@@ -2,8 +2,7 @@
 // 提供两个工具：
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
 //   codewiki_generate — 智能体编排：按上游 codewiki-session 流程编译/刷新 wiki，
-//                       可显式指定子代理模型（provider+model 成对出现才生效，否则继承会话模型）。
-// 另注册 bundled 技能 `codewiki`（上游 skills/codewiki-session.md 的 DSH 适配版）。
+//                       可显式指定子代理模型（provider+model 成对出现才生效，否则用插件默认，再退会话模型）。
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,8 +23,8 @@ const CONCURRENCY_HARD_CAP = 2 // 红线 2：子代理并发上限
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用插件自带 bin/cw(.exe)，再退回 PATH 里的 cw'),
-  defaultProvider: z.string().default('').volatile().description('codewiki_generate 子代理默认 provider；与默认 model 成对出现才生效'),
-  defaultModel: z.string().default('').volatile().description('codewiki_generate 子代理默认 model；建议填路由插件的 wiki 档（如 qwen3.8-flash）'),
+  defaultProvider: z.string().default('aliyun-bailian').volatile().description('codewiki_generate 子代理默认 provider；与默认 model 成对出现才生效；置空则继承会话模型'),
+  defaultModel: z.string().default('qwen3.8-flash').volatile().description('codewiki_generate 子代理默认 model；默认钉在路由插件 wiki 档的便宜模型'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 2'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
 })
@@ -436,7 +435,7 @@ function generateToolDefinition(cfg) {
     description: [
       '编译/刷新指定仓库的 CodeWiki（智能体编排版）。流程：cw status 判态 → 规划 agent 出模块计划 → 按并发上限分批派写文章子代理 → 横切文章（_architecture/_patterns/concepts）→ 审校 agent → cw index + meta update。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量。scope=stale：只刷新过期文章。',
-      'provider+model 成对出现时子代理用指定模型（建议路由插件的 wiki 档，如 qwen3.8-flash），否则继承插件默认配置，再否则继承会话模型。',
+      'provider+model 成对出现时子代理用指定模型；缺省用插件默认（aliyun-bailian/qwen3.8-flash，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。',
       '全量编译小仓库也要几分钟（多个子代理接力），适合后台调用。',
     ].join('\n'),
     parameters: {
@@ -675,47 +674,11 @@ function generateToolDefinition(cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// 技能 provider（形状对齐 genui bundledSkillProvider）
-// ---------------------------------------------------------------------------
-
-function readSkillBody(skillPath) {
-  const raw = fs.readFileSync(skillPath, 'utf8')
-  const end = raw.indexOf('\n---\n', 4)
-  if (!raw.startsWith('---\n') || end < 0) return raw
-  return raw.slice(end + 5)
-}
-
-function skillProvider() {
-  const skillPath = path.join(pluginDir, 'skills', 'codewiki.md')
-  const meta = () => ({
-    name: 'codewiki',
-    description: '维护当前代码库的活 wiki：cw status 三态判定 → 读 .codewiki/ 文章辅助编码 → 收尾写 learnings/decisions 并 cw index + meta update。',
-    invocation: { modelInvocable: true, userInvocable: true },
-    source: 'bundled',
-    provider: PLUGIN_NAME,
-    path: skillPath,
-    resourceBase: { kind: 'directory', path: path.dirname(skillPath) },
-    rank: 600,
-    locator: skillPath,
-  })
-  return {
-    name: PLUGIN_NAME,
-    list: () => Promise.resolve([meta()]),
-    get: () => {
-      const m = meta()
-      delete m.rank
-      delete m.locator
-      return Promise.resolve({ ...m, content: readSkillBody(skillPath) })
-    },
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 插件入口
 // ---------------------------------------------------------------------------
 
 export function apply(ctx, config) {
-  ctx.inject?.(['tools', 'subagents', 'skills'], (rc) => {
+  ctx.inject?.(['tools', 'subagents'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
     const subagents = rc?.subagents ?? rc
@@ -726,8 +689,5 @@ export function apply(ctx, config) {
         else ctx.on?.('dispose', () => { try { disposer() } catch { /* 忽略 */ } })
       }
     }
-
-    const skills = rc?.skills ?? rc
-    if (skills?.registerProvider) skills.registerProvider(() => skillProvider())
   })
 }
