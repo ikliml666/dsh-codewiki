@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — 2026-10-01
+
+- 移除 `codewiki` 技能（skills/codewiki.md 与 skillProvider 注册一并删除）：保留纯工具面（`cw` + `codewiki_generate`），wiki 编译一律走工具。
+- `defaultProvider`/`defaultModel` 默认值从空改为 `aliyun-bailian`/`qwen3.8-flash`（即路由插件 wiki 档）：不传参时子代理固定走便宜模型；显式置空两项才继承会话模型。
+
 ## 0.1.0 — 2026-10-01
 
 首次发布。

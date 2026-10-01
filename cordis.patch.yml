@@ -3,8 +3,8 @@
 # file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
 # 设置项（config 命名空间 = codewiki）：
 #   binaryPath:      cw 可执行文件路径；留空用插件自带 bin/cw.exe
-#   defaultProvider: 子代理默认 provider（与 defaultModel 成对生效）
-#   defaultModel:    子代理默认 model；建议填路由插件 wiki 档（aliyun-bailian/qwen3.8-flash）
+#   defaultProvider: 子代理默认 provider（与 defaultModel 成对生效；默认 aliyun-bailian）
+#   defaultModel:    子代理默认 model（默认 qwen3.8-flash，即路由插件 wiki 档）
 #   maxConcurrency:  写文章子代理并发上限（硬顶 2）
 #   articleLanguage: 文章语言（默认中文）
 - insert:
