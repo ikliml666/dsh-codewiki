@@ -1,10 +1,14 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "CodeWiki for DeepSeek Harness: cw CLI + agent-orchestrated wiki compilation with model routing.",
   "private": true,
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -13,6 +17,9 @@
     "@deepseek-ai/schemastery": "^3.18.4"
   },
   "dsh": {
+    "client": {
+      "platform": "web"
+    },
     "bundle": {
       "patch": "cordis.patch.yml"
     }
