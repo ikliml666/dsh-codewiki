@@ -1,0 +1,3 @@
+node_modules/
+vendor/codewiki/target/
+*.log
