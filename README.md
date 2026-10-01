@@ -8,6 +8,7 @@
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
 | `codewiki_generate` | 工具 | 编排编译：cw status 判态 → 规划 agent 出模块 JSON 计划 → 按并发上限分批派写文章子代理 → 横切文章（`_architecture.md`/`_patterns.md`/`concepts/`）→ 审校 agent → `cw index` + `cw meta update` |
+| CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
 
 `codewiki_generate` 关键行为：
 
@@ -18,6 +19,8 @@
 - 子代理经 `rc.subagents.start('spawn', payload)` 派发，`agentOptions` 携带模型路由；`stopReason != completed` 记失败。
 
 ## 设置（插件行 config，命名空间 `codewiki`）
+
+上述设置同样可在 **插件页 → CodeWiki 详情页**（`client.js`，v0.2.0 起）里修改：保存走 `configForms.mutate`（单层 op），与 patch 文件里手改等价、同样热生效。模型下拉来自 `ctx.remote.session.modelCatalog()`；目录不可用时退化为文本输入，仍可填任意 provider/model。
 
 - `binaryPath`：cw 可执行路径；留空用插件自带 `bin/cw.exe`（vendor 源码 + cargo release 编译），再退回 PATH 的 `cw`。
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。
@@ -40,13 +43,14 @@
    ```
 
 3. 依赖解析：插件在 profile node_modules 之外，`@deepseek-ai/schemastery`（仅 Config 用）走插件本地 junction → `/e/software/deepseek-harness/vendor/schemastery`（已建，`node_modules/@deepseek-ai/schemastery`）。工具/子代理全走注入服务，零 dsh-* import。
-4. 重启 dsh 生效。
+4. 重启 dsh 生效。客户端半侧（设置页）由包声明驱动：`package.json` 里 `dsh.client.platform: "web"` + `exports["./client"]`，宿主 client 扫描器沿 file:/// 条目找到本包后自动把 `client.js` 送进浏览器——同样需要一次重启（「非 client 包」判定按条目缓存到重启为止）。
 
 ## 开发
 
 ```
 vendor/codewiki/   上游源码（去除 .git）
 bin/cw.exe         cargo build --release 产物（git 内跟踪，改了 vendor 记得重编）
+client.js          插件页设置卡片（浏览器半侧；协议参照 ui-settings-agent-loop / router client.js）
 ```
 
-验证：`node --check index.js`；CLI 冒烟见 CHANGELOG 0.1.0。
+验证：`node --check index.js client.js`；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
