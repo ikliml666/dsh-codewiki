@@ -584,6 +584,7 @@ function generateToolDefinition(cfg, subagents) {
             label: `codewiki:更新 ${articleRel}`,
             name: articleRel,
             prompt: staleArticlePrompt(cwd, articlePath, sourceFiles, language),
+            route,
           }
         }).filter(Boolean)
         const results = await runBatched(subagents, exec, tasks, concurrency)
@@ -654,6 +655,7 @@ function generateToolDefinition(cfg, subagents) {
             label: `codewiki:模块 ${mod.name}`,
             name: `modules/${slugify(mod.name)}.md`,
             prompt: moduleArticlePrompt(cwd, wikiPath, mod, language),
+            route,
           }))
           const moduleResults = await runBatched(subagents, exec, moduleTasks, concurrency)
           for (const r of moduleResults) {

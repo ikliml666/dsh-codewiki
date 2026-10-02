@@ -110,10 +110,15 @@ try {
   check(st.exitCode === 0 && /No wiki found/i.test(st.stdout), 'cw status 判定 missing 态')
 
   console.log('== codewiki_generate 全量编译 ==')
+  const callsBeforeFull = mockSubagents.calls.length
   const r1 = await gen.execute({ cwd: repo }, { agent: 'test-agent' })
   console.log('  notes:', r1.notes.join(' | '))
   const planner = mockSubagents.calls[0]
   check(planner?.agentOptions?.provider === 'mock-prov' && planner?.agentOptions?.model === 'mock-model', '规划 agent 携带插件默认模型路由 agentOptions')
+  const fullCalls = mockSubagents.calls.slice(callsBeforeFull)
+  const moduleCalls = fullCalls.filter((p) => String(p.label ?? '').startsWith('codewiki:模块 '))
+  check(moduleCalls.length >= 2 && moduleCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `模块文章 agent（${moduleCalls.length} 个）携带插件默认模型路由 agentOptions`)
+  check(fullCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), '全量路径全部 spawn 调用均携带 agentOptions')
   check(r1.writtenCount >= 3 && r1.failedCount === 0, `全量编译完成 ${r1.writtenCount} 篇、失败 ${r1.failedCount} 篇`)
   check(r1.verified === true, '审校 agent 已执行')
   check(fs.existsSync(path.join(r1.wikiPath, 'modules', 'core.md')), 'modules/core.md 落盘')
@@ -130,8 +135,11 @@ try {
   fs.writeFileSync(path.join(repo, 'src', 'core.py'), 'def run():\n    return "core-v2"\n')
   execFileSync('git', ['add', '-A'], { cwd: repo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'v2'], { cwd: repo })
+  const callsBeforeStale = mockSubagents.calls.length
   const r2 = await gen.execute({ cwd: repo, scope: 'stale' }, { agent: 'test-agent' })
   console.log('  notes:', r2.notes.join(' | '))
+  const staleCalls = mockSubagents.calls.slice(callsBeforeStale)
+  check(staleCalls.length >= 1 && staleCalls.every((p) => String(p.label ?? '').startsWith('codewiki:更新 ') && p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `逐篇更新 agent（${staleCalls.length} 个）携带插件默认模型路由 agentOptions`)
   check(r2.writtenCount >= 1 && r2.failedCount === 0, `stale 更新完成 ${r2.writtenCount} 篇、失败 ${r2.failedCount} 篇`)
   check(fs.readFileSync(path.join(r1.wikiPath, 'modules', 'core.md'), 'utf8').includes('updated by test'), '过期文章已被重写')
 } finally {
