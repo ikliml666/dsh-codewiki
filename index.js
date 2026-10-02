@@ -2,7 +2,7 @@
 // 提供两个工具：
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
 //   codewiki_generate — 智能体编排：按上游 codewiki-session 流程编译/刷新 wiki，
-//                       可显式指定子代理模型（provider+model 成对出现才生效，否则用插件默认，再退会话模型）。
+//                       可显式指定子代理模型（provider+model 成对出现才生效，否则用插件默认，再退会话模型）与思考程度 reasoningEffort。
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
@@ -33,6 +33,7 @@ export const Config = z.object({
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
   defaultProvider: z.string().default('aliyun-bailian').volatile().description('codewiki_generate 子代理默认 provider；与默认 model 成对出现才生效；置空则继承会话模型'),
   defaultModel: z.string().default('qwen3.8-flash').volatile().description('codewiki_generate 子代理默认 model；默认钉在路由插件 wiki 档的便宜模型'),
+  defaultReasoningEffort: z.string().default('').volatile().description('codewiki_generate 子代理默认思考程度（reasoningEffort，adapter 自有值，如 off/low/high/max）；留空跟随所选模型默认'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 2'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
@@ -50,6 +51,7 @@ function liveConfig(config) {
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
     defaultProvider: String(val(c.defaultProvider) ?? '').trim(),
     defaultModel: String(val(c.defaultModel) ?? '').trim(),
+    defaultReasoningEffort: String(val(c.defaultReasoningEffort) ?? '').trim(),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
@@ -142,7 +144,13 @@ function textOfOutput(output) {
 
 async function launchAgent(subagents, exec, { label, prompt, route }) {
   const payload = { label, prompt: [{ type: 'text', text: prompt }], parent: exec.agent, signal: exec.signal }
-  if (route) payload.agentOptions = { provider: route.provider, model: route.model }
+  if (route) {
+    // 只带 route 里真实存在的字段——provider/model 不成对时不覆盖继承的父路由
+    const agentOptions = {}
+    if (route.provider && route.model) { agentOptions.provider = route.provider; agentOptions.model = route.model }
+    if (route.reasoningEffort) agentOptions.reasoningEffort = route.reasoningEffort
+    if (Object.keys(agentOptions).length) payload.agentOptions = agentOptions
+  }
   const run = await subagents.start('spawn', payload)
   try {
     const result = await run.result
@@ -463,7 +471,7 @@ function generateToolDefinition(cfg, subagents) {
     description: [
       '编译/刷新指定仓库的 CodeWiki（智能体编排版）。流程：cw status 判态 → 规划 agent 出模块计划 → 按并发上限分批派写文章子代理 → 横切文章（_architecture/_patterns/concepts）→ 审校 agent → cw index + meta update。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量。scope=stale：只刷新过期文章。',
-      'provider+model 成对出现时子代理用指定模型；缺省用插件默认（aliyun-bailian/qwen3.8-flash，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。',
+      'provider+model 成对出现时子代理用指定模型；缺省用插件默认（aliyun-bailian/qwen3.8-flash，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。reasoningEffort 指定子代理思考程度（adapter 自有值，如 off/low/high/max）；缺省用插件默认，再退所选模型默认。',
       '全量编译小仓库也要几分钟（多个子代理接力），适合后台调用。',
     ].join('\n'),
     parameters: {
@@ -473,6 +481,7 @@ function generateToolDefinition(cfg, subagents) {
         scope: { type: 'string', enum: ['auto', 'full', 'stale'], description: '编译范围，默认 auto' },
         provider: { type: 'string', description: '子代理 provider（须与 model 成对）' },
         model: { type: 'string', description: '子代理 model（须与 provider 成对）' },
+        reasoningEffort: { type: 'string', description: '子代理思考程度（adapter 自有值，如 off/low/high/max；留空跟随插件默认或模型默认）' },
         maxConcurrency: { type: 'number', description: '写文章并发上限（1-2，默认 2）' },
         language: { type: 'string', description: '文章语言，默认取插件设置（中文）' },
       },
@@ -532,10 +541,13 @@ function generateToolDefinition(cfg, subagents) {
       const route = (args.provider && args.model)
         ? { provider: String(args.provider), model: String(args.model) }
         : (c.defaultProvider && c.defaultModel ? { provider: c.defaultProvider, model: c.defaultModel } : undefined)
+      const effort = String(args.reasoningEffort ?? '').trim() || String(c.defaultReasoningEffort ?? '').trim()
+      if (effort) (route ??= {}).reasoningEffort = effort
+      const effortNote = effort ? `，思考程度 ${effort}` : ''
       const notes = []
-      if (args.provider && args.model) notes.push(`子代理模型：${route.provider}/${route.model}（调用参数）`)
-      else if (route) notes.push(`子代理模型：${route.provider}/${route.model}（插件默认配置）`)
-      else notes.push('子代理模型：继承会话模型')
+      if (args.provider && args.model) notes.push(`子代理模型：${route.provider}/${route.model}（调用参数${effortNote}）`)
+      else if (route?.provider && route?.model) notes.push(`子代理模型：${route.provider}/${route.model}（插件默认配置${effortNote}）`)
+      else notes.push(effort ? `子代理模型：继承会话模型${effortNote}` : '子代理模型：继承会话模型')
 
       const binary = resolveBinary(c)
       const statusRes = await runCw(binary, cwd, ['status'], 120000, exec.signal)

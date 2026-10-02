@@ -35,6 +35,8 @@ window.__ModuleLoader__.load({
       enabledHint: '停用后 cw 与 codewiki_generate 两个工具立即报错。',
       updateReminder: 'wiki 维护提醒',
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库存在 .codewiki/ 时出现，提醒改完代码后更新 wiki。',
+      reasoningEffort: '思考程度',
+      reasoningEffortHint: '子代理思考程度（reasoningEffort）。下拉来自模型目录对当前 provider+model 广播的档位；留空或目录不可用时跟随所选模型默认，也可手输 adapter 自有值。',
       maxConcurrency: '写文章并发上限',
       maxConcurrencyHint: '1–2；硬顶 2（子代理并发红线）。',
       articleLanguage: '文章语言',
@@ -67,6 +69,8 @@ window.__ModuleLoader__.load({
       enabledHint: 'When off, the cw and codewiki_generate tools error immediately.',
       updateReminder: 'Wiki update reminder',
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
+      reasoningEffort: 'Reasoning effort',
+      reasoningEffortHint: 'Subagent reasoning effort. Options come from the model catalog for the current provider+model; empty or catalog-unavailable follows the selected model default. Custom adapter values can be typed in.',
       maxConcurrency: 'Writer concurrency cap',
       maxConcurrencyHint: '1–2; hard cap 2 (subagent concurrency red line).',
       articleLanguage: 'Article language',
@@ -227,7 +231,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'maxConcurrency', 'articleLanguage', 'updateReminder']) {
+            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'defaultReasoningEffort', 'maxConcurrency', 'articleLanguage', 'updateReminder']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -273,6 +277,18 @@ window.__ModuleLoader__.load({
             return el('select', { value: current ?? '', onChange: (e) => setPath('defaultModel', e.target.value) },
               selectOptions(models, current))
           }
+          // 思考程度：档位来自模型目录对当前 provider+model 广播的 efforts（adapter 自有值，不硬编码枚举）。
+          // 目录没有该模型或无 efforts 时退回文本输入；当前值不在档位里时 selectOptions 会用 __keep 保留显示。
+          const effortCell = (providerId, modelId, current) => {
+            const efforts = (groups.find((g) => g.id === providerId)?.models ?? [])
+              .find((m) => m.id === modelId)?.reasoning?.efforts ?? []
+            const options = efforts.map((e2) => ({ id: e2.id, label: e2.name || e2.id }))
+            if (!options.length) {
+              return el(Input, { value: current ?? '', onChange: (e) => setPath('defaultReasoningEffort', e.target.value), placeholder: 'off/low/high/max…' })
+            }
+            return el('select', { value: current ?? '', onChange: (e) => setPath('defaultReasoningEffort', e.target.value) },
+              selectOptions(options, current))
+          }
 
           const statusPill = catalogStatus === 'loading'
             ? el(Pill, null, el(StateDot, { state: 'ongoing' }), ' ', t('catalogLoading'))
@@ -301,8 +317,11 @@ window.__ModuleLoader__.load({
                 providerCell(draft.defaultProvider),
                 el('label', null, t('model')),
                 modelCell(draft.defaultProvider, draft.defaultModel),
+                el('label', null, t('reasoningEffort')),
+                effortCell(draft.defaultProvider, draft.defaultModel, draft.defaultReasoningEffort),
               ),
               el('div', { 'data-dscw-hint': '' }, t('inheritHint')),
+              el('div', { 'data-dscw-hint': '' }, t('reasoningEffortHint')),
             ),
             // 运行
             el('section', { 'data-dscw-field': '' },

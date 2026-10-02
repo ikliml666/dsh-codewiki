@@ -9,11 +9,11 @@
 ## Key Components
 
 - `index.js` — 插件全部逻辑（单文件，Node ESM）
-  - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ maxConcurrency / articleLanguage / updateReminder，全部 `.volatile()`，execute 时 `val()` 解包热读取
+  - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ defaultReasoningEffort（0.2.6 起，默认空=跟随模型默认）/ maxConcurrency / articleLanguage / updateReminder，全部 `.volatile()`，execute 时 `val()` 解包热读取
   - `installUpdateReminder`（index.js:717）— 0.2.5 起：`agent/created` 时在 agent 作用域注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调每次组装求值——`updateReminder=false` 或会话仓库无 `.codewiki/` 时返回空（renderPrompt 丢弃空 section），否则注入 wiki 维护提醒（收尾 `codewiki_generate`/手工 cw 流程、learnings/decisions、wiki 与代码同提交）；agent 处置时 section 随作用域销毁
   - `runCw`（index.js:62）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s），响应 `exec.signal` abort（SIGKILL）
   - `parseStatus`（index.js:93）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
-  - `launchAgent`（index.js:119）/ `safeLaunch`（index.js:137）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions={provider,model}`，`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
+  - `launchAgent`（index.js:119）/ `safeLaunch`（index.js:137）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions` 只从 route 里真实存在的字段构建（provider+model 成对才设、reasoningEffort 有值才设——防止 effort-only route 用 `{provider:undefined}` 覆盖继承的父路由），`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
   - `runBatched`（index.js:146）— 按 maxConcurrency（硬顶 2）分批并发派写文章子代理
   - `cwToolDefinition`（index.js:311）— cw CLI 封装工具（子命令白名单）
   - `generateToolDefinition`（index.js:436）— 编排主流程：status 判态（非零退出且无输出直接抛错）→ clean 直接报告（`scope=full` 不短路，强制全量）/ stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
@@ -49,7 +49,7 @@
 
 ## Data Flow
 
-配置流：profile patch `config:` → cordis 注入 apply(ctx, config) → liveConfig 每次调用解包（volatile 热生效）。模型流：调用参数 provider+model > 插件默认（aliyun-bailian/qwen3.8-flash，0.1.1 起内建）> 两项默认显式置空才继承会话模型。
+配置流：profile patch `config:` → cordis 注入 apply(ctx, config) → liveConfig 每次调用解包（volatile 热生效）。模型流：调用参数 provider+model > 插件默认（aliyun-bailian/qwen3.8-flash，0.1.1 起内建）> 两项默认显式置空才继承会话模型。思考程度流（0.2.6 起）：调用参数 reasoningEffort > 插件默认 defaultReasoningEffort > 空（跟随所选模型默认；核心在 route 变更且未显式给 effort 时会丢弃父 effort）。设置页「思考程度」下拉来自 `modelCatalog()` 对当前 provider+model 广播的 `reasoning.efforts`（adapter 自有不透明值，不硬编码枚举），无档位时退文本输入。
 
 ## Connections
 

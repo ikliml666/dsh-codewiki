@@ -5,6 +5,7 @@
 #   binaryPath:      cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 bin/cw.exe
 #   defaultProvider: 子代理默认 provider（与 defaultModel 成对生效；默认 aliyun-bailian）
 #   defaultModel:    子代理默认 model（默认 qwen3.8-flash，即路由插件 wiki 档）
+#   defaultReasoningEffort: 子代理默认思考程度（adapter 自有值如 off/low/high/max；留空跟随模型默认）
 #   maxConcurrency:  写文章子代理并发上限（硬顶 2）
 #   articleLanguage: 文章语言（默认中文）
 #   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）

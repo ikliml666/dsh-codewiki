@@ -126,7 +126,7 @@ const mockCtx = {
 }
 rc.agents = { list: () => [...promptSections.keys()] }
 
-const reminderConfig = { defaultProvider: 'mock-prov', defaultModel: 'mock-model' }
+const reminderConfig = { defaultProvider: 'mock-prov', defaultModel: 'mock-model', defaultReasoningEffort: 'low' }
 apply(mockCtx, reminderConfig)
 
 console.log('== 系统提示 wiki 维护提醒 ==')
@@ -166,6 +166,7 @@ try {
   const moduleCalls = fullCalls.filter((p) => String(p.label ?? '').startsWith('codewiki:模块 '))
   check(moduleCalls.length >= 2 && moduleCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `模块文章 agent（${moduleCalls.length} 个）携带插件默认模型路由 agentOptions`)
   check(fullCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), '全量路径全部 spawn 调用均携带 agentOptions')
+  check(fullCalls.every((p) => p.agentOptions?.reasoningEffort === 'low'), '全量路径全部 spawn 携带插件默认思考程度 low')
   check(r1.writtenCount >= 3 && r1.failedCount === 0, `全量编译完成 ${r1.writtenCount} 篇、失败 ${r1.failedCount} 篇`)
   check(r1.verified === true, '审校 agent 已执行')
   check(fs.existsSync(path.join(r1.wikiPath, 'modules', 'core.md')), 'modules/core.md 落盘')
@@ -183,10 +184,11 @@ try {
   execFileSync('git', ['add', '-A'], { cwd: repo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'v2'], { cwd: repo })
   const callsBeforeStale = mockSubagents.calls.length
-  const r2 = await gen.execute({ cwd: repo, scope: 'stale' }, { agent: 'test-agent' })
+  const r2 = await gen.execute({ cwd: repo, scope: 'stale', reasoningEffort: 'max' }, { agent: 'test-agent' })
   console.log('  notes:', r2.notes.join(' | '))
   const staleCalls = mockSubagents.calls.slice(callsBeforeStale)
   check(staleCalls.length >= 1 && staleCalls.every((p) => String(p.label ?? '').startsWith('codewiki:更新 ') && p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `逐篇更新 agent（${staleCalls.length} 个）携带插件默认模型路由 agentOptions`)
+  check(staleCalls.every((p) => p.agentOptions?.reasoningEffort === 'max'), '调用参数 reasoningEffort=max 覆盖插件默认 low')
   check(r2.writtenCount >= 1 && r2.failedCount === 0, `stale 更新完成 ${r2.writtenCount} 篇、失败 ${r2.failedCount} 篇`)
   check(fs.readFileSync(path.join(r1.wikiPath, 'modules', 'core.md'), 'utf8').includes('updated by test'), '过期文章已被重写')
 } finally {

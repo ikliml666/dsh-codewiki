@@ -25,6 +25,7 @@
 
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。
+- `defaultReasoningEffort`：编译子代理默认思考程度（`reasoningEffort`，adapter 自有值，如 `off`/`low`/`high`/`max`）；留空跟随所选模型默认。0.2.6 起，设置页下拉来自模型目录对当前 provider+model 广播的档位，目录不可用时退文本输入；调用参数 `reasoningEffort` 优先于本配置。
 - `maxConcurrency`：写文章并发上限，默认 2。
 - `articleLanguage`：文章语言，默认中文。
 - `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾时 `codewiki_generate`（或手工 `cw status`→更新→`cw index`→`cw meta update`）、learnings/decisions 补文章、wiki 与代码同提交。0.2.5 起。
