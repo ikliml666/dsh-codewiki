@@ -1,6 +1,6 @@
 # @local/dsh-codewiki
 
-把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：中心化代码 wiki（`~/.codewiki/<project>/`）+ 智能体编排编译，支持为编译子代理指定模型。
+把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：仓库内代码 wiki（`<repo>/.codewiki/`，随仓库提交共享）+ 智能体编排编译，支持为编译子代理指定模型。
 
 ## 提供
 
@@ -23,7 +23,7 @@
 
 上述设置同样可在 **插件页 → CodeWiki 详情页**（`client.js`，v0.2.0 起）里修改：保存走 `configForms.mutate`（单层 op），与 patch 文件里手改等价、同样热生效。模型下拉来自 `ctx.remote.session.modelCatalog()`；目录不可用时退化为文本输入，仍可填任意 provider/model。
 
-- `binaryPath`：cw 可执行路径；留空用插件自带 `bin/cw.exe`（vendor 源码 + cargo release 编译），再退回 PATH 的 `cw`。
+- `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。
 - `maxConcurrency`：写文章并发上限，默认 2。
 - `articleLanguage`：文章语言，默认中文。

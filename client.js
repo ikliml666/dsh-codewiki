@@ -18,8 +18,8 @@ window.__ModuleLoader__.load({
 
     const zh = () => ({
       title: 'CodeWiki',
-      summary: '中心化代码 wiki（~/.codewiki/）：cw CLI 与智能体编排编译，可指定编译模型。',
-      intro: '维护 ~/.codewiki/<project>/ 下的活 wiki。此处设置经 configForms 热生效，无需重启。',
+      summary: '随仓库的代码 wiki（<repo>/.codewiki/）：cw CLI 与智能体编排编译，可指定编译模型。',
+      intro: '维护各仓库 .codewiki/ 目录下的活 wiki（随仓库提交共享）。此处设置经 configForms 热生效，无需重启。',
       secModel: '编译模型',
       secModelHint: 'codewiki_generate 派发的写文章/横切/审校子代理所用模型；provider 与 model 成对生效。',
       inheritHint: '两项都留空 = 跟随当前会话模型。默认钉在路由插件 wiki 档（aliyun-bailian / qwen3.8-flash）。',
@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
       maxConcurrencyHint: '1–2；硬顶 2（子代理并发红线）。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
-      binaryPathHint: '留空用插件自带 bin/cw.exe，再退回 PATH 里的 cw。',
+      binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
       save: '保存',
       discard: '放弃更改',
       saved: '已保存。',
@@ -48,8 +48,8 @@ window.__ModuleLoader__.load({
     })
     const en = () => ({
       title: 'CodeWiki',
-      summary: 'Centralized code wiki (~/.codewiki/): cw CLI and agent-orchestrated compilation with model routing.',
-      intro: 'Maintains a living wiki under ~/.codewiki/<project>/. Settings here apply hot via configForms — no restart needed.',
+      summary: 'Repo-local code wiki (<repo>/.codewiki/): cw CLI and agent-orchestrated compilation with model routing.',
+      intro: 'Maintains a living wiki inside each repository at .codewiki/ (committed and shared with the repo). Settings here apply hot via configForms — no restart needed.',
       secModel: 'Compilation model',
       secModelHint: 'Model used by the writer/cross-cut/review subagents spawned by codewiki_generate; provider and model take effect as a pair.',
       inheritHint: 'Leave both empty to follow the session model. Defaults pin the router wiki tier (aliyun-bailian / qwen3.8-flash).',
@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
       maxConcurrencyHint: '1–2; hard cap 2 (subagent concurrency red line).',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
-      binaryPathHint: 'Empty = bundled bin/cw.exe first, then cw on PATH.',
+      binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
       save: 'Save',
       discard: 'Discard changes',
       saved: 'Saved.',

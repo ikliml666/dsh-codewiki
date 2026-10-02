@@ -1,10 +1,10 @@
 # CodeWiki — @local/dsh-codewiki
 
-> 本文件是插件自身的项目 wiki 入口（CodeWiki.md 公约）。重启 dsh 后可用 `codewiki_generate` 对本仓库做全量编译，把本文细化成 `~/.codewiki/` 文章。
+> 本文件是插件自身的项目 wiki 入口（CodeWiki.md 公约）。重启 dsh 后可用 `codewiki_generate` 对本仓库做全量编译，把本文细化成 `<repo>/.codewiki/` 文章。
 
 ## Overview
 
-把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（智能体编排编译）两个纯工具，wiki 落在 `~/.codewiki/<project>/`。0.1.1 起不注册任何技能；编译子代理默认钉在 `aliyun-bailian/qwen3.8-flash`（路由插件 wiki 档）。0.2.0 起带插件页设置 UI（client.js），编译模型与运行选项可在插件管理页点进 CodeWiki 条目修改。
+把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（智能体编排编译）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享；0.2.3 对齐上游 wiki_path()，并修复 MSYS/Windows 路径误判与捆绑二进制过期分叉）。0.1.1 起不注册任何技能；编译子代理默认钉在 `aliyun-bailian/qwen3.8-flash`（路由插件 wiki 档）。0.2.0 起带插件页设置 UI（client.js），编译模型与运行选项可在插件管理页点进 CodeWiki 条目修改。
 
 ## Key Components
 
@@ -53,12 +53,12 @@
 ## Connections
 
 - [[dsh-subagent-auto-router]] — wiki 档路由与本插件默认模型同档；子代理经同一 `subagents` 服务派发
-- [[codewiki-upstream]] — vendor/codewiki（MIT）；布局 `~/.codewiki/<project>/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`；上游技能正文仅存于 `vendor/codewiki/skills/`，插件不再注册技能
+- [[codewiki-upstream]] — vendor/codewiki（MIT）；布局 `<repo>/.codewiki/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`（随仓库提交共享）；上游技能正文仅存于 `vendor/codewiki/skills/`，插件不再注册技能
 
 ## Known Issues
 
 - 插件注册不热加载：改 index.js / profile patch 后需重启 dsh（config 值本身热读）。client.js 同理：宿主「非 client 包」判定按 Loader 条目缓存，`dsh.client` 声明新增后需重启 dsh 才会把 client.js 送进浏览器。
 - `@deepseek-ai/schemastery` 靠插件本地 junction（→ `/e/software/deepseek-harness/vendor/schemastery`）；换机器需重建（`node -e "fs.symlinkSync(target,path,'junction')"`）。
-- 上游 `cw` 无 `--version`；`cw path` 在未 init 的仓库退回插件侧 fallback（`~/.codewiki/<basename>`）。
+- 上游 `cw` 无 `--version`；`cw path` 在未 init 的仓库退回插件侧 fallback（`<cwd>/.codewiki`，0.2.3 起与 wiki_path() 一致）。
 - 上游 stale 文章路径输出为反斜杠（`modules\app.md`），插件消费侧已归一为 `/`。
 - 设置页模型下拉依赖浏览器端 `modelCatalog()`；目录不可用时是文本输入兜底，不阻塞保存。

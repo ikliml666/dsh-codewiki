@@ -4,9 +4,8 @@
 //   codewiki_generate — 智能体编排：按上游 codewiki-session 流程编译/刷新 wiki，
 //                       可显式指定子代理模型（provider+model 成对出现才生效，否则用插件默认，再退会话模型）。
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 
@@ -16,13 +15,22 @@ export const name = PLUGIN_NAME
 const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', 'setup', 'uninstall']
 const CONCURRENCY_HARD_CAP = 2 // 红线 2：子代理并发上限
 
+// Windows/Git-Bash 兼容：MSYS 盘符路径（/e/...）Node 的 fs 不认，归一化为 E:/...。
+// 仅 win32 转换——POSIX 上 /e/... 可能是真实绝对路径，原样保留；识别不了的写法也原样交给 existsSync 报错。
+function normalizeCwd(input) {
+  const p = String(input ?? '').trim()
+  if (process.platform !== 'win32') return p
+  const m = p.match(/^\/([A-Za-z])\/(.*)$/)
+  return m ? `${m[1].toUpperCase()}:/${m[2]}` : p
+}
+
 // ---------------------------------------------------------------------------
 // 配置
 // ---------------------------------------------------------------------------
 
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
-  binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用插件自带 bin/cw(.exe)，再退回 PATH 里的 cw'),
+  binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
   defaultProvider: z.string().default('aliyun-bailian').volatile().description('codewiki_generate 子代理默认 provider；与默认 model 成对出现才生效；置空则继承会话模型'),
   defaultModel: z.string().default('qwen3.8-flash').volatile().description('codewiki_generate 子代理默认 model；默认钉在路由插件 wiki 档的便宜模型'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 2'),
@@ -54,6 +62,21 @@ function liveConfig(config) {
 
 function resolveBinary(cfg) {
   if (cfg.binaryPath) return cfg.binaryPath
+  // PATH 优先：用户安装的 cw 与其 codewiki 源码同步演进；捆绑副本只在 PATH 找不到时兜底，
+  // 避免捆绑二进制落后于源码时出现「bash 原生正常、包装层 No wiki found」的分叉。
+  if (process.platform === 'win32') {
+    try {
+      const probe = spawnSync('where', ['cw'], { encoding: 'utf8', windowsHide: true })
+      const first = String(probe.stdout ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0]
+      if (probe.status === 0 && first && fs.existsSync(first)) return first
+    } catch { /* 探测失败落到捆绑副本 */ }
+  } else {
+    try {
+      const probe = spawnSync('which', ['cw'], { encoding: 'utf8' })
+      const first = String(probe.stdout ?? '').trim().split(/\r?\n/)[0]
+      if (probe.status === 0 && first) return first
+    } catch { /* 探测失败落到捆绑副本 */ }
+  }
   const local = path.join(pluginDir, 'bin', process.platform === 'win32' ? 'cw.exe' : 'cw')
   if (fs.existsSync(local)) return local
   return 'cw'
@@ -312,14 +335,14 @@ function cwToolDefinition(cfg) {
   return {
     name: 'cw',
     description: [
-      '运行 CodeWiki CLI（cw）查询/维护当前仓库的代码 wiki。wiki 落在 ~/.codewiki/<project>/。',
-      '常用调用：args=["status"] 查新态（三态判定）；["init"] 初始化；["index"] 重建索引；["meta","update"] 记录编译基线 commit；["path"] 打印本仓库 wiki 目录；["projects"] 列出全部 wiki。',
+      '运行 CodeWiki CLI（cw）查询/维护当前仓库的代码 wiki。wiki 落在仓库内 <repo>/.codewiki/（随仓库提交）。',
+      '常用调用：args=["status"] 查新态（三态判定）；["init"] 初始化；["index"] 重建索引；["meta","update"] 记录编译基线 commit；["path"] 打印本仓库 wiki 目录（<repo>/.codewiki）；["projects"] 只列出 ~/.codewiki 旧位置的项目（现在 wiki 在各仓库内，一般用不到）。',
       '写文章、编译 wiki 请用 codewiki_generate（智能体编排），不要用本工具手写文章。',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        cwd: { type: 'string', description: '仓库绝对路径（git 仓库根或子目录）' },
+        cwd: { type: 'string', description: '仓库绝对路径（git 仓库根或子目录；Windows 支持 C:/... 与 Git-Bash /c/... 形式）' },
         args: {
           type: 'array',
           items: { type: 'string' },
@@ -351,8 +374,8 @@ function cwToolDefinition(cfg) {
     execute: async (args, exec) => {
       const c = liveConfig(cfg)
       if (!c.enabled) throw new Error('cw：插件已在设置中停用（codewiki → enabled）')
-      const cwd = String(args.cwd ?? '').trim()
-      if (!cwd || !fs.existsSync(cwd)) throw new Error(`cw：cwd 不存在：${cwd}`)
+      const cwd = normalizeCwd(args.cwd)
+      if (!cwd || !fs.existsSync(cwd)) throw new Error(`cw：cwd 不存在：${args.cwd ?? ''}`)
       const argv = (Array.isArray(args.args) ? args.args : []).map(String).filter((s) => s.length > 0)
       if (!argv.length) throw new Error('cw：args 不能为空，例如 ["status"]')
       if (!CW_SUBCOMMANDS.includes(argv[0])) {
@@ -430,7 +453,7 @@ async function wikiPathFor(cwd, binary, signal) {
   const r = await runCw(binary, cwd, ['path'], 30000, signal)
   const p = (r.stdout ?? '').trim().split(/\r?\n/).filter(Boolean).pop()
   if (r.exitCode === 0 && p) return p
-  return path.join(os.homedir(), '.codewiki', path.basename(path.resolve(cwd)))
+  return path.join(cwd, '.codewiki') // 与 wiki_path() 一致：wiki 在仓库内
 }
 
 function generateToolDefinition(cfg, subagents) {
@@ -445,7 +468,7 @@ function generateToolDefinition(cfg, subagents) {
     parameters: {
       type: 'object',
       properties: {
-        cwd: { type: 'string', description: '仓库绝对路径（git 仓库）' },
+        cwd: { type: 'string', description: '仓库绝对路径（git 仓库；Windows 支持 C:/... 与 Git-Bash /c/... 形式）' },
         scope: { type: 'string', enum: ['auto', 'full', 'stale'], description: '编译范围，默认 auto' },
         provider: { type: 'string', description: '子代理 provider（须与 model 成对）' },
         model: { type: 'string', description: '子代理 model（须与 provider 成对）' },
@@ -498,8 +521,8 @@ function generateToolDefinition(cfg, subagents) {
       const c = liveConfig(cfg)
       if (!c.enabled) throw new Error('codewiki_generate：插件已在设置中停用（codewiki → enabled）')
       if (!exec?.agent) throw new Error('codewiki_generate 必须在主代理会话中调用（缺少 calling agent）')
-      const cwd = String(args.cwd ?? '').trim()
-      if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${cwd}`)
+      const cwd = normalizeCwd(args.cwd)
+      if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const concurrency = Number.isFinite(Number(args.maxConcurrency)) && Number(args.maxConcurrency) >= 1

@@ -2,7 +2,7 @@
 # 挂载方式：本文件供 bundle 形式安装用；本地开发走 profiles/web/cordis.patch.yml 的
 # file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
 # 设置项（config 命名空间 = codewiki）：
-#   binaryPath:      cw 可执行文件路径；留空用插件自带 bin/cw.exe
+#   binaryPath:      cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 bin/cw.exe
 #   defaultProvider: 子代理默认 provider（与 defaultModel 成对生效；默认 aliyun-bailian）
 #   defaultModel:    子代理默认 model（默认 qwen3.8-flash，即路由插件 wiki 档）
 #   maxConcurrency:  写文章子代理并发上限（硬顶 2）
