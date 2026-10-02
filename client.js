@@ -345,7 +345,7 @@ window.__ModuleLoader__.load({
               el(Button, { size: 'sm', onClick: save, disabled: !dirty || !snapshot.writable }, t('save')),
               error
                 ? el('span', { 'data-dscw-warn': '' }, error)
-                : el(Tag, null, dirty ? t('discard') : (notice ?? '')),
+                : (!dirty && notice ? el(Tag, null, notice) : null),
             ),
           )
         }

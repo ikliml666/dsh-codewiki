@@ -8,15 +8,15 @@
 
 ## Key Components
 
-- `index.js` — 插件全部逻辑（单文件，Node ESM，693 行）
+- `index.js` — 插件全部逻辑（单文件，Node ESM）
   - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ maxConcurrency / articleLanguage，全部 `.volatile()`，execute 时 `val()` 解包热读取
-  - `runCw`（index.js:62）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s）
-  - `parseStatus`（index.js:89）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
-  - `launchAgent`（index.js:115）/ `safeLaunch`（index.js:133）— `rc.subagents.start('spawn', payload)`，route 存在时 `agentOptions={provider,model}`，`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
-  - `runBatched`（index.js:142）— 按 maxConcurrency（硬顶 2）分批并发派写文章子代理
-  - `cwToolDefinition`（index.js:307）— cw CLI 封装工具（子命令白名单）
-  - `generateToolDefinition`（index.js:432）— 编排主流程：status 判态 → clean 直接报告 / stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
-  - `apply`（index.js:680）— `ctx.inject(['tools','subagents'])` 一次注入，注册两工具
+  - `runCw`（index.js:62）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s），响应 `exec.signal` abort（SIGKILL）
+  - `parseStatus`（index.js:93）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
+  - `launchAgent`（index.js:119）/ `safeLaunch`（index.js:137）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions={provider,model}`，`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
+  - `runBatched`（index.js:146）— 按 maxConcurrency（硬顶 2）分批并发派写文章子代理
+  - `cwToolDefinition`（index.js:311）— cw CLI 封装工具（子命令白名单）
+  - `generateToolDefinition`（index.js:436）— 编排主流程：status 判态（非零退出且无输出直接抛错）→ clean 直接报告（`scope=full` 不短路，强制全量）/ stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
+  - `apply`（index.js:689）— `ctx.inject(['tools','subagents'])` 一次注入，注册两工具
 - `vendor/codewiki/` — 上游源码（去 .git）；`bin/cw.exe` — cargo release 产物（git 跟踪）
 - `client.js` — 插件页设置卡片（浏览器半侧，0.2.0）
   - 注册：`__ModuleLoader__.load({id:'@local/dsh-codewiki'})` → `apply` 里 `configForms.get('codewiki')` + `whileServed` 包 `slots.inject('plugins.item', …)`（order 30）

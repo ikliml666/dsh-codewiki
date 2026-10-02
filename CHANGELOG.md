@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.2 — 2026-10-02
+
+- fix：审查修复 8 项（test-orchestration.mjs 先行 RED：clean + scope=full 强制全量被短路）：
+  - `scope=full` 在 clean 态不再被「无需编译」短路，强制全量重编与文档一致；
+  - `cw status` 非零退出且无输出时直接抛错（此前二进制缺失/崩溃会被兜底成 stale 空清单白走全量）；
+  - 横切文章失败计入 `failedCount`（与 stale / 降级路径口径一致）；
+  - `runCw` 响应 `exec.signal`（abort 即 SIGKILL 子进程），cw / codewiki_generate 的全部子进程调用接入；
+  - `cw index` / `cw meta update` 失败时 notes 追加「编译基线可能未刷新，可重试」告警；
+  - 移除 execute 末尾不可达死代码；
+  - 设置页：保存条在 dirty 时不显示「放弃更改」文案 Tag（按钮 disabled 态已表达）；
+  - 文档同步：README / CodeWiki 中子代理派发写法与 0.2.1 实现一致（直用注入服务）。
+- test：新增「clean + scope=full 强制全量」编排用例；修复前 RED，修复后全 PASS。
+
 ## 0.2.1 — 2026-10-02
 
 - fix：子代理服务两处接线断裂，codewiki_generate 一进编译路径即抛错，0.1.0 起从未真正可用（当时验证只做了 node --check 与 CLI 冒烟，没跑过编排路径）：

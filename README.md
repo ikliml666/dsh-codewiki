@@ -16,7 +16,8 @@
 - `provider` + `model` 成对传入时子代理走指定模型；缺省用插件默认（`aliyun-bailian` / `qwen3.8-flash`，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。
 - 规划 agent 失败自动降级单 agent 全量编译；单篇文章失败只记账不中断；全部失败则不刷新编译基线（`meta update` 不执行，可安全重试）。
 - 写文章并发上限硬顶 2（红线 2），`maxConcurrency` 可调低。
-- 子代理经 `rc.subagents.start('spawn', payload)` 派发，`agentOptions` 携带模型路由；`stopReason != completed` 记失败。
+- 子代理经注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），`agentOptions` 携带模型路由；`stopReason != completed` 记失败。
+- `scope=full`：跳过 clean 短路，即使 wiki 最新也强制全量重编。
 
 ## 设置（插件行 config，命名空间 `codewiki`）
 

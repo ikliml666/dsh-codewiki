@@ -59,7 +59,7 @@ function resolveBinary(cfg) {
   return 'cw'
 }
 
-function runCw(binary, cwd, args, timeoutMs = 120000) {
+function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
   return new Promise((resolve) => {
     const child = spawn(binary, args, { cwd, windowsHide: true })
     let stdout = ''
@@ -69,14 +69,18 @@ function runCw(binary, cwd, args, timeoutMs = 120000) {
       timedOut = true
       try { child.kill('SIGKILL') } catch { /* 已退出 */ }
     }, timeoutMs)
+    const onAbort = () => { try { child.kill('SIGKILL') } catch { /* 已退出 */ } }
+    signal?.addEventListener('abort', onAbort, { once: true })
     child.stdout?.on('data', (d) => { stdout += d })
     child.stderr?.on('data', (d) => { stderr += d })
     child.on('error', (err) => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       resolve({ exitCode: -1, stdout, stderr: String(err?.message ?? err), timedOut })
     })
     child.on('close', (code) => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       resolve({ exitCode: code ?? -1, stdout, stderr, timedOut })
     })
   })
@@ -344,7 +348,7 @@ function cwToolDefinition(cfg) {
         return [{ type: 'text', text: body ? `${head}\n${body}` : head }]
       },
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
       const c = liveConfig(cfg)
       if (!c.enabled) throw new Error('cw：插件已在设置中停用（codewiki → enabled）')
       const cwd = String(args.cwd ?? '').trim()
@@ -355,7 +359,7 @@ function cwToolDefinition(cfg) {
         throw new Error(`cw：未知子命令 "${argv[0]}"，允许：${CW_SUBCOMMANDS.join(' / ')}`)
       }
       const binary = resolveBinary(c)
-      const r = await runCw(binary, cwd, argv)
+      const r = await runCw(binary, cwd, argv, 120000, exec?.signal)
       if (r.timedOut) throw new Error(`cw：执行超时（120s）—— ${argv.join(' ')}`)
       return {
         cwd,
@@ -422,8 +426,8 @@ function readSourceFiles(articlePath) {
   }
 }
 
-async function wikiPathFor(cwd, binary) {
-  const r = await runCw(binary, cwd, ['path'], 30000)
+async function wikiPathFor(cwd, binary, signal) {
+  const r = await runCw(binary, cwd, ['path'], 30000, signal)
   const p = (r.stdout ?? '').trim().split(/\r?\n/).filter(Boolean).pop()
   if (r.exitCode === 0 && p) return p
   return path.join(os.homedir(), '.codewiki', path.basename(path.resolve(cwd)))
@@ -510,10 +514,13 @@ function generateToolDefinition(cfg, subagents) {
       else notes.push('子代理模型：继承会话模型')
 
       const binary = resolveBinary(c)
-      const statusRes = await runCw(binary, cwd, ['status'])
+      const statusRes = await runCw(binary, cwd, ['status'], 120000, exec.signal)
       if (statusRes.timedOut) throw new Error('codewiki_generate：cw status 超时')
+      if (statusRes.exitCode !== 0 && !(statusRes.stdout ?? '').trim()) {
+        throw new Error(`codewiki_generate：cw status 失败（exit ${statusRes.exitCode}）—— ${(statusRes.stderr || statusRes.stdout || '').trim()}`)
+      }
       const status = parseStatus(statusRes.stdout)
-      const wikiPath = await wikiPathFor(cwd, binary)
+      const wikiPath = await wikiPathFor(cwd, binary, exec.signal)
 
       // scope 修正：stale 遇到没有 wiki 的仓库自动升全量，否则无从谈起
       let effectiveScope = scope
@@ -535,8 +542,8 @@ function generateToolDefinition(cfg, subagents) {
         notes,
       }
 
-      // ---- clean：直接报告 ----
-      if (status.state === 'clean') {
+      // ---- clean：直接报告（scope=full 例外：强制全量重编）----
+      if (status.state === 'clean' && effectiveScope !== 'full') {
         notes.push('Wiki is up to date —— 无需编译')
         return result
       }
@@ -563,9 +570,10 @@ function generateToolDefinition(cfg, subagents) {
           else result.failedCount += 1
         }
         if (result.writtenCount > 0) {
-          const idx = await runCw(binary, cwd, ['index'])
-          const meta = await runCw(binary, cwd, ['meta', 'update'])
+          const idx = await runCw(binary, cwd, ['index'], 120000, exec.signal)
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
           notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
+          if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
         }
         for (const r of results) {
           if (!r.ok) notes.push(`失败：${r.name} —— ${failureMessage(r)}`)
@@ -576,7 +584,7 @@ function generateToolDefinition(cfg, subagents) {
       // ---- stale 但解析不出过期文章 ----
       if (!needsFullCompile && status.state === 'stale' && !status.staleArticles.length) {
         if (status.changedFiles.length) {
-          const meta = await runCw(binary, cwd, ['meta', 'update'])
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
           notes.push(`有 ${status.changedFiles.length} 个文件变更但未命中任何文章的 source_files，已刷新编译基线（meta update exit ${meta.exitCode}）`)
           return result
         }
@@ -586,7 +594,7 @@ function generateToolDefinition(cfg, subagents) {
       // ---- 全量编译（scope=full，或 auto 命中 missing/uncompiled/无法解析）----
       if (needsFullCompile || status.state === 'stale') {
         if (status.state === 'missing') {
-          const init = await runCw(binary, cwd, ['init'])
+          const init = await runCw(binary, cwd, ['init'], 120000, exec.signal)
           if (init.exitCode !== 0) {
             throw new Error(`codewiki_generate：cw init 失败（exit ${init.exitCode}）—— ${(init.stderr || init.stdout || '').trim()}`)
           }
@@ -644,7 +652,10 @@ function generateToolDefinition(cfg, subagents) {
             })
             result.articles.push({ name: '_architecture + _patterns + concepts', ok: cross.ok, stopReason: cross.stopReason })
             if (cross.ok) result.writtenCount += 1
-            else notes.push(`横切文章失败 —— ${failureMessage(cross)}`)
+            else {
+              result.failedCount += 1
+              notes.push(`横切文章失败 —— ${failureMessage(cross)}`)
+            }
 
             const verify = await safeLaunch(subagents, exec, {
               label: 'codewiki:审校',
@@ -658,17 +669,15 @@ function generateToolDefinition(cfg, subagents) {
         }
 
         if (result.writtenCount > 0) {
-          const idx = await runCw(binary, cwd, ['index'])
-          const meta = await runCw(binary, cwd, ['meta', 'update'])
+          const idx = await runCw(binary, cwd, ['index'], 120000, exec.signal)
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
           notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
+          if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
         } else {
           notes.push('没有文章写成功，跳过 index/meta update（wiki 基线不变，可重试）')
         }
         return result
       }
-
-      notes.push('Wiki is up to date —— 无需编译')
-      return result
     },
   }
 }

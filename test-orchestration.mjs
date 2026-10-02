@@ -120,6 +120,12 @@ try {
   check(fs.existsSync(path.join(r1.wikiPath, '_architecture.md')), '_architecture.md 落盘')
   check(r1.notes.some((n) => n.includes('cw index')), `收尾 index/meta update 已执行（${r1.notes.find((n) => n.includes('cw index'))}）`)
 
+  console.log('== codewiki_generate clean + scope=full（强制全量） ==')
+  const r1b = await gen.execute({ cwd: repo, scope: 'full' }, { agent: 'test-agent' })
+  console.log('  notes:', r1b.notes.join(' | '))
+  check(r1b.scope === 'full' && r1b.writtenCount >= 3, `clean 态 scope=full 强制全量重编（${r1b.writtenCount} 篇）`)
+  check(!r1b.notes.some((n) => n.includes('无需编译')), 'scope=full 不被 clean 短路')
+
   console.log('== codewiki_generate stale 逐篇更新 ==')
   fs.writeFileSync(path.join(repo, 'src', 'core.py'), 'def run():\n    return "core-v2"\n')
   execFileSync('git', ['add', '-A'], { cwd: repo })
