@@ -7,6 +7,7 @@
 #   defaultModel:    子代理默认 model（默认 qwen3.8-flash，即路由插件 wiki 档）
 #   maxConcurrency:  写文章子代理并发上限（硬顶 2）
 #   articleLanguage: 文章语言（默认中文）
+#   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）
 - insert:
     - id: codewiki
       name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js

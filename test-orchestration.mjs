@@ -94,7 +94,54 @@ const rc = {
   tools: { register(def) { registered.set(def.name, def); return () => {} } },
   subagents: mockSubagents,
 }
-apply({ inject: (deps, fn) => fn(rc) }, { defaultProvider: 'mock-prov', defaultModel: 'mock-model' })
+
+// ---- 系统提示提醒捕获（agent/created 布线 + agent 作用域 section 注册） ----
+const agentListeners = []
+const promptSections = new Map() // mock agent -> 已注册 section 列表
+function makeMockAgent(cwd) {
+  const sections = []
+  const agent = {
+    session: { header: { cwd } },
+    ctx: {
+      inject: (deps, fn) => fn({
+        systemPrompt: {
+          getSectionOrder: (n) => ({ TOOL_REPORT: 2900 }[n] ?? 0),
+          section: (s) => { sections.push(s); return () => {} },
+        },
+      }),
+    },
+  }
+  promptSections.set(agent, sections)
+  return agent
+}
+// 轻量 fixture：临时目录 + 可选 .codewiki/，不做 git（提醒只看目录存在性）
+function makeReminderRepo(withWiki) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-remind-'))
+  if (withWiki) fs.mkdirSync(path.join(dir, '.codewiki'))
+  return dir
+}
+const mockCtx = {
+  inject: (deps, fn) => fn(rc),
+  on: (event, fn) => { if (event === 'agent/created') agentListeners.push(fn) },
+}
+rc.agents = { list: () => [...promptSections.keys()] }
+
+const reminderConfig = { defaultProvider: 'mock-prov', defaultModel: 'mock-model' }
+apply(mockCtx, reminderConfig)
+
+console.log('== 系统提示 wiki 维护提醒 ==')
+const agentWithWiki = makeMockAgent(makeReminderRepo(true))
+const agentNoWiki = makeMockAgent(makeReminderRepo(false))
+for (const fn of agentListeners) await fn({ agent: agentWithWiki })
+for (const fn of agentListeners) await fn({ agent: agentNoWiki })
+const secWithWiki = (promptSections.get(agentWithWiki) ?? [])[0]
+const secNoWiki = (promptSections.get(agentNoWiki) ?? [])[0]
+check(secWithWiki !== undefined, 'agent/created 后为会话 agent 注册了系统提示 section')
+check(secWithWiki?.name === 'codewiki:update-reminder', `section 名 codewiki:update-reminder（实际 ${secWithWiki?.name}）`)
+check(typeof secWithWiki?.text === 'function' && secWithWiki.text().includes('codewiki'), '有 .codewiki 的会话提醒文本非空且指向 codewiki')
+check(typeof secNoWiki?.text === 'function' && secNoWiki.text() === '', '无 .codewiki 的会话提醒文本为空（不注入噪音）')
+reminderConfig.updateReminder = false
+check(typeof secWithWiki?.text === 'function' && secWithWiki.text() === '', 'updateReminder=false 后提醒文本为空（运行时开关生效）')
 
 console.log('== 注册 ==')
 check(name === 'dsh-codewiki', `插件名 ${name}`)

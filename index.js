@@ -35,6 +35,7 @@ export const Config = z.object({
   defaultModel: z.string().default('qwen3.8-flash').volatile().description('codewiki_generate 子代理默认 model；默认钉在路由插件 wiki 档的便宜模型'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 2'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
+  updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
 })
 
 function val(x) {
@@ -711,6 +712,43 @@ function generateToolDefinition(cfg, subagents) {
 // 插件入口
 // ---------------------------------------------------------------------------
 
+// 会话系统提示里的 wiki 维护提醒：只在会话仓库存在 .codewiki/ 时出现。
+// text 回调每次组装时求值——cwd、.codewiki 存在性、开关全部实时读取，
+// 关闭开关/项目切换/删掉 wiki 都无需重启。
+function reminderText() {
+  return [
+    '【CodeWiki 维护】本仓库存在 .codewiki/ 活 wiki，涉及代码改动的任务收尾时必须：',
+    '- 运行 codewiki_generate（scope=auto 即可）更新受影响文章，或手工流程 cw status → 更新命中文章 → cw index → cw meta update；',
+    '- 修 bug 补 learnings/，设计决策补 decisions/；.codewiki/ 的改动与本次代码改动一起提交；',
+    '- 任务未更新 wiki 视为未完成（规程详见 codewiki 技能）。',
+  ].join('\n')
+}
+
+function installUpdateReminder(ctx, config) {
+  if (typeof ctx.on !== 'function') return
+  const seen = new WeakSet()
+  const install = (agent) => {
+    if (!agent || seen.has(agent)) return
+    seen.add(agent)
+    agent.ctx?.inject?.(['systemPrompt'], (rc2) => {
+      const sp = rc2?.systemPrompt ?? rc2
+      if (typeof sp?.section !== 'function') return
+      sp.section({
+        name: 'codewiki:update-reminder',
+        order: (typeof sp.getSectionOrder === 'function' ? sp.getSectionOrder('TOOL_REPORT') : 2900) + 1,
+        text: () => {
+          if (val(config?.updateReminder) === false) return ''
+          const cwd = String(agent.session?.header?.cwd ?? '')
+          if (!cwd || !fs.existsSync(path.join(cwd, '.codewiki'))) return ''
+          return reminderText()
+        },
+      })
+    })
+  }
+  for (const agent of (typeof ctx.agents?.list === 'function' ? ctx.agents.list() : [])) install(agent)
+  ctx.on('agent/created', async ({ agent } = {}) => { install(agent) })
+}
+
 export function apply(ctx, config) {
   ctx.inject?.(['tools', 'subagents'], (rc) => {
     const tools = rc?.tools ?? rc
@@ -724,4 +762,5 @@ export function apply(ctx, config) {
       }
     }
   })
+  installUpdateReminder(ctx, config)
 }

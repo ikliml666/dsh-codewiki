@@ -27,6 +27,7 @@
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。
 - `maxConcurrency`：写文章并发上限，默认 2。
 - `articleLanguage`：文章语言，默认中文。
+- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾时 `codewiki_generate`（或手工 `cw status`→更新→`cw index`→`cw meta update`）、learnings/decisions 补文章、wiki 与代码同提交。0.2.5 起。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
 
 ## 安装（本地 file:/// 直挂）

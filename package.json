@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "CodeWiki for DeepSeek Harness: cw CLI + agent-orchestrated wiki compilation with model routing.",
   "private": true,
   "type": "module",

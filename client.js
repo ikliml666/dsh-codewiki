@@ -33,6 +33,8 @@ window.__ModuleLoader__.load({
       secRun: '运行',
       enabled: '启用插件',
       enabledHint: '停用后 cw 与 codewiki_generate 两个工具立即报错。',
+      updateReminder: 'wiki 维护提醒',
+      updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库存在 .codewiki/ 时出现，提醒改完代码后更新 wiki。',
       maxConcurrency: '写文章并发上限',
       maxConcurrencyHint: '1–2；硬顶 2（子代理并发红线）。',
       articleLanguage: '文章语言',
@@ -63,6 +65,8 @@ window.__ModuleLoader__.load({
       secRun: 'Runtime',
       enabled: 'Enable plugin',
       enabledHint: 'When off, the cw and codewiki_generate tools error immediately.',
+      updateReminder: 'Wiki update reminder',
+      updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
       maxConcurrency: 'Writer concurrency cap',
       maxConcurrencyHint: '1–2; hard cap 2 (subagent concurrency red line).',
       articleLanguage: 'Article language',
@@ -223,7 +227,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'maxConcurrency', 'articleLanguage']) {
+            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'maxConcurrency', 'articleLanguage', 'updateReminder']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -312,6 +316,15 @@ window.__ModuleLoader__.load({
                     label: t('enabled'),
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('enabledHint')),
+                ),
+                el('label', null, t('updateReminder')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.updateReminder !== false,
+                    onChange: (v) => setPath('updateReminder', v),
+                    label: t('updateReminder'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('updateReminderHint')),
                 ),
                 el('label', null, t('maxConcurrency')),
                 el('div', { 'data-dscw-field': '' },
