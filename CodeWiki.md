@@ -10,7 +10,7 @@
 
 - `index.js` — 插件全部逻辑（单文件，Node ESM）
   - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ defaultReasoningEffort（0.2.6 起，默认空=跟随模型默认）/ maxConcurrency / articleLanguage / updateReminder，全部 `.volatile()`，execute 时 `val()` 解包热读取
-  - `installUpdateReminder`（index.js:717）— 0.2.5 起：`agent/created` 时在 agent 作用域注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调每次组装求值——`updateReminder=false` 或会话仓库无 `.codewiki/` 时返回空（renderPrompt 丢弃空 section），否则注入 wiki 维护提醒（收尾 `codewiki_generate`/手工 cw 流程、learnings/decisions、wiki 与代码同提交）；agent 处置时 section 随作用域销毁
+  - `installUpdateReminder`（index.js:739）— 0.2.5 起：`agent/created` 时在 agent 作用域注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调每次组装求值——`updateReminder=false` 或会话仓库无 `.codewiki/` 时返回空（renderPrompt 丢弃空 section），否则注入 wiki 维护提醒（收尾 `codewiki_generate`/手工 cw 流程、learnings/decisions、wiki 与代码同提交）；agent 处置时 section 随作用域销毁。0.2.7 起：存量代理经 `ctx.inject(['agents'])` 枚举（cordis 里插件 ctx 上未声明 inject 的服务属性访问即抛——0.2.5 的 `ctx.agents?.list()` 直接访问曾致 apply 同步崩溃、fiber FAILED、工具被回滚＝「插件没装上」），服务缺失静默跳过
   - `runCw`（index.js:62）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s），响应 `exec.signal` abort（SIGKILL）
   - `parseStatus`（index.js:93）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
   - `launchAgent`（index.js:119）/ `safeLaunch`（index.js:137）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions` 只从 route 里真实存在的字段构建（provider+model 成对才设、reasoningEffort 有值才设——防止 effort-only route 用 `{provider:undefined}` 覆盖继承的父路由），`stopReason != completed` 记失败，`run.dispose()` 幂等收尾

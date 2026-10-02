@@ -757,7 +757,15 @@ function installUpdateReminder(ctx, config) {
       })
     })
   }
-  for (const agent of (typeof ctx.agents?.list === 'function' ? ctx.agents.list() : [])) install(agent)
+  // cordis：插件 ctx 上未声明 inject 的服务属性，访问本身即抛（typeof 守卫无效）；
+  // 存量代理改经 inject(['agents']) 获取，服务缺失时静默跳过，新会话仍走 agent/created。
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['agents'], (rc3) => {
+      const agents = rc3?.agents ?? rc3
+      if (typeof agents?.list !== 'function') return
+      for (const agent of agents.list()) install(agent)
+    })
+  }
   ctx.on('agent/created', async ({ agent } = {}) => { install(agent) })
 }
 

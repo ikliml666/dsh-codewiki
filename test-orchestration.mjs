@@ -196,5 +196,32 @@ try {
   try { fs.rmSync(path.join(os.homedir(), '.codewiki', path.basename(repo)), { recursive: true, force: true }) } catch { /* wikiPath 已删 */ }
 }
 
+console.log('== 严格 cordis 语义：未 inject 的服务属性访问即抛 ==')
+{
+  const strictRegistered = new Map()
+  const strictListeners = []
+  const strictRc = {
+    tools: { register(def) { strictRegistered.set(def.name, def); return () => {} } },
+    subagents: makeMockSubagents(),
+  }
+  // 真实 cordis：对未声明 inject 的服务属性，访问本身抛异常（typeof 守卫救不了）
+  Object.defineProperty(strictRc, 'agents', {
+    get() { throw new Error('cannot get property "agents" without inject') },
+  })
+  const strictCtx = {
+    inject: (deps, fn) => fn(deps.includes('agents') ? { agents: { list: () => [] } } : strictRc),
+    on: (event, fn) => { if (event === 'agent/created') strictListeners.push(fn) },
+  }
+  // 真实 cordis 抛错点在插件自身的 ctx（apply 收到的对象），不在注入的 rc
+  Object.defineProperty(strictCtx, 'agents', {
+    get() { throw new Error('cannot get property "agents" without inject') },
+  })
+  let applyThrew = null
+  try { apply(strictCtx, {}) } catch (e) { applyThrew = e }
+  check(applyThrew === null, `apply 在严格 cordis 语义下不抛错（实际 ${applyThrew?.message ?? applyThrew}）`)
+  check(strictRegistered.get('cw') && strictRegistered.get('codewiki_generate'), '严格语义下 cw 与 codewiki_generate 仍注册（fiber 不回滚）')
+  check(strictListeners.length === 1, 'agent/created 监听已布线')
+}
+
 console.log(failures ? `\nFAIL：${failures} 项未通过` : '\nPASS：编排冒烟全部通过')
 process.exit(failures ? 1 : 0)
