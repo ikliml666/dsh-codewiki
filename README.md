@@ -53,4 +53,4 @@ bin/cw.exe         cargo build --release 产物（git 内跟踪，改了 vendor 
 client.js          插件页设置卡片（浏览器半侧；协议参照 ui-settings-agent-loop / router client.js）
 ```
 
-验证：`node --check index.js client.js`；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
+验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。

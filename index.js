@@ -112,10 +112,10 @@ function textOfOutput(output) {
     .join('')
 }
 
-async function launchAgent(rc, exec, { label, prompt, route }) {
+async function launchAgent(subagents, exec, { label, prompt, route }) {
   const payload = { label, prompt: [{ type: 'text', text: prompt }], parent: exec.agent, signal: exec.signal }
   if (route) payload.agentOptions = { provider: route.provider, model: route.model }
-  const run = await rc.subagents.start('spawn', payload)
+  const run = await subagents.start('spawn', payload)
   try {
     const result = await run.result
     return {
@@ -429,7 +429,7 @@ async function wikiPathFor(cwd, binary) {
   return path.join(os.homedir(), '.codewiki', path.basename(path.resolve(cwd)))
 }
 
-function generateToolDefinition(cfg) {
+function generateToolDefinition(cfg, subagents) {
   return {
     name: 'codewiki_generate',
     description: [
