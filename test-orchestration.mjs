@@ -22,9 +22,10 @@ function articleMd(title, source, type = 'module') {
 }
 
 // mock 子代理服务：按 label 路由，写文章任务真实落盘（模拟子代理用自己的写文件工具）
-function makeMockSubagents() {
+// initialWikiPath：批量集成节无「codewiki:模块」子代理来设置 wikiPath，显式传入避免横切 mock 落盘到进程 cwd
+function makeMockSubagents(initialWikiPath = '') {
   const calls = []
-  const state = { wikiPath: '' }
+  const state = { wikiPath: initialWikiPath }
   return {
     calls,
     async start(_kind, payload) {
@@ -225,7 +226,7 @@ console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文�
     const batchRegistered = new Map()
     const batchRc = {
       tools: { register(def) { batchRegistered.set(def.name, def); return () => {} } },
-      subagents: makeMockSubagents(),
+      subagents: makeMockSubagents(path.join(batchRepo, '.codewiki')),
     }
     apply({ inject: (deps, fn) => fn(deps.includes('agents') ? { agents: { list: () => [] } } : batchRc), on: () => {} }, { enabled: true, batchEnabled: true, batchApiKey: 'sk-test' })
     const callsBeforeBatch = batchRc.subagents.calls.length
