@@ -38,7 +38,21 @@ window.__ModuleLoader__.load({
       reasoningEffort: '思考程度',
       reasoningEffortHint: '子代理思考程度（reasoningEffort）。下拉来自模型目录对当前 provider+model 广播的档位；留空或目录不可用时跟随所选模型默认，也可手输 adapter 自有值。',
       maxConcurrency: '写文章并发上限',
-      maxConcurrencyHint: '1–2；硬顶 2（子代理并发红线）。',
+      maxConcurrencyHint: '1–8；硬顶 8。',
+      secBatch: '批量推理（降本）',
+      secBatchHint: '写文章环节改走阿里云百炼批量推理（Batch File，实时价 50%）；规划/横切/审校仍走智能体子代理。仅华北2（北京）支持，模型须用别名（快照版不支持批量）。',
+      batchEnabled: '启用批量推理',
+      batchEnabledHint: '开启且 API Key 就绪时写文章走批量；Key 留空自动回退智能体子代理。',
+      batchApiKey: '百炼 API Key',
+      batchApiKeyHint: 'DashScope API Key（sk-…），仅存本机配置，用于百炼 files/batches 接口。',
+      batchModel: '批量模型',
+      batchModelHint: '默认 qwen3.7-flash；仅华北2 支持，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）。',
+      batchThinkingBudget: '批量思考预算',
+      batchThinkingBudgetHint: '0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。',
+      batchWaitMinutes: '就地等待（分钟）',
+      batchWaitMinutesHint: '批量任务就地轮询等待时长；超时保留断点，下次 codewiki_generate 自动续查收尾。',
+      invalidBatchThinking: '批量思考预算须为 0–32768 的整数。',
+      invalidBatchWait: '就地等待须为正整数分钟。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -46,7 +60,7 @@ window.__ModuleLoader__.load({
       discard: '放弃更改',
       saved: '已保存。',
       conflict: '保存冲突：设置已被他处修改，请重试。',
-      invalidConcurrency: '并发上限须为 1–2 的整数。',
+      invalidConcurrency: '并发上限须为 1–8 的整数。',
       overridden: '已被配置文件覆盖',
       reset: '重置',
     })
@@ -72,7 +86,21 @@ window.__ModuleLoader__.load({
       reasoningEffort: 'Reasoning effort',
       reasoningEffortHint: 'Subagent reasoning effort. Options come from the model catalog for the current provider+model; empty or catalog-unavailable follows the selected model default. Custom adapter values can be typed in.',
       maxConcurrency: 'Writer concurrency cap',
-      maxConcurrencyHint: '1–2; hard cap 2 (subagent concurrency red line).',
+      maxConcurrencyHint: '1–8; hard cap 8.',
+      secBatch: 'Batch inference (cost saving)',
+      secBatchHint: 'Routes article writing through Alibaba Cloud Bailian batch inference (Batch File, 50% of realtime price); planning/cross-cut/review stay on agent subagents. North China 2 (Beijing) only; use the model alias (snapshots do not support batch).',
+      batchEnabled: 'Enable batch inference',
+      batchEnabledHint: 'When on with an API key set, article writing goes through batch; empty key falls back to agent subagents.',
+      batchApiKey: 'Bailian API key',
+      batchApiKeyHint: 'DashScope API key (sk-…), stored in local config only; used for the files/batches endpoints.',
+      batchModel: 'Batch model',
+      batchModelHint: 'Default qwen3.7-flash; North China 2 only, alias required (e.g. the qwen3.7-flash-2026-07-15 snapshot does not support batch).',
+      batchThinkingBudget: 'Batch thinking budget',
+      batchThinkingBudgetHint: '0 = thinking off (cheapest, recommended for simple tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output.',
+      batchWaitMinutes: 'Inline wait (minutes)',
+      batchWaitMinutesHint: 'How long to poll the batch task inline; on timeout a breakpoint is kept and the next codewiki_generate call settles it automatically.',
+      invalidBatchThinking: 'Batch thinking budget must be an integer between 0 and 32768.',
+      invalidBatchWait: 'Inline wait must be a positive integer number of minutes.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -80,7 +108,7 @@ window.__ModuleLoader__.load({
       discard: 'Discard changes',
       saved: 'Saved.',
       conflict: 'Save conflict: settings changed elsewhere, please retry.',
-      invalidConcurrency: 'Concurrency cap must be an integer between 1 and 2.',
+      invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
       overridden: 'Overridden by config file',
       reset: 'Reset',
     })
@@ -225,13 +253,23 @@ window.__ModuleLoader__.load({
           const save = async () => {
             if (!snapshot?.writable || snapshot.status !== 'ready') return
             const concurrency = Number(draft?.maxConcurrency)
-            if (Number.isFinite(concurrency) && (concurrency < 1 || concurrency > 2 || !Number.isInteger(concurrency))) {
+            if (Number.isFinite(concurrency) && (concurrency < 1 || concurrency > 8 || !Number.isInteger(concurrency))) {
               setError(t('invalidConcurrency'))
+              return
+            }
+            const thinking = Number(draft?.batchThinkingBudget)
+            if (Number.isFinite(thinking) && (thinking < 0 || thinking > 32768 || !Number.isInteger(thinking))) {
+              setError(t('invalidBatchThinking'))
+              return
+            }
+            const waitMin = Number(draft?.batchWaitMinutes)
+            if (Number.isFinite(waitMin) && (waitMin < 1 || !Number.isInteger(waitMin))) {
+              setError(t('invalidBatchWait'))
               return
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'defaultReasoningEffort', 'maxConcurrency', 'articleLanguage', 'updateReminder']) {
+            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'defaultReasoningEffort', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchEnabled', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchWaitMinutes']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -348,9 +386,9 @@ window.__ModuleLoader__.load({
                 el('label', null, t('maxConcurrency')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {
-                    value: String(draft.maxConcurrency ?? 2),
+                    value: String(draft.maxConcurrency ?? 8),
                     onChange: (e) => setPath('maxConcurrency', Number(e.target.value)),
-                    placeholder: '2',
+                    placeholder: '8',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('maxConcurrencyHint')),
                 ),
@@ -368,6 +406,55 @@ window.__ModuleLoader__.load({
                     placeholder: 'C:\\…\\cw.exe',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('binaryPathHint')),
+                ),
+              ),
+            ),
+            // 批量推理（降本）
+            el('section', { 'data-dscw-field': '' },
+              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secBatch'))),
+              el('div', { 'data-dscw-hint': '' }, t('secBatchHint')),
+              el('div', { 'data-dscw-grid': '' },
+                el('label', null, t('batchEnabled')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.batchEnabled === true,
+                    onChange: (v) => setPath('batchEnabled', v),
+                    label: t('batchEnabled'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('batchEnabledHint')),
+                ),
+                el('label', null, t('batchApiKey')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.batchApiKey ?? ''),
+                    onChange: (e) => setPath('batchApiKey', e.target.value),
+                    placeholder: 'sk-…',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('batchApiKeyHint')),
+                ),
+                el('label', null, t('batchModel')),
+                el(Input, {
+                  value: String(draft.batchModel ?? ''),
+                  onChange: (e) => setPath('batchModel', e.target.value),
+                  placeholder: 'qwen3.7-flash',
+                }),
+                el('label', null, t('batchThinkingBudget')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.batchThinkingBudget ?? 0),
+                    onChange: (e) => setPath('batchThinkingBudget', Number(e.target.value)),
+                    placeholder: '0',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint')),
+                ),
+                el('label', null, t('batchWaitMinutes')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.batchWaitMinutes ?? 20),
+                    onChange: (e) => setPath('batchWaitMinutes', Number(e.target.value)),
+                    placeholder: '20',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('batchWaitMinutesHint')),
                 ),
               ),
             ),

@@ -4,24 +4,25 @@
 
 ## Overview
 
-把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（智能体编排编译）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享；0.2.3 对齐上游 wiki_path()，并修复 MSYS/Windows 路径误判与捆绑二进制过期分叉）。0.1.1 起不注册任何技能；编译子代理默认钉在 `aliyun-bailian/qwen3.8-flash`（路由插件 wiki 档）。0.2.0 起带插件页设置 UI（client.js），编译模型与运行选项可在插件管理页点进 CodeWiki 条目修改。
+把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（智能体编排编译）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享；0.2.3 对齐上游 wiki_path()，并修复 MSYS/Windows 路径误判与捆绑二进制过期分叉）。0.1.1 起不注册任何技能；编译子代理默认钉在 `aliyun-bailian/qwen3.8-flash`（路由插件 wiki 档）。0.2.0 起带插件页设置 UI（client.js），编译模型与运行选项可在插件管理页点进 CodeWiki 条目修改。0.3.0 起：写文章并发硬顶放宽到 8；写文章环节可改走阿里云百炼批量推理（Batch File，实时价 50%，仅文章环节——规划/横切/审校仍走智能体），默认关闭。
 
 ## Key Components
 
 - `index.js` — 插件全部逻辑（单文件，Node ESM）
-  - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ defaultReasoningEffort（0.2.6 起，默认空=跟随模型默认）/ maxConcurrency / articleLanguage / updateReminder，全部 `.volatile()`，execute 时 `val()` 解包热读取
+  - `Config`（index.js:23）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ defaultReasoningEffort（0.2.6 起，默认空=跟随模型默认）/ maxConcurrency（0.3.0 起硬顶 8，默认 8）/ articleLanguage / updateReminder / 批量推理五项（0.3.0 起：batchEnabled 默认 false、batchApiKey、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考、batchWaitMinutes 默认 20），全部 `.volatile()`，execute 时 `val()` 解包热读取
   - `installUpdateReminder`（index.js:739）— 0.2.5 起：`agent/created` 时在 agent 作用域注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调每次组装求值——`updateReminder=false` 或会话仓库无 `.codewiki/` 时返回空（renderPrompt 丢弃空 section），否则注入 wiki 维护提醒（收尾 `codewiki_generate`/手工 cw 流程、learnings/decisions、wiki 与代码同提交）；agent 处置时 section 随作用域销毁。0.2.7 起：存量代理经 `ctx.inject(['agents'])` 枚举（cordis 里插件 ctx 上未声明 inject 的服务属性访问即抛——0.2.5 的 `ctx.agents?.list()` 直接访问曾致 apply 同步崩溃、fiber FAILED、工具被回滚＝「插件没装上」），服务缺失静默跳过
   - `runCw`（index.js:62）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s），响应 `exec.signal` abort（SIGKILL）
   - `parseStatus`（index.js:93）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
   - `launchAgent`（index.js:119）/ `safeLaunch`（index.js:137）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions` 只从 route 里真实存在的字段构建（provider+model 成对才设、reasoningEffort 有值才设——防止 effort-only route 用 `{provider:undefined}` 覆盖继承的父路由），`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
-  - `runBatched`（index.js:146）— 按 maxConcurrency（硬顶 2）分批并发派写文章子代理
+  - `runBatched`（index.js:146）— 按 maxConcurrency（0.3.0 起硬顶 8）分批并发派写文章子代理
+  - 批量推理模块（index.js:210 起，0.3.0）— `collectSources`（源码内联，800KB 单行预算，整文件粒度装填，超限回退智能体）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾、落盘、删断点）/ `runBatchTasks`（上传 /files → POST /batches 24h 窗口 → 1s 步进轮询 10s→30s 间隔；超时/中止保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次调用先续查收尾再派新任务）；默认关闭，batchApiKey 留空自动回退智能体子代理
   - `cwToolDefinition`（index.js:311）— cw CLI 封装工具（子命令白名单）
   - `generateToolDefinition`（index.js:436）— 编排主流程：status 判态（非零退出且无输出直接抛错）→ clean 直接报告（`scope=full` 不短路，强制全量）/ stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
   - `apply`（index.js:689）— `ctx.inject(['tools','subagents'])` 一次注入，注册两工具
 - `vendor/codewiki/` — 上游源码（去 .git）；`bin/cw.exe` — cargo release 产物（git 跟踪）
 - `client.js` — 插件页设置卡片（浏览器半侧，0.2.0）
   - 注册：`__ModuleLoader__.load({id:'@local/dsh-codewiki'})` → `apply` 里 `configForms.get('codewiki')` + `whileServed` 包 `slots.inject('plugins.item', …)`（order 30）
-  - `CodewikiCard`（client.js:129）— `view=summary` 一行简介（client.js:201）；`view=page` 完整表单：编译模型节（provider/model 级联下拉，`modelCatalog()` 失败退 Input）、运行节（enabled Switch / maxConcurrency 校验 1–2 / articleLanguage / binaryPath）、保存条（`form.mutate` 单层 op + revision CAS，client.js:233；脏检测/放弃/冲突提示）
+  - `CodewikiCard`（client.js:129）— `view=summary` 一行简介（client.js:201）；`view=page` 完整表单：编译模型节（provider/model 级联下拉，`modelCatalog()` 失败退 Input）、运行节（enabled Switch / maxConcurrency 校验 1–8 / articleLanguage / binaryPath）、批量推理节（0.3.0 起：batchEnabled Switch / batchApiKey / batchModel / batchThinkingBudget 0–32768 / batchWaitMinutes）、保存条（`form.mutate` 单层 op + revision CAS，client.js:233；脏检测/放弃/冲突提示）
   - 快照订阅：`form.getSnapshot()` + `form.subscribe`，仅 `revision` 变化才覆盖草稿（宿主保存回收读不冲掉本地编辑）
 - `cordis.patch.yml` — bundle 形式挂载补丁；本地开发走 profile patch 的 file:/// 直挂（id `codewiki`）
 - `package.json` — `exports["./client"]` + `dsh.client.platform:"web"` 让宿主扫描器沿 file:/// 条目发现客户端模块（改 dsh.client 后需重启）
@@ -38,7 +39,7 @@
   规划 agent（JSON 模块计划；失败降级单 agent 全量）
         │
         ▼
-  写文章子代理 ×N（runBatched，并发≤2；默认 qwen3.8-flash）
+  写文章 ×N（runBatched 并发≤8，或 0.3.0 起可改走百炼批量推理；默认 qwen3.8-flash）
         │
         ▼
   横切 agent（_architecture/_patterns/concepts）→ 审校 agent
