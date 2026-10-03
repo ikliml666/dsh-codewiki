@@ -128,6 +128,43 @@ check(!fs.existsSync(path.join(outDir, 'm2.md')), '失败文章不落盘')
 check(!fs.existsSync(stateFile), '收尾后断点文件已删除')
 check(JSON.parse(uploadedJsonl.trim().split('\n')[0]).body.enable_thinking === false, '上传 JSONL 思考参数按预算生成')
 
+// ---------- 4b. background 模式：提交即返回 ----------
+section('runBatchTasks：background 提交即返回（轮询交宿主后台链）')
+{
+  const bgState = path.join(workRoot, 'state-bg.json')
+  const bgNotes = []
+  const bgCalls = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const u = String(url)
+    bgCalls.push(u)
+    if (u.endsWith('/files')) return new Response(JSON.stringify({ id: 'file-bg-1' }), { status: 200 })
+    if (u.endsWith('/batches')) return new Response(JSON.stringify({ id: 'batch-bg-1' }), { status: 200 })
+    return new Response('{}', { status: 404 })
+  }
+  try {
+    const bgRes = await runBatchTasks({
+      exec,
+      batchCfg: { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0 },
+      tasks: batchTasks.map((t) => ({ ...t, articlePath: path.join(outDir, `bg-${t.name}`) })),
+      cwd: workRoot,
+      language: '中文',
+      waitMs: 60000,
+      stateFile: bgState,
+      notes: bgNotes,
+      background: true,
+    })
+    check(bgRes.submitted === 'batch-bg-1' && Array.isArray(bgRes.prepared) && bgRes.prepared.length === 3, '提交后立即返回 submitted 批次 id 与 prepared 任务集')
+    check(bgRes.prepared.every((t) => t.customId && typeof t.batchPrompt === 'string' && t.batchPrompt.length > 0), 'prepared 任务带 customId 与 batchPrompt（供后台 settleBatch 收尾）')
+    check(bgCalls.length === 2 && bgCalls.some((u) => u.endsWith('/files')) && bgCalls.some((u) => u.endsWith('/batches')), `提交后不再轮询（fetch 共 ${bgCalls.length} 次：/files 与 /batches）`)
+    check(fs.existsSync(bgState) && JSON.parse(fs.readFileSync(bgState, 'utf8')).batchId === 'batch-bg-1', '断点已写入（后台链据此收尾）')
+    check(bgNotes.some((n) => n.includes('batch-bg-1')), 'notes 记录批次 id')
+    fs.rmSync(bgState, { force: true })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
 // ---------- 5. 超预算任务回退 ----------
 section('runBatchTasks：超预算任务 oversized 回退')
 fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(900 * 1024))

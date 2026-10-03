@@ -234,7 +234,7 @@ console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文�
         ? { credentials: credSvc }
         : fn(deps.includes('agents') ? { agents: { list: () => [] } } : batchRc),
       on: () => {},
-    }, { enabled: true, batchEnabled: true, batchApiKey: '' })
+    }, { enabled: true, batchEnabled: true, batchAsync: false, batchApiKey: '' })
     const callsBeforeBatch = batchRc.subagents.calls.length
     const rb = await batchRegistered.get('codewiki_generate').execute({ cwd: batchRepo }, { agent: 'test-agent' })
     console.log('  notes:', rb.notes.join(' | '))
@@ -246,6 +246,68 @@ console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文�
     check(rb.writtenCount >= 2 && rb.failedCount === 0, `批量路径完成 ${rb.writtenCount} 篇、失败 ${rb.failedCount} 篇`)
     check(rb.notes.some((n) => n.includes('qwen3.7-flash')), 'notes 记录批量模型')
     check(rb.notes.some((n) => n.includes('凭证来源 credentials(file)')), 'notes 记录凭证来源（宿主凭据库）')
+  } finally {
+    globalThis.fetch = originalFetch
+    fs.rmSync(batchRepo, { recursive: true, force: true })
+    try { fs.rmSync(path.join(os.homedir(), '.codewiki', path.basename(batchRepo)), { recursive: true, force: true }) } catch { /* wikiPath 已删 */ }
+  }
+}
+
+console.log('== codewiki_generate 批量异步集成（batchAsync 默认开：提交即返回，宿主后台链自动收尾） ==')
+{
+  const batchRepo = makeFixtureRepo()
+  const originalFetch = globalThis.fetch
+  const batchPolls = []
+  let batchPollCount = 0
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    if (u.endsWith('/files')) return new Response(JSON.stringify({ id: 'file-async-1' }), { status: 200 })
+    if (u.endsWith('/batches')) return new Response(JSON.stringify({ id: 'batch-async-1' }), { status: 200 })
+    if (u.includes('/batches/batch-async-1')) {
+      batchPollCount += 1
+      batchPolls.push(batchPollCount)
+      if (batchPollCount === 1) return new Response(JSON.stringify({ id: 'batch-async-1', status: 'in_progress' }), { status: 200 })
+      return new Response(JSON.stringify({ id: 'batch-async-1', status: 'completed', output_file_id: 'out-async-1', error_file_id: 'err-async-1' }), { status: 200 })
+    }
+    if (u.includes('out-async-1')) {
+      const article = (title, src) => `---\ntitle: ${title}\ntype: module\nsource_files:\n  - ${src}\ntags: []\n---\n\n# ${title}\n\nAsync batch article.\n`
+      const lines = [
+        { custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: article('core', 'src/core.py') } }] } } },
+        { custom_id: 't1', response: { status_code: 200, body: { choices: [{ message: { content: article('util', 'src/util.py') } }] } } },
+      ]
+      return new Response(lines.map((l) => JSON.stringify(l)).join('\n') + '\n', { status: 200 })
+    }
+    if (u.includes('err-async-1')) return new Response('', { status: 200 })
+    return new Response('{}', { status: 404 })
+  }
+  try {
+    const asyncRegistered = new Map()
+    const asyncRc = {
+      tools: { register(def) { asyncRegistered.set(def.name, def); return () => {} } },
+      subagents: makeMockSubagents(path.join(batchRepo, '.codewiki')),
+    }
+    const credSvc = { resolve: async (ref) => ref === 'ALIYUN_BAILIAN_API_KEY' ? { value: 'sk-cred-test', source: 'file' } : undefined }
+    apply({
+      inject: (deps, fn) => deps.includes('credentials')
+        ? { credentials: credSvc }
+        : fn(deps.includes('agents') ? { agents: { list: () => [] } } : asyncRc),
+      on: () => {},
+    }, { enabled: true, batchEnabled: true, batchApiKey: '' })
+    const tmpBefore = new Set(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('dsh-codewiki-batch-')))
+    const callsBefore = asyncRc.subagents.calls.length
+    const ra = await asyncRegistered.get('codewiki_generate').execute({ cwd: batchRepo }, { agent: 'test-agent' })
+    check(ra.writtenCount === 0 && ra.failedCount === 0, `主调用立即返回，完成 ${ra.writtenCount} 篇（后台未落地时为 0）`)
+    check(ra.articles.every((a) => a.ok === null) && ra.articles.length >= 2, `articles 记录 ${ra.articles.length} 篇批量进行中（ok=null）`)
+    check(ra.notes.some((n) => n.includes('宿主后台任务')), 'notes 说明后台跟进')
+    check(!fs.existsSync(path.join(ra.wikiPath, 'modules', 'core.md')), '主调用返回时文章尚未落盘（未阻塞等待）')
+    // 等宿主后台链：轮询（mock 第 2 轮 completed）→ 落盘 → 横切/审校子代理 → cw index/meta
+    await new Promise((r) => setTimeout(r, 1500))
+    check(fs.existsSync(path.join(ra.wikiPath, 'modules', 'core.md')) && fs.readFileSync(path.join(ra.wikiPath, 'modules', 'core.md'), 'utf8').includes('Async batch article'), '后台链已将批量文章落盘')
+    const bgCalls = asyncRc.subagents.calls.slice(callsBefore)
+    check(bgCalls.some((p) => String(p.label ?? '').includes('横切文章（批量后台）')), '后台链派发了横切文章子代理')
+    check(bgCalls.some((p) => String(p.label ?? '').includes('审校（批量后台）')), '后台链派发了审校子代理')
+    const tmpLeftover = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('dsh-codewiki-batch-') && !tmpBefore.has(f))
+    check(tmpLeftover.length === 0, `断点已由后台收尾清理（本次运行残留 ${tmpLeftover.length}）`)
   } finally {
     globalThis.fetch = originalFetch
     fs.rmSync(batchRepo, { recursive: true, force: true })

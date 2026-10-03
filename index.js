@@ -38,6 +38,7 @@ export const Config = z.object({
   defaultReasoningEffort: z.string().default('').volatile().description('codewiki_generate 子代理默认思考程度（reasoningEffort，adapter 自有值，如 off/low/high/max）；留空跟随所选模型默认'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 8'),
   batchEnabled: z.boolean().default(false).volatile().description('写文章改走阿里云百炼批量推理（Batch File，实时价的 50%）；规划/横切/审校仍走智能体子代理'),
+  batchAsync: z.boolean().default(true).volatile().description('批量提交后本调用立即返回，由宿主后台任务等待批次并收尾（落盘→横切→审校→index）；关闭则就地等待至多 batchWaitMinutes 分钟'),
   batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证，取不到才回退智能体子代理'),
   batchModel: z.string().default('qwen3.7-flash').volatile().description('批量推理模型；仅华北2（北京）支持，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）'),
   batchThinkingBudget: z.number().default(0).volatile().description('批量推理思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
@@ -63,6 +64,7 @@ function liveConfig(config) {
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
     batchEnabled: val(c.batchEnabled) === true,
+    batchAsync: val(c.batchAsync) !== false,
     batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
     batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
     batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
@@ -443,7 +445,7 @@ export async function resolveBatchApiKey(hostCtx, cfg) {
 // 提交新批次并等待收尾。返回 { results, oversized }：
 // results 与 runBatched 同构（{name, ok, stopReason}）；oversized 是超单行预算、
 // 需回退智能体子代理的任务子集。断点在中止/超时时保留，下次调用续查。
-export async function runBatchTasks({ exec, batchCfg, tasks, cwd, language, waitMs, stateFile, notes }) {
+export async function runBatchTasks({ exec, batchCfg, tasks, cwd, language, waitMs, stateFile, notes, background }) {
   for (let i = 0; i < tasks.length; i++) tasks[i].customId = `t${i}`
   const prepared = []
   const oversized = []
@@ -479,9 +481,11 @@ export async function runBatchTasks({ exec, batchCfg, tasks, cwd, language, wait
     tasks: prepared.map((t) => ({ customId: t.customId, name: t.name, articlePath: t.articlePath })),
   }), 'utf8')
   notes.push(`批量任务已提交：${batch.id}（${prepared.length} 篇，模型 ${batchCfg.model}，思考预算 ${batchCfg.thinkingBudget || '关'}）`)
+  // 异步模式：提交即返回，批次等待与收尾交给宿主后台任务（exec闭包里的 backgroundFinalize）
+  if (background) return { results: [], oversized, submitted: batch.id, prepared }
 
   const deadline = Date.now() + waitMs
-  let delay = 10000
+  let delay = Number(process.env.DSH_CODEWIKI_BATCH_POLL_MS) || 10000
   for (;;) {
     let results = null
     try {
@@ -867,13 +871,57 @@ function generateToolDefinition(cfg, subagents) {
       if (c.batchEnabled && !batchKey) {
         notes.push('批量推理已开启但未找到百炼凭证——可在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey；写文章回退智能体子代理')
       } else if (useBatch) {
-        notes.push(`写文章走百炼批量推理（Batch File，实时价 50%）：模型 ${c.batchModel}，凭证来源 ${batchKey.source}，思考预算 ${c.batchThinkingBudget || '关闭'}，就地等待 ${c.batchWaitMinutes} 分钟`)
+        notes.push(`写文章走百炼批量推理（Batch File，实时价 50%）：模型 ${c.batchModel}，凭证来源 ${batchKey.source}，思考预算 ${c.batchThinkingBudget || '关闭'}，${c.batchAsync ? '提交后由宿主后台任务跟进收尾（本调用立即返回）' : `就地等待 ${c.batchWaitMinutes} 分钟`}`)
+      }
+
+      // 宿主后台收尾：等待批次终态 → 落盘 → （全量）派发横切/审校子代理 → cw index/meta。
+      // 不绑 exec.signal：主调用返回后等待继续；宿主关闭则断点兜底，下次调用续查。
+      const backgroundFinalize = async ({ batchId, prepared, crosscutPromptText, verifyPromptText }) => {
+        const bgNotes = []
+        const bgExec = { agent: exec.agent, signal: undefined }
+        const deadline = Date.now() + 24 * 3600 * 1000
+        let delay = Number(process.env.DSH_CODEWIKI_BATCH_POLL_MS) || 10000
+        let written = 0
+        for (;;) {
+          let results = null
+          try {
+            results = await settleBatch({ batchId, tasks: prepared, apiKey: batchKey.key, stateFile, notes: bgNotes })
+          } catch (err) {
+            console.error(`[dsh-codewiki] 批量 ${batchId} 后台收尾异常（断点保留，下次调用续查）—— ${String(err?.message ?? err)}`)
+            return
+          }
+          if (results) {
+            for (const r of results) if (r.ok) written += 1
+            break
+          }
+          if (Date.now() >= deadline) {
+            console.error(`[dsh-codewiki] 批量 ${batchId} 后台等待超 24h 放弃（断点保留，下次调用续查）`)
+            return
+          }
+          await sleep(delay)
+          delay = Math.min(delay * 1.5, 60000)
+        }
+        console.log(`[dsh-codewiki] 批量 ${batchId} 完成：成功 ${written}/${prepared.length}${bgNotes.length ? ` —— ${bgNotes.join('；')}` : ''}`)
+        if (written > 0 && crosscutPromptText) {
+          const cross = await safeLaunch(subagents, bgExec, { label: 'codewiki:横切文章（批量后台）', prompt: crosscutPromptText, route })
+          if (cross.ok) written += 1
+          else console.error(`[dsh-codewiki] 后台横切文章失败 —— ${failureMessage(cross)}`)
+          const verify = await safeLaunch(subagents, bgExec, { label: 'codewiki:审校（批量后台）', prompt: verifyPromptText, route })
+          if (!verify.ok) console.error(`[dsh-codewiki] 后台审校失败（不阻塞收尾）—— ${failureMessage(verify)}`)
+        }
+        if (written > 0) {
+          const idx = await runCw(binary, cwd, ['index'], 120000)
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000)
+          console.log(`[dsh-codewiki] 后台收尾 cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
+        } else {
+          console.log('[dsh-codewiki] 后台收尾：没有文章写成功，跳过 index/meta（wiki 基线不变，可重试编译）')
+        }
       }
 
       // 写文章统一出口：批量推理（仅文章环节）或智能体子代理分批；超限任务回退智能体
       const runArticleTasks = async (tasks) => {
-        if (!useBatch) return runBatched(subagents, exec, tasks, concurrency)
-        const { results, oversized } = await runBatchTasks({
+        if (!useBatch) return { results: await runBatched(subagents, exec, tasks, concurrency), oversized: [] }
+        const { results, oversized, submitted, prepared } = await runBatchTasks({
           exec,
           batchCfg: { apiKey: batchKey.key, model: c.batchModel, thinkingBudget: c.batchThinkingBudget },
           tasks,
@@ -882,13 +930,15 @@ function generateToolDefinition(cfg, subagents) {
           waitMs: c.batchWaitMinutes * 60000,
           stateFile,
           notes,
+          background: c.batchAsync,
         })
+        if (submitted) return { results, oversized, submitted, prepared }
         const all = [...results]
         if (oversized.length) {
           notes.push(`${oversized.length} 篇超出批量单行大小限制，回退智能体子代理`)
           all.push(...await runBatched(subagents, exec, oversized, concurrency))
         }
-        return all
+        return { results: all, oversized }
       }
 
       const binary = resolveBinary(c)
@@ -935,6 +985,10 @@ function generateToolDefinition(cfg, subagents) {
           notes,
         })
         if (settled === null) {
+          if (c.batchAsync) {
+            notes.push(`批量任务 ${pending.batchId} 仍在进行中——宿主后台任务跟进中，本调用直接返回；稍后重新调用 codewiki_generate 可查看进度`)
+            return result
+          }
           throw new Error(`批量任务 ${pending.batchId} 仍在进行中（未到终态）——稍后重新调用 codewiki_generate 继续，或到百炼控制台「批量推理」页查看进度`)
         }
         for (const r of settled) {
@@ -979,8 +1033,14 @@ function generateToolDefinition(cfg, subagents) {
             prevArticlePath: articlePath,
           }
         }).filter(Boolean)
-        const results = await runArticleTasks(tasks)
-        for (const r of results) {
+        const staleRun = await runArticleTasks(tasks)
+        if (staleRun.submitted) {
+          for (const t of tasks) result.articles.push({ name: t.name, ok: null, stopReason: `批量进行中（${staleRun.submitted}）` })
+          notes.push(`批次已提交，宿主后台任务将等待批次完成后自动落盘并刷新索引（本调用不等待）；稍后重新调用 codewiki_generate 可查看进度`)
+          void backgroundFinalize({ batchId: staleRun.submitted, prepared: staleRun.prepared })
+          return result
+        }
+        for (const r of staleRun.results) {
           result.articles.push({ name: r.name, ok: r.ok, stopReason: r.stopReason })
           if (r.ok) result.writtenCount += 1
           else result.failedCount += 1
@@ -991,7 +1051,7 @@ function generateToolDefinition(cfg, subagents) {
           notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
           if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
         }
-        for (const r of results) {
+        for (const r of staleRun.results) {
           if (!r.ok) notes.push(`失败：${r.name} —— ${failureMessage(r)}`)
         }
         return result
@@ -1052,13 +1112,24 @@ function generateToolDefinition(cfg, subagents) {
             sources: mod.files,
             articlePath: path.join(wikiPath, 'modules', `${slugify(mod.name)}.md`),
           }))
-          const moduleResults = await runArticleTasks(moduleTasks)
-          for (const r of moduleResults) {
+          const moduleRun = await runArticleTasks(moduleTasks)
+          if (moduleRun.submitted) {
+            for (const t of moduleTasks) result.articles.push({ name: t.name, ok: null, stopReason: `批量进行中（${moduleRun.submitted}）` })
+            notes.push(`批次已提交，宿主后台任务将等待批次完成后自动落盘并派发横切/审校/cw index（本调用不等待）；稍后重新调用 codewiki_generate 可查看进度`)
+            void backgroundFinalize({
+              batchId: moduleRun.submitted,
+              prepared: moduleRun.prepared,
+              crosscutPromptText: crosscutPrompt(cwd, wikiPath, plan, language),
+              verifyPromptText: verifyPrompt(cwd, wikiPath),
+            })
+            return result
+          }
+          for (const r of moduleRun.results) {
             result.articles.push({ name: r.name, ok: r.ok, stopReason: r.stopReason })
             if (r.ok) result.writtenCount += 1
             else result.failedCount += 1
           }
-          const okModules = moduleResults.filter((r) => r.ok).length
+          const okModules = moduleRun.results.filter((r) => r.ok).length
           if (okModules === 0) {
             notes.push('全部模块文章失败，跳过横切与审校（不刷新编译基线）')
           } else {

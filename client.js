@@ -43,6 +43,8 @@ window.__ModuleLoader__.load({
       secBatchHint: '写文章环节改走阿里云百炼批量推理（Batch File，实时价 50%）；规划/横切/审校仍走智能体子代理。仅华北2（北京）支持，模型须用别名（快照版不支持批量）。',
       batchEnabled: '启用批量推理',
       batchEnabledHint: '开启且找到百炼凭证时写文章走批量——凭证自动取模型设置「阿里百炼云」渠道；取不到才回退智能体子代理。',
+      batchAsync: '后台跟进（异步）',
+      batchAsyncHint: '开启时批量提交后立即返回，宿主后台任务自动等待批次并收尾（落盘→横切→审校→索引），主模型无需挂起等待；关闭则就地等待。',
       batchApiKey: '百炼 API Key',
       batchApiKeyHint: 'DashScope API Key（sk-…）。留空时自动使用模型设置「阿里百炼云」渠道的凭证；此处填写则覆盖它。',
       batchModel: '批量模型',
@@ -91,6 +93,8 @@ window.__ModuleLoader__.load({
       secBatchHint: 'Routes article writing through Alibaba Cloud Bailian batch inference (Batch File, 50% of realtime price); planning/cross-cut/review stay on agent subagents. North China 2 (Beijing) only; use the model alias (snapshots do not support batch).',
       batchEnabled: 'Enable batch inference',
       batchEnabledHint: 'When on with a Bailian credential found — the "阿里百炼云" provider credential from model settings is used automatically — article writing goes through batch; otherwise it falls back to agent subagents.',
+      batchAsync: 'Background follow-up (async)',
+      batchAsyncHint: 'When on, the call returns right after submission and a host background task waits for the batch and finishes up (write files → crosscut → review → index); the main model never blocks. Turn off to wait inline.',
       batchApiKey: 'Bailian API key',
       batchApiKeyHint: 'DashScope API key (sk-…). Leave empty to reuse the credential of the "阿里百炼云" provider from model settings; a value here overrides it.',
       batchModel: 'Batch model',
@@ -269,7 +273,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'defaultReasoningEffort', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchEnabled', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchWaitMinutes']) {
+            for (const key of ['enabled', 'binaryPath', 'defaultProvider', 'defaultModel', 'defaultReasoningEffort', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchEnabled', 'batchAsync', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchWaitMinutes']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -422,6 +426,15 @@ window.__ModuleLoader__.load({
                     label: t('batchEnabled'),
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('batchEnabledHint')),
+                ),
+                el('label', null, t('batchAsync')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.batchAsync !== false,
+                    onChange: (v) => setPath('batchAsync', v),
+                    label: t('batchAsync'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('batchAsyncHint')),
                 ),
                 el('label', null, t('batchApiKey')),
                 el('div', { 'data-dscw-field': '' },
