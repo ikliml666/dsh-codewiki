@@ -41,18 +41,19 @@ function makeMockSubagents() {
           ],
           concepts: [{ name: 'config-load', files: ['src/core.py'] }],
         }) + '\n```'
-      } else if (label.startsWith('codewiki:更新 ')) {
-        const rel = label.replace('codewiki:更新 ', '')
+      } else if (label.includes('codewiki:更新 ')) {
+        // label 可能带模型前缀（`[model] codewiki:更新 …`），按子串定位提取
+        const rel = label.split('codewiki:更新 ')[1]
         const file = path.join(state.wikiPath, rel.replace(/\\/g, '/'))
         fs.writeFileSync(file, fs.readFileSync(file, 'utf8') + '\n<!-- updated by test -->\n')
         reply = `WROTE ${file}`
-      } else if (label.startsWith('codewiki:模块 ')) {
+      } else if (label.includes('codewiki:模块 ')) {
         const m = text.match(/把文章写入：(\S+?\.md)/)
         if (!m) throw new Error('mock: 模块 prompt 里找不到写入路径')
         const file = m[1]
         state.wikiPath = path.dirname(path.dirname(file))
         fs.mkdirSync(path.dirname(file), { recursive: true })
-        const modName = label.replace('codewiki:模块 ', '')
+        const modName = label.split('codewiki:模块 ')[1]
         fs.writeFileSync(file, articleMd(modName, `src/${modName}.py`))
         reply = `WROTE ${file}`
       } else if (label.includes('横切')) {
@@ -163,7 +164,7 @@ try {
   const planner = mockSubagents.calls[0]
   check(planner?.agentOptions?.provider === 'mock-prov' && planner?.agentOptions?.model === 'mock-model', '规划 agent 携带插件默认模型路由 agentOptions')
   const fullCalls = mockSubagents.calls.slice(callsBeforeFull)
-  const moduleCalls = fullCalls.filter((p) => String(p.label ?? '').startsWith('codewiki:模块 '))
+  const moduleCalls = fullCalls.filter((p) => String(p.label ?? '').includes('codewiki:模块 '))
   check(moduleCalls.length >= 2 && moduleCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `模块文章 agent（${moduleCalls.length} 个）携带插件默认模型路由 agentOptions`)
   check(fullCalls.every((p) => p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), '全量路径全部 spawn 调用均携带 agentOptions')
   check(fullCalls.every((p) => p.agentOptions?.reasoningEffort === 'low'), '全量路径全部 spawn 携带插件默认思考程度 low')
@@ -187,7 +188,8 @@ try {
   const r2 = await gen.execute({ cwd: repo, scope: 'stale', reasoningEffort: 'max' }, { agent: 'test-agent' })
   console.log('  notes:', r2.notes.join(' | '))
   const staleCalls = mockSubagents.calls.slice(callsBeforeStale)
-  check(staleCalls.length >= 1 && staleCalls.every((p) => String(p.label ?? '').startsWith('codewiki:更新 ') && p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `逐篇更新 agent（${staleCalls.length} 个）携带插件默认模型路由 agentOptions`)
+  check(staleCalls.length >= 1 && staleCalls.every((p) => String(p.label ?? '').includes('codewiki:更新 ') && p.agentOptions?.provider === 'mock-prov' && p.agentOptions?.model === 'mock-model'), `逐篇更新 agent（${staleCalls.length} 个）携带插件默认模型路由 agentOptions`)
+  check(fullCalls.every((p) => String(p.label ?? '').startsWith('[mock-model] ')), `活动行 label 带模型前缀（${fullCalls.filter((p) => String(p.label ?? '').startsWith('[mock-model] ')).length}/${fullCalls.length} 个）`)
   check(staleCalls.every((p) => p.agentOptions?.reasoningEffort === 'max'), '调用参数 reasoningEffort=max 覆盖插件默认 low')
   check(r2.writtenCount >= 1 && r2.failedCount === 0, `stale 更新完成 ${r2.writtenCount} 篇、失败 ${r2.failedCount} 篇`)
   check(fs.readFileSync(path.join(r1.wikiPath, 'modules', 'core.md'), 'utf8').includes('updated by test'), '过期文章已被重写')

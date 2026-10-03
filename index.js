@@ -142,8 +142,21 @@ function textOfOutput(output) {
     .join('')
 }
 
+// 从父代理解析当前会话路由（鸭子类型，缺属性/异常一律 undefined）——继承场景的 label 标注用
+function parentRouteOf(agent) {
+  try {
+    const cfg = agent?.session?.requestHeader?.()?.config
+    if (cfg?.provider && cfg?.model) return { provider: cfg.provider, model: cfg.model }
+    if (agent?.options?.provider && agent?.options?.model) return { provider: agent.options.provider, model: agent.options.model }
+  } catch { /* requestHeader 未必存在 */ }
+  return undefined
+}
+
 async function launchAgent(subagents, exec, { label, prompt, route }) {
-  const payload = { label, prompt: [{ type: 'text', text: prompt }], parent: exec.agent, signal: exec.signal }
+  // ponytail: 模型只进活动行 label 前缀（model-only，provider 同名场景靠结果 notes 的全称汇总兜底）
+  const parent = parentRouteOf(exec?.agent)
+  const shownModel = route?.provider && route?.model ? route.model : parent?.model
+  const payload = { label: shownModel ? `[${shownModel}] ${label}` : label, prompt: [{ type: 'text', text: prompt }], parent: exec.agent, signal: exec.signal }
   if (route) {
     // 只带 route 里真实存在的字段——provider/model 不成对时不覆盖继承的父路由
     const agentOptions = {}
