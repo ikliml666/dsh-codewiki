@@ -198,6 +198,53 @@ try {
   try { fs.rmSync(path.join(os.homedir(), '.codewiki', path.basename(repo)), { recursive: true, force: true }) } catch { /* wikiPath 已删 */ }
 }
 
+console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文章走百炼 Batch，不再派写文章子代理） ==')
+{
+  const batchRepo = makeFixtureRepo()
+  const originalFetch = globalThis.fetch
+  const fetchCalls = []
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    fetchCalls.push(u)
+    if (u.endsWith('/files')) return new Response(JSON.stringify({ id: 'file-it-1' }), { status: 200 })
+    if (u.endsWith('/batches') || u.includes('/batches/batch-it-1')) {
+      return new Response(JSON.stringify({ id: 'batch-it-1', status: 'completed', output_file_id: 'out-it-1', error_file_id: 'err-it-1' }), { status: 200 })
+    }
+    if (u.includes('out-it-1')) {
+      const article = (title, src) => `---\ntitle: ${title}\ntype: module\nsource_files:\n  - ${src}\ntags: []\n---\n\n# ${title}\n\nBatch-written article.\n`
+      const lines = [
+        { custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: article('core', 'src/core.py') } }] } } },
+        { custom_id: 't1', response: { status_code: 200, body: { choices: [{ message: { content: article('util', 'src/util.py') } }] } } },
+      ]
+      return new Response(lines.map((l) => JSON.stringify(l)).join('\n') + '\n', { status: 200 })
+    }
+    if (u.includes('err-it-1')) return new Response('', { status: 200 })
+    return new Response('{}', { status: 404 })
+  }
+  try {
+    const batchRegistered = new Map()
+    const batchRc = {
+      tools: { register(def) { batchRegistered.set(def.name, def); return () => {} } },
+      subagents: makeMockSubagents(),
+    }
+    apply({ inject: (deps, fn) => fn(deps.includes('agents') ? { agents: { list: () => [] } } : batchRc), on: () => {} }, { enabled: true, batchEnabled: true, batchApiKey: 'sk-test' })
+    const callsBeforeBatch = batchRc.subagents.calls.length
+    const rb = await batchRegistered.get('codewiki_generate').execute({ cwd: batchRepo }, { agent: 'test-agent' })
+    console.log('  notes:', rb.notes.join(' | '))
+    const batchPathCalls = batchRc.subagents.calls.slice(callsBeforeBatch)
+    check(fetchCalls.some((u) => u.endsWith('/files')) && fetchCalls.some((u) => u.endsWith('/batches')), `百炼 API 已被调用（/files 与 /batches，共 ${fetchCalls.length} 次）`)
+    check(batchPathCalls.every((p) => !String(p.label ?? '').includes('codewiki:模块 ')), `写文章子代理 spawn 数为 0（本路径共 spawn ${batchPathCalls.length} 个）`)
+    check(batchPathCalls.some((p) => String(p.label ?? '').includes('模块规划')) && batchPathCalls.some((p) => String(p.label ?? '').includes('横切')), '规划与横切仍走智能体子代理')
+    check(fs.existsSync(path.join(rb.wikiPath, 'modules', 'core.md')) && fs.readFileSync(path.join(rb.wikiPath, 'modules', 'core.md'), 'utf8').includes('Batch-written'), '批量结果文章已由插件落盘')
+    check(rb.writtenCount >= 2 && rb.failedCount === 0, `批量路径完成 ${rb.writtenCount} 篇、失败 ${rb.failedCount} 篇`)
+    check(rb.notes.some((n) => n.includes('qwen3.7-flash')), 'notes 记录批量模型')
+  } finally {
+    globalThis.fetch = originalFetch
+    fs.rmSync(batchRepo, { recursive: true, force: true })
+    try { fs.rmSync(path.join(os.homedir(), '.codewiki', path.basename(batchRepo)), { recursive: true, force: true }) } catch { /* wikiPath 已删 */ }
+  }
+}
+
 console.log('== 严格 cordis 语义：未 inject 的服务属性访问即抛 ==')
 {
   const strictRegistered = new Map()
