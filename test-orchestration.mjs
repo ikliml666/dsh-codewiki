@@ -228,7 +228,13 @@ console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文�
       tools: { register(def) { batchRegistered.set(def.name, def); return () => {} } },
       subagents: makeMockSubagents(path.join(batchRepo, '.codewiki')),
     }
-    apply({ inject: (deps, fn) => fn(deps.includes('agents') ? { agents: { list: () => [] } } : batchRc), on: () => {} }, { enabled: true, batchEnabled: true, batchApiKey: 'sk-test' })
+    const credSvc = { resolve: async (ref) => ref === 'ALIYUN_BAILIAN_API_KEY' ? { value: 'sk-cred-test', source: 'file' } : undefined }
+    apply({
+      inject: (deps, fn) => deps.includes('credentials')
+        ? { credentials: credSvc }
+        : fn(deps.includes('agents') ? { agents: { list: () => [] } } : batchRc),
+      on: () => {},
+    }, { enabled: true, batchEnabled: true, batchApiKey: '' })
     const callsBeforeBatch = batchRc.subagents.calls.length
     const rb = await batchRegistered.get('codewiki_generate').execute({ cwd: batchRepo }, { agent: 'test-agent' })
     console.log('  notes:', rb.notes.join(' | '))
@@ -239,6 +245,7 @@ console.log('== codewiki_generate 批量推理集成（batchEnabled → 写文�
     check(fs.existsSync(path.join(rb.wikiPath, 'modules', 'core.md')) && fs.readFileSync(path.join(rb.wikiPath, 'modules', 'core.md'), 'utf8').includes('Batch-written'), '批量结果文章已由插件落盘')
     check(rb.writtenCount >= 2 && rb.failedCount === 0, `批量路径完成 ${rb.writtenCount} 篇、失败 ${rb.failedCount} 篇`)
     check(rb.notes.some((n) => n.includes('qwen3.7-flash')), 'notes 记录批量模型')
+    check(rb.notes.some((n) => n.includes('凭证来源 credentials(file)')), 'notes 记录凭证来源（宿主凭据库）')
   } finally {
     globalThis.fetch = originalFetch
     fs.rmSync(batchRepo, { recursive: true, force: true })

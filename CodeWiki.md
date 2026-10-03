@@ -15,7 +15,7 @@
   - `parseStatus`（index.js:133）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
   - `launchAgent`（index.js:169）/ `safeLaunch`（index.js:196）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions` 只从 route 里真实存在的字段构建（provider+model 成对才设、reasoningEffort 有值才设——防止 effort-only route 用 `{provider:undefined}` 覆盖继承的父路由），`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
   - `runBatched`（index.js:205）— 按 maxConcurrency（0.3.0 起硬顶 8）分批并发派写文章子代理
-  - 批量推理模块（index.js:243 起，0.3.0）— `collectSources`（源码内联，800KB 单行预算，整文件粒度装填，超限回退智能体）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾、落盘、删断点）/ `runBatchTasks`（上传 /files → POST /batches 24h 窗口 → 1s 步进轮询 10s→30s 间隔；超时/中止保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次调用先续查收尾再派新任务）；默认关闭，batchApiKey 留空自动回退智能体子代理
+  - 批量推理模块（index.js:243 起，0.3.0）— `collectSources`（源码内联，800KB 单行预算，整文件粒度装填，超限回退智能体）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾、落盘、删断点）/ `runBatchTasks`（上传 /files → POST /batches 24h 窗口 → 1s 步进轮询 10s→30s 间隔；超时/中止保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次调用先续查收尾再派新任务）/ `resolveBatchApiKey`（index.js:421，0.3.1——batchApiKey 留空时经宿主凭据库取模型设置「阿里百炼云」渠道凭证）；默认关闭，取不到凭证才回退智能体子代理
   - `cwToolDefinition`（index.js:624）— cw CLI 封装工具（子命令白名单）
   - `generateToolDefinition`（index.js:749）— 编排主流程：status 判态（非零退出且无输出直接抛错）→ clean 直接报告（`scope=full` 不短路，强制全量）/ stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
   - `apply`（index.js:1123）— `ctx.inject(['tools','subagents'])` 一次注入，注册两工具

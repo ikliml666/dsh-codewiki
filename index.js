@@ -38,7 +38,7 @@ export const Config = z.object({
   defaultReasoningEffort: z.string().default('').volatile().description('codewiki_generate 子代理默认思考程度（reasoningEffort，adapter 自有值，如 off/low/high/max）；留空跟随所选模型默认'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 8'),
   batchEnabled: z.boolean().default(false).volatile().description('写文章改走阿里云百炼批量推理（Batch File，实时价的 50%）；规划/横切/审校仍走智能体子代理'),
-  batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope）；开启批量推理必填，留空自动回退智能体子代理'),
+  batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证，取不到才回退智能体子代理'),
   batchModel: z.string().default('qwen3.7-flash').volatile().description('批量推理模型；仅华北2（北京）支持，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）'),
   batchThinkingBudget: z.number().default(0).volatile().description('批量推理思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
   batchWaitMinutes: z.number().default(20).volatile().description('批量任务就地轮询等待时长（分钟）；超时保留断点，下次调用自动续查收尾'),
@@ -410,6 +410,36 @@ function batchStateFile(cwd) {
   return path.join(os.tmpdir(), `dsh-codewiki-batch-${h}.json`)
 }
 
+/** apply 时捕获的宿主上下文，批量路径经它向宿主凭据库取模型渠道凭证 */
+let hostCtxRef = null
+
+/**
+ * 百炼凭证解析链：显式 batchApiKey 优先；留空经宿主凭据库（credentials 服务）
+ * 解析 ALIYUN_BAILIAN_API_KEY——即模型设置「阿里百炼云」渠道的 apiKeyEnv，
+ * 与模型适配器同一份凭证（继承 env > 凭据库 > .env）。取不到返回 null。
+ */
+export async function resolveBatchApiKey(hostCtx, cfg) {
+  const explicit = String(cfg?.batchApiKey ?? '').trim()
+  if (explicit) return { key: explicit, source: 'config' }
+  if (!hostCtx || typeof hostCtx.inject !== 'function') return null
+  const svc = await Promise.race([
+    (async () => {
+      try {
+        const sub = await hostCtx.inject(['credentials'])
+        const got = Array.isArray(sub) ? sub[0] : sub?.credentials ?? sub
+        return got && typeof got.resolve === 'function' ? got : null
+      } catch { return null }
+    })(),
+    sleep(3000).then(() => null),
+  ])
+  if (!svc) return null
+  try {
+    const resolved = await svc.resolve('ALIYUN_BAILIAN_API_KEY')
+    if (resolved?.value) return { key: resolved.value, source: `credentials(${resolved.source ?? 'unknown'})` }
+  } catch { /* 凭据库解析失败按无凭证处理，走回退 */ }
+  return null
+}
+
 // 提交新批次并等待收尾。返回 { results, oversized }：
 // results 与 runBatched 同构（{name, ok, stopReason}）；oversized 是超单行预算、
 // 需回退智能体子代理的任务子集。断点在中止/超时时保留，下次调用续查。
@@ -753,7 +783,7 @@ function generateToolDefinition(cfg, subagents) {
       '编译/刷新指定仓库的 CodeWiki（智能体编排版）。流程：cw status 判态 → 规划 agent 出模块计划 → 按并发上限分批派写文章子代理 → 横切文章（_architecture/_patterns/concepts）→ 审校 agent → cw index + meta update。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量。scope=stale：只刷新过期文章。',
       'provider+model 成对出现时子代理用指定模型；缺省用插件默认（aliyun-bailian/qwen3.8-flash，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。reasoningEffort 指定子代理思考程度（adapter 自有值，如 off/low/high/max）；缺省用插件默认，再退所选模型默认。',
-      '写文章环节可在插件设置改走阿里云百炼批量推理（Batch File，实时价 50%；batchEnabled + batchApiKey）；批量超时或中止会保留断点，重新调用自动续查收尾。',
+      '写文章环节可在插件设置改走阿里云百炼批量推理（Batch File，实时价 50%；batchEnabled，凭证自动取模型设置「阿里百炼云」渠道，或 batchApiKey 显式指定）；批量超时或中止会保留断点，重新调用自动续查收尾。',
       '全量编译小仓库也要几分钟（多个子代理接力），适合后台调用。',
     ].join('\n'),
     parameters: {
@@ -832,11 +862,12 @@ function generateToolDefinition(cfg, subagents) {
       else notes.push(effort ? `子代理模型：继承会话模型${effortNote}` : '子代理模型：继承会话模型')
 
       const stateFile = batchStateFile(cwd)
-      const useBatch = c.batchEnabled && !!c.batchApiKey
-      if (c.batchEnabled && !c.batchApiKey) {
-        notes.push('批量推理已开启但未配置百炼 API Key（codewiki → batchApiKey），写文章回退智能体子代理')
+      const batchKey = await resolveBatchApiKey(hostCtxRef, c)
+      const useBatch = c.batchEnabled && !!batchKey
+      if (c.batchEnabled && !batchKey) {
+        notes.push('批量推理已开启但未找到百炼凭证——可在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey；写文章回退智能体子代理')
       } else if (useBatch) {
-        notes.push(`写文章走百炼批量推理（Batch File，实时价 50%）：模型 ${c.batchModel}，思考预算 ${c.batchThinkingBudget || '关闭'}，就地等待 ${c.batchWaitMinutes} 分钟`)
+        notes.push(`写文章走百炼批量推理（Batch File，实时价 50%）：模型 ${c.batchModel}，凭证来源 ${batchKey.source}，思考预算 ${c.batchThinkingBudget || '关闭'}，就地等待 ${c.batchWaitMinutes} 分钟`)
       }
 
       // 写文章统一出口：批量推理（仅文章环节）或智能体子代理分批；超限任务回退智能体
@@ -844,7 +875,7 @@ function generateToolDefinition(cfg, subagents) {
         if (!useBatch) return runBatched(subagents, exec, tasks, concurrency)
         const { results, oversized } = await runBatchTasks({
           exec,
-          batchCfg: { apiKey: c.batchApiKey, model: c.batchModel, thinkingBudget: c.batchThinkingBudget },
+          batchCfg: { apiKey: batchKey.key, model: c.batchModel, thinkingBudget: c.batchThinkingBudget },
           tasks,
           cwd,
           language,
@@ -892,14 +923,14 @@ function generateToolDefinition(cfg, subagents) {
       // ---- 批量断点续查：上次调用留下未收尾的批次，先等它落地再谈新任务 ----
       const pending = readJsonFile(stateFile)
       if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
-        if (!c.batchApiKey) {
-          throw new Error(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 篇），但当前未配置百炼 API Key（codewiki → batchApiKey）——配置后重新调用即可续查收尾`)
+        if (!batchKey) {
+          throw new Error(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 篇），但未找到百炼凭证——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey 后重新调用即可续查收尾`)
         }
         notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 篇），先续查收尾，本次不派新任务`)
         const settled = await settleBatch({
           batchId: pending.batchId,
           tasks: pending.tasks.map((t) => ({ ...t })),
-          apiKey: c.batchApiKey,
+          apiKey: batchKey.key,
           stateFile,
           notes,
         })
@@ -1121,6 +1152,7 @@ function installUpdateReminder(ctx, config) {
 }
 
 export function apply(ctx, config) {
+  hostCtxRef = ctx
   ctx.inject?.(['tools', 'subagents'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return

@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { buildBatchJsonl, parseBatchResults, collectSources, runBatchTasks, settleBatch } from './index.js'
+import { buildBatchJsonl, parseBatchResults, collectSources, runBatchTasks, settleBatch, resolveBatchApiKey } from './index.js'
 
 let passed = 0
 const failures = []
@@ -195,6 +195,29 @@ check(!fs.existsSync(stateFile), '续查收尾后断点文件删除')
 globalThis.fetch = originalFetch
 fs.rmSync(tmpRoot, { recursive: true, force: true })
 fs.rmSync(workRoot, { recursive: true, force: true })
+
+// ---- resolveBatchApiKey：凭证解析链（显式配置 > 宿主凭据库）----
+console.log('\n== resolveBatchApiKey ==')
+const credSvc = {
+  resolve: async (ref) => ref === 'ALIYUN_BAILIAN_API_KEY'
+    ? { value: 'sk-cred-1', source: 'file' }
+    : undefined,
+}
+check((await resolveBatchApiKey(null, { batchApiKey: 'sk-explicit' })).key === 'sk-explicit', '显式 batchApiKey 最优先（source=config）')
+check((await resolveBatchApiKey(null, {})) === null, '无宿主上下文返回 null')
+check((await resolveBatchApiKey({}, {})) === null, 'inject 不是函数返回 null')
+const viaCred = await resolveBatchApiKey(
+  { inject: async (deps) => deps.includes('credentials') ? { credentials: credSvc } : undefined },
+  {},
+)
+check(viaCred?.key === 'sk-cred-1' && viaCred.source === 'credentials(file)', '经宿主凭据库取到模型渠道凭证并记录来源')
+const viaArray = await resolveBatchApiKey(
+  { inject: async () => [credSvc] },
+  {},
+)
+check(viaArray?.key === 'sk-cred-1' && viaArray.source === 'credentials(file)', 'inject 返回数组形态同样可用')
+check((await resolveBatchApiKey({ inject: async () => ({ credentials: { resolve: async () => undefined } }) }, {})) === null, '凭据库无该条目返回 null')
+check((await resolveBatchApiKey({ inject: async () => { throw new Error('no service') } }, {})) === null, 'inject 抛错（服务缺失）返回 null')
 
 console.log(`\n${failures.length ? 'FAIL' : 'ALL PASS'}：${passed} 通过，${failures.length} 失败`)
 if (failures.length) {
