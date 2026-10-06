@@ -688,6 +688,46 @@ console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不
   }
 }
 
+// ============================ 工具输出 schema 形态（0.4.10b） ============================
+console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null 占位回归） ==')
+{
+  // 与宿主校验器同构：属性存在时类型必须匹配（null/undefined 都不是 string，不算缺失）
+  const validateOut = (schema, v) => {
+    const errs = []
+    for (const [k, t] of Object.entries(schema.properties)) {
+      if (!(k in v)) continue
+      const types = Array.isArray(t.type) ? t.type : [t.type]
+      const val = v[k]
+      const ok = types.some((ty) =>
+        ty === 'string' ? typeof val === 'string' :
+        ty === 'number' ? typeof val === 'number' :
+        ty === 'boolean' ? typeof val === 'boolean' :
+        ty === 'array' ? Array.isArray(val) : false)
+      if (!ok) errs.push(`${k}=${JSON.stringify(val)}`)
+    }
+    for (const k of schema.required) if (!(k in v)) errs.push(`missing ${k}`)
+    return errs
+  }
+  const repo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  const wx = makeCtx({})
+  const cfg2 = {}
+  try {
+    apply(wx.ctx, cfg2)
+    const def = wx.registered.get('codewiki_generate')
+    const schema = def.output.schema
+    const r1 = await def.execute({ cwd: repo }, { agent: 'test-agent' })
+    await waitJob(r1.cwd)
+    check(validateOut(schema, r1).length === 0, `首次提交返回过 schema（${validateOut(schema, r1).join('; ')}）`)
+
+    const r2 = await def.execute({ cwd: repo }, { agent: 'test-agent' })
+    check(validateOut(schema, r2).length === 0, `二次调用（state ${r2.state}）返回过 schema（${validateOut(schema, r2).join('; ')}）`)
+  } finally {
+    mock.restore()
+    fs.rmSync(repo, { recursive: true, force: true })
+  }
+}
+
 // ============================ 无凭证诚实报错 ============================
 console.log('== 无凭证：诚实报错（没有子代理回退） ==')
 {

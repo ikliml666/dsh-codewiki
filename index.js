@@ -1655,7 +1655,8 @@ function generateToolDefinition(cfg, svc) {
       }
       const status = parseStatus(statusRes.stdout)
       const wikiPath = await wikiPathFor(cwd, binary, exec?.signal)
-      const result = { cwd, scope, wikiPath, state: status.state, jobId: null, stage: null, submitted: false, notes }
+      // jobId/stage 仅在提交/幂等/续查路径赋值——不放 null 占位（宿主按 output schema 校验，null 不是 string）
+      const result = { cwd, scope, wikiPath, state: status.state, submitted: false, notes }
 
       // 幂等：同仓库已有活动任务直接返回
       const active = svc.findActive(cwd)
