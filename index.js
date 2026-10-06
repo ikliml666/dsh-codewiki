@@ -39,6 +39,7 @@ export const Config = z.object({
   batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（批量推理与实时兜底共用）；仅华北2（北京）支持批量，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）'),
   batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证'),
   batchThinkingBudget: z.number().default(0).volatile().description('批量推理思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
+  batchMinTokens: z.number().default(30000).volatile().description('阶段实时阈值：单阶段请求输入估算低于该值时走实时并发推理（免批量排队，快），≥ 该值才提交百炼批量（5 折）；0=全部走批量'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('实时兜底请求并发上限（超预算任务走同步调用时生效），硬顶 8'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
@@ -57,6 +58,7 @@ function liveConfig(config) {
     batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
     batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
     batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
+    batchMinTokens: Math.max(Number(val(c.batchMinTokens)) || 0, 0),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
@@ -982,6 +984,12 @@ function createJobService(config) {
 
   // 批次收尾统一入口：异常折算成 null（断点保留，下轮 tick 重试）
   async function settleJob(job) {
+    // submitOrRun 就地实时完成的阶段：结果直取，不查百炼批次
+    if (job.batchRef.batchId === 'local') {
+      const rs = localResults.get(job.id)
+      localResults.delete(job.id)
+      return rs ?? []
+    }
     try {
       return await settleBatch({
         batchId: job.batchRef.batchId,
@@ -1059,6 +1067,35 @@ function createJobService(config) {
     touch(job)
   }
 
+  // 阶段级混合通道（batchMinTokens）：单阶段请求输入估算低于阈值的直接实时并发执行——
+  // 批量 5 折但要排队（分钟~小时级），小请求排队成本高于省下的差价。执行完把结果以
+  // batchId 'local' 挂进 batchRef，settleJob 下一 tick 原路收割，各阶段收割逻辑零改动。
+  const localResults = new Map() // jobId → results[]，与 settleBatch 返回同构
+  async function submitOrRun(job, prepared) {
+    const c = liveConfig(config)
+    if (c.batchMinTokens > 0) {
+      const totalTok = prepared.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0)
+      if (totalTok < c.batchMinTokens) {
+        note(job, `阶段 ${job.stage} 估算输入 ${totalTok} tok < ${c.batchMinTokens}，走实时推理（免批量排队）`)
+        const rt = await runRealtimeTasks(prepared, {
+          apiKey: await apiKeyOf(job),
+          model: c.batchModel,
+          thinkingBudget: c.batchThinkingBudget,
+          concurrency: c.maxConcurrency,
+          notes: job.notes,
+        })
+        localResults.set(job.id, [...rt.values()])
+        job.batchRef = { batchId: 'local', stateFile: batchStateFile(job.cwd) }
+        job.tasks = prepared.map((t) => ({
+          customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+        }))
+        touch(job)
+        return
+      }
+    }
+    await submitBatchFor(job, prepared)
+  }
+
   // ---- 阶段处理：每 tick 每 job 推进一步 ----
 
   async function tickPlan(job) {
@@ -1087,7 +1124,7 @@ function createJobService(config) {
       batchPrompt: batchPlannerPrompt(fileLines),
     }
     try {
-      await submitBatchFor(job, [planTask])
+      await submitOrRun(job, [planTask])
     } catch (err) {
       fail(job, `规划批次提交失败 —— ${String(err?.message ?? err)}`)
     }
@@ -1138,7 +1175,7 @@ function createJobService(config) {
     }
     if (prepared.length) {
       try {
-        await submitBatchFor(job, prepared)
+        await submitOrRun(job, prepared)
       } catch (err) {
         fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
       }
@@ -1221,7 +1258,7 @@ function createJobService(config) {
     if (totalTokens <= BATCH_TOKEN_BUDGET) {
       // 总量装得进单请求预算：单批直出，零拆分开销
       try {
-        await submitBatchFor(job, crosscutTasks(job, packArticles(texts)))
+        await submitOrRun(job, crosscutTasks(job, packArticles(texts)))
         note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念`)
       } catch (err) {
         fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
@@ -1235,7 +1272,7 @@ function createJobService(config) {
     }))
     job.crosscutSplit = true
     try {
-      await submitBatchFor(job, tasks)
+      await submitOrRun(job, tasks)
       note(job, `模块文章总量超单请求预算，横切拆为 ${tasks.length} 个观察任务并发执行，随后合成`)
     } catch (err) {
       job.crosscutSplit = false
@@ -1260,7 +1297,7 @@ function createJobService(config) {
   }
 
   function submitComposeBatch(job, observationsText) {
-    return submitBatchFor(job, crosscutTasks(job, observationsText))
+    return submitOrRun(job, crosscutTasks(job, observationsText))
       .then(() => {
         note(job, `横切合成批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念（输入=模块观察）`)
       })
@@ -1329,7 +1366,7 @@ function createJobService(config) {
     }
     if (!tasks.length) { job.stage = 'index'; touch(job); return }
     try {
-      await submitBatchFor(job, tasks)
+      await submitOrRun(job, tasks)
       note(job, `校对批次已提交：${tasks.length} 篇`)
     } catch (err) {
       note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)

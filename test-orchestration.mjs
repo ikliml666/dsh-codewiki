@@ -151,6 +151,36 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       }).join('\n') + '\n'
       return new Response(out, { status: 200 })
     }
+    if (u.includes('/chat/completions') && init.method === 'POST') {
+      // 阶段实时通道（0.4.5 submitOrRun）：与批量 mock 同一套应答语义，按 prompt 首行特征分发
+      const body = JSON.parse(init.body ?? '{}')
+      const prompt = String(body?.messages?.[0]?.content ?? '')
+      let content
+      if (prompt.includes('你是代码结构勘探员')) {
+        content = JSON.stringify({
+          project: 'fixture',
+          modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: [`src/${mn}.py`] })),
+          concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
+        })
+      } else if (prompt.includes('你是 CodeWiki 文章作者')) {
+        const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
+        content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(30000)}` : '')
+      } else if (prompt.includes('你是 CodeWiki 架构观察员')) {
+        content = '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
+      } else if (prompt.includes('写系统总览')) {
+        content = articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
+      } else if (prompt.includes('总结仓库反复出现的模式')) {
+        content = articleMd('Patterns', `src/${modules[1] ?? modules[0]}.py`, articleMarker, 'pattern')
+      } else if (prompt.includes('写跨模块概念')) {
+        content = articleMd('config-load', `src/${modules[0]}.py`, articleMarker, 'concept')
+      } else if (prompt.includes('你是 CodeWiki 审校员')) {
+        const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
+        content = fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', `src/${modules[0]}.py`, 'PROOFED')
+      } else {
+        content = '---\ntitle: unknown\n---\nunknown realtime task'
+      }
+      return json({ choices: [{ message: { content } }] })
+    }
     if (u.includes('/files/err-')) return new Response('', { status: 200 })
     return new Response('{}', { status: 404 })
   }
@@ -214,7 +244,8 @@ console.log('== 系统提示 wiki 维护提醒 ==')
 console.log('== 注册 ==')
 const mainRepo = makeFixtureRepo()
 const main = makeCtx()
-apply(main.ctx, {})
+const mainConfig = {}
+apply(main.ctx, mainConfig)
 check(name === 'dsh-codewiki', `插件名 ${name}`)
 check(main.registered.get('cw') && main.registered.get('codewiki_generate'), 'cw 与 codewiki_generate 两个工具均已注册')
 const gen = main.registered.get('codewiki_generate')
@@ -259,6 +290,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 {
   const bigRepo = makeFixtureRepo()
   const mock = makeBatchMock({ bigArticle: true })
+  mainConfig.batchMinTokens = 30000 // 混合模式：文章/横切/校对 pack 超阈值，仍应走批量
   try {
     const r = await gen.execute({ cwd: bigRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '大 wiki 提交即返回')
@@ -266,6 +298,8 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     const obsLines = (mock.uploaded ?? []).flat().filter((l) => String(l.custom_id).startsWith('obs'))
     check(obsLines.length === 2, `上传 2 个观察任务（实际 ${obsLines.length}）`)
+    check(!mock.uploaded.flat().some((l) => l.custom_id === 'plan'), '混合模式：小 plan 走实时（批量上传行无 plan）')
+    check(mock.fetchCalls.some((u) => u.includes('/chat/completions')), '混合模式：plan 已走实时通道')
     for (const l of obsLines) {
       const prompt = String(l.body?.messages?.[0]?.content ?? '')
       check((prompt.match(/^### /gm) ?? []).length === 1, `${l.custom_id}：观察输入只含一篇模块文章`)
@@ -279,8 +313,35 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     check((job.notes ?? []).some((n) => n.includes('3 倍价')), '单篇 30k 超大档触发 3 倍价明示')
     check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
   } finally {
+    delete mainConfig.batchMinTokens
     mock.restore()
     fs.rmSync(bigRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 阶段实时阈值（混合通道全实时） ============================
+console.log('== batchMinTokens 混合：小仓库各阶段输入均低于阈值 → 全程实时、零批量 ==')
+{
+  const smallRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  mainConfig.batchMinTokens = 30000
+  try {
+    const r = await gen.execute({ cwd: smallRepo }, { agent: 'test-agent' })
+    check(r.submitted === true, '混合模式提交即返回')
+    const job = await waitJob(r.cwd)
+    console.log('  notes:', (job?.notes ?? []).join(' | '))
+    check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(job?.writtenCount >= 5 && job?.failedCount === 0, `实时通道编译 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇`)
+    check(mock.fetchCalls.every((u) => !u.includes('/batches')), '全程零批量端点（各阶段都走实时）')
+    check(mock.fetchCalls.some((u) => u.includes('/chat/completions')), '实时 chat/completions 已调用')
+    check((job.notes ?? []).some((n) => n.includes('走实时推理')), 'notes 记录实时分流决策')
+    check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'core.md 实时落盘')
+    check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 实时落盘（keepInMemory 经 writeValidated）')
+    check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '校对实时回写')
+  } finally {
+    delete mainConfig.batchMinTokens
+    mock.restore()
+    fs.rmSync(smallRepo, { recursive: true, force: true })
   }
 }
 
