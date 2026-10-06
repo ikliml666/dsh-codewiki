@@ -831,7 +831,7 @@ const MAX_JOBS_KEPT = 30
 // 已知仓库清单：独立于 job 历史的持久化工作区登记。job 记录会被 MAX_JOBS_KEPT 截断、
 // Temp 沙箱任务会被启动清理移除，仓库总览若只扫 job 历史就会漏掉编译过的工作区
 // ——提交过一次就永久登记（hindsight recentWorkspaces 同思路），与 JOBS_FILE 同目录同生命周期。
-const REPOS_FILE = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+const REPOS_FILE = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
 function loadKnownRepos() {
   try { return JSON.parse(fs.readFileSync(REPOS_FILE, 'utf8'))?.repos ?? [] } catch { return [] }
 }
@@ -1798,7 +1798,16 @@ function installWebServer(ctx, service, extra = {}) {
     const wr = workspaceRegistry
     if (!wr || typeof wr.list !== 'function') return null
     if (liveConfig(config ?? {}).workspaceOnly === false) return null
-    const wsPaths = (wr.list() ?? []).map((w) => w?.path).filter((p) => typeof p === 'string' && p)
+    let wsList
+    try {
+      wsList = wr.list() ?? []
+    } catch (err) {
+      // 宿主注册表内部不一致（如 order references missing workspace）时降级不过滤：
+      // 过滤是体验优化，不能拖垮 jobs/repos 端点。
+      console.warn('[codewiki] workspaceRegistry.list() 抛错，工作区过滤降级停用：', err?.message ?? err)
+      return null
+    }
+    const wsPaths = wsList.map((w) => w?.path).filter((p) => typeof p === 'string' && p)
     return wsPaths.length ? wsPaths : null
   }
   // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
@@ -1815,11 +1824,16 @@ function installWebServer(ctx, service, extra = {}) {
       path: '/api/codewiki/jobs',
       handler: (req, res) => {
         if (!guard(req, res)) return
-        let list = service.list()
-        // workspaceOnly（默认开）：Temp 沙箱与任意路径任务不出现在面板。
-        const wsPaths = wsFilterPaths()
-        if (wsPaths) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
-        writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
+        try {
+          let list = service.list()
+          // workspaceOnly（默认开）：Temp 沙箱与任意路径任务不出现在面板。
+          const wsPaths = wsFilterPaths()
+          if (wsPaths) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
+          writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
+        } catch (err) {
+          // 宿主 webserver 对 handler reject 只回 400 空 body——把错误栈直接写进响应体便于排查
+          writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
+        }
       },
     })
     // 仓库总览：jobs 历史工作区的 wiki 状态（cw status 现算，30s 缓存——面板 2s 轮询不打爆 git）
@@ -1830,6 +1844,7 @@ function installWebServer(ctx, service, extra = {}) {
       path: '/api/codewiki/repos',
       handler: async (req, res) => {
         if (!guard(req, res)) return
+        try {
         const wsSig = (() => { const p = wsFilterPaths(); return p ? [...p].sort().join('|') : '' })()
         if (!reposCache || reposCache.sig !== wsSig || Date.now() - reposCacheAt > 30000) {
           const c = liveConfig(config ?? {})
@@ -1889,6 +1904,9 @@ function installWebServer(ctx, service, extra = {}) {
           reposCacheAt = Date.now()
         }
         writeJson(res, 200, reposCache)
+        } catch (err) {
+          writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
+        }
       },
     })
     ws.register({

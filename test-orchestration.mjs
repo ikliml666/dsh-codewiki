@@ -30,7 +30,7 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null } = {}) {
+function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
@@ -48,6 +48,9 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, work
   }
   if (workspaces !== null) {
     services.workspaceRegistry = { list: () => workspaces.map((p) => ({ path: p })) }
+  } else if (brokenRegistry) {
+    // 宿主注册表内部不一致形态：list() 抛（0.4.9c 真宿主 jobs/repos 400 的候选根因）
+    services.workspaceRegistry = { list: () => { throw new Error("workspace registry order references missing workspace 'w-broken'") } }
   }
   const ctx = {
     inject(deps, fn) {
@@ -651,6 +654,36 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     delete cfg2.workspaceOnly
     mock.restore()
     fs.rmSync(wsRepo, { recursive: true, force: true })
+    fs.rmSync(outsideRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ registry 异常防御（0.4.10） ============================
+console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不过滤 ==')
+{
+  const outsideRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  const wx = makeCtx({ brokenRegistry: true })
+  const cfg2 = {}
+  try {
+    apply(wx.ctx, cfg2)
+    const gen2 = wx.registered.get('codewiki_generate')
+    const ep2 = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    const epRepos = wx.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const rB = await gen2.execute({ cwd: outsideRepo }, { agent: 'test-agent' })
+    await waitJob(rB.cwd)
+
+    const res = fakeRes()
+    await ep2.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+    check(res.code === 200, `registry 抛错时 jobs 仍 200（实际 ${res.code}）`)
+    check(JSON.parse(res.out).jobs.some((j) => j.cwd === outsideRepo), 'registry 抛错时 jobs 不过滤（降级）')
+
+    const resR = fakeRes()
+    await epRepos.handler(fakeReq({}, '127.0.0.1', 'GET'), resR)
+    check(resR.code === 200, `registry 抛错时 repos 仍 200（实际 ${resR.code}）`)
+    check(JSON.parse(resR.out).repos.some((r) => r.cwd === outsideRepo), 'registry 抛错时总览不过滤（降级）')
+  } finally {
+    mock.restore()
     fs.rmSync(outsideRepo, { recursive: true, force: true })
   }
 }
