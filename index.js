@@ -358,7 +358,10 @@ export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes }) 
   }
   if (!BATCH_TERMINAL.has(status?.status)) return null // 未终态：调用方继续等
   if (status.status !== 'completed') {
-    notes.push(`批量任务 ${batchId} 终态 ${status.status}${status?.error?.message ? `：${status.error.message}` : ''}`)
+    // 失败原因字段两形态兼容：error.message（对象）或 errors（数组）
+    const errText = status?.error?.message
+      ?? (Array.isArray(status?.errors) ? status.errors.map((e) => e?.message ?? JSON.stringify(e)).filter(Boolean).join('; ') : '')
+    notes.push(`批量任务 ${batchId} 终态 ${status.status}${errText ? `：${errText}` : ''}`)
     finish()
     return results
   }
@@ -449,7 +452,7 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
 
 // 提交一个批次（JSONL → 文件上传 → /batches），并写断点文件。服务 tick 用 settleBatch
 // 轮询收尾，不再有 exec 就地等待路径。
-export async function submitBatch(prepared, { apiKey, model, thinkingBudget, stateFile, notes }) {
+export async function submitBatch(prepared, { apiKey, model, thinkingBudget, stateFile, notes, stage, crosscutSplit }) {
   const jsonl = buildBatchJsonl(prepared, { model, thinkingBudget })
   const form = new FormData()
   form.append('purpose', 'batch')
@@ -468,6 +471,8 @@ export async function submitBatch(prepared, { apiKey, model, thinkingBudget, sta
   fs.writeFileSync(stateFile, JSON.stringify({
     batchId: batch.id,
     model,
+    stage: stage ?? null,
+    crosscutSplit: crosscutSplit === true,
     tasks: prepared.map((t) => ({ customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true })),
   }), 'utf8')
   notes.push(`批量任务已提交：${batch.id}（${prepared.length} 个任务，模型 ${model}，思考预算 ${thinkingBudget || '关'}）`)
@@ -663,7 +668,7 @@ function cwToolDefinition(cfg) {
     description: [
       '运行 CodeWiki CLI（cw）查询/维护当前仓库的代码 wiki。wiki 落在仓库内 <repo>/.codewiki/（随仓库提交）。',
       '常用调用：args=["status"] 查新态（三态判定）；["init"] 初始化；["index"] 重建索引；["meta","update"] 记录编译基线 commit；["path"] 打印本仓库 wiki 目录（<repo>/.codewiki）；["projects"] 只列出 ~/.codewiki 旧位置的项目（现在 wiki 在各仓库内，一般用不到）。',
-      '写文章、编译 wiki 请用 codewiki_generate（智能体编排），不要用本工具手写文章。',
+      '写文章、编译 wiki 请用 codewiki_generate（后台批量流水线服务），不要用本工具手写文章。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -785,11 +790,11 @@ async function wikiPathFor(cwd, binary, signal) {
 // ---------------------------------------------------------------------------
 // 编排服务：全批量流水线（零子代理）
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
-//   full   = plan → articles → crosscut → review → index
+//   full   = plan → articles → crosscut →（超预算拆分时 compose）→ review → index
 //   stale  = articles（任务在提交时预构建）→ review → index
-//   resume = articles（settle 孤儿断点）→ review → index
+//   resume = 从断点记录的阶段恢复（0.3.x 断点无 stage 字段回退 articles）→ review → index
 // 全部模型调用都是单轮文本生成，统一走百炼批量推理（实时价 5 折）；单文件超
-// BATCH_TOKEN_BUDGET 的任务走实时兜底（bailianChat）。规划/横切/校对结果
+// 32k 预算先升 200k 大档重装继续批量，仍装不下才实时兜底（bailianChat）。规划/横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // ---------------------------------------------------------------------------
 
@@ -843,6 +848,26 @@ function loadJobs() {
   return Array.isArray(j?.jobs) ? j.jobs : []
 }
 
+const JOBS_LOCK_FILE = `${JOBS_FILE}.lock`
+// 跨进程推进锁：两个宿主窗口各跑一个服务实例，同时推进同一 job 会双提交批量。
+// 崩溃残留锁 60s 过期强删——tick 间隔 10s，60s 足够宽限。
+function acquireTickLock() {
+  try {
+    fs.writeFileSync(JOBS_LOCK_FILE, String(process.pid), { flag: 'wx' })
+    return true
+  } catch {
+    try {
+      if (Date.now() - fs.statSync(JOBS_LOCK_FILE).mtimeMs > 60000) {
+        fs.unlinkSync(JOBS_LOCK_FILE)
+        fs.writeFileSync(JOBS_LOCK_FILE, String(process.pid), { flag: 'wx' })
+        return true
+      }
+    } catch { /* 锁刚被别的实例释放：本轮让路 */ }
+    return false
+  }
+}
+function releaseTickLock() { try { fs.unlinkSync(JOBS_LOCK_FILE) } catch { /* 已被清理 */ } }
+
 function saveJobs(jobs) {
   // 只留最近 30 个；apiKey 不落盘（重启后按需重解析），cancelRequested 必须落盘（取消标记靠它跨 tick 存活）
   const kept = jobs.slice(-MAX_JOBS_KEPT).map(({ apiKey, ...rest }) => rest)
@@ -859,6 +884,7 @@ function jobSummary(job) {
     batchId: job.batchRef?.batchId ?? null,
     writtenCount: job.writtenCount,
     failedCount: job.failedCount,
+    cancelRequested: job.cancelRequested === true,
     articles: (job.articles ?? []).map((a) => ({ name: a.name, ok: a.ok })),
     notes: (job.notes ?? []).slice(-8),
     error: job.error ?? null,
@@ -873,18 +899,68 @@ function createJobService(config) {
   let timer = null
   let ticking = false
   let seq = 0
+  // 实例身份：tick 只推进本实例创建的 job（owner 缺失=0.4.2 残留，任何实例可接管续查）。
+  // 否则另一实例的 tick 会用 loadJobs 旧快照重复推进同一 job——双提交批量。
+  const instanceId = `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   // 脏标记：只有任务状态变更过才整写 JOBS_FILE。多实例并存时（插件重载/测试重复 apply），
   // 无事可做的旧实例不会用自己的过期快照覆盖新实例的活动 job。
   let dirty = false
+  // 本实例改过的 job id：flush 合并时这些 job 的内存对象是唯一现场（可能比磁盘新），
+  // 不允许被磁盘快照反向覆盖——否则 cancel/fail 与慢 tick 交错时会丢掉现场新增的 note/batchRef。
+  const dirtyIds = new Set()
   const persist = () => { dirty = true }
-  const flush = () => { if (!dirty) return; dirty = false; saveJobs(jobs) }
+  // 磁盘吸收：另一实例新增的 job、或同 id 但磁盘更新且本实例没动过的 job，并回内存——
+  // 防止 flush 用本实例的过期快照覆盖掉对方的活动 job。
+  function mergeFromDisk() {
+    const disk = loadJobs()
+    if (!disk.length) return
+    const mine = new Map(jobs.map((j) => [j.id, j]))
+    let changed = false
+    for (const theirs of disk) {
+      const m = mine.get(theirs.id)
+      if (m) {
+        if (!dirtyIds.has(theirs.id) && (theirs.updatedAt ?? '') > (m.updatedAt ?? '')) {
+          mine.set(theirs.id, theirs)
+          changed = true
+        }
+        continue
+      }
+      mine.set(theirs.id, theirs)
+      changed = true
+    }
+    if (!changed) return
+    const merged = [...mine.values()].sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+    jobs.length = 0
+    jobs.push(...merged)
+  }
+  const flush = () => {
+    if (!dirty) return
+    mergeFromDisk(); dirty = false; dirtyIds.clear(); saveJobs(jobs)
+  }
   const note = (job, msg) => {
     job.notes.push(msg)
     if (job.notes.length > 50) job.notes = job.notes.slice(-50)
   }
   // touch = 状态变更的统一入口：必须标脏，否则 tick 末 flush 跳过、取消等纯内存
   // 变更（touch 后 continue，绕过终态 persist）永远进不了 JOBS_FILE
-  const touch = (job) => { job.updatedAt = new Date().toISOString(); dirty = true }
+  const touch = (job) => {
+    job.updatedAt = new Date().toISOString(); dirty = true; dirtyIds.add(job.id)
+  }
+
+  // 跨实例取消：另一实例 cancel 的 job 不在本实例内存现场（dirtyIds 之外才允许被磁盘覆盖，
+  // 但本实例若正在推进它，内存对象永远不被磁盘覆盖）——每轮 tick 开头从磁盘拾取取消标记。
+  function syncCancelFlags() {
+    const disk = loadJobs()
+    if (!disk.length) return
+    for (const j of jobs) {
+      if (JOB_TERMINAL.has(j.stage) || j.cancelRequested) continue
+      const theirs = disk.find((d) => d.id === j.id)
+      if (theirs?.cancelRequested === true) {
+        j.cancelRequested = true
+        dirty = true
+      }
+    }
+  }
 
   function fail(job, msg) {
     job.stage = 'failed'
@@ -973,6 +1049,8 @@ function createJobService(config) {
       thinkingBudget: c.batchThinkingBudget,
       stateFile: batchStateFile(job.cwd),
       notes: job.notes,
+      stage: job.stage,
+      crosscutSplit: job.crosscutSplit === true,
     })
     job.batchRef = { batchId, stateFile: batchStateFile(job.cwd) }
     job.tasks = prepared.map((t) => ({
@@ -1173,6 +1251,9 @@ function createJobService(config) {
       tally(job, results, job.tasks)
       job.batchRef = null
       job.tasks = []
+    } else {
+      // 合成批断点丢失（stage 落盘与提交落盘之间进程中断）：留痕降级，不静默
+      note(job, '合成批次未落盘（上次进程中断于提交后落盘前），跳过横切进校对')
     }
     job.stage = 'review'
     touch(job)
@@ -1198,7 +1279,13 @@ function createJobService(config) {
       if (!a.ok || !a.path) continue
       let text = null
       try { text = fs.readFileSync(a.path, 'utf8') } catch { text = null }
-      if (text === null) { problems.push(`${a.name}：文件丢失`); a.ok = false; a.stopReason = 'missing'; continue }
+      if (text === null) {
+        problems.push(`${a.name}：文件丢失`)
+        a.ok = false
+        a.stopReason = 'missing'
+        if (job.writtenCount > 0) job.writtenCount-- // 文件已不在，成功写盘计数回退
+        continue
+      }
       if (!text.trimStart().startsWith('---')) { problems.push(`${a.name}：缺 frontmatter`); a.skipProofread = true; continue }
       const srcs = readSourceFiles(a.path)
       const missing = srcs.filter((f) => !fs.existsSync(path.join(job.cwd, f)))
@@ -1283,10 +1370,14 @@ function createJobService(config) {
 
   async function tick() {
     if (ticking) return
+    if (!acquireTickLock()) return // 另一实例正在推进，本轮让路
     ticking = true
     try {
+      syncCancelFlags()
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
+        if (job.owner && job.owner !== instanceId) continue // 另一实例的 job，它自己的 tick 负责推进
+        if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {
           job.stage = 'cancelled'
           job.finishedAt = new Date().toISOString()
@@ -1305,6 +1396,7 @@ function createJobService(config) {
       }
       flush()
     } finally {
+      releaseTickLock()
       ticking = false
     }
   }
@@ -1312,12 +1404,12 @@ function createJobService(config) {
   async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, resumeBatch }) {
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
-    const k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
-    if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（批量流水线没有子代理回退）')
+    // 占位先行：resolveBatchApiKey 最长等 3s，期间的并发提交靠非终态 stage 挡重复
     const job = {
       id: `job-${Date.now().toString(36)}-${(seq++).toString(36)}`,
       cwd, wikiPath, scope, language, kind,
-      stage: kind === 'full' ? 'plan' : 'articles',
+      owner: instanceId,
+      stage: 'submitting',
       plan: null,
       batchRef: null,
       tasks: [],
@@ -1325,20 +1417,34 @@ function createJobService(config) {
       writtenCount: 0,
       failedCount: 0,
       notes: [],
-      credentialSource: k.source,
-      apiKey: k.key,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
+    jobs.push(job)
+    persist()
+    let k
+    try {
+      k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
+      if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（批量流水线没有子代理回退）')
+    } catch (err) {
+      fail(job, String(err?.message ?? err))
+      flush()
+      throw err
+    }
+    job.credentialSource = k.source
+    job.apiKey = k.key
+    job.stage = kind === 'full' ? 'plan' : 'articles'
     if (kind === 'stale') job.tasks = prebuiltTasks ?? []
     if (kind === 'resume' && resumeBatch?.batchId) {
+      // 断点自带阶段（0.4.3+）；旧断点无 stage 字段回退 articles——0.3.x 只有文章环节走批量
+      job.stage = STAGE_HANDLER[resumeBatch.stage] ? resumeBatch.stage : 'articles'
+      if (resumeBatch.crosscutSplit === true) job.crosscutSplit = true
       job.batchRef = { batchId: resumeBatch.batchId, stateFile: batchStateFile(cwd) }
       job.tasks = (resumeBatch.tasks ?? []).map((t) => ({
         customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
       }))
       note(job, `续查孤儿断点批次 ${resumeBatch.batchId}（${job.tasks.length} 个任务）`)
     }
-    jobs.push(job)
     persist()
     flush() // 先落盘再推进：tick 中途崩溃也能从文件恢复
     void tick() // 立即推进一步，不等首个 tick 间隔
@@ -1346,16 +1452,17 @@ function createJobService(config) {
   }
 
   function cancel(jobId) {
+    mergeFromDisk() // 另一实例提交的 job 可能还没被本实例吸收过
     const job = jobs.find((j) => j.id === jobId)
     if (!job || JOB_TERMINAL.has(job.stage)) return false
     job.cancelRequested = true
     note(job, '收到取消请求，将在本轮收尾')
-    persist()
+    touch(job)
     flush()
     return true
   }
 
-  const list = () => jobs.map(jobSummary)
+  const list = () => { mergeFromDisk(); return jobs.map(jobSummary) }
   const findActive = (cwd) => jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage)) ?? null
 
   function start() {
@@ -1371,13 +1478,12 @@ function createJobService(config) {
   return { submit, cancel, list, findActive, start, stop }
 }
 
-let jobServiceRef = null
 
 // ---------------------------------------------------------------------------
 // 工具 2：codewiki_generate（提交制——判态与提交，编译由服务推进）
 // ---------------------------------------------------------------------------
 
-function generateToolDefinition(cfg) {
+function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
@@ -1423,7 +1529,7 @@ function generateToolDefinition(cfg) {
     execute: async (args, exec) => {
       const c = liveConfig(cfg)
       if (!c.enabled) throw new Error('codewiki_generate：插件已在设置中停用（codewiki → enabled）')
-      if (!jobServiceRef) throw new Error('codewiki_generate：编排服务未初始化')
+      if (!svc) throw new Error('codewiki_generate：编排服务未初始化')
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
@@ -1441,7 +1547,7 @@ function generateToolDefinition(cfg) {
       const result = { cwd, scope, wikiPath, state: status.state, jobId: null, stage: null, submitted: false, notes }
 
       // 幂等：同仓库已有活动任务直接返回
-      const active = jobServiceRef.findActive(cwd)
+      const active = svc.findActive(cwd)
       if (active) {
         notes.push(`该仓库已有进行中的编译任务 ${active.id}（stage ${active.stage}），本次调用直接返回现有任务`)
         result.jobId = active.id
@@ -1453,7 +1559,7 @@ function generateToolDefinition(cfg) {
       // 孤儿断点续查（历史遗留或取消任务留下的未收尾批次）
       const pending = readJsonFile(batchStateFile(cwd))
       if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
-        const { job } = await jobServiceRef.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending })
+        const { job } = await svc.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending })
         notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 个），已并入任务 ${job.id} 由服务续查收尾`)
         result.jobId = job.id
         result.stage = job.stage
@@ -1493,7 +1599,7 @@ function generateToolDefinition(cfg) {
           }
         }).filter(Boolean)
         if (tasks.length) {
-          const { job } = await jobServiceRef.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks })
+          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks })
           notes.push(`已提交 ${tasks.length} 篇过期文章更新任务 ${job.id}`)
           result.jobId = job.id
           result.stage = job.stage
@@ -1522,7 +1628,7 @@ function generateToolDefinition(cfg) {
         notes.push('cw init 完成')
       }
 
-      const { job } = await jobServiceRef.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language })
+      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language })
       notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部走百炼批量推理）`)
       result.jobId = job.id
       result.stage = job.stage
@@ -1657,13 +1763,14 @@ function installUpdateReminder(ctx, config) {
 export function apply(ctx, config) {
   hostCtxRef = ctx
   const service = createJobService(config)
-  jobServiceRef = service
   service.start()
-  if (typeof ctx.effect === 'function') ctx.effect(() => service.stop())
+  // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，
+  // 写成 () => service.stop() 会在启动时当场停掉服务（返回 undefined 也无 disposer）
+  if (typeof ctx.effect === 'function') ctx.effect(() => () => service.stop())
   ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    for (const definition of [cwToolDefinition(config), generateToolDefinition(config)]) {
+    for (const definition of [cwToolDefinition(config), generateToolDefinition(config, service)]) {
       const disposer = tools.register(definition)
       if (typeof disposer === 'function') {
         if (typeof ctx.effect === 'function') ctx.effect(() => disposer)

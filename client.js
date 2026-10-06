@@ -48,6 +48,7 @@ window.__ModuleLoader__.load({
       save: '保存',
       discard: '放弃更改',
       saved: '已保存。',
+      loadingLabel: '加载中…',
       conflict: '保存冲突：设置已被他处修改，请重试。',
       invalidConcurrency: '并发上限须为 1–8 的整数。',
       panelTitle: '编译任务',
@@ -97,6 +98,7 @@ window.__ModuleLoader__.load({
       save: 'Save',
       discard: 'Discard changes',
       saved: 'Saved.',
+      loadingLabel: 'Loading…',
       conflict: 'Save conflict: settings changed elsewhere, please retry.',
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
       panelTitle: 'Compilation jobs',
@@ -149,7 +151,8 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-note] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }',
       '[data-dscw-p-empty] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); padding: 8px 0; }',
     ].join('\n')
-    document.head.appendChild(style)
+    // HMR/重复加载时避免堆叠重复样式表
+    if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
 
     function el(tag, props, ...children) {
       return React.createElement(tag, props, ...children)
@@ -198,13 +201,16 @@ window.__ModuleLoader__.load({
 
         // 侧边栏面板：main slot 渲染任务列表，panellist 出入口（id 必须等于 main 的 key）。
         ctx.effect(() => {
-          ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: KEY }, CodewikiPanel))
-          ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-            name: 'sidebar.panellist',
-            id: KEY,
-            order: PANEL_ORDER,
-            label: () => tBound('title'),
-          }, PanelIcon))
+          const disposers = [
+            ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: KEY }, CodewikiPanel)),
+            ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+              name: 'sidebar.panellist',
+              id: KEY,
+              order: PANEL_ORDER,
+              label: () => tBound('title'),
+            }, PanelIcon)),
+          ]
+          return () => disposers.forEach((d) => { try { d?.() } catch { /* 已卸载亦可 */ } })
         }, 'dscw: panel')
 
         // -------------------------------------------------------------------
@@ -292,7 +298,7 @@ window.__ModuleLoader__.load({
           }
 
           if (snapshot.status === 'loading' || snapshot.status === 'unavailable' || !draft) {
-            return el('div', { 'data-dscw-page': '' }, el('div', { 'data-dscw-notice': '' }, t('saved')))
+            return el('div', { 'data-dscw-page': '' }, el('div', { 'data-dscw-notice': '' }, t('loadingLabel')))
           }
 
           return el('div', { 'data-dscw-page': '' },
@@ -399,7 +405,10 @@ window.__ModuleLoader__.load({
 
           React.useEffect(() => {
             let alive = true
+            let inFlight = false
             const pull = async () => {
+              if (inFlight) return // 上次请求未回包（服务卡顿）时不重叠拉取
+              inFlight = true
               try {
                 const data = await apiGet(JOBS_PATH)
                 if (!alive) return
@@ -407,6 +416,8 @@ window.__ModuleLoader__.load({
                 setErr(null)
               } catch (e) {
                 if (alive) setErr(String(e?.message ?? e))
+              } finally {
+                inFlight = false
               }
             }
             pull()
@@ -414,14 +425,17 @@ window.__ModuleLoader__.load({
             return () => { alive = false; clearInterval(id) }
           }, [])
 
+          // 卸载后不再 setState（轮询 fetch 可能晚于组件卸载回包）
+          const mountedRef = React.useRef(true)
+          React.useEffect(() => () => { mountedRef.current = false }, [])
           const cancel = async (jobId) => {
             setBusyId(jobId)
             try {
               await apiPost(CONTROL_PATH, { action: 'cancel', jobId })
             } catch (e) {
-              setErr(String(e?.message ?? e))
+              if (mountedRef.current) setErr(String(e?.message ?? e))
             }
-            setBusyId(null)
+            if (mountedRef.current) setBusyId(null)
           }
 
           const stageLabel = (stage) => t(`stage${stage.charAt(0).toUpperCase()}${stage.slice(1)}`)

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.3 — 2026-10-06
+
+### 审查修复：取消可靠性、多实例安全、断点保真
+
+审查（bb72b2c..675d51f）发现的问题全部修复：
+
+- **取消标记跨实例丢失（根因修复）**——`codewiki_generate` 工具的 execute 闭包原引用模块级 `jobServiceRef`（每次 apply 覆盖），多插件实例并存时（插件重载/测试重复 apply）提交与取消/面板端点会打到不同 service 实例：A 实例 cancel 落盘的 cancelRequested 在几 ms 内被 B 实例 tick 的内存副本整写覆盖，取消永远不生效。修复：service 作为参数注入工具定义，execute 闭包绑定自己 apply 创建的实例；模块级引用删除。
+- **生命周期**——`ctx.effect(() => () => service.stop())`（此前写成 `() => service.stop()` 会在启动时当场停掉服务）。
+- **多实例写盘安全**——job 带 `owner`（创建实例 id），tick 只推进自家 job；flush 脏标记（无变更不整写）+ `mergeFromDisk` 磁盘吸收（同 id 磁盘更新且非本实例现场才替换）；tick 进程级 `JOBS_FILE.lock` 串行；每轮 tick 开头从磁盘跨实例拾取 cancelRequested；cancel/list 先 mergeFromDisk。
+- **凭证窗口重复提交**——submit 占位先行（stage=submitting、无凭证即落盘），resolveBatchApiKey 失败则 fail+落盘后抛错；tick 跳过 submitting。
+- **断点保真**——批次断点文件记录 `stage`/`crosscutSplit`/任务清单，resume 按原阶段恢复（0.3.x 旧断点无 stage 回退 articles）。
+- **jobs 端点**——jobSummary 补 `cancelRequested` 字段（面板取消按钮状态）。
+- **横切/校对批次异常信息**——非终态时读 errors 数组（此前只读 error.message，错误被吞）。
+- **localReview 文件丢失回退**——降级时 writtenCount-- 不再虚报已写篇数。
+- **tickCompose 无断点**——上次进程中断于提交后落盘前时写 note 留痕再跳过。
+- **面板**——effect 返回 disposer（slots 注入可卸载）、style 防重复插入、轮询防重入+卸载守卫、加载态词典 loadingLabel（此前显示「已保存」）。
+- 文案：cw 工具描述改「后台批量流水线服务」；服务注释同步 0.4.x 行为。
+
+测试：test-orchestration 新增「断点 stage 字段」「并发提交占位与 flush 磁盘合并」块，取消块断言补齐（终态 cancelled + 断点保留 note）；test-batch 74 通过；test-cwd-paths 通过。
+
 ## 0.4.2 — 2026-10-06
 
 ### 超大任务升 256k 档（3 倍价）继续走批量

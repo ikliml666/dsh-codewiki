@@ -28,13 +28,19 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [] } = {}) {
+function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
+  const disposers = []
   const services = {
     webServer: { register(def) { endpoints.push(def) } },
-    credentials: { resolve: async (ref) => ref === 'ALIYUN_BAILIAN_API_KEY' && apiKey ? { value: apiKey, source: 'file' } : undefined },
+    credentials: {
+      resolve: async (ref) => {
+        if (slowCreds) await new Promise((r) => setTimeout(r, 50)) // 拉长 submit 的凭证窗口，测并发占位
+        return ref === 'ALIYUN_BAILIAN_API_KEY' && apiKey ? { value: apiKey, source: 'file' } : undefined
+      },
+    },
     agents: { list: () => agents },
     tools: { register(def) { registered.set(def.name, def); return () => {} } },
   }
@@ -45,8 +51,16 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [] } = {}) {
       return Promise.resolve(got.length === 1 ? got[0] : got)
     },
     on(event, fn) { listeners.push([event, fn]) },
+    // cordis 真实语义：立即执行 body，返回函数则收集为 disposer。
+    // 防线：若回归「ctx.effect(() => service.stop())」错写法，stop 被当场调用、
+    // tick 停摆，waitJob 挂死超时——整套编排测试直接失败。
+    effect(fn) {
+      const d = fn()
+      if (typeof d === 'function') disposers.push(d)
+      return d
+    },
   }
-  return { ctx, registered, endpoints, listeners }
+  return { ctx, registered, endpoints, listeners, disposers }
 }
 
 // 真实 cordis 语义 mock：agent.ctx 用于 systemPrompt section 注册
@@ -324,6 +338,79 @@ console.log('== codewiki_generate 孤儿断点续查（0.3.x 遗留 checkpoint �
     check(!fs.existsSync(checkpoint), '续查收尾后断点文件删除')
   } finally {
     globalThis.fetch = originalFetch
+  }
+}
+
+// ============================ 断点阶段感知恢复 ============================
+console.log('== 断点 stage 字段：resume 按原阶段恢复（0.4.3+ 断点） ==')
+{
+  const proofPath = path.join(mainRepo, '.codewiki', 'modules', 'core.md')
+  const h = crypto.createHash('sha1').update(mainRepo).digest('hex').slice(0, 12)
+  const checkpoint = path.join(os.tmpdir(), `dsh-codewiki-batch-${h}.json`)
+  fs.writeFileSync(checkpoint, JSON.stringify({
+    batchId: 'batch-review-1',
+    model: 'qwen3.7-flash',
+    stage: 'review',
+    crosscutSplit: false,
+    tasks: [{ customId: 'proof0', name: 'modules/core.md', articlePath: proofPath, keepInMemory: true }],
+  }), 'utf8')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    if (u.includes('/batches/batch-review-1')) return new Response(JSON.stringify({ id: 'batch-review-1', status: 'completed', output_file_id: 'out-review' }), { status: 200 })
+    if (u.includes('out-review')) {
+      return new Response(JSON.stringify({ custom_id: 'proof0', response: { status_code: 200, body: { choices: [{ message: { content: articleMd('core', 'src/core.py', 'PROOFED-REVIEW') } }] } } }), { status: 200 })
+    }
+    return new Response('{}', { status: 404 })
+  }
+  try {
+    const r4 = await gen.execute({ cwd: mainRepo }, { agent: 'test-agent' })
+    check(r4.stage === 'review', `resume 恢复到断点记录的 review 阶段（实际 ${r4.stage}）`)
+    const job = await waitJob(r4.cwd)
+    check(job?.stage === 'done', 'review 阶段断点续查后终态 done')
+    check(fs.readFileSync(proofPath, 'utf8').includes('PROOFED-REVIEW'), '校对任务收尾回写文章')
+    check(!fs.existsSync(checkpoint), '断点文件删除')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
+// ============================ 并发提交占位 + 多实例合并 ============================
+console.log('== 并发提交占位（凭证窗口）与 flush 磁盘合并 ==')
+{
+  // 预置「另一实例」的 job：flush 合并后不得丢失
+  const externalJob = {
+    id: 'job-external-1', cwd: 'C:/other-repo', kind: 'full', scope: 'full', stage: 'articles',
+    plan: null, batchRef: null, tasks: [], articles: [], writtenCount: 0, failedCount: 0, notes: [],
+    createdAt: new Date(Date.now() - 60000).toISOString(), updatedAt: new Date(Date.now() - 60000).toISOString(),
+  }
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [externalJob] }), 'utf8')
+
+  const concRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-conc-'))
+  fs.writeFileSync(path.join(concRepo, 'app.py'), 'print(1)\n', 'utf8')
+  const gitc = (...a) => execFileSync('git', a, { cwd: concRepo })
+  gitc('init'); gitc('add', '.'); gitc('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'init')
+  const cc = makeCtx({ slowCreds: true })
+  apply(cc.ctx, {})
+  const gen2 = cc.registered.get('codewiki_generate')
+  // 提交在占位窗口后走真实 submitBatchFor——mock 掉批量 API，让它快速失败即可
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'mock off' } }), { status: 500 })
+  // 先串行走一次（cw init 建好 wiki 基线，提交因 mock 500 快速失败），
+  // 避免并发对撞在 cw init 的 TOCTOU 上——本块只验证 submit 占位窗口
+  try { await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }) } catch { /* mock 500 预期失败 */ }
+  try {
+    const [ra, rb] = await Promise.all([
+      gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
+      gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
+    ])
+    check(ra.jobId && ra.jobId === rb.jobId, `并发提交共享同一 job（${ra.jobId} vs ${rb.jobId}）`)
+    await waitJob(concRepo)
+    const after = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+    check((after.jobs ?? []).some((j) => j.id === 'job-external-1'), 'flush 合并后另一实例的 job 不丢失')
+  } finally {
+    globalThis.fetch = originalFetch
+    try { fs.rmSync(concRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch { /* Windows 句柄延迟释放：留 tmp 自清 */ }
   }
 }
 
