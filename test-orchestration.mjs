@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url'
 process.env.DSH_CODEWIKI_TICK_MS = '300'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+// 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写
+process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}.json`)
 const { name, apply } = await import('./index.js')
 
 let failures = 0
@@ -22,7 +24,7 @@ function check(cond, msg) {
   else { failures += 1; console.error(`  ✗ ${msg}`) }
 }
 
-const JOBS_FILE = path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
+const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE
 const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
   `---\ntitle: ${title}\ntype: ${type}\nsource_files:\n  - ${source}\ntags: []\n---\n\n# ${title}\n\n${marker} article.\n`
 
@@ -339,6 +341,8 @@ console.log('== batchMinTokens 混合：小仓库各阶段输入均低于阈值 
     const resJobs = fakeRes()
     jobsEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resJobs)
     const summary = JSON.parse(resJobs.out).jobs.find((j) => j.id === r.jobId)
+    console.log('  DEBUG summary:', JSON.stringify(summary))
+    const dbg = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     check(summary?.tps > 0, `实时通道 tps 采样聚合（summary.tps=${summary?.tps}）`)
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'core.md 实时落盘')
     check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 实时落盘（keepInMemory 经 writeValidated）')
@@ -511,6 +515,61 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
   } finally {
     mock.restore()
     fs.rmSync(cancelRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 排除清单 / repos 总览 / compile 动作（0.4.7） ============================
+console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
+{
+  const exRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  try {
+    const reposEp = main.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const ctlEp = main.endpoints.find((e) => e.path === '/api/codewiki/control')
+
+    // 1) compile 动作提交成功
+    const resC = fakeRes()
+    await ctlEp.handler(fakeReq({ action: 'compile', cwd: exRepo }, '127.0.0.1', 'POST'), resC)
+    const cOut = JSON.parse(resC.out)
+    check(resC.code === 200 && cOut.ok === true && cOut.submitted === true, `compile 动作提交成功（${resC.code} submitted=${cOut.submitted}）`)
+
+    // 2) auto 直调命中幂等（同仓库活动任务直接返回）
+    const rAuto = await gen.execute({ cwd: exRepo, scope: 'auto', auto: true }, { agent: 'test-agent' })
+    check(rAuto.submitted === false && rAuto.jobId === cOut.jobId, 'auto 直调幂等：返回现有活动任务')
+
+    // 3) 任务跑完
+    const job = await waitJob(exRepo)
+    check(job?.stage === 'done', `compile 提交的任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+
+    // 4) 排除清单：compile 与直调都拒绝
+    mainConfig.excludePaths = exRepo
+    const resC2 = fakeRes()
+    await ctlEp.handler(fakeReq({ action: 'compile', cwd: exRepo }, '127.0.0.1', 'POST'), resC2)
+    const c2 = JSON.parse(resC2.out)
+    check(resC2.code === 400 && c2.ok === false && String(c2.error).includes('排除清单'), 'compile 对排除仓库 400 拒绝')
+    let err = null
+    try { await gen.execute({ cwd: exRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
+    check(err && String(err.message).includes('排除清单'), '直调对排除仓库抛错')
+    const sub = path.join(exRepo, 'packages', 'app')
+    fs.mkdirSync(sub, { recursive: true })
+    let err2 = null
+    try { await gen.execute({ cwd: sub }, { agent: 'test-agent' }) } catch (e) { err2 = e }
+    check(err2 && String(err2.message).includes('排除清单'), '子目录同样被排除')
+    delete mainConfig.excludePaths
+
+    // 5) repos 总览：排除标记 + 状态 + scheduler 块
+    const resR = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resR)
+    const payload = JSON.parse(resR.out)
+    const repoRow = (payload.repos ?? []).find((x) => x.cwd === exRepo)
+    check(!!repoRow, 'repos 总览含已编译仓库')
+    check(repoRow?.excluded === false, '移出清单后 excluded=false')
+    check(['clean', 'stale'].includes(repoRow?.state), `repos 状态可解析（${repoRow?.state}）`)
+    check(payload.scheduler && payload.scheduler.enabled === false && payload.scheduler.intervalMin === 30, 'repos 总览含 scheduler 块（默认关/30min）')
+  } finally {
+    delete mainConfig.excludePaths
+    mock.restore()
+    fs.rmSync(exRepo, { recursive: true, force: true })
   }
 }
 

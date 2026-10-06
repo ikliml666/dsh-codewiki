@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const CONTROL_PATH = '/api/codewiki/control'
     const PANEL_ORDER = 52 // 排在 dsh-hindsight-on-demand（50）之后
     const POLL_MS = 2000
+    const REPOS_PATH = '/api/codewiki/repos'
+    const REPOS_POLL_MS = 10000
     const ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']
 
     const zh = () => ({
@@ -76,7 +78,36 @@ window.__ModuleLoader__.load({
       settings: '设置',
       elapsedLabel: '已用时',
       historyLabel: '历史任务',
+      changedLabel: '变更文件',
       wikiAt: 'wiki：',
+      tabOverview: '总览',
+      tabTasks: '任务',
+      tabSettings: '设置',
+      reposEmpty: '还没有已编译的仓库——在会话里运行 codewiki_generate 开始编译。',
+      stateMissing: '未初始化',
+      stateUncompiled: '未编译',
+      stateClean: '最新',
+      stateStale: '有变更',
+      stateError: '出错',
+      excludedTag: '已排除',
+      autoTag: '自动',
+      schedTitle: '自动更新调度',
+      schedOn: '开',
+      schedOff: '关',
+      schedEvery: '扫描间隔',
+      schedLast: '上次扫描',
+      schedScanning: '正在扫描…',
+      schedNever: '从未',
+      schedMinutes: '分钟',
+      compileNow: '更新',
+      compileUpToDate: '已是最新',
+      secSchedule: '调度与排除',
+      autoUpdateLabel: '自动更新',
+      autoUpdateHint: '定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）。',
+      autoUpdateMinLabel: '扫描间隔（分钟）',
+      autoUpdateMinHint: '最小 5；扫描对 jobs 历史工作区逐个 cw status 判态，仅提交有变更的。',
+      excludePathsLabel: '排除清单',
+      excludePathsHint: '这些目录（含子目录）不编译 CodeWiki；换行/分号/逗号分隔绝对路径。',
     })
     const en = () => ({
       title: 'CodeWiki',
@@ -132,7 +163,36 @@ window.__ModuleLoader__.load({
       settings: 'Settings',
       elapsedLabel: 'elapsed',
       historyLabel: 'History',
+      changedLabel: 'changed files',
       wikiAt: 'wiki: ',
+      tabOverview: 'Overview',
+      tabTasks: 'Jobs',
+      tabSettings: 'Settings',
+      reposEmpty: 'No compiled repos yet — run codewiki_generate in a session to start one.',
+      stateMissing: 'No wiki',
+      stateUncompiled: 'Uncompiled',
+      stateClean: 'Up to date',
+      stateStale: 'Changed',
+      stateError: 'Error',
+      excludedTag: 'Excluded',
+      autoTag: 'Auto',
+      schedTitle: 'Auto-update scheduler',
+      schedOn: 'On',
+      schedOff: 'Off',
+      schedEvery: 'Interval',
+      schedLast: 'Last scan',
+      schedScanning: 'Scanning…',
+      schedNever: 'never',
+      schedMinutes: 'min',
+      compileNow: 'Update',
+      compileUpToDate: 'Up to date',
+      secSchedule: 'Scheduler & exclusions',
+      autoUpdateLabel: 'Auto update',
+      autoUpdateHint: 'Periodically scans compiled workspaces and submits incremental recompiles when changes are detected (scope=auto).',
+      autoUpdateMinLabel: 'Scan interval (minutes)',
+      autoUpdateMinHint: 'Minimum 5. Each scan runs cw status per historical workspace and submits only changed ones.',
+      excludePathsLabel: 'Excluded paths',
+      excludePathsHint: 'CodeWiki is never compiled under these directories (subtree included). Separate absolute paths with newlines, semicolons or commas.',
     })
 
     const style = document.createElement('style')
@@ -170,6 +230,16 @@ window.__ModuleLoader__.load({
       '@keyframes dscw-pulse { 50% { opacity: 0.45; } }',
       '[data-dscw-p-elapsed] { font-variant-numeric: tabular-nums; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-p-settings] { padding: 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
+      '[data-dscw-p-tabs] { display: flex; gap: 2px; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; padding: 2px; width: max-content; max-width: 100%; }',
+      '[data-dscw-p-tab] { border: 0; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 1; padding: 5px 12px; border-radius: 6px; cursor: pointer; }',
+      '[data-dscw-p-tab]:hover { color: var(--dsw-alias-label-primary); }',
+      '[data-dscw-p-tab][data-on="true"] { background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary)); color: var(--dsw-alias-label-primary-foreground, #fff); }',
+      '[data-dscw-p-stage][data-state="clean"] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
+      '[data-dscw-p-stage][data-state="stale"] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); }',
+      '[data-dscw-p-stage][data-state="missing"], [data-dscw-p-stage][data-state="uncompiled"] { color: var(--dsw-alias-label-tertiary); }',
+      '[data-dscw-p-sched] { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-repo] { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
+      '[data-dscw-p-textarea] { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
     if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
@@ -301,7 +371,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchMinTokens']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchMinTokens', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -417,6 +487,40 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
+                        // 调度与排除
+            el('section', { 'data-dscw-field': '' },
+              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secSchedule'))),
+              el('div', { 'data-dscw-grid': '' },
+                el('label', null, t('autoUpdateLabel')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.autoUpdate === true,
+                    onChange: (v) => setPath('autoUpdate', v),
+                    label: t('autoUpdateLabel'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('autoUpdateHint')),
+                ),
+                el('label', null, t('autoUpdateMinLabel')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.autoUpdateMin ?? 30),
+                    onChange: (e) => setPath('autoUpdateMin', Number(e.target.value)),
+                    placeholder: '30',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('autoUpdateMinHint')),
+                ),
+                el('label', null, t('excludePathsLabel')),
+                el('div', { 'data-dscw-field': '' },
+                  el('textarea', {
+                    'data-dscw-p-textarea': '',
+                    value: String(draft.excludePaths ?? ''),
+                    onChange: (e) => setPath('excludePaths', e.target.value),
+                    placeholder: 'E:\path\to\excluded-repo',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('excludePathsHint')),
+                ),
+              ),
+            ),
             // 保存条
             el('div', { 'data-dscw-bar': '' },
               el(Button, { variant: 'ghost', size: 'sm', onClick: discard, disabled: !dirty }, t('discard')),
@@ -432,12 +536,109 @@ window.__ModuleLoader__.load({
         // 侧边栏面板：编译任务进度 + 取消（轮询 jobs 端点）
         // -------------------------------------------------------------------
 
+        const stageLabel = (stage) => tBound(`stage${String(stage).charAt(0).toUpperCase()}${String(stage).slice(1)}`)
+        const stateLabel = (st) => tBound(`state${String(st).charAt(0).toUpperCase()}${String(st).slice(1)}`)
+        const repoName = (cwd) => {
+          const parts = String(cwd ?? '').split(/[\\/]/).filter(Boolean)
+          return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
+        }
+
+        // 总览标签页：所有工作区 wiki 的状态总览 + 自动更新调度信息（轮询 repos 端点）
+        function ReposTab() {
+          const t = tBound
+          const [data, setData] = React.useState(null)
+          const [err, setErr] = React.useState(null)
+          const [busyCwd, setBusyCwd] = React.useState(null)
+          const mountedRef = React.useRef(true)
+          React.useEffect(() => () => { mountedRef.current = false }, [])
+
+          React.useEffect(() => {
+            let alive = true
+            let inFlight = false
+            const pull = async () => {
+              if (inFlight) return
+              inFlight = true
+              try {
+                const j = await apiGet(REPOS_PATH)
+                if (alive) { setData(j ?? {}); setErr(null) }
+              } catch (e) {
+                if (alive) setErr(String(e?.message ?? e))
+              } finally {
+                inFlight = false
+              }
+            }
+            pull()
+            const id = setInterval(pull, REPOS_POLL_MS)
+            return () => { alive = false; clearInterval(id) }
+          }, [])
+
+          const compile = async (cwd) => {
+            setBusyCwd(cwd)
+            try {
+              await apiPost(CONTROL_PATH, { action: 'compile', cwd })
+            } catch (e) {
+              if (mountedRef.current) setErr(String(e?.message ?? e))
+            }
+            if (mountedRef.current) setBusyCwd(null)
+          }
+
+          const sched = data?.scheduler
+          const repos = Array.isArray(data?.repos) ? data.repos : []
+
+          try {
+            return el('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+              el('div', { 'data-dscw-p-sched': '' },
+                el('div', { 'data-dscw-p-row': '' },
+                  el('span', null, t('schedTitle')),
+                  el(Tag, null, sched ? (sched.enabled ? t('schedOn') : t('schedOff')) : '—'),
+                  sched ? `${t('schedEvery')} ${sched.intervalMin} ${t('schedMinutes')}` : null,
+                  sched?.scanning ? el('span', { 'data-dscw-p-stage': '', 'data-running': 'true' }, t('schedScanning')) : null,
+                ),
+                el('div', { 'data-dscw-p-meta': '' },
+                  `${t('schedLast')}: ${sched?.lastScan ? new Date(sched.lastScan).toLocaleString() : t('schedNever')}`,
+                  sched?.lastError ? ` · ${sched.lastError}` : '',
+                ),
+              ),
+              err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
+              repos.length
+                ? repos.map((r) => {
+                  const st = String(r.state ?? 'error')
+                  const stState = st === 'clean' ? 'done' : st === 'stale' ? 'stale' : st === 'error' ? 'failed' : 'cancelled'
+                  return el('div', { key: r.cwd, 'data-dscw-p-repo': '' },
+                    el('div', { 'data-dscw-p-row': '' },
+                      el('span', { style: { fontWeight: 500 }, title: r.cwd }, repoName(r.cwd)),
+                      r.excluded ? el(Tag, null, t('excludedTag')) : null,
+                      el('span', { 'data-dscw-p-stage': '', 'data-state': stState }, stateLabel(st)),
+                      st === 'stale'
+                        ? el(Button, {
+                          variant: 'ghost', size: 'sm',
+                          onClick: () => compile(r.cwd), disabled: busyCwd === r.cwd,
+                        }, t('compileNow'))
+                        : null,
+                    ),
+                    el('div', { 'data-dscw-p-meta': '' },
+                      st === 'stale'
+                        ? `${t('stateStale')} ${r.staleArticles ?? 0} ${t('unitArticle')} · ${t('changedLabel')} ${r.changedFiles ?? 0}`
+                        : '',
+                      r.lastJob
+                        ? `${r.lastJob.kind} · ${stageLabel(r.lastJob.stage)}${r.lastJob.auto ? ` · ${t('autoTag')}` : ''}`
+                        : '',
+                    ),
+                  )
+                })
+                : el('div', { 'data-dscw-p-empty': '' }, t('reposEmpty')),
+            )
+          } catch (e) {
+            return el('div', { 'data-dscw-p-empty': '' }, `Repos error: ${String(e?.stack ?? e)}`)
+          }
+        }
+
         function CodewikiPanel() {
           const t = tBound
           const [jobs, setJobs] = React.useState(null) // null = 尚未拿到首轮
           const [err, setErr] = React.useState(null)
           const [busyId, setBusyId] = React.useState(null)
-          const [showSettings, setShowSettings] = React.useState(false)
+          const [tab, setTab] = React.useState('overview')
 
           React.useEffect(() => {
             let alive = true
@@ -474,12 +675,7 @@ window.__ModuleLoader__.load({
             if (mountedRef.current) setBusyId(null)
           }
 
-          const stageLabel = (stage) => t(`stage${stage.charAt(0).toUpperCase()}${stage.slice(1)}`)
           const kindLabel = (kind) => (t(`kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`))
-          const repoName = (cwd) => {
-            const parts = String(cwd ?? '').split(/[\\/]/).filter(Boolean)
-            return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
-          }
 
           const fmtElapsed = (ms) => {
             const s = Math.max(0, Math.floor(ms / 1000))
@@ -549,29 +745,39 @@ window.__ModuleLoader__.load({
             return el('div', { 'data-dscw-p-page': '' },
               el('div', { 'data-dscw-p-head': '' },
                 el('h3', null, t('panelTitle')),
-                el(Button, { variant: 'ghost', size: 'sm', onClick: () => setShowSettings((v) => !v) }, t('settings')),
               ),
-              showSettings ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
-              err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
-              jobs === null
-                ? el('div', { 'data-dscw-p-empty': '' }, '…')
-                : !all.length
-                  ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
-                  : el(React.Fragment, null,
-                    jobCard(focus),
-                    rest.length
-                      ? el('details', { 'data-dscw-p-history': '' },
-                        el('summary', null, `${t('historyLabel')} (${rest.length})`),
-                        groups.map((g) => {
-                          const gj = g.jobs.filter((j) => j !== focus)
-                          return gj.length
-                            ? el(React.Fragment, { key: g.cwd },
-                              el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
-                              gj.map(jobCard))
-                            : null
-                        }))
-                      : null,
-                  ),
+              el('div', { 'data-dscw-p-tabs': '' },
+                [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['settings', t('tabSettings')]].map(([id, label]) =>
+                  el('button', {
+                    key: id, 'data-dscw-p-tab': '',
+                    'data-on': tab === id ? 'true' : null,
+                    onClick: () => setTab(id),
+                  }, label)),
+              ),
+              tab === 'overview' ? el(ReposTab) : null,
+              tab === 'settings' ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
+              tab === 'tasks'
+                ? (err ? el('div', { 'data-dscw-p-empty': '' }, err)
+                  : jobs === null
+                    ? el('div', { 'data-dscw-p-empty': '' }, '…')
+                    : !all.length
+                      ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
+                      : el(React.Fragment, null,
+                        jobCard(focus),
+                        rest.length
+                          ? el('details', { 'data-dscw-p-history': '' },
+                            el('summary', null, `${t('historyLabel')} (${rest.length})`),
+                            groups.map((g) => {
+                              const gj = g.jobs.filter((j) => j !== focus)
+                              return gj.length
+                                ? el(React.Fragment, { key: g.cwd },
+                                  el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
+                                  gj.map(jobCard))
+                                : null
+                            }))
+                          : null,
+                      ))
+                : null,
             )
           } catch (e) {
             // 渲染构建期异常直接显形，避免整块白屏无从排查

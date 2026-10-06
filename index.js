@@ -43,6 +43,9 @@ export const Config = z.object({
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('实时兜底请求并发上限（超预算任务走同步调用时生效），硬顶 8'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
+  excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
+  autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
+  autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
 })
 
 function val(x) {
@@ -63,6 +66,9 @@ function liveConfig(config) {
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
+    excludePaths: String(val(c.excludePaths) ?? ''),
+    autoUpdate: val(c.autoUpdate) === true,
+    autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
   }
 }
 
@@ -136,6 +142,17 @@ function parseStatus(stdout) {
     else staleArticles.push(line)
   }
   return { state: 'stale', changedFiles, staleArticles }
+}
+
+// 排除清单：换行/分号/逗号分隔的绝对路径；cwd 等于某项或位于其子树内即被排除（Windows 大小写不敏感）
+function isExcluded(cwd, list) {
+  const items = String(list ?? '').split(/[\n;，,]+/).map((s) => s.trim()).filter(Boolean)
+  if (!items.length || !cwd) return false
+  const n = path.normalize(cwd).toLowerCase().replace(/[\\/]+$/, '')
+  return items.some((item) => {
+    const m = path.normalize(item).toLowerCase().replace(/[\\/]+$/, '')
+    return n === m || n.startsWith(m + '\\') || n.startsWith(m + '/')
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -803,7 +820,9 @@ async function wikiPathFor(cwd, binary, signal) {
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // ---------------------------------------------------------------------------
 
-const JOBS_FILE = path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
+// 测试可设 DSH_CODEWIKI_JOBS_FILE 隔离到独立路径——默认路径与真实宿主实例共享，
+// 宿主周期 flush 会用其内存副本整写同一文件，测试期间互相洗掉对方的内存字段（tps 采样 flaky 的根因）
+const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
 const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
 const MAX_JOBS_KEPT = 30
 const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])
@@ -889,6 +908,7 @@ function jobSummary(job) {
     cwd: job.cwd,
     kind: job.kind,
     scope: job.scope,
+    auto: job.auto === true,
     stage: job.stage,
     batchId: job.batchRef?.batchId ?? null,
     writtenCount: job.writtenCount,
@@ -1464,7 +1484,11 @@ function createJobService(config) {
     }
   }
 
-  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, resumeBatch }) {
+  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, resumeBatch, auto }) {
+    const c0 = liveConfig(config)
+    if (isExcluded(cwd, c0.excludePaths)) {
+      throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
+    }
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
     // 占位先行：resolveBatchApiKey 最长等 3s，期间的并发提交靠非终态 stage 挡重复
@@ -1473,6 +1497,7 @@ function createJobService(config) {
       cwd, wikiPath, scope, language, kind,
       owner: instanceId,
       stage: 'submitting',
+      auto: auto === true,
       plan: null,
       batchRef: null,
       tasks: [],
@@ -1595,7 +1620,9 @@ function generateToolDefinition(cfg, svc) {
       if (!svc) throw new Error('codewiki_generate：编排服务未初始化')
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
+      if (isExcluded(cwd, c.excludePaths)) throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
+      const auto = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
 
@@ -1622,7 +1649,7 @@ function generateToolDefinition(cfg, svc) {
       // 孤儿断点续查（历史遗留或取消任务留下的未收尾批次）
       const pending = readJsonFile(batchStateFile(cwd))
       if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
-        const { job } = await svc.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending })
+        const { job } = await svc.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending, auto })
         notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 个），已并入任务 ${job.id} 由服务续查收尾`)
         result.jobId = job.id
         result.stage = job.stage
@@ -1662,7 +1689,7 @@ function generateToolDefinition(cfg, svc) {
           }
         }).filter(Boolean)
         if (tasks.length) {
-          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks })
+          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto })
           notes.push(`已提交 ${tasks.length} 篇过期文章更新任务 ${job.id}`)
           result.jobId = job.id
           result.stage = job.stage
@@ -1691,7 +1718,7 @@ function generateToolDefinition(cfg, svc) {
         notes.push('cw init 完成')
       }
 
-      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language })
+      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto })
       notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部走百炼批量推理）`)
       result.jobId = job.id
       result.stage = job.stage
@@ -1736,7 +1763,8 @@ function readBodyJson(req) {
   })
 }
 
-function installWebServer(ctx, service) {
+function installWebServer(ctx, service, extra = {}) {
+  const { config, schedState, compile } = extra
   if (typeof ctx.inject !== 'function') return
   // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
   ctx.inject(['webServer'], (rc) => {
@@ -1755,6 +1783,61 @@ function installWebServer(ctx, service) {
         writeJson(res, 200, { now: new Date().toISOString(), jobs: service.list() })
       },
     })
+    // 仓库总览：jobs 历史工作区的 wiki 状态（cw status 现算，30s 缓存——面板 2s 轮询不打爆 git）
+    let reposCache = null
+    let reposCacheAt = 0
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/repos',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        if (!reposCache || Date.now() - reposCacheAt > 30000) {
+          const c = liveConfig(config ?? {})
+          const seen = new Set()
+          const lastByCwd = new Map()
+          for (const j of service.list()) {
+            if (!j.cwd || seen.has(j.cwd)) continue
+            seen.add(j.cwd)
+            lastByCwd.set(j.cwd, j)
+          }
+          const repos = []
+          for (const cwd of seen) {
+            const last = lastByCwd.get(cwd)
+            const base = {
+              cwd,
+              excluded: isExcluded(cwd, c.excludePaths),
+              lastJob: last ? { id: last.id, kind: last.kind, stage: last.stage, auto: last.auto === true, finishedAt: last.finishedAt ?? null, writtenCount: last.writtenCount ?? 0 } : null,
+            }
+            try {
+              const binary = resolveBinary(c)
+              const st = await runCw(binary, cwd, ['status'], 20000)
+              const status = parseStatus(st.stdout)
+              repos.push({
+                ...base,
+                state: status.state,
+                staleArticles: status.staleArticles.length,
+                changedFiles: status.changedFiles.length,
+                wikiPath: await wikiPathFor(cwd, binary).catch(() => null),
+              })
+            } catch (err) {
+              repos.push({ ...base, state: 'error', error: String(err?.message ?? err) })
+            }
+          }
+          reposCache = {
+            repos,
+            scheduler: {
+              enabled: c.autoUpdate,
+              intervalMin: c.autoUpdateMin,
+              lastScan: schedState?.lastScan ? new Date(schedState.lastScan).toISOString() : null,
+              scanning: schedState?.scanning === true,
+              lastError: schedState?.lastError ?? null,
+            },
+          }
+          reposCacheAt = Date.now()
+        }
+        writeJson(res, 200, reposCache)
+      },
+    })
     ws.register({
       kind: 'exact',
       path: '/api/codewiki/control',
@@ -1768,7 +1851,18 @@ function installWebServer(ctx, service) {
           writeJson(res, ok ? 200 : 404, { ok })
           return
         }
-        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."}' })
+        if (body?.action === 'compile' && body?.cwd) {
+          if (typeof compile !== 'function') { writeJson(res, 501, { error: '编译入口未初始化' }); return }
+          reposCache = null // 编译提交会改 wiki 状态，下次拉总览强制重算
+          try {
+            const r = await compile({ cwd: String(body.cwd), scope: ['auto', 'full', 'stale'].includes(body?.scope) ? body.scope : 'auto' }, {})
+            writeJson(res, 200, { ok: true, ...r })
+          } catch (err) {
+            writeJson(res, 400, { ok: false, error: String(err?.message ?? err) })
+          }
+          return
+        }
+        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."} 或 {"action":"compile","cwd":"..."}' })
       },
     })
   })
@@ -1830,10 +1924,35 @@ export function apply(ctx, config) {
   // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，
   // 写成 () => service.stop() 会在启动时当场停掉服务（返回 undefined 也无 disposer）
   if (typeof ctx.effect === 'function') ctx.effect(() => () => service.stop())
+  const generateDef = generateToolDefinition(config, service)
+  // 自动更新调度器：60s 心跳，到点对历史工作区逐个 scope=auto 判态提交。
+  // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
+  const schedState = { lastScan: 0, scanning: false, lastError: null }
+  let scanning = false
+  const autoScan = async () => {
+    const c = liveConfig(config)
+    if (!c.autoUpdate || scanning) return
+    if (Date.now() - schedState.lastScan < c.autoUpdateMin * 60000) return
+    scanning = true
+    schedState.scanning = true
+    schedState.lastScan = Date.now()
+    try {
+      const cwds = [...new Set(service.list().map((j) => j.cwd).filter(Boolean))]
+      for (const cwd of cwds) {
+        if (isExcluded(cwd, c.excludePaths)) continue
+        try { await generateDef.execute({ cwd, scope: 'auto', auto: true }, {}) } catch (err) {
+          schedState.lastError = `${new Date().toISOString()} ${String(err?.message ?? err).slice(0, 200)}`
+        }
+      }
+    } finally { scanning = false; schedState.scanning = false }
+  }
+  const scanTimer = setInterval(() => { void autoScan() }, 60000)
+  scanTimer.unref?.()
+  if (typeof ctx.effect === 'function') ctx.effect(() => () => clearInterval(scanTimer))
   ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    for (const definition of [cwToolDefinition(config), generateToolDefinition(config, service)]) {
+    for (const definition of [cwToolDefinition(config), generateDef]) {
       const disposer = tools.register(definition)
       if (typeof disposer === 'function') {
         if (typeof ctx.effect === 'function') ctx.effect(() => disposer)
@@ -1841,6 +1960,6 @@ export function apply(ctx, config) {
       }
     }
   })
-  installWebServer(ctx, service)
+  installWebServer(ctx, service, { config, schedState, compile: (args, exec) => generateDef.execute(args, exec) })
   installUpdateReminder(ctx, config)
 }
