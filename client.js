@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
     const CONTROL_PATH = '/api/codewiki/control'
     const PANEL_ORDER = 52 // 排在 dsh-hindsight-on-demand（50）之后
     const POLL_MS = 2000
-    const ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'review', 'index']
+    const ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -55,6 +55,7 @@ window.__ModuleLoader__.load({
       stagePlan: '规划中',
       stageArticles: '写文章中',
       stageCrosscut: '横切中',
+      stageCompose: '合成中',
       stageReview: '校对中',
       stageIndex: '建索引中',
       stageDone: '已完成',
@@ -103,6 +104,7 @@ window.__ModuleLoader__.load({
       stagePlan: 'Planning',
       stageArticles: 'Writing articles',
       stageCrosscut: 'Cross-cutting',
+      stageCompose: 'Composing',
       stageReview: 'Proofreading',
       stageIndex: 'Indexing',
       stageDone: 'Done',

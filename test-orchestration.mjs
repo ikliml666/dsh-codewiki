@@ -79,7 +79,7 @@ function makeFixtureRepo() {
 }
 
 // mock 百炼批量 API：按上传 JSONL 的 custom_id 生成应答（plan/tN/arch/patterns/conceptN/proofN）
-function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false } = {}) {
+function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {}) {
   const uploaded = []
   let batchSeq = 0
   const originalFetch = globalThis.fetch
@@ -116,7 +116,10 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
           })
         } else if (/^t\d+$/.test(cid)) {
           const mn = modules[Number(cid.slice(1))] ?? modules[0]
-          content = articleMd(mn, `src/${mn}.py`, articleMarker)
+          content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(20000)}` : '')
+        } else if (cid.startsWith('obs')) {
+          // 观察任务（大 wiki 拆分路径）：单篇输入的正确性由测试对上传 JSONL 断言
+          content = '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
         } else if (cid === 'arch') {
           content = articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
         } else if (cid === 'patterns') {
@@ -137,7 +140,7 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
     if (u.includes('/files/err-')) return new Response('', { status: 200 })
     return new Response('{}', { status: 404 })
   }
-  return { fetchCalls, restore: () => { globalThis.fetch = originalFetch } }
+  return { fetchCalls, uploaded, restore: () => { globalThis.fetch = originalFetch } }
 }
 
 // 轮询 JOBS_FILE 等某 cwd 的最新 job 终态
@@ -234,6 +237,35 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(!(job.notes ?? []).some((n) => n.includes('子代理')), '全程零子代理（notes 无子代理字样）')
   } finally {
     mock.restore()
+  }
+}
+
+// ============================ 大 wiki：横切精准拆分 ============================
+console.log('== 横切精准拆分：模块文章总量超预算 → 观察任务 map + 合成批 reduce ==')
+{
+  const bigRepo = makeFixtureRepo()
+  const mock = makeBatchMock({ bigArticle: true })
+  try {
+    const r = await gen.execute({ cwd: bigRepo }, { agent: 'test-agent' })
+    check(r.submitted === true, '大 wiki 提交即返回')
+    const job = await waitJob(r.cwd)
+    console.log('  notes:', (job?.notes ?? []).join(' | '))
+    const obsLines = (mock.uploaded ?? []).flat().filter((l) => String(l.custom_id).startsWith('obs'))
+    check(obsLines.length === 2, `上传 2 个观察任务（实际 ${obsLines.length}）`)
+    for (const l of obsLines) {
+      const prompt = String(l.body?.messages?.[0]?.content ?? '')
+      check((prompt.match(/^### /gm) ?? []).length === 1, `${l.custom_id}：观察输入只含一篇模块文章`)
+    }
+    check(!mock.uploaded.flat().some((l) => l.custom_id === 'arch' && String(l.body?.messages?.[0]?.content ?? '').includes('长'.repeat(100))), '合成批输入不含原文全文（只吃观察）')
+    check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 经合成批落盘')
+    check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
+    check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '大 wiki 校对批次照常回写（动态预算）')
+    check((job.notes ?? []).some((n) => n.includes('观察任务并发执行')), 'notes 记录拆分决策')
+    check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
+  } finally {
+    mock.restore()
+    fs.rmSync(bigRepo, { recursive: true, force: true })
   }
 }
 

@@ -602,6 +602,27 @@ function batchConceptPrompt(language, concept, articlesText) {
   ) + `\n\n以下全部模块文章：\n\n${articlesText}`
 }
 
+// 模块观察 prompt（横切 map 阶段）：每篇模块文章一个小任务，输出紧凑观察。
+// 输出刻意不带 frontmatter——观察批不走 tally 落盘，只在合成批拼包。
+function batchObservePrompt(language, moduleName, articleText) {
+  return [
+    `你是 CodeWiki 架构观察员。观察全文用${language}书写。`,
+    '',
+    `任务：通读下文模块「${moduleName}」的完整文章，输出该模块的架构观察（紧凑 markdown）。必含：`,
+    '1. 模块职责（一句话）；',
+    '2. 对外接口/入口：函数、类、路由名 + 文中行号；',
+    '3. 依赖方向：依赖哪些模块、被谁依赖（从文中引用推断）；',
+    '4. 值得进入系统总览的模式、约定或风险；',
+    '5. `source_files:` 原样列出文章 frontmatter 里的源文件（POSIX 相对路径）。',
+    '',
+    '只输出观察正文——禁止 frontmatter、禁止用代码围栏整体包裹。',
+    '',
+    `### ${moduleName}`,
+    '',
+    articleText,
+  ].join('\n')
+}
+
 // 批量校对 prompt：输入=文章全文+source_files 源码，输出=修正后整文（服务侧校验后才落盘）。
 // 行号抽查这类机械核对由模型一次完成，不再需要多轮工具的审校智能体。
 function batchProofreadPrompt({ language, articleText, sourcesText }) {
@@ -1044,27 +1065,10 @@ function createJobService(config) {
     }
   }
 
-  async function tickCrosscut(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      tally(job, results, job.tasks)
-      job.batchRef = null
-      job.tasks = []
-      job.stage = 'review'
-      touch(job)
-      return
-    }
-    // 输入 = 成功模块文章全文（packArticles 装不下截头部并标注）
-    const texts = []
-    for (const a of job.articles) {
-      if (!a.ok || !a.path) continue
-      try { texts.push({ name: a.name, text: fs.readFileSync(a.path, 'utf8') }) } catch { /* 丢文件在横切输入缺席 */ }
-    }
-    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); job.stage = 'review'; touch(job); return }
-    const pack = packArticles(texts)
+  // 横切合成任务（单批直出与拆分合成共用）：输入 pack = 模块文章全文或模块观察拼接
+  function crosscutTasks(job, pack) {
     const lang = job.language
-    const tasks = [
+    return [
       {
         customId: 'arch', name: '_architecture.md', keepInMemory: true,
         articlePath: path.join(job.wikiPath, '_architecture.md'),
@@ -1081,12 +1085,100 @@ function createJobService(config) {
         batchPrompt: batchConceptPrompt(lang, c.name, pack),
       })),
     ]
+  }
+
+  async function tickCrosscut(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      const tasks = job.tasks
+      job.batchRef = null
+      job.tasks = []
+      if (job.crosscutSplit) {
+        // 观察批收尾：不走 tally（不写盘不计数），收观察文本拼合成批
+        job.crosscutSplit = false
+        const observations = []
+        for (const r of results) {
+          if (r.ok && r.content) observations.push({ name: r.name, text: r.content })
+          else note(job, `${r.name}：模块观察失败，该模块缺席横切合成`)
+        }
+        if (!observations.length) {
+          note(job, '全部模块观察失败，跳过横切')
+          job.stage = 'review'
+          touch(job)
+          return
+        }
+        const pack = observations.map((o) => `#### ${o.name}\n\n${o.text}`).join('\n\n')
+        note(job, `收到 ${observations.length} 份模块观察，提交横切合成批次`)
+        job.stage = 'compose'
+        touch(job)
+        await submitComposeBatch(job, pack)
+        return
+      }
+      tally(job, results, tasks)
+      job.stage = 'review'
+      touch(job)
+      return
+    }
+    // 输入 = 成功模块文章全文（packArticles 装不下截头部并标注）
+    const texts = []
+    for (const a of job.articles) {
+      if (!a.ok || !a.path) continue
+      try { texts.push({ name: a.name, text: fs.readFileSync(a.path, 'utf8') }) } catch { /* 丢文件在横切输入缺席 */ }
+    }
+    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); job.stage = 'review'; touch(job); return }
+    const lang = job.language
+    // 拆分判定用原始总量——packArticles 只截后续文章头部，pack 体积永远装得下，不能作依据
+    const totalTokens = texts.reduce((n, a) => n + estimateTokens(a.text), 0)
+    if (totalTokens <= BATCH_TOKEN_BUDGET) {
+      // 总量装得进单请求预算：单批直出，零拆分开销
+      try {
+        await submitBatchFor(job, crosscutTasks(job, packArticles(texts)))
+        note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念`)
+      } catch (err) {
+        fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
+      }
+      return
+    }
+    // 精准拆分：每篇模块文章一个观察小任务（并发跑），合成批只吃观察（远小于原文，永不超限）
+    const tasks = texts.map((a, i) => ({
+      customId: `obs${i}`, name: `_obs/${a.name}`, keepInMemory: true,
+      batchPrompt: batchObservePrompt(lang, a.name, a.text),
+    }))
+    job.crosscutSplit = true
     try {
       await submitBatchFor(job, tasks)
-      note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念`)
+      note(job, `模块文章总量超单请求预算，横切拆为 ${tasks.length} 个观察任务并发执行，随后合成`)
     } catch (err) {
-      fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
+      job.crosscutSplit = false
+      fail(job, `观察批次提交失败 —— ${String(err?.message ?? err)}`)
     }
+  }
+
+  // 合成批收尾：观察批已 settle，合成结果与单批路径同样走 tally 写盘
+  async function tickCompose(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      tally(job, results, job.tasks)
+      job.batchRef = null
+      job.tasks = []
+    }
+    job.stage = 'review'
+    touch(job)
+  }
+
+  function submitComposeBatch(job, observationsText) {
+    return submitBatchFor(job, crosscutTasks(job, observationsText))
+      .then(() => {
+        note(job, `横切合成批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念（输入=模块观察）`)
+      })
+      .catch((err) => {
+        // 文章已写成功，合成提交失败降级跳过横切，不推翻整个任务
+        job.stage = 'review'
+        touch(job)
+        note(job, `横切合成批次提交失败，跳过横切 —— ${String(err?.message ?? err)}`)
+      })
   }
 
   // 本地核对：frontmatter 必填 + source_files 存在性（只记账，不删文）
@@ -1124,9 +1216,12 @@ function createJobService(config) {
       if (!a.ok || !a.path || a.skipProofread) continue
       let articleText = null
       try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
-      const srcs = collectSources(job.cwd, readSourceFiles(a.path))
-      if (srcs.oversized || estimateTokens(articleText) + estimateTokens(srcs.text) > BATCH_TOKEN_BUDGET) {
-        note(job, `${a.name}：文章+源码超预算，跳过校对批次`)
+      const articleTokens = estimateTokens(articleText)
+      const srcs = articleTokens >= BATCH_TOKEN_BUDGET
+        ? { oversized: true }
+        : collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
+      if (srcs.oversized) {
+        note(job, `${a.name}：文章或首个源文件超校对预算，跳过校对批次`)
         continue
       }
       tasks.push({
@@ -1170,6 +1265,7 @@ function createJobService(config) {
     plan: tickPlan,
     articles: tickArticles,
     crosscut: tickCrosscut,
+    compose: tickCompose,
     review: tickReview,
     index: tickIndex,
   }
