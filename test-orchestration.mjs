@@ -179,7 +179,7 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       } else {
         content = '---\ntitle: unknown\n---\nunknown realtime task'
       }
-      return json({ choices: [{ message: { content } }] })
+      return json({ choices: [{ message: { content } }], usage: { output_tokens: 128 } })
     }
     if (u.includes('/files/err-')) return new Response('', { status: 200 })
     return new Response('{}', { status: 404 })
@@ -335,6 +335,11 @@ console.log('== batchMinTokens 混合：小仓库各阶段输入均低于阈值 
     check(mock.fetchCalls.every((u) => !u.includes('/batches')), '全程零批量端点（各阶段都走实时）')
     check(mock.fetchCalls.some((u) => u.includes('/chat/completions')), '实时 chat/completions 已调用')
     check((job.notes ?? []).some((n) => n.includes('走实时推理')), 'notes 记录实时分流决策')
+    const jobsEp = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    const resJobs = fakeRes()
+    jobsEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resJobs)
+    const summary = JSON.parse(resJobs.out).jobs.find((j) => j.id === r.jobId)
+    check(summary?.tps > 0, `实时通道 tps 采样聚合（summary.tps=${summary?.tps}）`)
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'core.md 实时落盘')
     check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 实时落盘（keepInMemory 经 writeValidated）')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '校对实时回写')
@@ -543,6 +548,25 @@ console.log('== 严格 cordis 语义：未 inject 的服务属性访问即抛 ==
   check(applyThrew === null, `apply 在严格 cordis 语义下不抛错（实际 ${applyThrew?.message ?? applyThrew}）`)
   check(strictRegistered.get('cw') && strictRegistered.get('codewiki_generate'), '严格语义下两工具仍注册（fiber 不回滚）')
   check(strictListeners.length === 1, 'agent/created 监听已布线')
+}
+
+// ============================ Temp 残留清理（0.4.6） ============================
+console.log('== 服务启动清理：Temp 目录终态任务自动移除，活动任务与工作区任务保留 ==')
+{
+  const iso = new Date().toISOString()
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [
+    { id: 'job-tmp-done', cwd: path.join(os.tmpdir(), 'cw-orch-deadbeef'), kind: 'full', scope: 'auto', stage: 'done', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso, writtenCount: 3 },
+    { id: 'job-tmp-active', cwd: path.join(os.tmpdir(), 'cw-orch-alive'), kind: 'full', scope: 'auto', stage: 'articles', owner: 'svc-foreign-instance', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso },
+    { id: 'job-ws-done', cwd: 'E:/some/real/workspace', kind: 'full', scope: 'auto', stage: 'done', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso, writtenCount: 2 },
+  ] }), 'utf8')
+  const cc = makeCtx()
+  apply(cc.ctx, {})
+  await new Promise((r) => setTimeout(r, 1200)) // 等 tick flush 落盘
+  const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+  const ids = (data.jobs ?? []).map((j) => j.id)
+  check(!ids.includes('job-tmp-done'), 'Temp 目录终态任务已被启动清理移除')
+  check(ids.includes('job-tmp-active'), 'Temp 目录活动任务保留')
+  check(ids.includes('job-ws-done'), '工作区终态任务保留')
 }
 
 // 清理主 fixture（wiki 在仓库内 .codewiki/，随目录一起删）

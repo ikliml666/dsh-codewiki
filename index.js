@@ -169,7 +169,7 @@ async function bailianChat({ apiKey, model, thinkingBudget, prompt }) {
   const j = JSON.parse(text)
   const content = j?.choices?.[0]?.message?.content
   if (typeof content !== 'string') throw new Error('实时调用响应缺少 content')
-  return content
+  return { content, outputTokens: Number(j?.usage?.output_tokens) || 0 }
 }
 
 // 任务结果统一出口：keepInMemory 任务（规划/校对）把 content 带回内存由服务侧消费，
@@ -186,9 +186,10 @@ function applyTaskResult(task, content, notes) {
   }
 }
 
-// 实时兜底并发池：按 maxConcurrency 同时在飞的同步请求逐个消费任务队列。
-// 返回 Map(customId → 结果)，与 parseBatchResults 同构（{ok, stopReason, content?}）。
-export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes }) {
+// 实时通道并发池（0.4.5 混合主通道，也服务超大批量任务的兜底）：按 maxConcurrency
+// 同时在飞的同步请求逐个消费任务队列。onTaskDone 每任务上报 {outputTokens, durationMs}
+// 供 tps 采样。返回 Map(customId → 结果)，与 parseBatchResults 同构（{ok, stopReason, content?}）。
+export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone }) {
   const results = new Map()
   let cursor = 0
   const worker = async () => {
@@ -197,7 +198,9 @@ export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, c
       if (i >= tasks.length) return
       const t = tasks[i]
       try {
-        const content = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt })
+        const startedAt = Date.now()
+        const { content, outputTokens } = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt })
+        if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
       } catch (err) {
         notes.push(`实时兜底 ${t.name} 失败 —— ${String(err?.message ?? err)}`)
@@ -877,6 +880,10 @@ function saveJobs(jobs) {
 }
 
 function jobSummary(job) {
+  // tps：最近实时任务样本的聚合（总输出 token / 总生成毫秒），批量阶段无样本为 null
+  const samples = job.tpsSamples ?? []
+  const tok = samples.reduce((a, x) => a + (x.outputTokens ?? 0), 0)
+  const ms = samples.reduce((a, x) => a + (x.durationMs ?? 0), 0)
   return {
     id: job.id,
     cwd: job.cwd,
@@ -893,6 +900,7 @@ function jobSummary(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     finishedAt: job.finishedAt ?? null,
+    tps: ms > 0 ? Math.round((tok / ms) * 10000) / 10 : null,
   }
 }
 
@@ -911,6 +919,20 @@ function createJobService(config) {
   // 不允许被磁盘快照反向覆盖——否则 cancel/fail 与慢 tick 交错时会丢掉现场新增的 note/batchRef。
   const dirtyIds = new Set()
   const persist = () => { dirty = true }
+  // Temp 沙箱残留清理：cwd 位于系统临时目录的终态任务（调试/测试期产物）启动即移除，
+  // 活动任务保留（可能是真实编译）；面板端点直接受益，无需逐个手工取消。
+  {
+    const tmpBase = path.normalize(os.tmpdir()).toLowerCase()
+    const kept = jobs.filter((j) => !(
+      j.cwd && path.normalize(j.cwd).toLowerCase().startsWith(tmpBase) &&
+      ['done', 'failed', 'cancelled'].includes(j.stage)
+    ))
+    if (kept.length !== jobs.length) {
+      jobs.length = 0
+      jobs.push(...kept)
+      saveJobs(jobs) // 立即落盘：仅 persist 标脏的话，tick 的 mergeFromDisk 会把磁盘残留吸回内存
+    }
+  }
   // 磁盘吸收：另一实例新增的 job、或同 id 但磁盘更新且本实例没动过的 job，并回内存——
   // 防止 flush 用本实例的过期快照覆盖掉对方的活动 job。
   function mergeFromDisk() {
@@ -940,7 +962,7 @@ function createJobService(config) {
     mergeFromDisk(); dirty = false; dirtyIds.clear(); saveJobs(jobs)
   }
   const note = (job, msg) => {
-    job.notes.push(msg)
+    ;(job.notes ??= []).push(msg) // 磁盘残留/手工构造的 job 可能缺 notes，防御性补齐
     if (job.notes.length > 50) job.notes = job.notes.slice(-50)
   }
   // touch = 状态变更的统一入口：必须标脏，否则 tick 末 flush 跳过、取消等纯内存
@@ -1083,6 +1105,10 @@ function createJobService(config) {
           thinkingBudget: c.batchThinkingBudget,
           concurrency: c.maxConcurrency,
           notes: job.notes,
+          onTaskDone: (s) => {
+            job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
+            touch(job)
+          },
         })
         localResults.set(job.id, [...rt.values()])
         job.batchRef = { batchId: 'local', stateFile: batchStateFile(job.cwd) }

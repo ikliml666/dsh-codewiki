@@ -75,6 +75,7 @@ window.__ModuleLoader__.load({
       cancelRequestedLabel: '取消中…',
       settings: '设置',
       elapsedLabel: '已用时',
+      historyLabel: '历史任务',
       wikiAt: 'wiki：',
     })
     const en = () => ({
@@ -130,6 +131,7 @@ window.__ModuleLoader__.load({
       cancelRequestedLabel: 'Cancelling…',
       settings: 'Settings',
       elapsedLabel: 'elapsed',
+      historyLabel: 'History',
       wikiAt: 'wiki: ',
     })
 
@@ -161,6 +163,8 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-note] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }',
       '[data-dscw-p-empty] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); padding: 8px 0; }',
       '[data-dscw-p-group] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); margin-top: 4px; word-break: break-all; }',
+      '[data-dscw-p-history] { margin-top: 12px; }',
+      '[data-dscw-p-history] summary { cursor: pointer; user-select: none; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); margin-bottom: 6px; }',
       '[data-dscw-p-job][data-active="true"] { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 7%, transparent); }',
       '[data-dscw-p-stage][data-running="true"] { animation: dscw-pulse 1.6s ease-in-out infinite; }',
       '@keyframes dscw-pulse { 50% { opacity: 0.45; } }',
@@ -486,7 +490,7 @@ window.__ModuleLoader__.load({
           }
           const isActive = (job) => ACTIVE_STAGES.includes(job.stage)
 
-          // 按工作区（cwd）分组；保持首次出现顺序，组内最新在前
+          // 按工作区（cwd）分组；保持首次出现顺序，组内最新在前（服务历史折叠区）
           const groups = []
           const byCwd = new Map()
           for (const job of jobs ?? []) {
@@ -494,6 +498,12 @@ window.__ModuleLoader__.load({
             if (!g) { g = []; byCwd.set(job.cwd, g); groups.push({ cwd: job.cwd, jobs: g }) }
             g.unshift(job)
           }
+
+          // 焦点任务：活动优先（新→旧），无活动取最近更新的一个；其余收进「历史任务」折叠区
+          const byUpdated = (a, b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? ''))
+          const all = jobs ?? []
+          const focus = (all.filter(isActive).sort(byUpdated))[0] ?? [...all].sort(byUpdated)[0] ?? null
+          const rest = all.filter((j) => j !== focus)
 
           const jobCard = (job) => {
             const active = isActive(job)
@@ -523,7 +533,8 @@ window.__ModuleLoader__.load({
                   active && arts.length
                     ? `${t('writtenLabel')} ${okCount}/${arts.length} ${t('unitArticle')}`
                     : `${t('writtenLabel')} ${job.writtenCount ?? okCount} ${t('unitArticle')}`,
-                  job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '')
+                  job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '',
+                  job.tps ? ` · tps ${job.tps}` : '')
                 : null,
               (job.notes ?? []).length
                 ? el('div', { 'data-dscw-p-note': '' }, job.notes[job.notes.length - 1])
@@ -544,12 +555,23 @@ window.__ModuleLoader__.load({
               err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
               jobs === null
                 ? el('div', { 'data-dscw-p-empty': '' }, '…')
-                : !jobs.length
+                : !all.length
                   ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
-                  : groups.map((g) => el(React.Fragment, { key: g.cwd },
-                    el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
-                    g.jobs.map(jobCard),
-                  )),
+                  : el(React.Fragment, null,
+                    jobCard(focus),
+                    rest.length
+                      ? el('details', { 'data-dscw-p-history': '' },
+                        el('summary', null, `${t('historyLabel')} (${rest.length})`),
+                        groups.map((g) => {
+                          const gj = g.jobs.filter((j) => j !== focus)
+                          return gj.length
+                            ? el(React.Fragment, { key: g.cwd },
+                              el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
+                              gj.map(jobCard))
+                            : null
+                        }))
+                      : null,
+                  ),
             )
           } catch (e) {
             // 渲染构建期异常直接显形，避免整块白屏无从排查
