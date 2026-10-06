@@ -79,6 +79,7 @@ section('prepareArticleTasks：prompt 装配与 oversized 拆分')
 const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-work-'))
 fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
 fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(300 * 1024))
+fs.writeFileSync(path.join(workRoot, 'huge.ts'), 'x'.repeat(800 * 1024))
 const outDir = path.join(workRoot, 'wiki', 'modules')
 const plainTasks = ['t0', 't1', 't2'].map((_id, i) => ({
   name: `modules/m${i}.md`,
@@ -98,8 +99,10 @@ fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
 const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
 check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
 const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 0 && bigPrep.oversized.length === 1, '单文件超 token 预算 → oversized（转实时兜底）')
-check(typeof bigPrep.oversized[0].batchPrompt === 'string' && bigPrep.oversized[0].batchPrompt.length > 0, 'oversized 任务同样带 batchPrompt')
+check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装仍走批量')
+check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档任务 prompt 内联完整源码')
+const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
+check(hugePrep.prepared.length === 0 && hugePrep.oversized.length === 1, '单文件连 200k 大档都装不下 → oversized（转实时兜底）')
 
 // ---------- 6. submitBatch：mock fetch 提交 + 断点 ----------
 section('submitBatch：mock fetch 提交与断点落盘')

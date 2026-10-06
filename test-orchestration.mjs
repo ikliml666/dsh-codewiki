@@ -116,7 +116,7 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
           })
         } else if (/^t\d+$/.test(cid)) {
           const mn = modules[Number(cid.slice(1))] ?? modules[0]
-          content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(20000)}` : '')
+          content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(30000)}` : '')
         } else if (cid.startsWith('obs')) {
           // 观察任务（大 wiki 拆分路径）：单篇输入的正确性由测试对上传 JSONL 断言
           content = '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
@@ -262,6 +262,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '大 wiki 校对批次照常回写（动态预算）')
     check((job.notes ?? []).some((n) => n.includes('观察任务并发执行')), 'notes 记录拆分决策')
+    check((job.notes ?? []).some((n) => n.includes('3 倍价')), '单篇 30k 超大档触发 3 倍价明示')
     check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
   } finally {
     mock.restore()

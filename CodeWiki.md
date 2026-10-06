@@ -4,7 +4,7 @@
 
 ## Overview
 
-把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（编译入口）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享）。0.4.0 起**编译完全不走子代理**：`codewiki_generate` 是纯提交制（预构建任务 → 宿主常驻 JobService 即返回），六个环节（规划/写文章/横切/合成/审校/索引收尾，合成仅在横切超预算拆分时出现）全部经阿里云百炼批量推理（Batch File，实时价 50%），按 token 预算 28k（qwen3.7-flash ≤32k 输入低价档）分块装填，横切输入超预算自动 map-reduce 拆分（每篇一个观察任务并发，再合成），仅超预算单文件回退实时兑底。侧边栏面板（hindsight 式）轮询任务进度并支持取消。
+把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（编译入口）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享）。0.4.0 起**编译完全不走子代理**：`codewiki_generate` 是纯提交制（预构建任务 → 宿主常驻 JobService 即返回），六个环节（规划/写文章/横切/合成/审校/索引收尾，合成仅在横切超预算拆分时出现）全部经阿里云百炼批量推理（Batch File，实时价 50%），按 token 预算 28k（qwen3.7-flash ≤32k 输入低价档）分块装填，横切输入超预算自动 map-reduce 拆分（每篇一个观察任务并发，再合成），单文件超预算升 200k 大档（32k–256k 档 3 倍价，批量仍 5 折）重装继续走批量，连大档都装不下才回退实时兑底；提交时明示超 32k 档请求数。侧边栏面板（hindsight 式）轮询任务进度并支持取消。
 
 ## Key Components
 
@@ -13,7 +13,7 @@
   - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过
   - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）
   - 批量推理模块 — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（实时兑底并发池，结果与批量同构）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（兑底单轮）
-  - `createJobService` — 宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调，下限 250ms）推进阶段机 plan→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`（compose 仅当横切输入超 28k 预算：每篇模块文章一个观察任务并发跑，settle 后以观察 pack 提交合成批；总量装得下则单批直出）；校对按「预算−文章 token」动态装填源码；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（只剥 apiKey；多实例以脏标记防互相覆盖——persist 置脏、tick 末 flush、submit/cancel 先落盘再异步 tick）；批次未终态保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次提交自动续查（resume job）；取消幂等（cancelRequested 跨 tick 存活，取消保留断点可续查）；`writeValidated` 校验 frontmatter 后直接写盘（keepInMemory 任务的唯一写盘点）
+  - `createJobService` — 宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调，下限 250ms）推进阶段机 plan→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`（compose 仅当横切输入超 28k 预算：每篇模块文章一个观察任务并发跑，settle 后以观察 pack 提交合成批；总量装得下则单批直出）；校对按「预算−文章 token」动态装填源码，装不下升大档（200k）重装；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（只剥 apiKey；多实例以脏标记防互相覆盖——persist 置脏、tick 末 flush、submit/cancel 先落盘再异步 tick）；批次未终态保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次提交自动续查（resume job）；取消幂等（cancelRequested 跨 tick 存活，取消保留断点可续查）；`writeValidated` 校验 frontmatter 后直接写盘（keepInMemory 任务的唯一写盘点）
   - `cwToolDefinition` — cw CLI 封装工具（子命令白名单）
   - `generateToolDefinition` — 纯提交制：normalizeCwd → 凭证解析（无凭证诚实报错，不回退子代理）→ cw status 判态 → 孤儿断点并入（resume）→ 任务预构建（clean 短路 / stale 逐篇直达 articles / 全量走 plan）→ `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用
   - webServer 端点 — `GET /api/codewiki/jobs`（任务列表，不含 apiKey）与 `POST /api/codewiki/control {action:'cancel',jobId}`，仅回环放行（403）

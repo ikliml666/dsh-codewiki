@@ -218,6 +218,9 @@ const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 // 单个批量请求的输入 token 预算：qwen3.7-flash 输入 ≤32k 档单价最低（约 $0.03/M，
 // 批量再 5 折 ≈ $0.015/M），留 ~4k 余量吸收估算误差与消息骨架开销。
 const BATCH_TOKEN_BUDGET = 28000
+// 32k–256k 输入档（3 倍价，批量仍 5 折）的装填上限：超预算任务升到该档继续走批量
+//（百炼按请求实际输入自动分档计价），只有单文件连该档都装不下才回退实时兜底/跳过校对。
+const BATCH_TOKEN_HARD_LIMIT = 200000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -423,12 +426,16 @@ export async function resolveBatchApiKey(hostCtx, cfg) {
 }
 
 // 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
-// 分配 customId。oversized（单文件超预算）任务同样拼好 prompt，转实时兜底通道。
+// 分配 customId。单文件超预算先升大档（BATCH_TOKEN_HARD_LIMIT）重装继续走批量，
+// 连大档都装不下才转实时兜底通道。
 export function prepareArticleTasks(tasks, { cwd, language }) {
   const prepared = []
   const oversized = []
   for (const t of tasks) {
-    const { text, oversized: tooBig } = collectSources(cwd, t.sources)
+    let { text, oversized: tooBig } = collectSources(cwd, t.sources)
+    if (tooBig) {
+      ;({ text, oversized: tooBig } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
+    }
     const prevArticle = t.prevArticlePath
       ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
       : ''
@@ -957,6 +964,9 @@ function createJobService(config) {
 
   async function submitBatchFor(job, prepared) {
     const c = liveConfig(config)
+    // 请求实际输入超 32k 档的按 3 倍价计费，提交前明示
+    const tier2 = prepared.filter((t) => estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET).length
+    if (tier2) note(job, `${tier2} 个请求输入超 32k 档，按 3 倍价计费`)
     const batchId = await submitBatch(prepared, {
       apiKey: await apiKeyOf(job),
       model: c.batchModel,
@@ -1037,7 +1047,7 @@ function createJobService(config) {
     const { prepared, oversized } = prepareArticleTasks(tasks, { cwd: job.cwd, language: job.language })
     if (oversized.length) {
       const c = liveConfig(config)
-      note(job, `${oversized.length} 个任务单文件超 ${BATCH_TOKEN_BUDGET} token 预算，走实时兜底（同模型同步调用）`)
+      note(job, `${oversized.length} 个任务连 ${BATCH_TOKEN_HARD_LIMIT} token 大档都装不下，走实时兜底（同模型同步调用）`)
       oversized.forEach((t, i) => { t.customId = `rt${i}` })
       const rt = await runRealtimeTasks(oversized, {
         apiKey: await apiKeyOf(job),
@@ -1217,11 +1227,12 @@ function createJobService(config) {
       let articleText = null
       try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
       const articleTokens = estimateTokens(articleText)
-      const srcs = articleTokens >= BATCH_TOKEN_BUDGET
-        ? { oversized: true }
-        : collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
+      let srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
       if (srcs.oversized) {
-        note(job, `${a.name}：文章或首个源文件超校对预算，跳过校对批次`)
+        srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_HARD_LIMIT - articleTokens)
+      }
+      if (srcs.oversized) {
+        note(job, `${a.name}：首个源文件连大档预算都装不下，跳过校对批次`)
         continue
       }
       tasks.push({
