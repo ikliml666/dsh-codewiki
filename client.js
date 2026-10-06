@@ -70,6 +70,8 @@ window.__ModuleLoader__.load({
       unitArticle: '篇',
       cancelJob: '取消',
       cancelRequestedLabel: '取消中…',
+      settings: '设置',
+      elapsedLabel: '已用时',
       wikiAt: 'wiki：',
     })
     const en = () => ({
@@ -120,6 +122,8 @@ window.__ModuleLoader__.load({
       unitArticle: 'articles',
       cancelJob: 'Cancel',
       cancelRequestedLabel: 'Cancelling…',
+      settings: 'Settings',
+      elapsedLabel: 'elapsed',
       wikiAt: 'wiki: ',
     })
 
@@ -137,12 +141,11 @@ window.__ModuleLoader__.load({
       '[data-dscw-notice] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-warn] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); font-size: 12px; line-height: 18px; }',
       // 侧边栏面板
-      '[data-dscw-p-page] { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: var(--dsw-alias-label-primary); }',
+      '[data-dscw-p-page] { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: var(--dsw-alias-label-primary); height: 100%; overflow-y: auto; }',
       '[data-dscw-p-head] { display: flex; align-items: center; justify-content: space-between; gap: 8px; }',
       '[data-dscw-p-head] h3 { margin: 0; font-size: 14px; font-weight: 500; line-height: 22px; }',
       '[data-dscw-p-job] { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
       '[data-dscw-p-row] { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }',
-      '[data-dscw-p-name] { font-weight: 500; word-break: break-all; }',
       '[data-dscw-p-stage] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-business-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-stage][data-state="done"] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-stage][data-state="failed"] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
@@ -150,6 +153,12 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-meta] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
       '[data-dscw-p-note] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }',
       '[data-dscw-p-empty] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); padding: 8px 0; }',
+      '[data-dscw-p-group] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); margin-top: 4px; word-break: break-all; }',
+      '[data-dscw-p-job][data-active="true"] { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 7%, transparent); }',
+      '[data-dscw-p-stage][data-running="true"] { animation: dscw-pulse 1.6s ease-in-out infinite; }',
+      '@keyframes dscw-pulse { 50% { opacity: 0.45; } }',
+      '[data-dscw-p-elapsed] { font-variant-numeric: tabular-nums; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-settings] { padding: 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
     if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
@@ -359,6 +368,7 @@ window.__ModuleLoader__.load({
                 el('label', null, t('batchApiKey')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {
+                    type: 'password',
                     value: String(draft.batchApiKey ?? ''),
                     onChange: (e) => setPath('batchApiKey', e.target.value),
                     placeholder: 'sk-…',
@@ -402,6 +412,7 @@ window.__ModuleLoader__.load({
           const [jobs, setJobs] = React.useState(null) // null = 尚未拿到首轮
           const [err, setErr] = React.useState(null)
           const [busyId, setBusyId] = React.useState(null)
+          const [showSettings, setShowSettings] = React.useState(false)
 
           React.useEffect(() => {
             let alive = true
@@ -442,37 +453,77 @@ window.__ModuleLoader__.load({
           const kindLabel = (kind) => (t(`kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`))
           const repoName = (cwd) => String(cwd ?? '').split(/[\\/]/).filter(Boolean).pop() ?? cwd
 
+          const fmtElapsed = (ms) => {
+            const s = Math.max(0, Math.floor(ms / 1000))
+            const h = Math.floor(s / 3600)
+            const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+            const ss = String(s % 60).padStart(2, '0')
+            return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+          }
+          const isActive = (job) => ACTIVE_STAGES.includes(job.stage)
+
+          // 按工作区（cwd）分组；保持首次出现顺序，组内最新在前
+          const groups = []
+          const byCwd = new Map()
+          for (const job of jobs ?? []) {
+            let g = byCwd.get(job.cwd)
+            if (!g) { g = []; byCwd.set(job.cwd, g); groups.push(g) }
+            g.unshift(job)
+          }
+
+          const jobCard = (job) => {
+            const active = isActive(job)
+            const arts = Array.isArray(job.articles) ? job.articles : []
+            const okCount = arts.filter((a) => a.ok).length
+            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null },
+              el('div', { 'data-dscw-p-row': '' },
+                el(Tag, null, kindLabel(job.kind)),
+                el('span', {
+                  'data-dscw-p-stage': '', 'data-state': job.stage,
+                  'data-running': active ? 'true' : null,
+                }, stageLabel(job.stage)),
+                active
+                  ? el('span', { 'data-dscw-p-elapsed': '' },
+                    `${t('elapsedLabel')} ${fmtElapsed(Date.now() - Date.parse(job.createdAt))}`)
+                  : null,
+                active
+                  ? el(Button, {
+                    variant: 'ghost', size: 'sm',
+                    onClick: () => cancel(job.id),
+                    disabled: busyId === job.id || job.cancelRequested === true,
+                  }, job.cancelRequested === true ? t('cancelRequestedLabel') : t('cancelJob'))
+                  : null,
+              ),
+              (typeof job.writtenCount === 'number' || arts.length)
+                ? el('div', { 'data-dscw-p-meta': '' },
+                  active && arts.length
+                    ? `${t('writtenLabel')} ${okCount}/${arts.length} ${t('unitArticle')}`
+                    : `${t('writtenLabel')} ${job.writtenCount ?? okCount} ${t('unitArticle')}`,
+                  job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '')
+                : null,
+              (job.notes ?? []).length
+                ? el('div', { 'data-dscw-p-note': '' }, job.notes[job.notes.length - 1])
+                : null,
+              job.wikiPath
+                ? el('div', { 'data-dscw-p-meta': '' }, `${t('wikiAt')}${job.wikiPath}`)
+                : null,
+            )
+          }
+
           return el('div', { 'data-dscw-p-page': '' },
-            el('div', { 'data-dscw-p-head': '' }, el('h3', null, t('panelTitle'))),
+            el('div', { 'data-dscw-p-head': '' },
+              el('h3', null, t('panelTitle')),
+              el(Button, { variant: 'ghost', size: 'sm', onClick: () => setShowSettings((v) => !v) }, t('settings')),
+            ),
+            showSettings ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
             err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
             jobs === null
               ? el('div', { 'data-dscw-p-empty': '' }, '…')
               : !jobs.length
                 ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
-                : [...jobs].reverse().map((job) => el('div', { key: job.id, 'data-dscw-p-job': '' },
-                  el('div', { 'data-dscw-p-row': '' },
-                    el('span', { 'data-dscw-p-name': '' }, repoName(job.cwd)),
-                    el(Tag, null, kindLabel(job.kind)),
-                    el('span', { 'data-dscw-p-stage': '', 'data-state': job.stage }, stageLabel(job.stage)),
-                    ACTIVE_STAGES.includes(job.stage)
-                      ? el(Button, {
-                        variant: 'ghost', size: 'sm',
-                        onClick: () => cancel(job.id),
-                        disabled: busyId === job.id || job.cancelRequested === true,
-                      }, job.cancelRequested === true ? t('cancelRequestedLabel') : t('cancelJob'))
-                      : null,
-                  ),
-                  typeof job.writtenCount === 'number'
-                    ? el('div', { 'data-dscw-p-meta': '' },
-                      `${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`,
-                      job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '')
-                    : null,
-                  (job.notes ?? []).length
-                    ? el('div', { 'data-dscw-p-note': '' }, job.notes[job.notes.length - 1])
-                    : null,
-                  job.wikiPath
-                    ? el('div', { 'data-dscw-p-meta': '' }, `${t('wikiAt')}${job.wikiPath}`)
-                    : null,
+                : groups.map((g) => el(React.Fragment, { key: g.cwd },
+                  el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
+                  g.jobs.map(jobCard),
                 )),
           )
         }
