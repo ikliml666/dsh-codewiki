@@ -1791,6 +1791,16 @@ function installWebServer(ctx, service, extra = {}) {
   // 服务缺失（老宿主/测试 ctx）时保持 null——jobs 端点不过滤，行为与 0.4.8 一致。
   let workspaceRegistry = null
   ctx.inject(['workspaceRegistry'], (wr) => { workspaceRegistry = wr ?? null })
+  // 工作区过滤清单（jobs 与 repos 总览共用）：宿主注册表可用且开关开启时返回路径清单，否则 null。
+  // cwd 等于某工作区或位于其子目录内（isExcluded 命中判定，语义同 hindsight withinPath）；
+  // 宿主未注册任何工作区时返回 null——不过滤，行为与 0.4.8 一致。
+  const wsFilterPaths = () => {
+    const wr = workspaceRegistry
+    if (!wr || typeof wr.list !== 'function') return null
+    if (liveConfig(config ?? {}).workspaceOnly === false) return null
+    const wsPaths = (wr.list() ?? []).map((w) => w?.path).filter((p) => typeof p === 'string' && p)
+    return wsPaths.length ? wsPaths : null
+  }
   // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
   ctx.inject(['webServer'], (rc) => {
     const ws = rc?.webServer ?? rc
@@ -1806,14 +1816,9 @@ function installWebServer(ctx, service, extra = {}) {
       handler: (req, res) => {
         if (!guard(req, res)) return
         let list = service.list()
-        const wr = workspaceRegistry
-        // workspaceOnly（默认开）：只显示属于已添加 dsh 工作区的任务——cwd 等于某工作区
-        // 或位于其子目录内（isExcluded 的路径清单命中判定，语义同 hindsight withinPath）。
-        // Temp 沙箱与任意路径任务不出现在面板；宿主未注册任何工作区时不过滤。
-        if (wr && typeof wr.list === 'function' && liveConfig(config ?? {}).workspaceOnly !== false) {
-          const wsPaths = (wr.list() ?? []).map((w) => w?.path).filter((p) => typeof p === 'string' && p)
-          if (wsPaths.length) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
-        }
+        // workspaceOnly（默认开）：Temp 沙箱与任意路径任务不出现在面板。
+        const wsPaths = wsFilterPaths()
+        if (wsPaths) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
         writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
       },
     })
@@ -1825,7 +1830,8 @@ function installWebServer(ctx, service, extra = {}) {
       path: '/api/codewiki/repos',
       handler: async (req, res) => {
         if (!guard(req, res)) return
-        if (!reposCache || Date.now() - reposCacheAt > 30000) {
+        const wsSig = (() => { const p = wsFilterPaths(); return p ? [...p].sort().join('|') : '' })()
+        if (!reposCache || reposCache.sig !== wsSig || Date.now() - reposCacheAt > 30000) {
           const c = liveConfig(config ?? {})
           const normKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
           const seen = new Map() // normKey → 展示用 cwd（job 历史形态优先，knownRepos 补缺）
@@ -1840,8 +1846,12 @@ function installWebServer(ctx, service, extra = {}) {
             seen.set(k, dir)
             lastByCwd.set(dir, last ?? null)
           }
-          for (const j of service.list()) putCwd(j.cwd, j)
-          for (const dir of loadKnownRepos()) putCwd(dir, null)
+          // workspaceOnly（默认开）：总览只显示已添加工作区（含其子仓库）——knownRepos/job
+          // 历史里的 Temp 沙箱与任意路径目录不再出现；无清单时不过滤。
+          const wsPaths = wsFilterPaths()
+          const inWs = (dir) => !wsPaths || isExcluded(dir, wsPaths)
+          for (const j of service.list()) if (inWs(j.cwd)) putCwd(j.cwd, j)
+          for (const dir of loadKnownRepos()) if (inWs(dir)) putCwd(dir, null)
           const repos = []
           for (const cwd of seen.values()) {
             const last = lastByCwd.get(cwd)
@@ -1866,6 +1876,7 @@ function installWebServer(ctx, service, extra = {}) {
             }
           }
           reposCache = {
+            sig: wsSig,
             repos,
             scheduler: {
               enabled: c.autoUpdate,

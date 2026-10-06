@@ -621,6 +621,7 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     apply(wx.ctx, cfg2)
     const gen2 = wx.registered.get('codewiki_generate')
     const ep2 = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    const epRepos = wx.endpoints.find((e) => e.path === '/api/codewiki/repos')
 
     const rA = await gen2.execute({ cwd: wsRepo }, { agent: 'test-agent' })
     await waitJob(rA.cwd)
@@ -635,8 +636,17 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     check((await readJobs()).some((j) => j.cwd === wsRepo), '工作区内任务显示')
     check(!(await readJobs()).some((j) => j.cwd === outsideRepo), `工作区外任务被过滤（${outsideRepo}）`)
 
+    const readRepos = async () => {
+      const res = fakeRes()
+      await epRepos.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+      return JSON.parse(res.out).repos
+    }
+    check((await readRepos()).some((r) => r.cwd === wsRepo), '总览含工作区内仓库')
+    check(!(await readRepos()).some((r) => r.cwd === outsideRepo), '总览不含工作区外仓库（Temp 沙箱行消失）')
+
     cfg2.workspaceOnly = false
-    check((await readJobs()).some((j) => j.cwd === outsideRepo), 'workspaceOnly=false 后不过滤')
+    check((await readJobs()).some((j) => j.cwd === outsideRepo), 'workspaceOnly=false 后任务不过滤')
+    check((await readRepos()).some((r) => r.cwd === outsideRepo), 'workspaceOnly=false 后总览不过滤')
   } finally {
     delete cfg2.workspaceOnly
     mock.restore()
