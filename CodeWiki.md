@@ -4,58 +4,54 @@
 
 ## Overview
 
-把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（智能体编排编译）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享；0.2.3 对齐上游 wiki_path()，并修复 MSYS/Windows 路径误判与捆绑二进制过期分叉）。0.1.1 起不注册任何技能；编译子代理默认钉在 `aliyun-bailian/qwen3.8-flash`（路由插件 wiki 档）。0.2.0 起带插件页设置 UI（client.js），编译模型与运行选项可在插件管理页点进 CodeWiki 条目修改。0.3.0 起：写文章并发硬顶放宽到 8；写文章环节可改走阿里云百炼批量推理（Batch File，实时价 50%，仅文章环节——规划/横切/审校仍走智能体），默认关闭。
+把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`）接入 DeepSeek Harness：提供 `cw`（CLI 封装）与 `codewiki_generate`（编译入口）两个纯工具，wiki 落在仓库内 `<repo>/.codewiki/`（随仓库提交共享）。0.4.0 起**编译完全不走子代理**：`codewiki_generate` 是纯提交制（预构建任务 → 宿主常驻 JobService 即返回），五个环节（规划/写文章/横切/审校/索引收尾）全部经阿里云百炼批量推理（Batch File，实时价 50%），按 token 预算 28k（qwen3.7-flash ≤32k 输入低价档）分块装填，仅超预算单文件回退实时兑底。侧边栏面板（hindsight 式）轮询任务进度并支持取消。
 
 ## Key Components
 
 - `index.js` — 插件全部逻辑（单文件，Node ESM）
-  - `Config`（index.js:33）— schemastery 设置：enabled / binaryPath / defaultProvider+defaultModel（默认 `aliyun-bailian`+`qwen3.8-flash`）/ defaultReasoningEffort（0.2.6 起，默认空=跟随模型默认）/ maxConcurrency（0.3.0 起硬顶 8，默认 8）/ articleLanguage / updateReminder / 批量推理六项（0.3.0 起：batchEnabled 默认 false、batchAsync 默认 true=提交即返回由宿主后台收尾、batchApiKey、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考、batchWaitMinutes 默认 20），全部 `.volatile()`，execute 时 `val()` 解包热读取
-  - `installUpdateReminder`（index.js:1090）— 0.2.5 起：`agent/created` 时在 agent 作用域注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调每次组装求值——`updateReminder=false` 或会话仓库无 `.codewiki/` 时返回空（renderPrompt 丢弃空 section），否则注入 wiki 维护提醒（收尾 `codewiki_generate`/手工 cw 流程、learnings/decisions、wiki 与代码同提交）；agent 处置时 section 随作用域销毁。0.2.7 起：存量代理经 `ctx.inject(['agents'])` 枚举（cordis 里插件 ctx 上未声明 inject 的服务属性访问即抛——0.2.5 的 `ctx.agents?.list()` 直接访问曾致 apply 同步崩溃、fiber FAILED、工具被回滚＝「插件没装上」），服务缺失静默跳过
-  - `runCw`（index.js:102）— spawn cw 子进程，stdout/stderr/exitCode/超时（120s），响应 `exec.signal` abort（SIGKILL）
-  - `parseStatus`（index.js:133）— 上游三态输出解析：missing / uncompiled / clean / stale（`  M <file>` 变更行 + `  ! <article>` 过期文章行；Windows 反斜杠路径）
-  - `launchAgent`（index.js:169）/ `safeLaunch`（index.js:196）— 直用注入的 `subagents` 服务派发（`subagents.start('spawn', payload)`），route 存在时 `agentOptions` 只从 route 里真实存在的字段构建（provider+model 成对才设、reasoningEffort 有值才设——防止 effort-only route 用 `{provider:undefined}` 覆盖继承的父路由），`stopReason != completed` 记失败，`run.dispose()` 幂等收尾
-  - `runBatched`（index.js:205）— 按 maxConcurrency（0.3.0 起硬顶 8）分批并发派写文章子代理
-  - 批量推理模块（index.js:243 起，0.3.0）— `collectSources`（源码内联，800KB 单行预算，整文件粒度装填，超限回退智能体）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾、落盘、删断点）/ `runBatchTasks`（上传 /files → POST /batches 24h 窗口 → 1s 步进轮询 10s→30s 间隔；`background:true`（0.3.2）提交即返回 `{submitted, prepared}`；超时/中止保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次调用先续查收尾再派新任务）/ `resolveBatchApiKey`（index.js:421，0.3.1——batchApiKey 留空时经宿主凭据库取模型设置「阿里百炼云」渠道凭证）；默认关闭，取不到凭证才回退智能体子代理；batchAsync 开启时（0.3.2，默认开）execute 内 `backgroundFinalize` 闭包作为宿主后台链：不绑 exec.signal，等待批次终态（轮询 10s→60s，上限 24h）→ settleBatch 落盘 →（全量）派发「横切文章（批量后台）」与「审校（批量后台）」子代理 → cw index/meta update，结果走 console（`[dsh-codewiki]` 前缀）
-  - `cwToolDefinition`（index.js:624）— cw CLI 封装工具（子命令白名单）
-  - `generateToolDefinition`（index.js:749）— 编排主流程：status 判态（非零退出且无输出直接抛错）→ clean 直接报告（`scope=full` 不短路，强制全量）/ stale 逐篇更新（读 frontmatter source_files）→ 全量：规划 agent 出模块 JSON（`parsePlan` 容错解析，失败降级单 agent）→ 横切文章 → 审校 agent → `cw index` + `cw meta update`（仅当有文章写成功，失败不刷新基线可重试）
-  - `apply`（index.js:1123）— `ctx.inject(['tools','subagents'])` 一次注入，注册两工具
+  - `Config`（index.js:36）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取
+  - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过
+  - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）
+  - 批量推理模块 — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（实时兑底并发池，结果与批量同构）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（兑底单轮）
+  - `createJobService` — 宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调，下限 250ms）推进阶段机 plan→articles→crosscut→review→index→收尾 `cw index`+`meta update`；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（只剥 apiKey；多实例以脏标记防互相覆盖——persist 置脏、tick 末 flush、submit/cancel 先落盘再异步 tick）；批次未终态保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`，下次提交自动续查（resume job）；取消幂等（cancelRequested 跨 tick 存活，取消保留断点可续查）；`writeValidated` 校验 frontmatter 后直接写盘（keepInMemory 任务的唯一写盘点）
+  - `cwToolDefinition` — cw CLI 封装工具（子命令白名单）
+  - `generateToolDefinition` — 纯提交制：normalizeCwd → 凭证解析（无凭证诚实报错，不回退子代理）→ cw status 判态 → 孤儿断点并入（resume）→ 任务预构建（clean 短路 / stale 逐篇直达 articles / 全量走 plan）→ `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用
+  - webServer 端点 — `GET /api/codewiki/jobs`（任务列表，不含 apiKey）与 `POST /api/codewiki/control {action:'cancel',jobId}`，仅回环放行（403）
+  - `apply` — `ctx.inject(['tools','webServer','credentials'])` 注册两工具 + 端点；`agent/created` 布提醒
 - `vendor/codewiki/` — 上游源码（去 .git）；`bin/cw.exe` — cargo release 产物（git 跟踪）
-- `client.js` — 插件页设置卡片（浏览器半侧，0.2.0）
-  - 注册：`__ModuleLoader__.load({id:'@local/dsh-codewiki'})` → `apply` 里 `configForms.get('codewiki')` + `whileServed` 包 `slots.inject('plugins.item', …)`（order 30）
-  - `CodewikiCard`（client.js:165）— `view=summary` 一行简介（client.js:237）；`view=page` 完整表单：编译模型节（provider/model 级联下拉，`modelCatalog()` 失败退 Input）、运行节（enabled Switch / maxConcurrency 校验 1–8 / articleLanguage / binaryPath）、批量推理节（0.3.0 起：batchEnabled Switch / batchAsync Switch（0.3.2，默认开）/ batchApiKey / batchModel / batchThinkingBudget 0–32768 / batchWaitMinutes）、保存条（`form.mutate` 单层 op + revision CAS，client.js:279；脏检测/放弃/冲突提示）
-  - 快照订阅：`form.getSnapshot()` + `form.subscribe`，仅 `revision` 变化才覆盖草稿（宿主保存回收读不冲掉本地编辑）
+- `client.js` — 插件页设置卡片 + 侧边栏面板（浏览器半侧）
+  - 注册：`__ModuleLoader__.load({id:'@local/dsh-codewiki'})` → `plugins.item`（order 30，设置表单）+ `main`/`sidebar.panellist` 双 slot（key/id='codewiki'，order 52，任务面板）
+  - `CodewikiCard` — 快照订阅（revision 变更才覆盖草稿）；表单：运行节（enabled/updateReminder/maxConcurrency/articleLanguage/binaryPath）+ 批量节（batchApiKey/batchModel/batchThinkingBudget）；保存条 `form.mutate` 单层 op + revision CAS
+  - `CodewikiPanel` — 2s 轮询 `GET /api/codewiki/jobs`，任务卡（仓库名/类型/阶段/已写篇数/notes/wiki 路径），活动任务可取消（POST control）；`PanelIcon` 内联 SVG
 - `cordis.patch.yml` — bundle 形式挂载补丁；本地开发走 profile patch 的 file:/// 直挂（id `codewiki`）
 - `package.json` — `exports["./client"]` + `dsh.client.platform:"web"` 让宿主扫描器沿 file:/// 条目发现客户端模块（改 dsh.client 后需重启）
 
 ## Architecture
 
 ```text
-模型调用 codewiki_generate(cwd, scope, provider?, model?)
-        │
+模型调用 codewiki_generate(cwd, scope)          （纯提交，零 LLM 调用）
+        │ 任务预构建（判态/断点续查/分块装填）
         ▼
-  cw status 判态 ──clean──► 直接报告
-        │ stale/missing/uncompiled
+  JobService.submit ──► {submitted, jobId, stage}  立即返回
+        │（宿主后台，tick 10s）
         ▼
-  规划 agent（JSON 模块计划；失败降级单 agent 全量）
-        │
-        ▼
-  写文章 ×N（runBatched 并发≤8，或 0.3.0 起可改走百炼批量推理；默认 qwen3.8-flash）
-        │
-        ▼
-  横切 agent（_architecture/_patterns/concepts）→ 审校 agent
+  plan ──► articles ──► crosscut ──► review ──► index
+  （全部百炼批量推理：JSONL 上传→轮询→结果落盘/回写；超预算单文件实时兑底）
         │
         ▼
   cw index + cw meta update（有成功文章才刷新基线）
+
+侧边栏面板 ──2s 轮询──► GET /api/codewiki/jobs ──取消──► POST /api/codewiki/control
 ```
 
 ## Data Flow
 
-配置流：profile patch `config:` → cordis 注入 apply(ctx, config) → liveConfig 每次调用解包（volatile 热生效）。模型流：调用参数 provider+model > 插件默认（aliyun-bailian/qwen3.8-flash，0.1.1 起内建）> 两项默认显式置空才继承会话模型。思考程度流（0.2.6 起）：调用参数 reasoningEffort > 插件默认 defaultReasoningEffort > 空（跟随所选模型默认；核心在 route 变更且未显式给 effort 时会丢弃父 effort）。设置页「思考程度」下拉来自 `modelCatalog()` 对当前 provider+model 广播的 `reasoning.efforts`（adapter 自有不透明值，不硬编码枚举），无档位时退文本输入。
+配置流：profile patch `config:` → cordis 注入 apply(ctx, config) → liveConfig 每次调用解包（volatile 热生效）。凭证流：显式 batchApiKey > 宿主凭据库 `resolve('ALIYUN_BAILIAN_API_KEY')`（模型设置「阿里百炼云」渠道）。任务流：execute 预构建（含 token 预算分块）→ jobs.json 持久化 → 服务 tick 消费 → 批次断点（未终态保留，跨会话续查）→ 文章落盘 + 校对回写 → cw index/meta update。面板流：浏览器 2s 轮询 jobs 端点（回环 only）。
 
 ## Connections
 
-- [[dsh-subagent-auto-router]] — wiki 档路由与本插件默认模型同档；子代理经同一 `subagents` 服务派发
 - [[codewiki-upstream]] — vendor/codewiki（MIT）；布局 `<repo>/.codewiki/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`（随仓库提交共享）；上游技能正文仅存于 `vendor/codewiki/skills/`，插件不再注册技能
+- 阿里云百炼批量推理 — 北京地域独立计费项，实时价 50%；模型须用别名（快照版不支持批量）；`qwen3.7-flash` 输入 ≤32k 档 $0.03/M（批量再 5 折），故 BATCH_TOKEN_BUDGET=28000
 
 ## Known Issues
 
@@ -63,4 +59,4 @@
 - `@deepseek-ai/schemastery` 靠插件本地 junction（→ `/e/software/deepseek-harness/vendor/schemastery`）；换机器需重建（`node -e "fs.symlinkSync(target,path,'junction')"`）。
 - 上游 `cw` 无 `--version`；`cw path` 在未 init 的仓库退回插件侧 fallback（`<cwd>/.codewiki`，0.2.3 起与 wiki_path() 一致）。
 - 上游 stale 文章路径输出为反斜杠（`modules\app.md`），插件消费侧已归一为 `/`。
-- 设置页模型下拉依赖浏览器端 `modelCatalog()`；目录不可用时是文本输入兜底，不阻塞保存。
+- 批量推理仅北京地域、独立计费项、不支持缓存/免费额度；断点最长 24h（百炼批次窗口），过期作废。

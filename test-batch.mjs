@@ -1,9 +1,14 @@
-// test-batch.mjs — 批量推理模块自检：纯函数（JSONL 构建/结果解析/源码装填）+ mock fetch 全流程
+// test-batch.mjs — 批量推理流水线自检：纯函数（JSONL 构建/结果解析/源码装填/token 估算/
+// 任务装配/本地规划/横切装填/仓库勘探）+ mock fetch（提交/收尾/实时兜底）全流程
 // 跑法：node test-batch.mjs（Node ≥20，全局 fetch/FormData/Blob）
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { buildBatchJsonl, parseBatchResults, collectSources, runBatchTasks, settleBatch, resolveBatchApiKey } from './index.js'
+import {
+  buildBatchJsonl, parseBatchResults, collectSources, estimateTokens,
+  prepareArticleTasks, submitBatch, settleBatch, runRealtimeTasks,
+  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey,
+} from './index.js'
 
 let passed = 0
 const failures = []
@@ -13,7 +18,14 @@ function check(cond, msg) {
 }
 function section(name) { console.log(`\n== ${name} ==`) }
 
-// ---------- 1. buildBatchJsonl ----------
+// ---------- 1. estimateTokens ----------
+section('estimateTokens：CJK 与 ASCII 粗算')
+check(estimateTokens('中文') === 2, 'CJK 每字 1 token')
+check(estimateTokens('abcdefghij') === 3, 'ASCII 10 字符 → ceil(10/3.5)=3')
+check(estimateTokens('') === 0, '空串为 0')
+check(estimateTokens('中文abcdef') === 4, '混合计费（2 CJK + ceil(5/3.5)=2）')
+
+// ---------- 2. buildBatchJsonl ----------
 section('buildBatchJsonl：思考参数位置与取值')
 const tasks = [
   { customId: 't0', batchPrompt: 'PROMPT-A' },
@@ -33,7 +45,7 @@ const on0 = JSON.parse(buildBatchJsonl([{ customId: 'x', batchPrompt: 'P' }], { 
 check(on0.body.enable_thinking === true && on0.body.thinking_budget === 1024, 'budget=1024 → enable_thinking:true + thinking_budget:1024（body 顶层）')
 check(!JSON.stringify(on0.body.messages).includes('thinking'), '思考参数不进 messages')
 
-// ---------- 2. parseBatchResults ----------
+// ---------- 3. parseBatchResults ----------
 section('parseBatchResults：结果行/错误行/坏行')
 const output = [
   JSON.stringify({ custom_id: 'a', response: { status_code: 200, body: { choices: [{ message: { content: '# 文章A' } }] } } }),
@@ -47,8 +59,8 @@ check(parsed.get('b')?.ok === false && parsed.get('b').error.includes('400'), '�
 check(parsed.get('c')?.ok === false && parsed.get('c').error === 'quota exceeded', '错误文件行 → 失败 + message')
 check(parsed.size === 3, '坏行跳过不占位（size=3）')
 
-// ---------- 3. collectSources ----------
-section('collectSources：装填/缺失/预算')
+// ---------- 4. collectSources（token 预算） ----------
+section('collectSources：装填/缺失/token 预算')
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-test-'))
 fs.writeFileSync(path.join(tmpRoot, 'a.ts'), 'export const A = 1\n')
 fs.writeFileSync(path.join(tmpRoot, 'b.ts'), 'export const B = 2\n')
@@ -57,14 +69,40 @@ check(cs.text.includes('### a.ts') && cs.text.includes('export const A = 1'), '�
 check(cs.text.includes('missing.ts') && cs.text.includes('文件不存在'), '缺失文件在文内标注')
 check(cs.skipped.length === 0 && cs.oversized === false, '预算充足时无跳过')
 const tiny = collectSources(tmpRoot, ['a.ts', 'b.ts'], 10)
-check(tiny.oversized === true, '首文件即超预算 → oversized（整任务回退）')
+check(tiny.oversized === true && tiny.text.includes('export const A = 1'), '首文件即超预算 → oversized（原文返回转实时兜底）')
 const firstBlock = '### a.ts\n\n```\nexport const A = 1\n```\n\n'
-const small = collectSources(tmpRoot, ['a.ts', 'b.ts'], Buffer.byteLength(firstBlock, 'utf8') + 1)
+const small = collectSources(tmpRoot, ['a.ts', 'b.ts'], estimateTokens(firstBlock) + 1)
 check(small.oversized === false && small.skipped.includes('b.ts'), '预算装不下第二文件 → skipped')
 
-// ---------- 4. runBatchTasks：mock fetch 提交→轮询→收尾 ----------
-section('runBatchTasks：mock fetch 全流程')
-let batchPolls = 0
+// ---------- 5. prepareArticleTasks ----------
+section('prepareArticleTasks：prompt 装配与 oversized 拆分')
+const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-work-'))
+fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
+fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(300 * 1024))
+const outDir = path.join(workRoot, 'wiki', 'modules')
+const plainTasks = ['t0', 't1', 't2'].map((_id, i) => ({
+  name: `modules/m${i}.md`,
+  mission: `任务t${i}`,
+  sources: ['src.ts'],
+  articlePath: path.join(outDir, `m${i}.md`),
+}))
+const prep = prepareArticleTasks(plainTasks, { cwd: workRoot, language: '中文' })
+check(prep.prepared.length === 3 && prep.oversized.length === 0, '普通任务全部进 prepared')
+check(prep.prepared[0].customId === 't0' && prep.prepared[2].customId === 't2', 'customId 按序分配')
+check(prep.prepared[0].batchPrompt.includes('任务t0') && prep.prepared[0].batchPrompt.includes('中文'), 'prompt 含 mission 与语言')
+check(prep.prepared[0].batchPrompt.includes('export const S = 3'), 'prompt 内联源码')
+check(prep.prepared[0].batchPrompt.trimStart().startsWith('你') || prep.prepared[0].batchPrompt.includes('frontmatter'), 'prompt 含 frontmatter 规范')
+const prevPath = path.join(outDir, 'm0.md')
+fs.mkdirSync(outDir, { recursive: true })
+fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
+const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
+check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
+const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
+check(bigPrep.prepared.length === 0 && bigPrep.oversized.length === 1, '单文件超 token 预算 → oversized（转实时兜底）')
+check(typeof bigPrep.oversized[0].batchPrompt === 'string' && bigPrep.oversized[0].batchPrompt.length > 0, 'oversized 任务同样带 batchPrompt')
+
+// ---------- 6. submitBatch：mock fetch 提交 + 断点 ----------
+section('submitBatch：mock fetch 提交与断点落盘')
 let uploadedJsonl = ''
 const mockJson = (obj, status = 200) => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(obj) })
 const originalFetch = globalThis.fetch
@@ -79,14 +117,32 @@ globalThis.fetch = async (url, init = {}) => {
     check(body.input_file_id === 'file-1' && body.endpoint === '/v1/chat/completions' && body.completion_window === '24h', '批次创建参数（input_file_id/endpoint/completion_window）')
     return mockJson({ id: 'batch-1', status: 'validating' })
   }
+  throw new Error(`mock fetch 未路由：${u}`)
+}
+const stateFile = path.join(workRoot, 'state.json')
+const notes = []
+const batchId = await submitBatch(prep.prepared, {
+  apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, stateFile, notes,
+})
+check(batchId === 'batch-1', '返回批次 id')
+check(uploadedJsonl.trim().split('\n').length === 3, '上传 JSONL 3 行（3 任务）')
+check(JSON.parse(uploadedJsonl.trim().split('\n')[0]).body.enable_thinking === false, '上传 JSONL 思考参数按预算生成')
+const bp1 = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+check(bp1.batchId === 'batch-1' && bp1.tasks.length === 3, '断点含 batchId 与任务清单')
+check(bp1.tasks[0].customId === 't0' && bp1.tasks[0].articlePath.endsWith('m0.md') && bp1.tasks[0].keepInMemory === false, '断点任务含 customId/articlePath/keepInMemory')
+check(notes.some((n) => n.includes('batch-1')), 'notes 记录批次 id')
+
+// ---------- 7. settleBatch：收尾落盘 ----------
+section('settleBatch：批次完成 → 解析 → 落盘 → 清断点')
+globalThis.fetch = async (url) => {
+  const u = String(url)
   if (u.includes('/batches/batch-1')) {
-    batchPolls += 1
-    return batchPolls < 2 ? mockJson({ id: 'batch-1', status: 'in_progress' }) : mockJson({ id: 'batch-1', status: 'completed', output_file_id: 'out-1', error_file_id: 'err-1' })
+    return mockJson({ id: 'batch-1', status: 'completed', output_file_id: 'out-1', error_file_id: 'err-1' })
   }
   if (u.includes('/files/out-1/content')) {
     return { ok: true, status: 200, text: async () => [
       JSON.stringify({ custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: '---\ntitle: A\n---\n文章A' } }] } } }),
-      JSON.stringify({ custom_id: 't1', response: { status_code: 200, body: { choices: [{ message: { content: '文章B' } }] } } }),
+      JSON.stringify({ custom_id: 't1', response: { status_code: 200, body: { choices: [{ message: { content: '---\ntitle: B\n---\n文章B' } }] } } }),
       JSON.stringify({ custom_id: 't2', response: { status_code: 500, body: {} } }),
     ].join('\n') }
   }
@@ -95,143 +151,130 @@ globalThis.fetch = async (url, init = {}) => {
   }
   throw new Error(`mock fetch 未路由：${u}`)
 }
-
-const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-work-'))
-fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
-const outDir = path.join(workRoot, 'wiki', 'modules')
-const stateFile = path.join(workRoot, 'state.json')
-const exec = {}
-const notes = []
-const batchTasks = ['t0', 't1', 't2'].map((_id, i) => ({
-  name: `modules/m${i}.md`,
-  mission: `任务t${i}`,
-  sources: ['src.ts'],
-  articlePath: path.join(outDir, `m${i}.md`),
-}))
-const batchRes = await runBatchTasks({
-  exec,
-  batchCfg: { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0 },
-  tasks: batchTasks,
-  cwd: workRoot,
-  language: '中文',
-  waitMs: 60000,
-  stateFile,
-  notes,
-})
-check(uploadedJsonl.trim().split('\n').length === 3, '上传 JSONL 3 行（3 任务）')
-check(batchRes.results.length === 3 && batchRes.oversized.length === 0, '返回 3 条结果、无 oversized')
-check(batchRes.results[0].ok && batchRes.results[1].ok, 't0/t1 成功')
-check(batchRes.results[2].ok === false && notes.some((n) => n.includes('internal error')), 't2 失败且 notes 记行级错误')
+const settleNotes = []
+const settled = await settleBatch({ batchId: 'batch-1', tasks: bp1.tasks, apiKey: 'sk-test', stateFile, notes: settleNotes })
+check(Array.isArray(settled) && settled.length === 3, '收尾返回 3 条结果')
+check(settled[0].ok && settled[1].ok && !settled[2].ok, 't0/t1 成功、t2 失败')
+check(settleNotes.some((n) => n.includes('internal error')), 'notes 记行级错误')
 check(fs.readFileSync(path.join(outDir, 'm0.md'), 'utf8').includes('文章A'), '成功文章已落盘 m0.md')
 check(fs.readFileSync(path.join(outDir, 'm1.md'), 'utf8').includes('文章B'), '成功文章已落盘 m1.md')
 check(!fs.existsSync(path.join(outDir, 'm2.md')), '失败文章不落盘')
 check(!fs.existsSync(stateFile), '收尾后断点文件已删除')
-check(JSON.parse(uploadedJsonl.trim().split('\n')[0]).body.enable_thinking === false, '上传 JSONL 思考参数按预算生成')
 
-// ---------- 4b. background 模式：提交即返回 ----------
-section('runBatchTasks：background 提交即返回（轮询交宿主后台链）')
-{
-  const bgState = path.join(workRoot, 'state-bg.json')
-  const bgNotes = []
-  const bgCalls = []
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (url, init) => {
-    const u = String(url)
-    bgCalls.push(u)
-    if (u.endsWith('/files')) return new Response(JSON.stringify({ id: 'file-bg-1' }), { status: 200 })
-    if (u.endsWith('/batches')) return new Response(JSON.stringify({ id: 'batch-bg-1' }), { status: 200 })
-    return new Response('{}', { status: 404 })
+// ---------- 8. keepInMemory 任务：不落盘，content 进结果 ----------
+section('settleBatch：keepInMemory 结果留在内存')
+const kmState = path.join(workRoot, 'state-km.json')
+globalThis.fetch = async (url, init = {}) => {
+  const u = String(url)
+  if (u.endsWith('/files') && init.method === 'POST') return mockJson({ id: 'file-km' })
+  if (u.endsWith('/batches') && init.method === 'POST') return mockJson({ id: 'batch-km', status: 'validating' })
+  if (u.includes('/batches/batch-km')) return mockJson({ id: 'batch-km', status: 'completed', output_file_id: 'out-km' })
+  if (u.includes('/files/out-km/content')) {
+    return { ok: true, status: 200, text: async () => JSON.stringify({ custom_id: 'plan', response: { status_code: 200, body: { choices: [{ message: { content: '{"project":"x","modules":[],"concepts":[]}' } }] } } }) }
   }
-  try {
-    const bgRes = await runBatchTasks({
-      exec,
-      batchCfg: { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0 },
-      tasks: batchTasks.map((t) => ({ ...t, articlePath: path.join(outDir, `bg-${t.name}`) })),
-      cwd: workRoot,
-      language: '中文',
-      waitMs: 60000,
-      stateFile: bgState,
-      notes: bgNotes,
-      background: true,
-    })
-    check(bgRes.submitted === 'batch-bg-1' && Array.isArray(bgRes.prepared) && bgRes.prepared.length === 3, '提交后立即返回 submitted 批次 id 与 prepared 任务集')
-    check(bgRes.prepared.every((t) => t.customId && typeof t.batchPrompt === 'string' && t.batchPrompt.length > 0), 'prepared 任务带 customId 与 batchPrompt（供后台 settleBatch 收尾）')
-    check(bgCalls.length === 2 && bgCalls.some((u) => u.endsWith('/files')) && bgCalls.some((u) => u.endsWith('/batches')), `提交后不再轮询（fetch 共 ${bgCalls.length} 次：/files 与 /batches）`)
-    check(fs.existsSync(bgState) && JSON.parse(fs.readFileSync(bgState, 'utf8')).batchId === 'batch-bg-1', '断点已写入（后台链据此收尾）')
-    check(bgNotes.some((n) => n.includes('batch-bg-1')), 'notes 记录批次 id')
-    fs.rmSync(bgState, { force: true })
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+  throw new Error(`mock fetch 未路由：${u}`)
 }
+const kmTask = [{ customId: 'plan', name: '_plan', keepInMemory: true, batchPrompt: '规划' }]
+const kmId = await submitBatch(kmTask, { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, stateFile: kmState, notes: [] })
+const kmRes = await settleBatch({ batchId: kmId, tasks: kmTask, apiKey: 'sk-test', stateFile: kmState, notes: [] })
+check(kmRes.length === 1 && kmRes[0].ok && kmRes[0].content.includes('"modules"'), 'keepInMemory 结果带 content')
+check(!fs.existsSync(path.join(workRoot, '_plan')), 'keepInMemory 不落盘（规划结果由服务侧消费）')
+check(!fs.existsSync(kmState), 'keepInMemory 收尾同样清断点')
 
-// ---------- 5. 超预算任务回退 ----------
-section('runBatchTasks：超预算任务 oversized 回退')
-fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(900 * 1024))
-const bigRes = await runBatchTasks({
-  exec,
-  batchCfg: { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0 },
-  tasks: [{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }],
-  cwd: workRoot,
-  language: '中文',
-  waitMs: 60000,
-  stateFile,
-  notes,
-})
-check(bigRes.results.length === 0 && bigRes.oversized.length === 1, '全 oversized → 不提交批次，回退列表返回')
+// ---------- 9. runRealtimeTasks：oversized 实时兜底 ----------
+section('runRealtimeTasks：并发池 + 失败记账')
+globalThis.fetch = async (url, init = {}) => {
+  const u = String(url)
+  if (u.endsWith('/chat/completions')) {
+    const body = JSON.parse(init.body)
+    if (body.model !== 'qwen3.7-flash') throw new Error('model 透传缺失')
+    const prompt = body.messages[0].content
+    if (prompt.includes('boom')) throw new Error('simulated network error')
+    return mockJson({ choices: [{ message: { content: prompt.includes('km') ? '内存结果' : '---\ntitle: R\n---\n实时结果' } }] })
+  }
+  throw new Error(`mock fetch 未路由：${u}`)
+}
+const rtNotes = []
+const rtDisk = path.join(outDir, 'rt.md')
+const rtTasks = [
+  { customId: 'rt0', name: 'modules/rt.md', articlePath: rtDisk, batchPrompt: '写文章' },
+  { customId: 'rt1', name: '_mem', keepInMemory: true, batchPrompt: 'km 任务' },
+  { customId: 'rt2', name: 'modules/boom.md', articlePath: path.join(outDir, 'boom.md'), batchPrompt: 'boom 任务' },
+]
+const rt = await runRealtimeTasks(rtTasks, { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, concurrency: 2, notes: rtNotes })
+check(rt.size === 3, '实时兜底返回 3 条结果（Map）')
+check(rt.get('rt0').ok && fs.readFileSync(rtDisk, 'utf8').includes('实时结果'), '磁盘任务落盘成功')
+check(rt.get('rt1').ok && rt.get('rt1').content === '内存结果', 'keepInMemory 结果带 content')
+check(rt.get('rt2').ok === false && rtNotes.some((n) => n.includes('simulated network error')), '失败记账进 notes，不中断其他任务')
+check(!fs.existsSync(path.join(outDir, 'boom.md')), '失败任务不落盘')
 
-// ---------- 6. 超时保留断点 ----------
-section('runBatchTasks：超时保留断点')
+// ---------- 10. 断点续查收尾（孤儿批次） ----------
+section('settleBatch：断点续查收尾')
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url)
   if (u.endsWith('/files') && init.method === 'POST') return mockJson({ id: 'file-2' })
   if (u.endsWith('/batches') && init.method === 'POST') return mockJson({ id: 'batch-2', status: 'validating' })
-  if (u.includes('/batches/batch-2')) return mockJson({ id: 'batch-2', status: 'in_progress' })
-  throw new Error(`mock fetch 未路由：${u}`)
-}
-let timeoutErr = null
-try {
-  await runBatchTasks({
-    exec,
-    batchCfg: { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0 },
-    tasks: [{ name: 'modules/slow.md', mission: '慢任务', sources: ['src.ts'], articlePath: path.join(outDir, 'slow.md') }],
-    cwd: workRoot,
-    language: '中文',
-    waitMs: 300,
-    stateFile,
-    notes,
-  })
-} catch (err) { timeoutErr = err }
-check(timeoutErr && String(timeoutErr.message).includes('batch-2') && String(timeoutErr.message).includes('断点'), '超时抛错并提示断点保留')
-check(fs.existsSync(stateFile), '断点文件保留')
-const bp = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-check(bp.batchId === 'batch-2' && bp.tasks.length === 1 && bp.tasks[0].articlePath.endsWith('slow.md'), '断点内容含 batchId 与任务清单')
-
-// ---------- 7. 断点续查收尾 ----------
-section('settleBatch：断点续查收尾')
-globalThis.fetch = async (url) => {
-  const u = String(url)
   if (u.includes('/batches/batch-2')) return mockJson({ id: 'batch-2', status: 'completed', output_file_id: 'out-2' })
   if (u.includes('/files/out-2/content')) {
-    return { ok: true, status: 200, text: async () => JSON.stringify({ custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: '慢任务完成' } }] } } }) }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: '---\ntitle: S\n---\n慢任务完成' } }] } } }) }
   }
   throw new Error(`mock fetch 未路由：${u}`)
 }
-const settleNotes = []
-const settled = await settleBatch({
-  batchId: 'batch-2',
-  tasks: bp.tasks.map((t) => ({ ...t })),
-  apiKey: 'sk-test',
-  stateFile,
-  notes: settleNotes,
-})
-check(Array.isArray(settled) && settled.length === 1 && settled[0].ok, '续查收尾返回成功结果')
+const slowTasks = prepareArticleTasks([{ name: 'modules/slow.md', mission: '慢任务', sources: ['src.ts'], articlePath: path.join(outDir, 'slow.md') }], { cwd: workRoot, language: '中文' })
+const slowId = await submitBatch(slowTasks.prepared, { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, stateFile, notes: [] })
+check(slowId === 'batch-2' && fs.existsSync(stateFile), '提交后断点保留（收尾前任意时刻可续查）')
+const bp = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+const resumed = await settleBatch({ batchId: bp.batchId, tasks: bp.tasks.map((t) => ({ ...t })), apiKey: 'sk-test', stateFile, notes: [] })
+check(Array.isArray(resumed) && resumed.length === 1 && resumed[0].ok, '续查收尾返回成功结果')
 check(fs.readFileSync(path.join(outDir, 'slow.md'), 'utf8').includes('慢任务完成'), '续查文章落盘 slow.md')
 check(!fs.existsSync(stateFile), '续查收尾后断点文件删除')
+
+// ---------- 11. 本地规划兜底 ----------
+section('localPlan：顶层目录分组')
+const lp = localPlan([
+  { path: 'src/a.ts', bytes: 10 },
+  { path: 'src/b.ts', bytes: 10 },
+  { path: 'README.md', bytes: 10 },
+  { path: 'docs/guide/c1.md', bytes: 10 },
+])
+check(lp.modules.length === 3, '按顶层目录分组（src/root/docs）')
+check(lp.modules.find((m) => m.name === 'src')?.files.length === 2, 'src 组收 2 个文件')
+check(lp.modules.find((m) => m.name === 'root')?.files.includes('README.md'), '根文件归 root 组')
+check(lp.concepts.length === 0, '兜底规划不造概念')
+
+// ---------- 12. packArticles：横切输入装填 ----------
+section('packArticles：整篇装填与头部截断')
+const longText = `---\ntitle: X\n---\n\n## Overview\n\n${'概'.repeat(200)}\n\n## Key Components\n\n${'件'.repeat(200)}`
+const packed = packArticles([
+  { name: 'a.md', text: '短文一' },
+  { name: 'b.md', text: longText },
+], 250)
+check(packed.includes('#### a.md') && packed.includes('短文一'), '预算内首篇整篇装填')
+check(packed.includes('仅头部') && !packed.includes('## Key Components'), '后续超预算文章只装头部并标注')
+check(packed.includes('## Overview'), '头部含 frontmatter 与 Overview')
+const packedFit = packArticles([{ name: 'a.md', text: '短文' }], 100)
+check(packedFit.includes('#### a.md') && packedFit.includes('短文'), '预算内整篇装填')
+
+// ---------- 13. scanRepoFiles：勘探黑名单 ----------
+section('scanRepoFiles：黑名单/后缀/大小上限')
+const scanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-scan-'))
+fs.mkdirSync(path.join(scanRoot, 'src'))
+fs.mkdirSync(path.join(scanRoot, 'node_modules'))
+fs.mkdirSync(path.join(scanRoot, '.git'))
+fs.writeFileSync(path.join(scanRoot, 'src', 'good.ts'), 'export const G = 1\n')
+fs.writeFileSync(path.join(scanRoot, 'node_modules', 'dep.ts'), 'export const D = 1\n')
+fs.writeFileSync(path.join(scanRoot, '.git', 'config'), 'gitconfig')
+fs.writeFileSync(path.join(scanRoot, 'logo.png'), 'binary')
+fs.writeFileSync(path.join(scanRoot, 'huge.ts'), 'x'.repeat(300 * 1024))
+fs.writeFileSync(path.join(scanRoot, 'empty.ts'), '')
+const scanned = scanRepoFiles(scanRoot)
+check(scanned.length === 1 && scanned[0].path === 'src/good.ts', '只收有效源码（跳过 node_modules/.git/二进制/超大/空文件）')
+check(scanned[0].bytes === 'export const G = 1\n'.length, 'bytes 为文件大小')
 
 globalThis.fetch = originalFetch
 fs.rmSync(tmpRoot, { recursive: true, force: true })
 fs.rmSync(workRoot, { recursive: true, force: true })
+fs.rmSync(scanRoot, { recursive: true, force: true })
 
 // ---- resolveBatchApiKey：凭证解析链（显式配置 > 宿主凭据库）----
 console.log('\n== resolveBatchApiKey ==')

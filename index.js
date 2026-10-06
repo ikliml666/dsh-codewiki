@@ -1,8 +1,10 @@
 // dsh-codewiki — 把 mraza007/codewiki（Rust CLI `cw`）接入 DeepSeek Harness。
 // 提供两个工具：
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
-//   codewiki_generate — 智能体编排：按上游 codewiki-session 流程编译/刷新 wiki，
-//                       可显式指定子代理模型（provider+model 成对出现才生效，否则用插件默认，再退会话模型）与思考程度 reasoningEffort。
+//   codewiki_generate — 服务化编译：判态后把编译任务提交给宿主常驻服务（侧边栏 CodeWiki 面板可见），
+//                       服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进，全部环节走百炼批量推理
+//                       （任务输入压在 ≤32k token 低价档，Batch 再打 5 折），零子代理；
+//                       超预算任务用同一凭证的同步 chat/completions 实时兜底。
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -15,7 +17,8 @@ const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
 export const name = PLUGIN_NAME
 const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', 'setup', 'uninstall']
-const CONCURRENCY_HARD_CAP = 8 // 子代理并发硬顶（0.3.0 起，原红线 2 经用户要求放宽）
+// 实时兜底（同步 chat/completions）并发硬顶；批量推理本身由百炼服务端并行，不受此限
+const CONCURRENCY_HARD_CAP = 8
 
 // Windows/Git-Bash 兼容：MSYS 盘符路径（/e/...）Node 的 fs 不认，归一化为 E:/...。
 // 仅 win32 转换——POSIX 上 /e/... 可能是真实绝对路径，原样保留；识别不了的写法也原样交给 existsSync 报错。
@@ -33,16 +36,10 @@ function normalizeCwd(input) {
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
-  defaultProvider: z.string().default('aliyun-bailian').volatile().description('codewiki_generate 子代理默认 provider；与默认 model 成对出现才生效；置空则继承会话模型'),
-  defaultModel: z.string().default('qwen3.8-flash').volatile().description('codewiki_generate 子代理默认 model；默认钉在路由插件 wiki 档的便宜模型'),
-  defaultReasoningEffort: z.string().default('').volatile().description('codewiki_generate 子代理默认思考程度（reasoningEffort，adapter 自有值，如 off/low/high/max）；留空跟随所选模型默认'),
-  maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('写文章子代理并发上限，硬顶 8'),
-  batchEnabled: z.boolean().default(false).volatile().description('写文章改走阿里云百炼批量推理（Batch File，实时价的 50%）；规划/横切/审校仍走智能体子代理'),
-  batchAsync: z.boolean().default(true).volatile().description('批量提交后本调用立即返回，由宿主后台任务等待批次并收尾（落盘→横切→审校→index）；关闭则就地等待至多 batchWaitMinutes 分钟'),
-  batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证，取不到才回退智能体子代理'),
-  batchModel: z.string().default('qwen3.7-flash').volatile().description('批量推理模型；仅华北2（北京）支持，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）'),
+  batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（批量推理与实时兜底共用）；仅华北2（北京）支持批量，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）'),
+  batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证'),
   batchThinkingBudget: z.number().default(0).volatile().description('批量推理思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
-  batchWaitMinutes: z.number().default(20).volatile().description('批量任务就地轮询等待时长（分钟）；超时保留断点，下次调用自动续查收尾'),
+  maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('实时兜底请求并发上限（超预算任务走同步调用时生效），硬顶 8'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
 })
@@ -57,20 +54,12 @@ function liveConfig(config) {
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
-    defaultProvider: String(val(c.defaultProvider) ?? '').trim(),
-    defaultModel: String(val(c.defaultModel) ?? '').trim(),
-    defaultReasoningEffort: String(val(c.defaultReasoningEffort) ?? '').trim(),
+    batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
+    batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
+    batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
-    batchEnabled: val(c.batchEnabled) === true,
-    batchAsync: val(c.batchAsync) !== false,
-    batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
-    batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
-    batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
-    batchWaitMinutes: Number.isFinite(Number(val(c.batchWaitMinutes))) && Number(val(c.batchWaitMinutes)) > 0
-      ? Math.min(Number(val(c.batchWaitMinutes)), 1440)
-      : 20,
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
   }
 }
@@ -148,90 +137,87 @@ function parseStatus(stdout) {
 }
 
 // ---------------------------------------------------------------------------
-// 子代理
+// Token 预算与实时兜底
 // ---------------------------------------------------------------------------
 
-function textOfOutput(output) {
-  return (Array.isArray(output) ? output : [])
-    .filter((b) => b?.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('')
-}
-
-// 从父代理解析当前会话路由（鸭子类型，缺属性/异常一律 undefined）——继承场景的 label 标注用
-function parentRouteOf(agent) {
-  try {
-    const cfg = agent?.session?.requestHeader?.()?.config
-    if (cfg?.provider && cfg?.model) return { provider: cfg.provider, model: cfg.model }
-    if (agent?.options?.provider && agent?.options?.model) return { provider: agent.options.provider, model: agent.options.model }
-  } catch { /* requestHeader 未必存在 */ }
-  return undefined
-}
-
-async function launchAgent(subagents, exec, { label, prompt, route }) {
-  // ponytail: 模型只进活动行 label 前缀（model-only，provider 同名场景靠结果 notes 的全称汇总兜底）
-  const parent = parentRouteOf(exec?.agent)
-  const shownModel = route?.provider && route?.model ? route.model : parent?.model
-  const payload = { label: shownModel ? `[${shownModel}] ${label}` : label, prompt: [{ type: 'text', text: prompt }], parent: exec.agent, signal: exec.signal }
-  if (route) {
-    // 只带 route 里真实存在的字段——provider/model 不成对时不覆盖继承的父路由
-    const agentOptions = {}
-    if (route.provider && route.model) { agentOptions.provider = route.provider; agentOptions.model = route.model }
-    if (route.reasoningEffort) agentOptions.reasoningEffort = route.reasoningEffort
-    if (Object.keys(agentOptions).length) payload.agentOptions = agentOptions
+// 粗算 token 数：CJK 字符 ≈ 1 token/字，其余（ASCII 代码为主）≈ 3.5 字符/token。
+// 只为把批量单请求输入压进 qwen3.7-flash ≤32k 输入低价档（约 $0.03/M，批量再 5 折；
+// 32k-256k 档 $0.10/M 贵 3 倍多），不需要精确分词器。
+export function estimateTokens(text) {
+  const s = String(text ?? '')
+  let cjk = 0
+  for (const ch of s) {
+    const c = ch.codePointAt(0)
+    if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3000 && c <= 0x303f) || (c >= 0xff00 && c <= 0xffef)) cjk++
   }
-  const run = await subagents.start('spawn', payload)
-  try {
-    const result = await run.result
-    return {
-      ok: result?.stopReason === 'completed',
-      stopReason: result?.stopReason ?? 'unknown',
-      text: textOfOutput(result?.output),
-      diagnostic: result?.diagnostic,
-    }
-  } finally {
-    try { await run.dispose() } catch { /* dispose 幂等 */ }
-  }
+  return cjk + Math.ceil((s.length - cjk) / 3.5)
 }
 
-// 启动/运行失败一律折算成失败记录，不向上抛（编排器逐项记账）。
-async function safeLaunch(subagents, exec, task) {
+// 同步单轮调用（实时价）：批量单行预算装不下的 oversized 任务的兜底通道，
+// 与批量共用同一凭证与模型。零子代理——只是不走 Batch File 通道。
+async function bailianChat({ apiKey, model, thinkingBudget, prompt }) {
+  const body = { model, messages: [{ role: 'user', content: prompt }] }
+  body.enable_thinking = thinkingBudget > 0
+  if (thinkingBudget > 0) body.thinking_budget = thinkingBudget
+  const text = await bailianRequest('/chat/completions', apiKey, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = JSON.parse(text)
+  const content = j?.choices?.[0]?.message?.content
+  if (typeof content !== 'string') throw new Error('实时调用响应缺少 content')
+  return content
+}
+
+// 任务结果统一出口：keepInMemory 任务（规划/校对）把 content 带回内存由服务侧消费，
+// 文章任务直接落盘。批量收尾（settleBatch）与实时兜底共用。
+function applyTaskResult(task, content, notes) {
+  if (task.keepInMemory) return { name: task.name, ok: true, stopReason: 'completed', content }
   try {
-    return await launchAgent(subagents, exec, task)
+    fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
+    fs.writeFileSync(task.articlePath, content, 'utf8')
+    return { name: task.name, ok: true, stopReason: 'completed' }
   } catch (err) {
-    return { ok: false, stopReason: 'error', text: '', diagnostic: String(err?.message ?? err) }
+    notes.push(`文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
+    return { name: task.name, ok: false, stopReason: 'error' }
   }
 }
 
-// 按 maxConcurrency 分批并发；单个失败只记账不中断（stopReason != completed 亦然）。
-async function runBatched(subagents, exec, tasks, concurrency) {
-  const results = []
-  for (let i = 0; i < tasks.length; i += concurrency) {
-    const batch = tasks.slice(i, i + concurrency)
-    const settled = await Promise.all(batch.map((t) =>
-      safeLaunch(subagents, exec, t).then((r) => ({ ...r, label: t.label, name: t.name }))
-    ))
-    results.push(...settled)
+// 实时兜底并发池：按 maxConcurrency 同时在飞的同步请求逐个消费任务队列。
+// 返回 Map(customId → 结果)，与 parseBatchResults 同构（{ok, stopReason, content?}）。
+export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes }) {
+  const results = new Map()
+  let cursor = 0
+  const worker = async () => {
+    for (;;) {
+      const i = cursor++
+      if (i >= tasks.length) return
+      const t = tasks[i]
+      try {
+        const content = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt })
+        results.set(t.customId, applyTaskResult(t, content, notes))
+      } catch (err) {
+        notes.push(`实时兜底 ${t.name} 失败 —— ${String(err?.message ?? err)}`)
+        results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
+      }
+    }
   }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, worker))
   return results
-}
-
-function failureMessage(r) {
-  let msg = `子代理异常结束（stopReason: ${r.stopReason}）`
-  if (r.diagnostic) msg += `：${r.diagnostic}`
-  if (r.text) msg += `\n部分输出：${r.text.slice(0, 500)}`
-  return msg
 }
 
 // ---------------------------------------------------------------------------
 // 批量推理（阿里云百炼 Batch File，OpenAI 兼容接口，实时价的 50%）
-// 写文章任务是单轮文本生成，绕开智能体子代理：插件内联源码 → JSONL 上传 →
-// 轮询批次 → 下载结果 → 插件落盘。规划/横切/审校仍走智能体（需要多轮工具）。
+// 全部环节（规划/写文章/横切/校对）都是单轮文本生成，统一走这条通道：任务内联
+// 输入 → JSONL 上传 → 轮询批次 → 收尾落盘。输入按 token 预算装填，压在
+// qwen3.7-flash ≤32k 输入低价档；装不下的单文件走实时兜底（bailianChat）。
 // ---------------------------------------------------------------------------
 
 const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-// 百炼单行请求上限 1MB（UTF-8）；prompt 文本按 800KB 预算装填源码留足 JSON 转义余量
-const BATCH_LINE_BUDGET = 800 * 1024
+// 单个批量请求的输入 token 预算：qwen3.7-flash 输入 ≤32k 档单价最低（约 $0.03/M，
+// 批量再 5 折 ≈ $0.015/M），留 ~4k 余量吸收估算误差与消息骨架开销。
+const BATCH_TOKEN_BUDGET = 28000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -239,10 +225,10 @@ function readJsonFile(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
 }
 
-// 把源文件内联成 markdown 文本；按字节预算整文件装填（不做半文件截断——半截代码误导行号）。
+// 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
 // 返回 { text, skipped, oversized }：skipped 是预算装不下的文件清单，oversized=true 表示
-// 连第一个文件都装不下（该任务整体回退智能体子代理）。
-export function collectSources(cwd, files, budget = BATCH_LINE_BUDGET) {
+// 连第一个文件都装不下（text 原样带这一个文件，任务整体转实时兜底通道）。
+export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
   const parts = []
   const skipped = []
   let used = 0
@@ -254,9 +240,9 @@ export function collectSources(cwd, files, budget = BATCH_LINE_BUDGET) {
     const body = content === null
       ? `### ${rel}\n\n（文件不存在或读取失败）\n`
       : `### ${rel}\n\n\`\`\`\n${content}\n\`\`\`\n`
-    const size = Buffer.byteLength(body, 'utf8')
+    const size = estimateTokens(body)
     if (used + size > budget) {
-      if (first) return { text: '', skipped: [], oversized: true }
+      if (first) return { text: body, skipped: [], oversized: true }
       skipped.push(rel)
       continue
     }
@@ -266,7 +252,7 @@ export function collectSources(cwd, files, budget = BATCH_LINE_BUDGET) {
   }
   let text = parts.join('\n')
   if (skipped.length) {
-    text += `\n（以下文件因批量单行大小限制未内联，行号相关描述不得涉及它们：${skipped.join('、')}）\n`
+    text += `\n（以下文件因单请求输入预算未内联，行号相关描述不得涉及它们：${skipped.join('、')}）\n`
   }
   return { text, skipped, oversized: false }
 }
@@ -385,16 +371,10 @@ export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes }) 
       const r = parsed.get(task.customId)
       if (!r?.ok) {
         results[i].stopReason = 'error'
-        notes.push(`批量文章 ${task.name} 失败 —— ${r ? r.error : '结果文件中无此请求（行级错误未回传）'}`)
+        notes.push(`批量任务 ${task.name} 失败 —— ${r ? r.error : '结果文件中无此请求（行级错误未回传）'}`)
         continue
       }
-      try {
-        fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
-        fs.writeFileSync(task.articlePath, r.content, 'utf8')
-        results[i] = { name: task.name, ok: true, stopReason: 'completed' }
-      } catch (err) {
-        notes.push(`批量文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
-      }
+      results[i] = applyTaskResult(task, r.content, notes)
     }
   } catch (err) {
     notes.push(`批量任务 ${batchId} 结果下载失败（断点保留，可重试）—— ${String(err?.message ?? err)}`)
@@ -442,30 +422,33 @@ export async function resolveBatchApiKey(hostCtx, cfg) {
   return null
 }
 
-// 提交新批次并等待收尾。返回 { results, oversized }：
-// results 与 runBatched 同构（{name, ok, stopReason}）；oversized 是超单行预算、
-// 需回退智能体子代理的任务子集。断点在中止/超时时保留，下次调用续查。
-export async function runBatchTasks({ exec, batchCfg, tasks, cwd, language, waitMs, stateFile, notes, background }) {
-  for (let i = 0; i < tasks.length; i++) tasks[i].customId = `t${i}`
+// 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
+// 分配 customId。oversized（单文件超预算）任务同样拼好 prompt，转实时兜底通道。
+export function prepareArticleTasks(tasks, { cwd, language }) {
   const prepared = []
   const oversized = []
   for (const t of tasks) {
     const { text, oversized: tooBig } = collectSources(cwd, t.sources)
-    if (tooBig) { oversized.push(t); continue }
     const prevArticle = t.prevArticlePath
       ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
       : ''
     t.batchPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })
+    if (tooBig) { oversized.push(t); continue }
+    t.customId = t.customId ?? `t${prepared.length}`
     prepared.push(t)
   }
-  if (!prepared.length) return { results: [], oversized }
+  return { prepared, oversized }
+}
 
-  const jsonl = buildBatchJsonl(prepared, batchCfg)
+// 提交一个批次（JSONL → 文件上传 → /batches），并写断点文件。服务 tick 用 settleBatch
+// 轮询收尾，不再有 exec 就地等待路径。
+export async function submitBatch(prepared, { apiKey, model, thinkingBudget, stateFile, notes }) {
+  const jsonl = buildBatchJsonl(prepared, { model, thinkingBudget })
   const form = new FormData()
   form.append('purpose', 'batch')
   form.append('file', new Blob([jsonl], { type: 'application/jsonl' }), 'codewiki-batch.jsonl')
-  const file = JSON.parse(await bailianRequest('/files', batchCfg.apiKey, { method: 'POST', body: form }))
-  const batch = JSON.parse(await bailianRequest('/batches', batchCfg.apiKey, {
+  const file = JSON.parse(await bailianRequest('/files', apiKey, { method: 'POST', body: form }))
+  const batch = JSON.parse(await bailianRequest('/batches', apiKey, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -477,36 +460,11 @@ export async function runBatchTasks({ exec, batchCfg, tasks, cwd, language, wait
   }))
   fs.writeFileSync(stateFile, JSON.stringify({
     batchId: batch.id,
-    model: batchCfg.model,
-    tasks: prepared.map((t) => ({ customId: t.customId, name: t.name, articlePath: t.articlePath })),
+    model,
+    tasks: prepared.map((t) => ({ customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true })),
   }), 'utf8')
-  notes.push(`批量任务已提交：${batch.id}（${prepared.length} 篇，模型 ${batchCfg.model}，思考预算 ${batchCfg.thinkingBudget || '关'}）`)
-  // 异步模式：提交即返回，批次等待与收尾交给宿主后台任务（exec闭包里的 backgroundFinalize）
-  if (background) return { results: [], oversized, submitted: batch.id, prepared }
-
-  const deadline = Date.now() + waitMs
-  let delay = Number(process.env.DSH_CODEWIKI_BATCH_POLL_MS) || 10000
-  for (;;) {
-    let results = null
-    try {
-      results = await settleBatch({ batchId: batch.id, tasks: prepared, apiKey: batchCfg.apiKey, stateFile, notes })
-    } catch (err) {
-      notes.push(`批量任务 ${batch.id} 收尾异常（断点保留，可重试）—— ${String(err?.message ?? err)}`)
-      return { results: prepared.map((t) => ({ name: t.name, ok: false, stopReason: 'error' })), oversized }
-    }
-    if (results) return { results, oversized }
-    if (exec.signal?.aborted) throw new Error(`批量任务 ${batch.id} 已中止（断点保留，下次调用自动续查）`)
-    if (Date.now() >= deadline) {
-      throw new Error(`批量任务 ${batch.id} 在 ${Math.round(waitMs / 60000)} 分钟等待预算内未完成（断点已保留，稍后重新调用 codewiki_generate 会自动续查收尾；也可在百炼控制台「批量推理」页查看进度）`)
-    }
-    // 睡眠按 1s 步进，保证 abort 及时生效；轮询间隔按 delay 增长（10s → 30s 封顶）
-    const step = Math.min(delay, deadline - Date.now())
-    for (let waited = 0; waited < step; waited += 1000) {
-      if (exec.signal?.aborted) break
-      await sleep(Math.min(1000, step - waited))
-    }
-    delay = Math.min(delay * 1.5, 30000)
-  }
+  notes.push(`批量任务已提交：${batch.id}（${prepared.length} 个任务，模型 ${model}，思考预算 ${thinkingBudget || '关'}）`)
+  return batch.id
 }
 
 // ---------------------------------------------------------------------------
@@ -544,10 +502,12 @@ function articleFormatSection() {
   ].join('\n')
 }
 
-function plannerPrompt(cwd) {
+// 批量规划 prompt：输入是文件清单文本（scanRepoFiles 的 path+bytes），输出纯 JSON 计划。
+// keepInMemory 任务——结果由服务侧 parsePlan 消费，不落盘。
+function batchPlannerPrompt(fileLines) {
   return [
-    `你是代码结构勘探员。目标仓库：${cwd}。`,
-    '通读仓库结构（用你的文件列表/读文件工具），识别全部源码文件（尊重 .gitignore，跳过第三方依赖、vendor、构建产物），按逻辑模块分组，并识别跨模块概念。',
+    '你是代码结构勘探员。下面是一个仓库的全部源码文件清单（路径 + 字节数）。',
+    '按逻辑模块分组（模块要切小，一个模块 3-8 个文件为宜），并识别真正跨模块的概念。',
     '只输出一个 JSON 对象——禁止 markdown 围栏、禁止任何解释文字：',
     '{',
     '  "project": "<一句话项目定位>",',
@@ -555,99 +515,113 @@ function plannerPrompt(cwd) {
     '  "concepts": [ {"name": "kebab-case-name", "files": ["相对路径"]} ]',
     '}',
     '要求：',
-    '- modules 的 files 并集必须覆盖仓库全部源码文件；每个文件恰好归入一个模块',
+    '- modules 的 files 并集必须覆盖清单里全部文件；每个文件恰好归入一个模块',
+    '- 只用清单里出现的路径，不得发明清单外的文件',
     '- concepts 只收真正跨模块的模式（错误处理、数据流、认证、配置加载等），没有就给空数组',
-    '- files 用相对仓库根的 POSIX 风格路径（/ 分隔）',
     '- name 用小写 kebab-case，作为文章文件名',
-  ].join('\n')
-}
-
-function moduleArticlePrompt(cwd, wikiPath, mod, language) {
-  const files = mod.files.map((f) => `- ${f}`).join('\n')
-  const slug = slugify(mod.name)
-  return [
-    `你是 CodeWiki 文章作者。仓库：${cwd}。文章全文用${language}书写。`,
     '',
-    '任务：先用你的读文件工具逐个通读下列文件的完整内容，再写一篇该模块的 wiki 文章，',
-    `用你的写文件工具把文章写入：${path.join(wikiPath, 'modules', `${slug}.md`)}（目录不存在先创建；文件已存在则整体重写覆盖）。`,
-    '',
-    '模块：' + mod.name + (mod.summary ? ` —— ${mod.summary}` : ''),
     '文件清单：',
-    files,
-    '',
-    articleFormatSection(),
-    '',
-    '完成后只回复一行：WROTE <文章绝对路径>；只有无法完成时才回复 FAILED <原因>。',
+    fileLines,
   ].join('\n')
 }
 
-function crosscutPrompt(cwd, wikiPath, plan, language) {
-  const concepts = plan.concepts.length
-    ? plan.concepts.map((c) => `- ${c.name}`).join('\n')
-    : '- （规划未识别出跨模块概念；若你发现明显的横切模式可自行补充）'
+// 本地规划兜底：批量规划失败/解析不出 JSON 时按顶层目录分组。宁可粗也不中断整条流水线。
+export function localPlan(files) {
+  const groups = new Map()
+  for (const f of files) {
+    const top = f.path.split('/')[0]
+    const name = slugify(top === f.path ? 'root' : top)
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name).push(f.path)
+  }
+  return {
+    project: '（本地兜底规划：按顶层目录分组）',
+    modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
+    concepts: [],
+  }
+}
+
+// 横切输入装配：整篇装填成功文章；装不下的装头部（frontmatter + Overview 段）并标注截断。
+// articles: [{name, text}]；预算按 token 计（与批量单请求同预算）。
+export function packArticles(articles, budget = BATCH_TOKEN_BUDGET) {
+  const parts = []
+  let used = 0
+  for (const a of articles) {
+    let text = a.text
+    const size = estimateTokens(text)
+    if (used + size > budget && parts.length) {
+      const head = text.slice(0, Math.max(0, text.indexOf('## Key Components')))
+      const headSize = estimateTokens(head)
+      if (used + headSize <= budget) {
+        parts.push(`#### ${a.name}（超预算，仅头部）\n\n${head}`)
+        used += headSize
+      }
+      continue
+    }
+    parts.push(`#### ${a.name}\n\n${text}`)
+    used += size
+  }
+  return parts.join('\n\n')
+}
+
+function crosscutIntro(language, what, requirements) {
   return [
-    `你是 CodeWiki 横切文章作者。仓库：${cwd}，wiki 目录：${wikiPath}。文章全文用${language}书写。`,
+    `你是 CodeWiki 横切文章作者。文章全文用${language}书写。`,
     '',
-    '先读 ' + wikiPath + '/modules/ 下已生成的全部模块文章与仓库源码，建立全貌，然后依次写入：',
-    `1. ${path.join(wikiPath, '_architecture.md')} — 系统总览：必须含三张 UTF-8 box-drawing 图（System Overview 总框图、Request/Data Flow 数据流、Dependency Graph 依赖方向），说明各模块职责与相互连接；frontmatter type: architecture`,
-    `2. ${path.join(wikiPath, '_patterns.md')} — 仓库反复出现的模式（命名约定、错误处理风格、构建流程等）；frontmatter type: pattern`,
-    '3. 每个概念一篇 ' + path.join(wikiPath, 'concepts') + '/<name>.md；frontmatter type: concept',
+    `任务：${what}`,
     '',
-    '概念清单：',
-    concepts,
+    requirements,
     '',
-    'frontmatter 通用规范：title/type/source_files（列出你实际读过的文件）/tags。',
-    '行号必须实读源码验证；Markdown 规范；图一律 ```text 围栏；写给零上下文的未来 agent。',
-    '完成后逐行回复：WROTE <文件绝对路径>。',
+    '直接输出完整文章：以 --- frontmatter 开始（title/type/source_files/tags）。',
+    '只输出文章本身——禁止用 markdown 代码围栏整体包裹、禁止任何解释文字。',
+    'source_files 列出你实际依据的下文模块文章 frontmatter 里出现的源文件（POSIX 相对路径）。',
   ].join('\n')
 }
 
-function verifyPrompt(cwd, wikiPath) {
-  return [
-    `你是 CodeWiki 审校员。仓库：${cwd}，wiki 目录：${wikiPath}。`,
-    '逐篇读取 wiki 下全部 .md 文件（modules/、concepts/、_architecture.md、_patterns.md 等），对每篇：',
-    '1. frontmatter source_files 列出的每个文件必须真实存在于仓库（用你的文件工具核对）',
-    '2. 抽查 3 个函数/类名及其行号，回到源码逐个核对（行号、名字、归属模块）',
-    '3. 检查是否有重大源码文件未被任何文章的 source_files 覆盖',
-    '4. frontmatter 缺 title/type/source_files 的直接补齐',
-    '5. 文内行号与代码不符的段落直接改写修正',
-    '发现的问题必须直接修复（改写文章），不要只报告。',
-    '',
-    '完成后回复：VERIFIED（修复 N 处，逐条列出）或 ISSUES（无法自行修复的问题清单）。',
-  ].join('\n')
+function batchArchitecturePrompt(language, articlesText) {
+  return crosscutIntro(
+    language,
+    `基于下文全部模块文章，写系统总览 _architecture.md。必须含三张 UTF-8 box-drawing 图（┌ ┐ └ ┘ ─ │ ► ◄ ▼）放进 \`\`\`text 围栏：System Overview 总框图、Request/Data Flow 数据流、Dependency Graph 依赖方向，说明各模块职责与相互连接。frontmatter type: architecture。章节：## Overview / ## System Overview / ## Data Flow / ## Dependency Graph / ## Module Roles。`,
+    '行号可以引用模块文章中的行号；Markdown 规范；写给零上下文的未来 agent。',
+  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
 }
 
-function fallbackCompilePrompt(cwd, wikiPath, language) {
-  return [
-    `你是 CodeWiki 全量编译员。仓库：${cwd}，wiki 目录：${wikiPath}。文章全文用${language}书写。`,
-    '依次完成（中途不得省略任何一步）：',
-    '1. 勘探：列出仓库全部源码文件（尊重 .gitignore，跳过 vendor/构建产物），按逻辑模块分组，识别跨模块概念',
-    `2. 每个模块一篇 ${path.join(wikiPath, 'modules')}/<name>.md（name 用小写 kebab-case）`,
-    `3. 横切：${path.join(wikiPath, '_architecture.md')}（type: architecture，三张图）、${path.join(wikiPath, '_patterns.md')}（type: pattern）、concepts/<name>.md（type: concept）`,
-    `4. 自查：全部 source_files 真实存在、抽 3 个行号核对、无重大文件遗漏`,
-    '',
-    articleFormatSection(),
-    '',
-    '完成后逐行回复：WROTE <文件绝对路径>。',
-  ].join('\n')
+function batchPatternsPrompt(language, articlesText) {
+  return crosscutIntro(
+    language,
+    '基于下文全部模块文章，总结仓库反复出现的模式 _patterns.md（命名约定、错误处理风格、构建/测试流程、目录约定等，每模式一节并给出处）。frontmatter type: pattern。章节：## Overview / ## Patterns。',
+    '每个模式必须引用具体模块文章中出现的文件/函数名作为证据。',
+  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
 }
 
-function staleArticlePrompt(cwd, articlePath, sourceFiles, language) {
-  const files = sourceFiles.map((f) => `- ${f}`).join('\n')
+function batchConceptPrompt(language, concept, articlesText) {
+  return crosscutIntro(
+    language,
+    `基于下文模块文章，写跨模块概念「${concept}」一篇专文。讲清该概念涉及哪些模块、数据/控制如何在它们之间流动、实现位置（文件:行号）。frontmatter type: concept，title 用该概念名。章节：## Overview / ## Involved Modules / ## Flow / ## Implementation Map。`,
+    '只依据下文模块文章，不得发明未出现的文件。',
+  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
+}
+
+// 批量校对 prompt：输入=文章全文+source_files 源码，输出=修正后整文（服务侧校验后才落盘）。
+// 行号抽查这类机械核对由模型一次完成，不再需要多轮工具的审校智能体。
+function batchProofreadPrompt({ language, articleText, sourcesText }) {
   return [
-    `你是 CodeWiki 文章维护员。仓库：${cwd}。文章全文用${language}书写。`,
+    `你是 CodeWiki 审校员。文章全文用${language}书写。`,
     '',
-    `该文章相对上次编译已过期：${articlePath}`,
-    '先用你的读文件工具读这篇文章，再重新通读它 frontmatter source_files 里列出的全部源文件（当前代码可能已变化）：',
-    files,
+    '任务：核对下文 wiki 文章与源码的一致性，输出修正后的完整文章。',
+    '核对项：',
+    '1. frontmatter 必有 title/type/source_files/tags，source_files 与正文实际引用一致',
+    '2. 抽查文中全部函数/类名与行号（上源码逐个核对）：名字错改名字、行号错改行号、归属错改归属',
+    '3. 重大源码文件被引用但未列入 source_files 的，补进 frontmatter',
+    '4. 与源码不符的描述段落直接改写',
     '',
-    '然后更新这篇文章，使其与当前代码完全一致：',
-    '- 行号、函数/类清单、字段、数据流按当前代码改写；行号必须实读验证',
-    '- source_files 按你实际读过的文件刷新（含测试文件）',
-    '- 保留文章原有章节结构（Overview/Key Components/Architecture/Data Flow/Connections/Known Issues）与 frontmatter 的 title/type/tags',
-    '- 用写文件工具整体覆盖写回原路径',
+    '只输出修正后的完整文章（以 --- frontmatter 开始）——禁止围栏整体包裹、禁止解释文字。',
+    '文章与源码一致时也输出全文原样（不做无谓改写）。',
     '',
-    '完成后只回复一行：WROTE <文章绝对路径>；只有无法完成时才回复 FAILED <原因>。',
+    '==== 待校对文章 ====', '',
+    articleText, '',
+    '==== source_files 对应源码 ====', '',
+    sourcesText,
   ].join('\n')
 }
 
@@ -780,25 +754,536 @@ async function wikiPathFor(cwd, binary, signal) {
   return path.join(cwd, '.codewiki') // 与 wiki_path() 一致：wiki 在仓库内
 }
 
-function generateToolDefinition(cfg, subagents) {
+// ---------------------------------------------------------------------------
+// 编排服务：全批量流水线（零子代理）
+// codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
+//   full   = plan → articles → crosscut → review → index
+//   stale  = articles（任务在提交时预构建）→ review → index
+//   resume = articles（settle 孤儿断点）→ review → index
+// 全部模型调用都是单轮文本生成，统一走百炼批量推理（实时价 5 折）；单文件超
+// BATCH_TOKEN_BUDGET 的任务走实时兜底（bailianChat）。规划/横切/校对结果
+// keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
+// ---------------------------------------------------------------------------
+
+const JOBS_FILE = path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
+const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
+const MAX_JOBS_KEPT = 30
+const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])
+
+// 仓库源码勘探（规划输入）：黑名单目录 + 二进制后缀 + 单文件 256KB + 总数 2000
+const SCAN_SKIP_DIRS = new Set([
+  '.git', '.codewiki', 'node_modules', 'vendor', 'dist', 'build', 'out', 'target',
+  '.next', '__pycache__', '.venv', 'venv', '.idea', '.vscode', 'bin', 'obj',
+  '.gradle', 'Pods', 'coverage', '.nyc_output', 'tmp', 'logs',
+])
+const SCAN_SKIP_EXT = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.svg', '.pdf', '.zip', '.gz',
+  '.tar', '.7z', '.rar', '.exe', '.dll', '.so', '.dylib', '.bin', '.o', '.obj',
+  '.a', '.lib', '.class', '.jar', '.pyc', '.pyo', '.woff', '.woff2', '.ttf', '.otf',
+  '.eot', '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.db', '.sqlite', '.wasm', '.node', '.map',
+])
+const SCAN_MAX_FILE_BYTES = 256 * 1024
+const SCAN_MAX_FILES = 2000
+
+export function scanRepoFiles(cwd) {
+  const out = []
+  const walk = (dir, rel) => {
+    if (out.length >= SCAN_MAX_FILES) return
+    let entries
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (out.length >= SCAN_MAX_FILES) return
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) {
+        if (SCAN_SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue
+        walk(path.join(dir, e.name), r)
+      } else if (e.isFile()) {
+        if (SCAN_SKIP_EXT.has(path.extname(e.name).toLowerCase())) continue
+        let st
+        try { st = fs.statSync(path.join(dir, e.name)) } catch { continue }
+        if (st.size === 0 || st.size > SCAN_MAX_FILE_BYTES) continue
+        out.push({ path: r, bytes: st.size })
+      }
+    }
+  }
+  walk(cwd, '')
+  return out
+}
+
+function loadJobs() {
+  const j = readJsonFile(JOBS_FILE)
+  return Array.isArray(j?.jobs) ? j.jobs : []
+}
+
+function saveJobs(jobs) {
+  // 只留最近 30 个；apiKey 不落盘（重启后按需重解析），cancelRequested 必须落盘（取消标记靠它跨 tick 存活）
+  const kept = jobs.slice(-MAX_JOBS_KEPT).map(({ apiKey, ...rest }) => rest)
+  try { fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: kept }, null, 2), 'utf8') } catch { /* tmp 不可写则放弃持久化 */ }
+}
+
+function jobSummary(job) {
+  return {
+    id: job.id,
+    cwd: job.cwd,
+    kind: job.kind,
+    scope: job.scope,
+    stage: job.stage,
+    batchId: job.batchRef?.batchId ?? null,
+    writtenCount: job.writtenCount,
+    failedCount: job.failedCount,
+    articles: (job.articles ?? []).map((a) => ({ name: a.name, ok: a.ok })),
+    notes: (job.notes ?? []).slice(-8),
+    error: job.error ?? null,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    finishedAt: job.finishedAt ?? null,
+  }
+}
+
+function createJobService(config) {
+  const jobs = loadJobs()
+  let timer = null
+  let ticking = false
+  let seq = 0
+  // 脏标记：只有任务状态变更过才整写 JOBS_FILE。多实例并存时（插件重载/测试重复 apply），
+  // 无事可做的旧实例不会用自己的过期快照覆盖新实例的活动 job。
+  let dirty = false
+  const persist = () => { dirty = true }
+  const flush = () => { if (!dirty) return; dirty = false; saveJobs(jobs) }
+  const note = (job, msg) => {
+    job.notes.push(msg)
+    if (job.notes.length > 50) job.notes = job.notes.slice(-50)
+  }
+  // touch = 状态变更的统一入口：必须标脏，否则 tick 末 flush 跳过、取消等纯内存
+  // 变更（touch 后 continue，绕过终态 persist）永远进不了 JOBS_FILE
+  const touch = (job) => { job.updatedAt = new Date().toISOString(); dirty = true }
+
+  function fail(job, msg) {
+    job.stage = 'failed'
+    job.error = msg
+    job.finishedAt = new Date().toISOString()
+    note(job, `任务失败：${msg}`)
+    touch(job)
+  }
+
+  // 凭证：内存缓存优先；不落盘，重启后重解析（凭证库可能已就绪/已更换）
+  async function apiKeyOf(job) {
+    if (job.apiKey) return job.apiKey
+    const k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
+    if (!k) throw new Error(`未找到百炼凭证（原解析来源 ${job.credentialSource ?? '未知'}），任务无法继续——可在插件设置填 batchApiKey 后重新提交`)
+    job.apiKey = k.key
+    job.credentialSource = k.source
+    return k.key
+  }
+
+  // 批次收尾统一入口：异常折算成 null（断点保留，下轮 tick 重试）
+  async function settleJob(job) {
+    try {
+      return await settleBatch({
+        batchId: job.batchRef.batchId,
+        tasks: job.tasks,
+        apiKey: await apiKeyOf(job),
+        stateFile: job.batchRef.stateFile,
+        notes: job.notes,
+      })
+    } catch (err) {
+      note(job, `批次 ${job.batchRef?.batchId} 收尾异常（断点保留，下轮重试）—— ${String(err?.message ?? err)}`)
+      return null
+    }
+  }
+
+  // keepInMemory 结果的落盘闸门：输出必须以 frontmatter 开头，坏输出不写 wiki。
+  // keepInMemory 任务（横切/校对）在 settleBatch 不落盘，唯一写盘点在这里——
+  // 不能再走 applyTaskResult（它对 keepInMemory 只回内存不落盘）。
+  function writeValidated(job, task, content) {
+    if (typeof content !== 'string' || !content.trimStart().startsWith('---')) {
+      note(job, `${task.name}：模型输出缺 frontmatter，不落盘（原文件保留）`)
+      return { name: task.name, ok: false, stopReason: 'invalid' }
+    }
+    try {
+      fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
+      fs.writeFileSync(task.articlePath, content, 'utf8')
+      return { name: task.name, ok: true, stopReason: 'completed' }
+    } catch (err) {
+      note(job, `文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
+      return { name: task.name, ok: false, stopReason: 'error' }
+    }
+  }
+
+  // 结果记账；replace=true 时校对结果覆盖同名文章条目（校对失败不推翻已写成功的原文）
+  function tally(job, results, tasks, { replace = false } = {}) {
+    const byName = new Map((tasks ?? job.tasks ?? []).map((t) => [t.name, t]))
+    for (const r of results) {
+      const t = byName.get(r.name)
+      let entry
+      if (t?.keepInMemory && r.ok) {
+        entry = writeValidated(job, t, r.content)
+      } else {
+        entry = { name: r.name, ok: r.ok === true, stopReason: r.stopReason }
+      }
+      const rec = { name: entry.name, ok: entry.ok, stopReason: entry.stopReason, path: t?.articlePath ?? null }
+      const prev = replace ? job.articles.find((a) => a.name === rec.name) : null
+      if (prev) {
+        if (!rec.ok && prev.ok) rec.ok = true
+        Object.assign(prev, rec)
+      } else {
+        job.articles.push(rec)
+        if (rec.ok) job.writtenCount += 1
+        else job.failedCount += 1
+      }
+    }
+  }
+
+  async function submitBatchFor(job, prepared) {
+    const c = liveConfig(config)
+    const batchId = await submitBatch(prepared, {
+      apiKey: await apiKeyOf(job),
+      model: c.batchModel,
+      thinkingBudget: c.batchThinkingBudget,
+      stateFile: batchStateFile(job.cwd),
+      notes: job.notes,
+    })
+    job.batchRef = { batchId, stateFile: batchStateFile(job.cwd) }
+    job.tasks = prepared.map((t) => ({
+      customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+    }))
+    touch(job)
+  }
+
+  // ---- 阶段处理：每 tick 每 job 推进一步 ----
+
+  async function tickPlan(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      const planResult = results.find((r) => r.ok && r.content)
+      let plan = planResult ? parsePlan(planResult.content) : null
+      if (!plan) {
+        note(job, '批量规划未产出可用 JSON，降级本地按顶层目录分组')
+        plan = localPlan(scanRepoFiles(job.cwd))
+      }
+      job.plan = plan
+      note(job, `规划：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
+      job.batchRef = null
+      job.tasks = []
+      job.stage = 'articles'
+      touch(job)
+      return
+    }
+    const files = scanRepoFiles(job.cwd)
+    if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
+    const fileLines = files.map((f) => `- ${f.path}（${f.bytes}B）`).join('\n')
+    const planTask = {
+      customId: 'plan', name: '_plan', keepInMemory: true,
+      batchPrompt: batchPlannerPrompt(fileLines),
+    }
+    try {
+      await submitBatchFor(job, [planTask])
+    } catch (err) {
+      fail(job, `规划批次提交失败 —— ${String(err?.message ?? err)}`)
+    }
+  }
+
+  async function tickArticles(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      tally(job, results, job.tasks)
+      job.batchRef = null
+      job.tasks = []
+      if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
+      job.stage = job.kind === 'full' ? 'crosscut' : 'review'
+      touch(job)
+      return
+    }
+    // 组装文章任务并提交：stale 用预构建任务；full 用 job.plan；resume 不经此处（batchRef 已设）
+    let tasks
+    if (job.kind === 'stale') tasks = job.tasks
+    else {
+      const plan = job.plan
+      if (!plan?.modules?.length) { fail(job, '规划没有可用模块'); return }
+      tasks = plan.modules.map((mod) => {
+        const slug = slugify(mod.name)
+        return {
+          name: `modules/${slug}.md`,
+          mission: `为模块「${mod.name}」撰写文章 modules/${slug}.md${mod.summary ? `：${mod.summary}` : ''}`,
+          sources: mod.files,
+          articlePath: path.join(job.wikiPath, 'modules', `${slug}.md`),
+          prevArticlePath: path.join(job.wikiPath, 'modules', `${slug}.md`), // 已有旧文则作上下文
+        }
+      })
+    }
+    const { prepared, oversized } = prepareArticleTasks(tasks, { cwd: job.cwd, language: job.language })
+    if (oversized.length) {
+      const c = liveConfig(config)
+      note(job, `${oversized.length} 个任务单文件超 ${BATCH_TOKEN_BUDGET} token 预算，走实时兜底（同模型同步调用）`)
+      oversized.forEach((t, i) => { t.customId = `rt${i}` })
+      const rt = await runRealtimeTasks(oversized, {
+        apiKey: await apiKeyOf(job),
+        model: c.batchModel,
+        thinkingBudget: c.batchThinkingBudget,
+        concurrency: c.maxConcurrency,
+        notes: job.notes,
+      })
+      tally(job, [...rt.values()], oversized)
+    }
+    if (prepared.length) {
+      try {
+        await submitBatchFor(job, prepared)
+      } catch (err) {
+        fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
+      }
+      return
+    }
+    if (oversized.length) {
+      if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
+      job.stage = job.kind === 'full' ? 'crosscut' : 'review'
+      touch(job)
+    } else {
+      fail(job, '没有可写的文章任务')
+    }
+  }
+
+  async function tickCrosscut(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      tally(job, results, job.tasks)
+      job.batchRef = null
+      job.tasks = []
+      job.stage = 'review'
+      touch(job)
+      return
+    }
+    // 输入 = 成功模块文章全文（packArticles 装不下截头部并标注）
+    const texts = []
+    for (const a of job.articles) {
+      if (!a.ok || !a.path) continue
+      try { texts.push({ name: a.name, text: fs.readFileSync(a.path, 'utf8') }) } catch { /* 丢文件在横切输入缺席 */ }
+    }
+    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); job.stage = 'review'; touch(job); return }
+    const pack = packArticles(texts)
+    const lang = job.language
+    const tasks = [
+      {
+        customId: 'arch', name: '_architecture.md', keepInMemory: true,
+        articlePath: path.join(job.wikiPath, '_architecture.md'),
+        batchPrompt: batchArchitecturePrompt(lang, pack),
+      },
+      {
+        customId: 'patterns', name: '_patterns.md', keepInMemory: true,
+        articlePath: path.join(job.wikiPath, '_patterns.md'),
+        batchPrompt: batchPatternsPrompt(lang, pack),
+      },
+      ...job.plan.concepts.map((c, i) => ({
+        customId: `concept${i}`, name: `concepts/${slugify(c.name)}.md`, keepInMemory: true,
+        articlePath: path.join(job.wikiPath, 'concepts', `${slugify(c.name)}.md`),
+        batchPrompt: batchConceptPrompt(lang, c.name, pack),
+      })),
+    ]
+    try {
+      await submitBatchFor(job, tasks)
+      note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念`)
+    } catch (err) {
+      fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
+    }
+  }
+
+  // 本地核对：frontmatter 必填 + source_files 存在性（只记账，不删文）
+  function localReview(job) {
+    const problems = []
+    for (const a of job.articles) {
+      if (!a.ok || !a.path) continue
+      let text = null
+      try { text = fs.readFileSync(a.path, 'utf8') } catch { text = null }
+      if (text === null) { problems.push(`${a.name}：文件丢失`); a.ok = false; a.stopReason = 'missing'; continue }
+      if (!text.trimStart().startsWith('---')) { problems.push(`${a.name}：缺 frontmatter`); a.skipProofread = true; continue }
+      const srcs = readSourceFiles(a.path)
+      const missing = srcs.filter((f) => !fs.existsSync(path.join(job.cwd, f)))
+      if (missing.length) problems.push(`${a.name}：source_files 缺 ${missing.slice(0, 3).join('、')}${missing.length > 3 ? ' 等' : ''}`)
+      a.skipProofread = srcs.length === 0
+    }
+    if (problems.length) note(job, `本地核对 ${problems.length} 处问题 —— ${problems.slice(0, 4).join('；')}${problems.length > 4 ? '…' : ''}`)
+  }
+
+  async function tickReview(job) {
+    if (job.batchRef) {
+      const results = await settleJob(job)
+      if (results === null) return
+      tally(job, results, job.tasks, { replace: true })
+      job.batchRef = null
+      job.tasks = []
+      job.stage = 'index'
+      touch(job)
+      return
+    }
+    localReview(job)
+    const tasks = []
+    let i = 0
+    for (const a of job.articles) {
+      if (!a.ok || !a.path || a.skipProofread) continue
+      let articleText = null
+      try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
+      const srcs = collectSources(job.cwd, readSourceFiles(a.path))
+      if (srcs.oversized || estimateTokens(articleText) + estimateTokens(srcs.text) > BATCH_TOKEN_BUDGET) {
+        note(job, `${a.name}：文章+源码超预算，跳过校对批次`)
+        continue
+      }
+      tasks.push({
+        customId: `proof${i++}`, name: a.name, keepInMemory: true, articlePath: a.path,
+        batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
+      })
+    }
+    if (!tasks.length) { job.stage = 'index'; touch(job); return }
+    try {
+      await submitBatchFor(job, tasks)
+      note(job, `校对批次已提交：${tasks.length} 篇`)
+    } catch (err) {
+      note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)
+      job.batchRef = null
+      job.tasks = []
+      job.stage = 'index'
+      touch(job)
+    }
+  }
+
+  async function tickIndex(job) {
+    if (job.writtenCount > 0) {
+      const binary = resolveBinary(liveConfig(config))
+      try {
+        const idx = await runCw(binary, job.cwd, ['index'], 120000)
+        const meta = await runCw(binary, job.cwd, ['meta', 'update'], 120000)
+        note(job, `cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
+        if (idx.exitCode !== 0 || meta.exitCode !== 0) note(job, '收尾命令存在失败，编译基线可能未刷新，可重试编译')
+      } catch (err) {
+        note(job, `cw index/meta 执行异常 —— ${String(err?.message ?? err)}`)
+      }
+    } else {
+      note(job, '没有文章写成功，跳过 index/meta update（wiki 基线不变，可重新提交）')
+    }
+    job.stage = 'done'
+    job.finishedAt = new Date().toISOString()
+    touch(job)
+  }
+
+  const STAGE_HANDLER = {
+    plan: tickPlan,
+    articles: tickArticles,
+    crosscut: tickCrosscut,
+    review: tickReview,
+    index: tickIndex,
+  }
+
+  async function tick() {
+    if (ticking) return
+    ticking = true
+    try {
+      for (const job of jobs) {
+        if (JOB_TERMINAL.has(job.stage)) continue
+        if (job.cancelRequested) {
+          job.stage = 'cancelled'
+          job.finishedAt = new Date().toISOString()
+          if (job.batchRef) note(job, `已取消：批次 ${job.batchRef.batchId} 断点保留，重新调用 codewiki_generate 可续查收尾`)
+          touch(job)
+          continue
+        }
+        const handler = STAGE_HANDLER[job.stage]
+        if (!handler) { fail(job, `未知阶段 ${job.stage}`); continue }
+        try {
+          await handler(job)
+        } catch (err) {
+          fail(job, `阶段 ${job.stage} 异常 —— ${String(err?.message ?? err)}`)
+        }
+        if (JOB_TERMINAL.has(job.stage)) persist()
+      }
+      flush()
+    } finally {
+      ticking = false
+    }
+  }
+
+  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, resumeBatch }) {
+    const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
+    if (existing) return { job: existing, existed: true }
+    const k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
+    if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（批量流水线没有子代理回退）')
+    const job = {
+      id: `job-${Date.now().toString(36)}-${(seq++).toString(36)}`,
+      cwd, wikiPath, scope, language, kind,
+      stage: kind === 'full' ? 'plan' : 'articles',
+      plan: null,
+      batchRef: null,
+      tasks: [],
+      articles: [],
+      writtenCount: 0,
+      failedCount: 0,
+      notes: [],
+      credentialSource: k.source,
+      apiKey: k.key,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    if (kind === 'stale') job.tasks = prebuiltTasks ?? []
+    if (kind === 'resume' && resumeBatch?.batchId) {
+      job.batchRef = { batchId: resumeBatch.batchId, stateFile: batchStateFile(cwd) }
+      job.tasks = (resumeBatch.tasks ?? []).map((t) => ({
+        customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+      }))
+      note(job, `续查孤儿断点批次 ${resumeBatch.batchId}（${job.tasks.length} 个任务）`)
+    }
+    jobs.push(job)
+    persist()
+    flush() // 先落盘再推进：tick 中途崩溃也能从文件恢复
+    void tick() // 立即推进一步，不等首个 tick 间隔
+    return { job, existed: false }
+  }
+
+  function cancel(jobId) {
+    const job = jobs.find((j) => j.id === jobId)
+    if (!job || JOB_TERMINAL.has(job.stage)) return false
+    job.cancelRequested = true
+    note(job, '收到取消请求，将在本轮收尾')
+    persist()
+    flush()
+    return true
+  }
+
+  const list = () => jobs.map(jobSummary)
+  const findActive = (cwd) => jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage)) ?? null
+
+  function start() {
+    if (timer) return
+    timer = setInterval(() => { void tick() }, TICK_MS)
+    timer.unref?.()
+  }
+  function stop() {
+    if (timer) clearInterval(timer)
+    timer = null
+  }
+
+  return { submit, cancel, list, findActive, start, stop }
+}
+
+let jobServiceRef = null
+
+// ---------------------------------------------------------------------------
+// 工具 2：codewiki_generate（提交制——判态与提交，编译由服务推进）
+// ---------------------------------------------------------------------------
+
+function generateToolDefinition(cfg) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（智能体编排版）。流程：cw status 判态 → 规划 agent 出模块计划 → 按并发上限分批派写文章子代理 → 横切文章（_architecture/_patterns/concepts）→ 审校 agent → cw index + meta update。',
-      'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量。scope=stale：只刷新过期文章。',
-      'provider+model 成对出现时子代理用指定模型；缺省用插件默认（aliyun-bailian/qwen3.8-flash，即路由插件 wiki 档）；两项默认都显式置空才继承会话模型。reasoningEffort 指定子代理思考程度（adapter 自有值，如 off/low/high/max）；缺省用插件默认，再退所选模型默认。',
-      '写文章环节可在插件设置改走阿里云百炼批量推理（Batch File，实时价 50%；batchEnabled，凭证自动取模型设置「阿里百炼云」渠道，或 batchApiKey 显式指定）；批量超时或中止会保留断点，重新调用自动续查收尾。',
-      '全量编译小仓库也要几分钟（多个子代理接力），适合后台调用。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节走阿里云百炼批量推理（实时价 50%，输入按 ≤32k token 低价档分块装填）。',
+      'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
+      '进度：设置侧边栏 CodeWiki 面板，或 GET /api/codewiki/jobs（回环地址）；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进；孤儿批次断点在重新调用本工具时自动并入续查。',
+      '凭证自动取模型设置「阿里百炼云」渠道（或插件设置 batchApiKey），取不到时报错而不是降级子代理。全量编译小仓库也要几分钟（批次排队+生成），适合后台调用。',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: '仓库绝对路径（git 仓库；Windows 支持 C:/... 与 Git-Bash /c/... 形式）' },
         scope: { type: 'string', enum: ['auto', 'full', 'stale'], description: '编译范围，默认 auto' },
-        provider: { type: 'string', description: '子代理 provider（须与 model 成对）' },
-        model: { type: 'string', description: '子代理 model（须与 provider 成对）' },
-        reasoningEffort: { type: 'string', description: '子代理思考程度（adapter 自有值，如 off/low/high/max；留空跟随插件默认或模型默认）' },
-        maxConcurrency: { type: 'number', description: '写文章并发上限（1-8，默认 8）' },
         language: { type: 'string', description: '文章语言，默认取插件设置（中文）' },
       },
       required: ['cwd'],
@@ -812,33 +1297,18 @@ function generateToolDefinition(cfg, subagents) {
           scope: { type: 'string' },
           wikiPath: { type: 'string' },
           state: { type: 'string' },
-          articles: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                name: { type: 'string' },
-                ok: { type: 'boolean' },
-                stopReason: { type: 'string' },
-              },
-              required: ['name', 'ok', 'stopReason'],
-            },
-          },
-          writtenCount: { type: 'number' },
-          failedCount: { type: 'number' },
-          verified: { type: 'boolean' },
+          jobId: { type: 'string' },
+          stage: { type: 'string' },
+          submitted: { type: 'boolean' },
           notes: { type: 'array', items: { type: 'string' } },
         },
-        required: ['cwd', 'scope', 'state', 'articles', 'writtenCount', 'failedCount', 'notes'],
+        required: ['cwd', 'scope', 'wikiPath', 'state', 'submitted', 'notes'],
       },
       render(args, value) {
         const lines = [`codewiki_generate（${value.scope}，${value.cwd}）`]
         if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
-        if (value.articles.length) {
-          lines.push('文章：')
-          for (const a of value.articles) lines.push(`  ${a.ok ? '✓' : '✗'} ${a.name}${a.ok ? '' : `（${a.stopReason}）`}`)
-        }
-        lines.push(`完成 ${value.writtenCount} 篇，失败 ${value.failedCount} 篇${value.verified === true ? '，已审校' : ''}`)
+        if (value.submitted) lines.push(`已提交后台任务 ${value.jobId}（stage ${value.stage}）——服务 10s 节拍推进，侧边栏 CodeWiki 面板或 GET /api/codewiki/jobs 查进度`)
+        else lines.push(`未提交任务（state ${value.state}）`)
         for (const n of value.notes) lines.push(`· ${n}`)
         return [{ type: 'text', text: lines.join('\n') }]
       },
@@ -846,111 +1316,45 @@ function generateToolDefinition(cfg, subagents) {
     execute: async (args, exec) => {
       const c = liveConfig(cfg)
       if (!c.enabled) throw new Error('codewiki_generate：插件已在设置中停用（codewiki → enabled）')
-      if (!exec?.agent) throw new Error('codewiki_generate 必须在主代理会话中调用（缺少 calling agent）')
+      if (!jobServiceRef) throw new Error('codewiki_generate：编排服务未初始化')
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
       const language = String(args.language ?? '').trim() || c.articleLanguage
-      const concurrency = Number.isFinite(Number(args.maxConcurrency)) && Number(args.maxConcurrency) >= 1
-        ? Math.min(Math.floor(Number(args.maxConcurrency)), CONCURRENCY_HARD_CAP)
-        : c.maxConcurrency
-      const route = (args.provider && args.model)
-        ? { provider: String(args.provider), model: String(args.model) }
-        : (c.defaultProvider && c.defaultModel ? { provider: c.defaultProvider, model: c.defaultModel } : undefined)
-      const effort = String(args.reasoningEffort ?? '').trim() || String(c.defaultReasoningEffort ?? '').trim()
-      if (effort) (route ??= {}).reasoningEffort = effort
-      const effortNote = effort ? `，思考程度 ${effort}` : ''
       const notes = []
-      if (args.provider && args.model) notes.push(`子代理模型：${route.provider}/${route.model}（调用参数${effortNote}）`)
-      else if (route?.provider && route?.model) notes.push(`子代理模型：${route.provider}/${route.model}（插件默认配置${effortNote}）`)
-      else notes.push(effort ? `子代理模型：继承会话模型${effortNote}` : '子代理模型：继承会话模型')
-
-      const stateFile = batchStateFile(cwd)
-      const batchKey = await resolveBatchApiKey(hostCtxRef, c)
-      const useBatch = c.batchEnabled && !!batchKey
-      if (c.batchEnabled && !batchKey) {
-        notes.push('批量推理已开启但未找到百炼凭证——可在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey；写文章回退智能体子代理')
-      } else if (useBatch) {
-        notes.push(`写文章走百炼批量推理（Batch File，实时价 50%）：模型 ${c.batchModel}，凭证来源 ${batchKey.source}，思考预算 ${c.batchThinkingBudget || '关闭'}，${c.batchAsync ? '提交后由宿主后台任务跟进收尾（本调用立即返回）' : `就地等待 ${c.batchWaitMinutes} 分钟`}`)
-      }
-
-      // 宿主后台收尾：等待批次终态 → 落盘 → （全量）派发横切/审校子代理 → cw index/meta。
-      // 不绑 exec.signal：主调用返回后等待继续；宿主关闭则断点兜底，下次调用续查。
-      const backgroundFinalize = async ({ batchId, prepared, crosscutPromptText, verifyPromptText }) => {
-        const bgNotes = []
-        const bgExec = { agent: exec.agent, signal: undefined }
-        const deadline = Date.now() + 24 * 3600 * 1000
-        let delay = Number(process.env.DSH_CODEWIKI_BATCH_POLL_MS) || 10000
-        let written = 0
-        for (;;) {
-          let results = null
-          try {
-            results = await settleBatch({ batchId, tasks: prepared, apiKey: batchKey.key, stateFile, notes: bgNotes })
-          } catch (err) {
-            console.error(`[dsh-codewiki] 批量 ${batchId} 后台收尾异常（断点保留，下次调用续查）—— ${String(err?.message ?? err)}`)
-            return
-          }
-          if (results) {
-            for (const r of results) if (r.ok) written += 1
-            break
-          }
-          if (Date.now() >= deadline) {
-            console.error(`[dsh-codewiki] 批量 ${batchId} 后台等待超 24h 放弃（断点保留，下次调用续查）`)
-            return
-          }
-          await sleep(delay)
-          delay = Math.min(delay * 1.5, 60000)
-        }
-        console.log(`[dsh-codewiki] 批量 ${batchId} 完成：成功 ${written}/${prepared.length}${bgNotes.length ? ` —— ${bgNotes.join('；')}` : ''}`)
-        if (written > 0 && crosscutPromptText) {
-          const cross = await safeLaunch(subagents, bgExec, { label: 'codewiki:横切文章（批量后台）', prompt: crosscutPromptText, route })
-          if (cross.ok) written += 1
-          else console.error(`[dsh-codewiki] 后台横切文章失败 —— ${failureMessage(cross)}`)
-          const verify = await safeLaunch(subagents, bgExec, { label: 'codewiki:审校（批量后台）', prompt: verifyPromptText, route })
-          if (!verify.ok) console.error(`[dsh-codewiki] 后台审校失败（不阻塞收尾）—— ${failureMessage(verify)}`)
-        }
-        if (written > 0) {
-          const idx = await runCw(binary, cwd, ['index'], 120000)
-          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000)
-          console.log(`[dsh-codewiki] 后台收尾 cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
-        } else {
-          console.log('[dsh-codewiki] 后台收尾：没有文章写成功，跳过 index/meta（wiki 基线不变，可重试编译）')
-        }
-      }
-
-      // 写文章统一出口：批量推理（仅文章环节）或智能体子代理分批；超限任务回退智能体
-      const runArticleTasks = async (tasks) => {
-        if (!useBatch) return { results: await runBatched(subagents, exec, tasks, concurrency), oversized: [] }
-        const { results, oversized, submitted, prepared } = await runBatchTasks({
-          exec,
-          batchCfg: { apiKey: batchKey.key, model: c.batchModel, thinkingBudget: c.batchThinkingBudget },
-          tasks,
-          cwd,
-          language,
-          waitMs: c.batchWaitMinutes * 60000,
-          stateFile,
-          notes,
-          background: c.batchAsync,
-        })
-        if (submitted) return { results, oversized, submitted, prepared }
-        const all = [...results]
-        if (oversized.length) {
-          notes.push(`${oversized.length} 篇超出批量单行大小限制，回退智能体子代理`)
-          all.push(...await runBatched(subagents, exec, oversized, concurrency))
-        }
-        return { results: all, oversized }
-      }
 
       const binary = resolveBinary(c)
-      const statusRes = await runCw(binary, cwd, ['status'], 120000, exec.signal)
+      const statusRes = await runCw(binary, cwd, ['status'], 120000, exec?.signal)
       if (statusRes.timedOut) throw new Error('codewiki_generate：cw status 超时')
       if (statusRes.exitCode !== 0 && !(statusRes.stdout ?? '').trim()) {
         throw new Error(`codewiki_generate：cw status 失败（exit ${statusRes.exitCode}）—— ${(statusRes.stderr || statusRes.stdout || '').trim()}`)
       }
       const status = parseStatus(statusRes.stdout)
-      const wikiPath = await wikiPathFor(cwd, binary, exec.signal)
+      const wikiPath = await wikiPathFor(cwd, binary, exec?.signal)
+      const result = { cwd, scope, wikiPath, state: status.state, jobId: null, stage: null, submitted: false, notes }
 
-      // scope 修正：stale 遇到没有 wiki 的仓库自动升全量，否则无从谈起
+      // 幂等：同仓库已有活动任务直接返回
+      const active = jobServiceRef.findActive(cwd)
+      if (active) {
+        notes.push(`该仓库已有进行中的编译任务 ${active.id}（stage ${active.stage}），本次调用直接返回现有任务`)
+        result.jobId = active.id
+        result.stage = active.stage
+        result.scope = active.scope
+        return result
+      }
+
+      // 孤儿断点续查（历史遗留或取消任务留下的未收尾批次）
+      const pending = readJsonFile(batchStateFile(cwd))
+      if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
+        const { job } = await jobServiceRef.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending })
+        notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 个），已并入任务 ${job.id} 由服务续查收尾`)
+        result.jobId = job.id
+        result.stage = job.stage
+        result.submitted = true
+        return result
+      }
+
+      // scope 修正：stale 遇到没有 wiki 的仓库自动升全量
       let effectiveScope = scope
       if (scope === 'stale' && (status.state === 'missing' || status.state === 'uncompiled')) {
         effectiveScope = 'full'
@@ -958,219 +1362,140 @@ function generateToolDefinition(cfg, subagents) {
       }
       const needsFullCompile = effectiveScope === 'full' || status.state === 'missing' || status.state === 'uncompiled'
 
-      const result = {
-        cwd,
-        scope: effectiveScope,
-        wikiPath,
-        state: status.state,
-        articles: [],
-        writtenCount: 0,
-        failedCount: 0,
-        verified: false,
-        notes,
-      }
-
-      // ---- 批量断点续查：上次调用留下未收尾的批次，先等它落地再谈新任务 ----
-      const pending = readJsonFile(stateFile)
-      if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
-        if (!batchKey) {
-          throw new Error(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 篇），但未找到百炼凭证——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey 后重新调用即可续查收尾`)
-        }
-        notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 篇），先续查收尾，本次不派新任务`)
-        const settled = await settleBatch({
-          batchId: pending.batchId,
-          tasks: pending.tasks.map((t) => ({ ...t })),
-          apiKey: batchKey.key,
-          stateFile,
-          notes,
-        })
-        if (settled === null) {
-          if (c.batchAsync) {
-            notes.push(`批量任务 ${pending.batchId} 仍在进行中——宿主后台任务跟进中，本调用直接返回；稍后重新调用 codewiki_generate 可查看进度`)
-            return result
-          }
-          throw new Error(`批量任务 ${pending.batchId} 仍在进行中（未到终态）——稍后重新调用 codewiki_generate 继续，或到百炼控制台「批量推理」页查看进度`)
-        }
-        for (const r of settled) {
-          result.articles.push({ name: r.name, ok: r.ok, stopReason: r.stopReason })
-          if (r.ok) result.writtenCount += 1
-          else result.failedCount += 1
-        }
-        notes.push(`批量续查收尾：成功 ${result.writtenCount}/${settled.length} 篇`)
-        if (result.writtenCount > 0) {
-          const idx = await runCw(binary, cwd, ['index'], 120000, exec.signal)
-          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
-          notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
-          if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
-        }
-        if (result.failedCount > 0) notes.push('续查存在失败文章，可重新调用 codewiki_generate（scope=stale）补齐')
-        return result
-      }
-
-      // ---- clean：直接报告（scope=full 例外：强制全量重编）----
+      // clean：直接报告（scope=full 例外：强制全量重编）
       if (status.state === 'clean' && effectiveScope !== 'full') {
         notes.push('Wiki is up to date —— 无需编译')
         return result
       }
 
-      // ---- stale / auto 逐篇更新 ----
+      // stale / auto 逐篇更新：任务在提交时预构建（服务直接进 articles 阶段）
       if (!needsFullCompile && status.state === 'stale' && status.staleArticles.length) {
         const tasks = status.staleArticles.map((articleRel) => {
           const articlePath = path.join(wikiPath, articleRel.replace(/\\/g, '/'))
           const sourceFiles = readSourceFiles(articlePath)
           if (!sourceFiles.length) {
-            notes.push(`文章 ${articleRel} 无 source_files frontmatter，跳过（请手工处理或用 scope=full）`)
+            notes.push(`文章 ${articleRel} 无 source_files frontmatter，跳过（可手工处理或用 scope=full）`)
             return null
           }
           return {
-            label: `codewiki:更新 ${articleRel}`,
             name: articleRel,
-            prompt: staleArticlePrompt(cwd, articlePath, sourceFiles, language),
-            route,
             mission: `更新过期文章 ${articleRel}：以当前代码为准重写其内容，保留章节结构与 title/type/tags`,
             sources: sourceFiles,
             articlePath,
             prevArticlePath: articlePath,
           }
         }).filter(Boolean)
-        const staleRun = await runArticleTasks(tasks)
-        if (staleRun.submitted) {
-          for (const t of tasks) result.articles.push({ name: t.name, ok: null, stopReason: `批量进行中（${staleRun.submitted}）` })
-          notes.push(`批次已提交，宿主后台任务将等待批次完成后自动落盘并刷新索引（本调用不等待）；稍后重新调用 codewiki_generate 可查看进度`)
-          void backgroundFinalize({ batchId: staleRun.submitted, prepared: staleRun.prepared })
+        if (tasks.length) {
+          const { job } = await jobServiceRef.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks })
+          notes.push(`已提交 ${tasks.length} 篇过期文章更新任务 ${job.id}`)
+          result.jobId = job.id
+          result.stage = job.stage
+          result.submitted = true
           return result
         }
-        for (const r of staleRun.results) {
-          result.articles.push({ name: r.name, ok: r.ok, stopReason: r.stopReason })
-          if (r.ok) result.writtenCount += 1
-          else result.failedCount += 1
-        }
-        if (result.writtenCount > 0) {
-          const idx = await runCw(binary, cwd, ['index'], 120000, exec.signal)
-          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
-          notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
-          if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
-        }
-        for (const r of staleRun.results) {
-          if (!r.ok) notes.push(`失败：${r.name} —— ${failureMessage(r)}`)
-        }
-        return result
+        notes.push('没有可更新的过期文章，改走全量编译')
       }
 
-      // ---- stale 但解析不出过期文章 ----
+      // stale 但解析不出过期文章
       if (!needsFullCompile && status.state === 'stale' && !status.staleArticles.length) {
         if (status.changedFiles.length) {
-          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec?.signal)
           notes.push(`有 ${status.changedFiles.length} 个文件变更但未命中任何文章的 source_files，已刷新编译基线（meta update exit ${meta.exitCode}）`)
           return result
         }
         notes.push('cw status 输出无法解析，改走全量编译')
       }
 
-      // ---- 全量编译（scope=full，或 auto 命中 missing/uncompiled/无法解析）----
-      if (needsFullCompile || status.state === 'stale') {
-        if (status.state === 'missing') {
-          const init = await runCw(binary, cwd, ['init'], 120000, exec.signal)
-          if (init.exitCode !== 0) {
-            throw new Error(`codewiki_generate：cw init 失败（exit ${init.exitCode}）—— ${(init.stderr || init.stdout || '').trim()}`)
-          }
-          notes.push('cw init 完成')
+      // 全量编译（scope=full，或 auto 命中 missing/uncompiled/无法解析）
+      if (status.state === 'missing') {
+        const init = await runCw(binary, cwd, ['init'], 120000, exec?.signal)
+        if (init.exitCode !== 0) {
+          throw new Error(`codewiki_generate：cw init 失败（exit ${init.exitCode}）—— ${(init.stderr || init.stdout || '').trim()}`)
         }
-
-        // 规划：一个勘探 agent 出模块 JSON 计划；失败降级单 agent 全量
-        let plan = null
-        const planned = await safeLaunch(subagents, exec, {
-          label: 'codewiki:模块规划',
-          prompt: plannerPrompt(cwd),
-          route,
-        })
-        if (planned.ok) plan = parsePlan(planned.text)
-        if (!plan) {
-          notes.push(`模块规划${planned.ok ? '未产出可用 JSON' : `失败（${failureMessage(planned)}）`}，降级单 agent 全量编译`)
-        }
-
-        if (!plan) {
-          const r = await safeLaunch(subagents, exec, {
-            label: 'codewiki:全量编译（降级单 agent）',
-            prompt: fallbackCompilePrompt(cwd, wikiPath, language),
-            route,
-          })
-          result.articles.push({ name: '_all（单 agent 全量）', ok: r.ok, stopReason: r.stopReason })
-          if (r.ok) result.writtenCount += 1
-          else {
-            result.failedCount += 1
-            notes.push(`全量编译失败 —— ${failureMessage(r)}`)
-          }
-        } else {
-          notes.push(`规划：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
-          const moduleTasks = plan.modules.map((mod) => ({
-            label: `codewiki:模块 ${mod.name}`,
-            name: `modules/${slugify(mod.name)}.md`,
-            prompt: moduleArticlePrompt(cwd, wikiPath, mod, language),
-            route,
-            mission: `为模块「${mod.name}」撰写文章 modules/${slugify(mod.name)}.md${mod.summary ? `：${mod.summary}` : ''}`,
-            sources: mod.files,
-            articlePath: path.join(wikiPath, 'modules', `${slugify(mod.name)}.md`),
-          }))
-          const moduleRun = await runArticleTasks(moduleTasks)
-          if (moduleRun.submitted) {
-            for (const t of moduleTasks) result.articles.push({ name: t.name, ok: null, stopReason: `批量进行中（${moduleRun.submitted}）` })
-            notes.push(`批次已提交，宿主后台任务将等待批次完成后自动落盘并派发横切/审校/cw index（本调用不等待）；稍后重新调用 codewiki_generate 可查看进度`)
-            void backgroundFinalize({
-              batchId: moduleRun.submitted,
-              prepared: moduleRun.prepared,
-              crosscutPromptText: crosscutPrompt(cwd, wikiPath, plan, language),
-              verifyPromptText: verifyPrompt(cwd, wikiPath),
-            })
-            return result
-          }
-          for (const r of moduleRun.results) {
-            result.articles.push({ name: r.name, ok: r.ok, stopReason: r.stopReason })
-            if (r.ok) result.writtenCount += 1
-            else result.failedCount += 1
-          }
-          const okModules = moduleRun.results.filter((r) => r.ok).length
-          if (okModules === 0) {
-            notes.push('全部模块文章失败，跳过横切与审校（不刷新编译基线）')
-          } else {
-            if (okModules < moduleTasks.length) {
-              notes.push(`${moduleTasks.length - okModules} 个模块文章失败，横切文章按成功模块撰写`)
-            }
-            const cross = await safeLaunch(subagents, exec, {
-              label: 'codewiki:横切文章',
-              prompt: crosscutPrompt(cwd, wikiPath, plan, language),
-              route,
-            })
-            result.articles.push({ name: '_architecture + _patterns + concepts', ok: cross.ok, stopReason: cross.stopReason })
-            if (cross.ok) result.writtenCount += 1
-            else {
-              result.failedCount += 1
-              notes.push(`横切文章失败 —— ${failureMessage(cross)}`)
-            }
-
-            const verify = await safeLaunch(subagents, exec, {
-              label: 'codewiki:审校',
-              prompt: verifyPrompt(cwd, wikiPath),
-              route,
-            })
-            result.verified = verify.ok
-            if (verify.ok && verify.text) notes.push(`审校：${verify.text.trim().slice(0, 800)}`)
-            else if (!verify.ok) notes.push(`审校失败（不阻塞收尾）—— ${failureMessage(verify)}`)
-          }
-        }
-
-        if (result.writtenCount > 0) {
-          const idx = await runCw(binary, cwd, ['index'], 120000, exec.signal)
-          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec.signal)
-          notes.push(`cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
-          if (idx.exitCode !== 0 || meta.exitCode !== 0) notes.push('收尾命令存在失败，编译基线可能未刷新，可重试')
-        } else {
-          notes.push('没有文章写成功，跳过 index/meta update（wiki 基线不变，可重试）')
-        }
-        return result
+        notes.push('cw init 完成')
       }
+
+      const { job } = await jobServiceRef.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language })
+      notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部走百炼批量推理）`)
+      result.jobId = job.id
+      result.stage = job.stage
+      result.submitted = true
+      return result
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// 本机面板后端：GET /api/codewiki/jobs、POST /api/codewiki/control（仅回环）
+// ---------------------------------------------------------------------------
+
+function isLoopbackRequest(req) {
+  const addr = String(req?.socket?.remoteAddress ?? '')
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+}
+
+function writeJson(res, code, obj) {
+  const body = JSON.stringify(obj)
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) })
+  res.end(body)
+}
+
+function readBodyJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > 1024 * 1024) {
+        reject(new Error('请求体超过 1MB'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch (err) { reject(err) }
+    })
+    req.on('error', reject)
+  })
+}
+
+function installWebServer(ctx, service) {
+  if (typeof ctx.inject !== 'function') return
+  // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
+  ctx.inject(['webServer'], (rc) => {
+    const ws = rc?.webServer ?? rc
+    if (!ws || typeof ws.register !== 'function') return
+    const guard = (req, res) => {
+      if (isLoopbackRequest(req)) return true
+      writeJson(res, 403, { error: 'loopback only' })
+      return false
+    }
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/jobs',
+      handler: (req, res) => {
+        if (!guard(req, res)) return
+        writeJson(res, 200, { now: new Date().toISOString(), jobs: service.list() })
+      },
+    })
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/control',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        if (req.method !== 'POST') { writeJson(res, 405, { error: 'POST only' }); return }
+        let body
+        try { body = await readBodyJson(req) } catch (err) { writeJson(res, 400, { error: String(err?.message ?? err) }); return }
+        if (body?.action === 'cancel' && body?.jobId) {
+          const ok = service.cancel(String(body.jobId))
+          writeJson(res, ok ? 200 : 404, { ok })
+          return
+        }
+        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."}' })
+      },
+    })
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,11 +1549,14 @@ function installUpdateReminder(ctx, config) {
 
 export function apply(ctx, config) {
   hostCtxRef = ctx
-  ctx.inject?.(['tools', 'subagents'], (rc) => {
+  const service = createJobService(config)
+  jobServiceRef = service
+  service.start()
+  if (typeof ctx.effect === 'function') ctx.effect(() => service.stop())
+  ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    const subagents = rc?.subagents ?? rc
-    for (const definition of [cwToolDefinition(config), generateToolDefinition(config, subagents)]) {
+    for (const definition of [cwToolDefinition(config), generateToolDefinition(config)]) {
       const disposer = tools.register(definition)
       if (typeof disposer === 'function') {
         if (typeof ctx.effect === 'function') ctx.effect(() => disposer)
@@ -1236,5 +1564,6 @@ export function apply(ctx, config) {
       }
     }
   })
+  installWebServer(ctx, service)
   installUpdateReminder(ctx, config)
 }
