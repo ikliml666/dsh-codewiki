@@ -1791,7 +1791,13 @@ function installWebServer(ctx, service, extra = {}) {
   // 宿主工作区注册表（WorkspaceRegistry.list() 同步内存投影）：任务页过滤数据源。
   // 服务缺失（老宿主/测试 ctx）时保持 null——jobs 端点不过滤，行为与 0.4.8 一致。
   let workspaceRegistry = null
-  ctx.inject(['workspaceRegistry'], (wr) => { workspaceRegistry = wr ?? null })
+  // cordis inject 回调参数是「注入了所声明服务的 ctx 切片」，服务本体在切片同名属性上
+  // （0.4.10 真宿主 `cannot get property "list" without inject` 的根因：切片被当成实例存下）。
+  // 兼容旧 mock 直传实例的形态：切片无同名属性时回退参数本身，且必须带 list 方法。
+  ctx.inject(['workspaceRegistry'], (rc) => {
+    const wr = rc?.workspaceRegistry ?? rc
+    workspaceRegistry = wr && typeof wr.list === 'function' ? wr : null
+  })
   // 工作区过滤清单（jobs 与 repos 总览共用）：宿主注册表可用且开关开启时返回路径清单，否则 null。
   // cwd 等于某工作区或位于其子目录内（isExcluded 命中判定，语义同 hindsight withinPath）；
   // 宿主未注册任何工作区时返回 null——不过滤，行为与 0.4.8 一致。

@@ -54,8 +54,14 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, work
   }
   const ctx = {
     inject(deps, fn) {
+      // 宿主同构：带回调传「ctx 切片」（服务在切片同名属性上）——0.4.10 教训：直传实例
+      // 会掩盖 cordis 严格语义（切片当实例用，属性访问才抛 without inject）。
+      if (typeof fn === 'function') {
+        const slice = {}
+        for (const d of deps) slice[d] = services[d]
+        return fn(slice)
+      }
       const got = deps.map((d) => services[d])
-      if (typeof fn === 'function') return fn(...got)
       return Promise.resolve(got.length === 1 ? got[0] : got)
     },
     on(event, fn) { listeners.push([event, fn]) },
