@@ -141,7 +141,8 @@ window.__ModuleLoader__.load({
       '[data-dscw-notice] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-warn] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); font-size: 12px; line-height: 18px; }',
       // 侧边栏面板
-      '[data-dscw-p-page] { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: var(--dsw-alias-label-primary); height: 100%; overflow-y: auto; }',
+      '[data-dscw-p-page] { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: var(--dsw-alias-label-primary); box-sizing: border-box; height: 100%; overflow-y: auto; }',
+      '[data-dscw-p-page] * { box-sizing: border-box; }',
       '[data-dscw-p-head] { display: flex; align-items: center; justify-content: space-between; gap: 8px; }',
       '[data-dscw-p-head] h3 { margin: 0; font-size: 14px; font-weight: 500; line-height: 22px; }',
       '[data-dscw-p-job] { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
@@ -510,22 +511,28 @@ window.__ModuleLoader__.load({
             )
           }
 
-          return el('div', { 'data-dscw-p-page': '' },
-            el('div', { 'data-dscw-p-head': '' },
-              el('h3', null, t('panelTitle')),
-              el(Button, { variant: 'ghost', size: 'sm', onClick: () => setShowSettings((v) => !v) }, t('settings')),
-            ),
-            showSettings ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
-            err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
-            jobs === null
-              ? el('div', { 'data-dscw-p-empty': '' }, '…')
-              : !jobs.length
-                ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
-                : groups.map((g) => el(React.Fragment, { key: g.cwd },
-                  el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
-                  g.jobs.map(jobCard),
-                )),
-          )
+          try {
+            return el('div', { 'data-dscw-p-page': '' },
+              el('div', { 'data-dscw-p-head': '' },
+                el('h3', null, t('panelTitle')),
+                el(Button, { variant: 'ghost', size: 'sm', onClick: () => setShowSettings((v) => !v) }, t('settings')),
+              ),
+              showSettings ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
+              err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
+              jobs === null
+                ? el('div', { 'data-dscw-p-empty': '' }, '…')
+                : !jobs.length
+                  ? el('div', { 'data-dscw-p-empty': '' }, t('panelEmpty'))
+                  : groups.map((g) => el(React.Fragment, { key: g.cwd },
+                    el('div', { 'data-dscw-p-group': '', title: g.cwd }, repoName(g.cwd)),
+                    g.jobs.map(jobCard),
+                  )),
+            )
+          } catch (e) {
+            // 渲染构建期异常直接显形，避免整块白屏无从排查
+            return el('div', { 'data-dscw-p-page': '' },
+              el('div', { 'data-dscw-p-empty': '' }, `Panel error: ${String(e?.stack ?? e)}`))
+          }
         }
 
         function PanelIcon(props) {
