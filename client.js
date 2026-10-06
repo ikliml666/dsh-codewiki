@@ -468,7 +468,7 @@ window.__ModuleLoader__.load({
           const byCwd = new Map()
           for (const job of jobs ?? []) {
             let g = byCwd.get(job.cwd)
-            if (!g) { g = []; byCwd.set(job.cwd, g); groups.push(g) }
+            if (!g) { g = []; byCwd.set(job.cwd, g); groups.push({ cwd: job.cwd, jobs: g }) }
             g.unshift(job)
           }
 
