@@ -825,6 +825,23 @@ async function wikiPathFor(cwd, binary, signal) {
 const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
 const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
 const MAX_JOBS_KEPT = 30
+
+// 已知仓库清单：独立于 job 历史的持久化工作区登记。job 记录会被 MAX_JOBS_KEPT 截断、
+// Temp 沙箱任务会被启动清理移除，仓库总览若只扫 job 历史就会漏掉编译过的工作区
+// ——提交过一次就永久登记（hindsight recentWorkspaces 同思路），与 JOBS_FILE 同目录同生命周期。
+const REPOS_FILE = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+function loadKnownRepos() {
+  try { return JSON.parse(fs.readFileSync(REPOS_FILE, 'utf8'))?.repos ?? [] } catch { return [] }
+}
+function rememberRepo(cwd) {
+  const dir = String(cwd ?? '').trim()
+  if (!dir) return
+  const key = (p) => path.normalize(p).replace(/[\\/]+$/, '').toLowerCase()
+  const list = loadKnownRepos()
+  if (list.some((p) => key(p) === key(dir))) return
+  list.push(dir)
+  try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: list }, null, 2), 'utf8') } catch { /* 不可写则放弃 */ }
+}
 const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])
 
 // 仓库源码勘探（规划输入）：黑名单目录 + 二进制后缀 + 单文件 256KB + 总数 2000
@@ -926,6 +943,7 @@ function jobSummary(job) {
 
 function createJobService(config) {
   const jobs = loadJobs()
+  for (const j of jobs) rememberRepo(j.cwd) // 一次性种子：旧历史进已知仓库清单
   let timer = null
   let ticking = false
   let seq = 0
@@ -1489,6 +1507,7 @@ function createJobService(config) {
     if (isExcluded(cwd, c0.excludePaths)) {
       throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
     }
+    rememberRepo(cwd)
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
     // 占位先行：resolveBatchApiKey 最长等 3s，期间的并发提交靠非终态 stage 挡重复
@@ -1793,15 +1812,23 @@ function installWebServer(ctx, service, extra = {}) {
         if (!guard(req, res)) return
         if (!reposCache || Date.now() - reposCacheAt > 30000) {
           const c = liveConfig(config ?? {})
-          const seen = new Set()
+          const normKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
+          const seen = new Map() // normKey → 展示用 cwd（job 历史形态优先，knownRepos 补缺）
           const lastByCwd = new Map()
-          for (const j of service.list()) {
-            if (!j.cwd || seen.has(j.cwd)) continue
-            seen.add(j.cwd)
-            lastByCwd.set(j.cwd, j)
+          const putCwd = (dir, last) => {
+            if (!dir) return
+            const k = normKey(dir)
+            if (seen.has(k)) {
+              if (last && !lastByCwd.get(seen.get(k))) lastByCwd.set(seen.get(k), last)
+              return
+            }
+            seen.set(k, dir)
+            lastByCwd.set(dir, last ?? null)
           }
+          for (const j of service.list()) putCwd(j.cwd, j)
+          for (const dir of loadKnownRepos()) putCwd(dir, null)
           const repos = []
-          for (const cwd of seen) {
+          for (const cwd of seen.values()) {
             const last = lastByCwd.get(cwd)
             const base = {
               cwd,
@@ -1851,6 +1878,11 @@ function installWebServer(ctx, service, extra = {}) {
           writeJson(res, ok ? 200 : 404, { ok })
           return
         }
+        if (body?.action === 'refresh') {
+          reposCache = null
+          writeJson(res, 200, { ok: true })
+          return
+        }
         if (body?.action === 'compile' && body?.cwd) {
           if (typeof compile !== 'function') { writeJson(res, 501, { error: '编译入口未初始化' }); return }
           reposCache = null // 编译提交会改 wiki 状态，下次拉总览强制重算
@@ -1862,7 +1894,7 @@ function installWebServer(ctx, service, extra = {}) {
           }
           return
         }
-        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."} 或 {"action":"compile","cwd":"..."}' })
+        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."} / {"action":"compile","cwd":"..."} / {"action":"refresh"}' })
       },
     })
   })

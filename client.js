@@ -90,6 +90,8 @@ window.__ModuleLoader__.load({
       stateStale: '有变更',
       stateError: '出错',
       excludedTag: '已排除',
+      excludeRepo: '排除',
+      unexcludeRepo: '取消排除',
       autoTag: '自动',
       schedTitle: '自动更新调度',
       schedOn: '开',
@@ -175,6 +177,8 @@ window.__ModuleLoader__.load({
       stateStale: 'Changed',
       stateError: 'Error',
       excludedTag: 'Excluded',
+      excludeRepo: 'Exclude',
+      unexcludeRepo: 'Un-exclude',
       autoTag: 'Auto',
       schedTitle: 'Auto-update scheduler',
       schedOn: 'On',
@@ -552,25 +556,47 @@ window.__ModuleLoader__.load({
           const mountedRef = React.useRef(true)
           React.useEffect(() => () => { mountedRef.current = false }, [])
 
-          React.useEffect(() => {
-            let alive = true
-            let inFlight = false
-            const pull = async () => {
-              if (inFlight) return
-              inFlight = true
-              try {
-                const j = await apiGet(REPOS_PATH)
-                if (alive) { setData(j ?? {}); setErr(null) }
-              } catch (e) {
-                if (alive) setErr(String(e?.message ?? e))
-              } finally {
-                inFlight = false
-              }
+          const inFlightRef = React.useRef(false)
+          const pull = async () => {
+            if (inFlightRef.current) return
+            inFlightRef.current = true
+            try {
+              const j = await apiGet(REPOS_PATH)
+              if (mountedRef.current) { setData(j ?? {}); setErr(null) }
+            } catch (e) {
+              if (mountedRef.current) setErr(String(e?.message ?? e))
+            } finally {
+              inFlightRef.current = false
             }
+          }
+          React.useEffect(() => {
             pull()
             const id = setInterval(pull, REPOS_POLL_MS)
-            return () => { alive = false; clearInterval(id) }
+            return () => clearInterval(id)
           }, [])
+
+          // 排除/取消排除：直接改插件配置 excludePaths（form.mutate，与设置卡保存同链路，
+          // 经宿主 configForms 持久化并热生效）；成功后让服务端总览缓存失效并立即重拉
+          const [exclBusy, setExclBusy] = React.useState(null)
+          const toggleExclude = async (r) => {
+            const snap = form?.getSnapshot?.()
+            if (!snap || snap.status !== 'ready' || !snap.writable) return
+            setExclBusy(r.cwd)
+            try {
+              const norm = (p) => String(p ?? '').replace(/[\\/]+$/, '').toLowerCase()
+              const list = String(snap.value?.excludePaths ?? '').split(/[\n;，,]+/).map((x) => x.trim()).filter(Boolean)
+              const has = list.some((p) => norm(p) === norm(r.cwd))
+              const next = has ? list.filter((p) => norm(p) !== norm(r.cwd)) : [...list, r.cwd]
+              const accepted = await form.mutate([{ op: 'set', path: ['excludePaths'], value: next.join('\n') }], snap.revision)
+              if (accepted) {
+                await apiPost(CONTROL_PATH, { action: 'refresh' }).catch(() => {})
+                if (mountedRef.current) { setErr(null); await pull() }
+              }
+            } catch (e) {
+              if (mountedRef.current) setErr(String(e?.message ?? e))
+            }
+            if (mountedRef.current) setExclBusy(null)
+          }
 
           const compile = async (cwd) => {
             setBusyCwd(cwd)
@@ -615,6 +641,11 @@ window.__ModuleLoader__.load({
                           onClick: () => compile(r.cwd), disabled: busyCwd === r.cwd,
                         }, t('compileNow'))
                         : null,
+                      el(Button, {
+                        variant: 'ghost', size: 'sm',
+                        disabled: exclBusy === r.cwd,
+                        onClick: () => toggleExclude(r),
+                      }, r.excluded ? t('unexcludeRepo') : t('excludeRepo')),
                     ),
                     el('div', { 'data-dscw-p-meta': '' },
                       st === 'stale'

@@ -573,6 +573,38 @@ console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
   }
 }
 
+// ============================ 已知仓库登记 / refresh（0.4.8） ============================
+console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 ==')
+{
+  const krRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  const reposFile = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  try {
+    const r = await gen.execute({ cwd: krRepo }, { agent: 'test-agent' })
+    check(r.submitted === true, '0.4.8 编译提交成功')
+    await waitJob(r.cwd)
+    const listed = JSON.parse(fs.readFileSync(reposFile, 'utf8')).repos.map((p) => p.toLowerCase())
+    check(listed.includes(krRepo.toLowerCase()), '提交即登记 knownRepos（持久化清单）')
+
+    // 模拟 job 历史丢失（MAX_JOBS_KEPT 截断/清理）：knownRepos 仍让总览发现该仓
+    fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+    const ctlEp8 = main.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const resR = fakeRes()
+    await ctlEp8.handler(fakeReq({ action: 'refresh' }, '127.0.0.1', 'POST'), resR)
+    check(resR.code === 200 && JSON.parse(resR.out).ok === true, 'refresh 动作清总览缓存')
+    const jobsEp2 = main.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const res2 = fakeRes()
+    await jobsEp2.handler(fakeReq({}, '127.0.0.1', 'GET'), res2)
+    const payload2 = JSON.parse(res2.out)
+    const row2 = (payload2.repos ?? []).find((x) => x.cwd.toLowerCase() === krRepo.toLowerCase())
+    check(!!row2, 'job 历史清空后 repos 总览仍发现已编译仓库（knownRepos）')
+  } finally {
+    mock.restore()
+    fs.rmSync(krRepo, { recursive: true, force: true })
+    try { fs.unlinkSync(reposFile) } catch { /* 测试清理 */ }
+  }
+}
+
 // ============================ 无凭证诚实报错 ============================
 console.log('== 无凭证：诚实报错（没有子代理回退） ==')
 {
