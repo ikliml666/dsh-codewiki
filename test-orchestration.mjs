@@ -30,7 +30,7 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false } = {}) {
+function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
@@ -45,6 +45,9 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false } = {
     },
     agents: { list: () => agents },
     tools: { register(def) { registered.set(def.name, def); return () => {} } },
+  }
+  if (workspaces !== null) {
+    services.workspaceRegistry = { list: () => workspaces.map((p) => ({ path: p })) }
   }
   const ctx = {
     inject(deps, fn) {
@@ -602,6 +605,43 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
     mock.restore()
     fs.rmSync(krRepo, { recursive: true, force: true })
     try { fs.unlinkSync(reposFile) } catch { /* 测试清理 */ }
+  }
+}
+
+// ============================ 工作区任务过滤（0.4.9） ============================
+console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） ==')
+{
+  const wsRepo = makeFixtureRepo()
+  const outsideRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  // 注册 workspaceRegistry：只有 wsRepo 是已添加工作区（宿主 WorkspaceRegistry 同构）
+  const wx = makeCtx({ workspaces: [wsRepo] })
+  const cfg2 = {}
+  try {
+    apply(wx.ctx, cfg2)
+    const gen2 = wx.registered.get('codewiki_generate')
+    const ep2 = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+
+    const rA = await gen2.execute({ cwd: wsRepo }, { agent: 'test-agent' })
+    await waitJob(rA.cwd)
+    const rB = await gen2.execute({ cwd: outsideRepo }, { agent: 'test-agent' })
+    await waitJob(rB.cwd)
+
+    const readJobs = async () => {
+      const res = fakeRes()
+      await ep2.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+      return JSON.parse(res.out).jobs
+    }
+    check((await readJobs()).some((j) => j.cwd === wsRepo), '工作区内任务显示')
+    check(!(await readJobs()).some((j) => j.cwd === outsideRepo), `工作区外任务被过滤（${outsideRepo}）`)
+
+    cfg2.workspaceOnly = false
+    check((await readJobs()).some((j) => j.cwd === outsideRepo), 'workspaceOnly=false 后不过滤')
+  } finally {
+    delete cfg2.workspaceOnly
+    mock.restore()
+    fs.rmSync(wsRepo, { recursive: true, force: true })
+    fs.rmSync(outsideRepo, { recursive: true, force: true })
   }
 }
 

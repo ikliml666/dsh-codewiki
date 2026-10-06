@@ -33,6 +33,8 @@ window.__ModuleLoader__.load({
       enabledHint: '停用后 cw 与 codewiki_generate 两个工具立即报错。',
       updateReminder: 'wiki 维护提醒',
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库存在 .codewiki/ 时出现，提醒改完代码后更新 wiki。',
+      workspaceOnly: '只显示工作区任务',
+      workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '实时兑底并发上限',
       maxConcurrencyHint: '1–8；硬顶 8。仅超预算单文件的实时兑底请求使用。',
       secBatch: '批量编译（百炼）',
@@ -120,6 +122,8 @@ window.__ModuleLoader__.load({
       enabledHint: 'When off, the cw and codewiki_generate tools error immediately.',
       updateReminder: 'Wiki update reminder',
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
+      workspaceOnly: 'Workspace tasks only',
+      workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Realtime fallback concurrency',
       maxConcurrencyHint: '1–8; hard cap 8. Used only by realtime fallback requests for oversized single files.',
       secBatch: 'Batch compilation (Bailian)',
@@ -375,7 +379,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchMinTokens', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchMinTokens', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -423,6 +427,15 @@ window.__ModuleLoader__.load({
                     label: t('updateReminder'),
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('updateReminderHint')),
+                ),
+                el('label', null, t('workspaceOnly')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.workspaceOnly !== false,
+                    onChange: (v) => setPath('workspaceOnly', v),
+                    label: t('workspaceOnly'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('workspaceOnlyHint')),
                 ),
                 el('label', null, t('maxConcurrency')),
                 el('div', { 'data-dscw-field': '' },

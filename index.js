@@ -46,6 +46,7 @@ export const Config = z.object({
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
+  workspaceOnly: z.boolean().default(true).volatile().description('任务页只显示属于已添加 dsh 工作区（宿主工作区列表）的任务'),
 })
 
 function val(x) {
@@ -69,6 +70,7 @@ function liveConfig(config) {
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
     autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
+    workspaceOnly: val(c.workspaceOnly) !== false,
   }
 }
 
@@ -1785,6 +1787,10 @@ function readBodyJson(req) {
 function installWebServer(ctx, service, extra = {}) {
   const { config, schedState, compile } = extra
   if (typeof ctx.inject !== 'function') return
+  // 宿主工作区注册表（WorkspaceRegistry.list() 同步内存投影）：任务页过滤数据源。
+  // 服务缺失（老宿主/测试 ctx）时保持 null——jobs 端点不过滤，行为与 0.4.8 一致。
+  let workspaceRegistry = null
+  ctx.inject(['workspaceRegistry'], (wr) => { workspaceRegistry = wr ?? null })
   // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
   ctx.inject(['webServer'], (rc) => {
     const ws = rc?.webServer ?? rc
@@ -1799,7 +1805,16 @@ function installWebServer(ctx, service, extra = {}) {
       path: '/api/codewiki/jobs',
       handler: (req, res) => {
         if (!guard(req, res)) return
-        writeJson(res, 200, { now: new Date().toISOString(), jobs: service.list() })
+        let list = service.list()
+        const wr = workspaceRegistry
+        // workspaceOnly（默认开）：只显示属于已添加 dsh 工作区的任务——cwd 等于某工作区
+        // 或位于其子目录内（isExcluded 的路径清单命中判定，语义同 hindsight withinPath）。
+        // Temp 沙箱与任意路径任务不出现在面板；宿主未注册任何工作区时不过滤。
+        if (wr && typeof wr.list === 'function' && liveConfig(config ?? {}).workspaceOnly !== false) {
+          const wsPaths = (wr.list() ?? []).map((w) => w?.path).filter((p) => typeof p === 'string' && p)
+          if (wsPaths.length) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
+        }
+        writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
       },
     })
     // 仓库总览：jobs 历史工作区的 wiki 状态（cw status 现算，30s 缓存——面板 2s 轮询不打爆 git）
