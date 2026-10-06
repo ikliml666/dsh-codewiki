@@ -452,7 +452,10 @@ window.__ModuleLoader__.load({
 
           const stageLabel = (stage) => t(`stage${stage.charAt(0).toUpperCase()}${stage.slice(1)}`)
           const kindLabel = (kind) => (t(`kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`))
-          const repoName = (cwd) => String(cwd ?? '').split(/[\\/]/).filter(Boolean).pop() ?? cwd
+          const repoName = (cwd) => {
+            const parts = String(cwd ?? '').split(/[\\/]/).filter(Boolean)
+            return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
+          }
 
           const fmtElapsed = (ms) => {
             const s = Math.max(0, Math.floor(ms / 1000))
