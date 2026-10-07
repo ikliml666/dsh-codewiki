@@ -757,6 +757,40 @@ console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null
   }
 }
 
+// ============================ 孤儿任务接管（0.4.11.2） ============================
+console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时接管 ==')
+{
+  const staleAt = new Date(Date.now() - 6 * 60000).toISOString()
+  const freshAt = new Date().toISOString()
+  const mkForeign = (id, updatedAt, extra = {}) => ({
+    id, cwd: 'E:/somewhere/foreign-' + id, kind: 'stale', scope: 'auto', language: 'zh',
+    stage: 'articles', owner: 'svc-foreign-instance',
+    plan: null, batchRef: null, tasks: [], articles: [], writtenCount: 0, failedCount: 0,
+    notes: [], createdAt: staleAt, updatedAt, ...extra,
+  })
+  // apply 前写入 JOBS_FILE，start() 的 loadJobs 直接吸收
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [
+    mkForeign('job-orphan-stale', staleAt, { cancelRequested: true }),
+    mkForeign('job-orphan-fresh', freshAt),
+  ] }), 'utf8')
+  const wx = makeCtx({})
+  const cfg2 = {}
+  apply(wx.ctx, cfg2)
+  // 等 2 个 tick：接管（陈旧）在下一轮 tick 生效；新鲜的继续让路
+  await new Promise((r) => setTimeout(r, 800))
+  const epJ = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+  const res = fakeRes()
+  await epJ.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+  const got = JSON.parse(res.out).jobs
+  const st = got.find((j) => j.id === 'job-orphan-stale')
+  const fr = got.find((j) => j.id === 'job-orphan-fresh')
+  check(st?.stage === 'cancelled', `停更 6 分钟的 foreign 任务被接管并响应取消（实际 stage=${st?.stage}）`)
+  check((st?.notes ?? []).some((m) => String(m).includes('接管')), '接管时写了 note 留痕')
+  check(fr?.stage === 'articles' && (fr?.notes ?? []).every((m) => !String(m).includes('接管')),
+    `新鲜 foreign 任务不被抢（实际 stage=${fr?.stage} 接管note=${(fr?.notes ?? []).some((m) => String(m).includes('接管'))}）`)
+  try { fs.unlinkSync(JOBS_FILE) } catch { /* 测试清理 */ }
+}
+
 // ============================ 无凭证诚实报错 ============================
 console.log('== 无凭证：诚实报错（没有子代理回退） ==')
 {

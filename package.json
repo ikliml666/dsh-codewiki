@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.4.11",
+  "version": "0.4.11.1",
   "description": "CodeWiki for DeepSeek Harness: cw CLI + all-batch wiki compilation pipeline (Bailian batch inference, zero subagents) with a sidebar panel.",
   "private": true,
   "type": "module",

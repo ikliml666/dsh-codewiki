@@ -833,6 +833,8 @@ async function wikiPathFor(cwd, binary, signal) {
 // 宿主周期 flush 会用其内存副本整写同一文件，测试期间互相洗掉对方的内存字段（tps 采样 flaky 的根因）
 const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
 const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
+// 孤儿接管阈值：另一实例的 job 停更超过该时长视为宿主重启遗留，本实例接管推进
+const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)
 const MAX_JOBS_KEPT = 30
 
 // 已知仓库清单：独立于 job 历史的持久化工作区登记。job 记录会被 MAX_JOBS_KEPT 截断、
@@ -1495,7 +1497,15 @@ function createJobService(config) {
       syncCancelFlags()
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
-        if (job.owner && job.owner !== instanceId) continue // 另一实例的 job，它自己的 tick 负责推进
+        if (job.owner && job.owner !== instanceId) {
+          // 另一实例的 job：它活着会随批次轮询 touch（updatedAt 每 tick 前进）；
+          // 停更超时视为孤儿（宿主重启后 instanceId 变了，旧任务无人推进），接管。
+          const idleMs = Date.now() - Date.parse(job.updatedAt || job.createdAt || new Date().toISOString())
+          if (Number.isFinite(idleMs) && idleMs <= ORPHAN_TAKEOVER_MS) continue
+          note(job, `原实例 ${job.owner} 停更 ${Math.round(idleMs / 60000)} 分钟，本实例接管推进`)
+          job.owner = instanceId
+          touch(job)
+        }
         if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {
           job.stage = 'cancelled'
