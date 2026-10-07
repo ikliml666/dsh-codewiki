@@ -127,7 +127,7 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
     }
     const bm = u.match(/\/batches\/(batch-\d+)$/)
     if (bm) {
-      if (stall) return json({ id: bm[1], status: 'in_progress' })
+      if (stall) return json({ id: bm[1], status: 'in_progress', request_counts: { total: 2, completed: 1, failed: 0 } })
       return json({ id: bm[1], status: 'completed', output_file_id: `out-${bm[1]}`, error_file_id: `err-${bm[1]}` })
     }
     const om = u.match(/\/files\/out-(batch-\d+)\/content$/)
@@ -515,6 +515,21 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
     const jobsPayload = JSON.parse(resJobs.out)
     check(Array.isArray(jobsPayload.jobs) && jobsPayload.jobs.some((j) => j.id === r4.jobId), 'jobs 列表包含活动任务')
     check(jobsPayload.jobs.every((j) => !('apiKey' in j)), 'jobs 列表不泄漏 apiKey')
+    // 0.4.11：批量中间进度与逐任务明细透出
+    await new Promise((r) => setTimeout(r, 900)) // 等一拍 tick：settleJob 轮询批次带出 request_counts
+    const resProg = fakeRes()
+    jobsEp.handler(fakeReq(), resProg)
+    const progJob = JSON.parse(resProg.out).jobs.find((j) => j.id === r4.jobId)
+    check(!!progJob?.batchProgress && progJob.batchProgress.total >= 2 && progJob.batchProgress.completed >= 1,
+      `批量中间进度 request_counts 透出（实际 ${JSON.stringify(progJob?.batchProgress)}）`)
+    check(Array.isArray(progJob?.taskList) && progJob.taskList.length >= 1 && progJob.taskList.every((x) => x.state === 'pending'),
+      `taskList 活动期为待办明细（实际 ${JSON.stringify(progJob?.taskList)?.slice(0, 120)}）`)
+    const reposEp = main.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const resRepos11 = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resRepos11)
+    const repoRow11 = (JSON.parse(resRepos11.out).repos ?? []).find((x) => x.cwd === cancelRepo)
+    check(repoRow11?.lastJob?.taskList?.length >= 1 && repoRow11.lastJob.tps !== undefined && repoRow11.lastJob.batchProgress !== undefined,
+      'repos 总览活动任务带 taskList/batchProgress/tps')
     const resCancel = fakeRes()
     await ctlEp.handler(fakeReq({ action: 'cancel', jobId: r4.jobId }), resCancel)
     check(resCancel.code === 200 && JSON.parse(resCancel.out).ok === true, '取消请求被接受')
@@ -595,6 +610,14 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
     const r = await gen.execute({ cwd: krRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '0.4.8 编译提交成功')
     await waitJob(r.cwd)
+    // 0.4.11：终态任务明细全结算、中间进度清空
+    const jobsEp11 = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    const resDone11 = fakeRes()
+    jobsEp11.handler(fakeReq(), resDone11)
+    const doneJob = JSON.parse(resDone11.out).jobs.find((j) => j.id === r.jobId)
+    check(Array.isArray(doneJob?.taskList) && doneJob.taskList.length >= 2 && doneJob.taskList.every((x) => x.state === 'done'),
+      `终态 taskList 全部 done（实际 ${JSON.stringify(doneJob?.taskList)?.slice(0, 120)}）`)
+    check(doneJob?.batchProgress === null, '终态 batchProgress 已清空')
     const listed = JSON.parse(fs.readFileSync(reposFile, 'utf8')).repos.map((p) => p.toLowerCase())
     check(listed.includes(krRepo.toLowerCase()), '提交即登记 knownRepos（持久化清单）')
 

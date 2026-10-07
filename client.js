@@ -105,6 +105,7 @@ window.__ModuleLoader__.load({
       schedMinutes: '分钟',
       compileNow: '更新',
       compileUpToDate: '已是最新',
+      batchLabel: '批次',
       secSchedule: '调度与排除',
       autoUpdateLabel: '自动更新',
       autoUpdateHint: '定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）。',
@@ -194,6 +195,7 @@ window.__ModuleLoader__.load({
       schedMinutes: 'min',
       compileNow: 'Update',
       compileUpToDate: 'Up to date',
+      batchLabel: 'Batch',
       secSchedule: 'Scheduler & exclusions',
       autoUpdateLabel: 'Auto update',
       autoUpdateHint: 'Periodically scans compiled workspaces and submits incremental recompiles when changes are detected (scope=auto).',
@@ -247,6 +249,13 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-stage][data-state="missing"], [data-dscw-p-stage][data-state="uncompiled"] { color: var(--dsw-alias-label-tertiary); }',
       '[data-dscw-p-sched] { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-p-repo] { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
+      '[data-dscw-p-bar] { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); overflow: hidden; }',
+      '[data-dscw-p-barfill] { height: 100%; border-radius: 2px; background: var(--dsw-alias-brand-primary); transition: width 0.4s ease; }',
+      '[data-dscw-p-tasklist] { display: flex; flex-direction: column; gap: 1px; max-height: 180px; overflow-y: auto; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-task] { display: flex; gap: 6px; align-items: baseline; }',
+      '[data-dscw-p-task] [data-mark] { flex: none; width: 12px; text-align: center; }',
+      '[data-dscw-p-task][data-state="done"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
+      '[data-dscw-p-task][data-state="failed"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-textarea] { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
@@ -555,6 +564,11 @@ window.__ModuleLoader__.load({
 
         const stageLabel = (stage) => tBound(`stage${String(stage).charAt(0).toUpperCase()}${String(stage).slice(1)}`)
         const stateLabel = (st) => tBound(`state${String(st).charAt(0).toUpperCase()}${String(st).slice(1)}`)
+        const kindLabelOf = (t, kind) => t(`kind${String(kind).charAt(0).toUpperCase()}${String(kind).slice(1)}`)
+        const progressBar = (done, total) => (total > 0
+          ? el('div', { 'data-dscw-p-bar': '' },
+            el('div', { 'data-dscw-p-barfill': '', style: { width: `${Math.max(0, Math.min(100, Math.round((done / total) * 100)))}%` } }))
+          : null)
         const repoName = (cwd) => {
           const parts = String(cwd ?? '').split(/[\\/]/).filter(Boolean)
           return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
@@ -660,14 +674,23 @@ window.__ModuleLoader__.load({
                         onClick: () => toggleExclude(r),
                       }, r.excluded ? t('unexcludeRepo') : t('excludeRepo')),
                     ),
-                    el('div', { 'data-dscw-p-meta': '' },
-                      st === 'stale'
-                        ? `${t('stateStale')} ${r.staleArticles ?? 0} ${t('unitArticle')} · ${t('changedLabel')} ${r.changedFiles ?? 0}`
-                        : '',
-                      r.lastJob
-                        ? `${r.lastJob.kind} · ${stageLabel(r.lastJob.stage)}${r.lastJob.auto ? ` · ${t('autoTag')}` : ''}`
-                        : '',
-                    ),
+                    (() => {
+                      const lj = r.lastJob
+                      const ljActive = lj && !['done', 'failed', 'cancelled'].includes(lj.stage)
+                      const tl = ljActive && Array.isArray(lj.taskList) ? lj.taskList : []
+                      const tlDone = tl.filter((x) => x.state === 'done').length
+                      const barDone = ljActive && lj.batchProgress ? lj.batchProgress.completed : tlDone
+                      const barTotal = ljActive && lj.batchProgress ? Math.max(lj.batchProgress.total, tl.length) : tl.length
+                      const parts = []
+                      if (st === 'stale') parts.push(`${t('stateStale')} ${r.staleArticles ?? 0} ${t('unitArticle')} · ${t('changedLabel')} ${r.changedFiles ?? 0}`)
+                      if (lj) parts.push(`${kindLabelOf(t, lj.kind)} · ${stageLabel(lj.stage)}${lj.auto ? ` · ${t('autoTag')}` : ''}`)
+                      if (ljActive && lj.batchProgress) parts.push(`${t('batchLabel')} ${lj.batchProgress.completed}/${lj.batchProgress.total}`)
+                      if (ljActive && lj.tps) parts.push(`tps ${lj.tps}`)
+                      return el(React.Fragment, null,
+                        parts.length ? el('div', { 'data-dscw-p-meta': '' }, parts.join(' · ')) : null,
+                        barTotal > 0 ? progressBar(barDone, barTotal) : null,
+                      )
+                    })(),
                   )
                 })
                 : el('div', { 'data-dscw-p-empty': '' }, t('reposEmpty')),
@@ -749,6 +772,8 @@ window.__ModuleLoader__.load({
             const active = isActive(job)
             const arts = Array.isArray(job.articles) ? job.articles : []
             const okCount = arts.filter((a) => a.ok).length
+            const taskList = Array.isArray(job.taskList) ? job.taskList : []
+            const doneN = taskList.filter((x) => x.state === 'done').length
             return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
@@ -768,16 +793,27 @@ window.__ModuleLoader__.load({
                   }, job.cancelRequested === true ? t('cancelRequestedLabel') : t('cancelJob'))
                   : null,
               ),
-              (typeof job.writtenCount === 'number' || arts.length)
+              (typeof job.writtenCount === 'number' || arts.length || taskList.length)
                 ? el('div', { 'data-dscw-p-meta': '' },
                   active && arts.length
                     ? `${t('writtenLabel')} ${okCount}/${arts.length} ${t('unitArticle')}`
                     : `${t('writtenLabel')} ${job.writtenCount ?? okCount} ${t('unitArticle')}`,
                   job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '',
+                  active && job.batchProgress ? ` · ${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}` : '',
                   job.tps ? ` · tps ${job.tps}` : '')
                 : null,
+              progressBar(
+                active && job.batchProgress ? job.batchProgress.completed : doneN,
+                active && job.batchProgress ? Math.max(job.batchProgress.total, taskList.length) : taskList.length,
+              ),
               (job.notes ?? []).length
                 ? el('div', { 'data-dscw-p-note': '' }, job.notes[job.notes.length - 1])
+                : null,
+              active && taskList.length
+                ? el('div', { 'data-dscw-p-tasklist': '' },
+                  taskList.map((x) => el('div', { key: x.name, 'data-dscw-p-task': '', 'data-state': x.state },
+                    el('span', { 'data-mark': '' }, x.state === 'done' ? '✓' : x.state === 'failed' ? '✗' : '·'),
+                    el('span', null, x.name))))
                 : null,
               job.wikiPath
                 ? el('div', { 'data-dscw-p-meta': '' }, `${t('wikiAt')}${job.wikiPath}`)

@@ -369,7 +369,7 @@ const BATCH_TERMINAL = new Set(['completed', 'failed', 'expired', 'cancelled'])
 
 // 批次收尾：终态后下载结果（与错误）文件、逐行落盘、清理断点文件。
 // 任何一步失败都折算成逐篇失败记录，不向上抛（断点文件仅在校验到终态后删除）。
-export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes }) {
+export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes, onProgress }) {
   const byCustomId = new Map(tasks.map((t) => [t.customId, t]))
   const results = tasks.map((t) => ({ name: t.name, ok: false, stopReason: 'error' }))
   const finish = () => { try { fs.unlinkSync(stateFile) } catch { /* 已不存在亦可 */ } }
@@ -380,7 +380,14 @@ export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes }) 
     notes.push(`批量任务 ${batchId} 状态查询失败（断点保留，可重试）—— ${String(err?.message ?? err)}`)
     return results
   }
-  if (!BATCH_TERMINAL.has(status?.status)) return null // 未终态：调用方继续等
+  if (!BATCH_TERMINAL.has(status?.status)) {
+    // 中间进度（OpenAI batch 兼容的 request_counts）经 onProgress 透给任务卡，不影响收尾循环
+    const rc = status?.request_counts
+    if (typeof onProgress === 'function' && rc) {
+      try { onProgress({ total: rc.total ?? tasks.length, completed: rc.completed ?? 0, failed: rc.failed ?? 0 }) } catch { /* 进度回调失败不阻断轮询 */ }
+    }
+    return null
+  }
   if (status.status !== 'completed') {
     // 失败原因字段两形态兼容：error.message（对象）或 errors（数组）
     const errText = status?.error?.message
@@ -934,6 +941,12 @@ function jobSummary(job) {
     failedCount: job.failedCount,
     cancelRequested: job.cancelRequested === true,
     articles: (job.articles ?? []).map((a) => ({ name: a.name, ok: a.ok })),
+    // 全程任务明细：已结算（done/failed）在前，当前批次待办（pending）在后；进度条分母即其长度
+    taskList: [
+      ...(job.articles ?? []).map((a) => ({ name: a.name, state: a.ok ? 'done' : 'failed' })),
+      ...(() => { const settled = new Set((job.articles ?? []).map((a) => a.name)); return (job.tasks ?? []).filter((t) => !settled.has(t.name)).map((t) => ({ name: t.name, state: 'pending' })) })(),
+    ],
+    batchProgress: job.batchProgress ?? null,
     notes: (job.notes ?? []).slice(-8),
     error: job.error ?? null,
     createdAt: job.createdAt,
@@ -1053,13 +1066,16 @@ function createJobService(config) {
       return rs ?? []
     }
     try {
-      return await settleBatch({
+      const rs = await settleBatch({
         batchId: job.batchRef.batchId,
         tasks: job.tasks,
         apiKey: await apiKeyOf(job),
         stateFile: job.batchRef.stateFile,
         notes: job.notes,
+        onProgress: (rc) => { job.batchProgress = rc; touch(job) },
       })
+      if (rs) job.batchProgress = null // 批次已终态收尾，中间进度作废
+      return rs
     } catch (err) {
       note(job, `批次 ${job.batchRef?.batchId} 收尾异常（断点保留，下轮重试）—— ${String(err?.message ?? err)}`)
       return null
@@ -1880,7 +1896,12 @@ function installWebServer(ctx, service, extra = {}) {
             const base = {
               cwd,
               excluded: isExcluded(cwd, c.excludePaths),
-              lastJob: last ? { id: last.id, kind: last.kind, stage: last.stage, auto: last.auto === true, finishedAt: last.finishedAt ?? null, writtenCount: last.writtenCount ?? 0 } : null,
+              lastJob: last ? {
+                id: last.id, kind: last.kind, stage: last.stage, auto: last.auto === true,
+                finishedAt: last.finishedAt ?? null, writtenCount: last.writtenCount ?? 0,
+                tps: last.tps ?? null, batchProgress: last.batchProgress ?? null,
+                taskList: JOB_TERMINAL.has(last.stage) ? [] : (last.taskList ?? []),
+              } : null,
             }
             try {
               const binary = resolveBinary(c)
