@@ -146,6 +146,21 @@ function parseStatus(stdout) {
   return { state: 'stale', changedFiles, staleArticles }
 }
 
+// wiki 篇数：递归统计 <repo>/.codewiki/ 下的 .md 文章（含 _index），总览卡展示用
+function countWikiArticles(wikiPath) {
+  try {
+    let n = 0
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) walk(path.join(dir, e.name))
+        else if (e.name.endsWith('.md')) n++
+      }
+    }
+    walk(wikiPath)
+    return n
+  } catch { return null }
+}
+
 // 排除清单：换行/分号/逗号分隔的绝对路径；cwd 等于某项或位于其子树内即被排除（Windows 大小写不敏感）
 function isExcluded(cwd, list) {
   const items = String(list ?? '').split(/[\n;，,]+/).map((s) => s.trim()).filter(Boolean)
@@ -339,7 +354,10 @@ export function parseBatchResults(outputText, errorText = '') {
     if (!j || typeof j.custom_id !== 'string') continue
     const sc = j?.response?.status_code
     const content = j?.response?.body?.choices?.[0]?.message?.content
-    if (sc === 200 && typeof content === 'string') out.set(j.custom_id, { ok: true, content })
+    if (sc === 200 && typeof content === 'string') {
+      const outputTokens = Number(j?.response?.body?.usage?.output_tokens ?? j?.response?.body?.usage?.completion_tokens) || 0
+      out.set(j.custom_id, { ok: true, content, outputTokens })
+    }
     else out.set(j.custom_id, { ok: false, error: `HTTP ${sc ?? '?'}` })
   }
   for (const line of lines(errorText)) {
@@ -412,6 +430,7 @@ export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes, on
         continue
       }
       results[i] = applyTaskResult(task, r.content, notes)
+      if (r.outputTokens) results[i].outputTokens = r.outputTokens
     }
   } catch (err) {
     notes.push(`批量任务 ${batchId} 结果下载失败（断点保留，可重试）—— ${String(err?.message ?? err)}`)
@@ -949,6 +968,10 @@ function jobSummary(job) {
       ...(() => { const settled = new Set((job.articles ?? []).map((a) => a.name)); return (job.tasks ?? []).filter((t) => !settled.has(t.name)).map((t) => ({ name: t.name, state: 'pending' })) })(),
     ],
     batchProgress: job.batchProgress ?? null,
+    batchSubmittedAt: job.batchSubmittedAt ?? null,
+    stageStartedAt: job.stageStartedAt ?? null,
+    stageTimings: job.stageTimings ?? null,
+    usage: job.usage ?? null,
     notes: (job.notes ?? []).slice(-8),
     error: job.error ?? null,
     createdAt: job.createdAt,
@@ -1025,6 +1048,30 @@ function createJobService(config) {
   const touch = (job) => {
     job.updatedAt = new Date().toISOString(); dirty = true; dirtyIds.add(job.id)
   }
+  // 阶段切换统一入口：累计各阶段耗时并记录当前阶段起始时刻（面板步骤条/耗时展示用）。
+  // 旧任务/测试构造的 job 无 stageStartedAt 时只切阶段不记时。
+  const setStage = (job, stage) => {
+    if (job.stage && job.stageStartedAt) {
+      const ms = Date.now() - Date.parse(job.stageStartedAt)
+      if (Number.isFinite(ms) && ms > 0) {
+        job.stageTimings = { ...(job.stageTimings ?? {}), [job.stage]: (job.stageTimings?.[job.stage] ?? 0) + ms }
+      }
+    }
+    job.stage = stage
+    job.stageStartedAt = new Date().toISOString()
+    touch(job)
+  }
+  // 用量累计：输入为提交时估算（estimateTokens），输出为响应回传 usage 实测。
+  const addUsage = (job, { inputTok = 0, outputTok = 0, requests = 0, batch = false, realtime = false, overTier2 = 0 } = {}) => {
+    job.usage ??= { inputTok: 0, outputTok: 0, requests: 0, batchRequests: 0, realtimeRequests: 0, overTier2: 0 }
+    job.usage.inputTok += inputTok
+    job.usage.outputTok += outputTok
+    job.usage.requests += requests
+    job.usage.batchRequests += batch ? requests : 0
+    job.usage.realtimeRequests += realtime ? requests : 0
+    job.usage.overTier2 += overTier2
+    touch(job)
+  }
 
   // 跨实例取消：另一实例 cancel 的 job 不在本实例内存现场（dirtyIds 之外才允许被磁盘覆盖，
   // 但本实例若正在推进它，内存对象永远不被磁盘覆盖）——每轮 tick 开头从磁盘拾取取消标记。
@@ -1042,7 +1089,7 @@ function createJobService(config) {
   }
 
   function fail(job, msg) {
-    job.stage = 'failed'
+    setStage(job, 'failed')
     job.error = msg
     job.finishedAt = new Date().toISOString()
     note(job, `任务失败：${msg}`)
@@ -1076,7 +1123,19 @@ function createJobService(config) {
         notes: job.notes,
         onProgress: (rc) => { job.batchProgress = rc; touch(job) },
       })
-      if (rs) job.batchProgress = null // 批次已终态收尾，中间进度作废
+      if (rs) {
+        job.batchProgress = null // 批次已终态收尾，中间进度作废
+        job.batchSubmittedAt = null
+        // 批量输出 token 实测入账；收尾可重试（结果下载失败断点保留），按批次 id 防双计
+        const tok = rs.reduce((a, x) => a + (x.outputTokens ?? 0), 0)
+        if (tok > 0 && job.batchRef?.batchId && job.batchRef.batchId !== 'local') {
+          job.usageBatches ??= []
+          if (!job.usageBatches.includes(job.batchRef.batchId)) {
+            job.usageBatches.push(job.batchRef.batchId)
+            addUsage(job, { outputTok: tok })
+          }
+        }
+      }
       return rs
     } catch (err) {
       note(job, `批次 ${job.batchRef?.batchId} 收尾异常（断点保留，下轮重试）—— ${String(err?.message ?? err)}`)
@@ -1131,6 +1190,7 @@ function createJobService(config) {
     // 请求实际输入超 32k 档的按 3 倍价计费，提交前明示
     const tier2 = prepared.filter((t) => estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET).length
     if (tier2) note(job, `${tier2} 个请求输入超 32k 档，按 3 倍价计费`)
+    addUsage(job, { inputTok: prepared.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0), requests: prepared.length, batch: true, overTier2: tier2 })
     const batchId = await submitBatch(prepared, {
       apiKey: await apiKeyOf(job),
       model: c.batchModel,
@@ -1141,6 +1201,7 @@ function createJobService(config) {
       crosscutSplit: job.crosscutSplit === true,
     })
     job.batchRef = { batchId, stateFile: batchStateFile(job.cwd) }
+    job.batchSubmittedAt = new Date().toISOString()
     job.tasks = prepared.map((t) => ({
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
     }))
@@ -1157,6 +1218,7 @@ function createJobService(config) {
       const totalTok = prepared.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0)
       if (totalTok < c.batchMinTokens) {
         note(job, `阶段 ${job.stage} 估算输入 ${totalTok} tok < ${c.batchMinTokens}，走实时推理（免批量排队）`)
+        addUsage(job, { inputTok: totalTok, requests: prepared.length, realtime: true })
         const rt = await runRealtimeTasks(prepared, {
           apiKey: await apiKeyOf(job),
           model: c.batchModel,
@@ -1165,7 +1227,7 @@ function createJobService(config) {
           notes: job.notes,
           onTaskDone: (s) => {
             job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
-            touch(job)
+            addUsage(job, { outputTok: s.outputTokens ?? 0 })
           },
         })
         localResults.set(job.id, [...rt.values()])
@@ -1196,8 +1258,7 @@ function createJobService(config) {
       note(job, `规划：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
       job.batchRef = null
       job.tasks = []
-      job.stage = 'articles'
-      touch(job)
+      setStage(job, 'articles')
       return
     }
     const files = scanRepoFiles(job.cwd)
@@ -1222,8 +1283,7 @@ function createJobService(config) {
       job.batchRef = null
       job.tasks = []
       if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
-      job.stage = job.kind === 'full' ? 'crosscut' : 'review'
-      touch(job)
+      setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
       return
     }
     // 组装文章任务并提交：stale 用预构建任务；full 用 job.plan；resume 不经此处（batchRef 已设）
@@ -1248,12 +1308,17 @@ function createJobService(config) {
       const c = liveConfig(config)
       note(job, `${oversized.length} 个任务连 ${BATCH_TOKEN_HARD_LIMIT} token 大档都装不下，走实时兜底（同模型同步调用）`)
       oversized.forEach((t, i) => { t.customId = `rt${i}` })
+      addUsage(job, { inputTok: oversized.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0), requests: oversized.length, realtime: true })
       const rt = await runRealtimeTasks(oversized, {
         apiKey: await apiKeyOf(job),
         model: c.batchModel,
         thinkingBudget: c.batchThinkingBudget,
         concurrency: c.maxConcurrency,
         notes: job.notes,
+        onTaskDone: (s) => {
+          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
+          addUsage(job, { outputTok: s.outputTokens ?? 0 })
+        },
       })
       tally(job, [...rt.values()], oversized)
     }
@@ -1267,8 +1332,7 @@ function createJobService(config) {
     }
     if (oversized.length) {
       if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
-      job.stage = job.kind === 'full' ? 'crosscut' : 'review'
-      touch(job)
+      setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
     } else {
       fail(job, '没有可写的文章任务')
     }
@@ -1313,20 +1377,17 @@ function createJobService(config) {
         }
         if (!observations.length) {
           note(job, '全部模块观察失败，跳过横切')
-          job.stage = 'review'
-          touch(job)
+          setStage(job, 'review')
           return
         }
         const pack = observations.map((o) => `#### ${o.name}\n\n${o.text}`).join('\n\n')
         note(job, `收到 ${observations.length} 份模块观察，提交横切合成批次`)
-        job.stage = 'compose'
-        touch(job)
+        setStage(job, 'compose')
         await submitComposeBatch(job, pack)
         return
       }
       tally(job, results, tasks)
-      job.stage = 'review'
-      touch(job)
+      setStage(job, 'review')
       return
     }
     // 输入 = 成功模块文章全文（packArticles 装不下截头部并标注）
@@ -1335,7 +1396,7 @@ function createJobService(config) {
       if (!a.ok || !a.path) continue
       try { texts.push({ name: a.name, text: fs.readFileSync(a.path, 'utf8') }) } catch { /* 丢文件在横切输入缺席 */ }
     }
-    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); job.stage = 'review'; touch(job); return }
+    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); setStage(job, 'review'); return }
     const lang = job.language
     // 拆分判定用原始总量——packArticles 只截后续文章头部，pack 体积永远装得下，不能作依据
     const totalTokens = texts.reduce((n, a) => n + estimateTokens(a.text), 0)
@@ -1376,8 +1437,7 @@ function createJobService(config) {
       // 合成批断点丢失（stage 落盘与提交落盘之间进程中断）：留痕降级，不静默
       note(job, '合成批次未落盘（上次进程中断于提交后落盘前），跳过横切进校对')
     }
-    job.stage = 'review'
-    touch(job)
+    setStage(job, 'review')
   }
 
   function submitComposeBatch(job, observationsText) {
@@ -1387,8 +1447,7 @@ function createJobService(config) {
       })
       .catch((err) => {
         // 文章已写成功，合成提交失败降级跳过横切，不推翻整个任务
-        job.stage = 'review'
-        touch(job)
+        setStage(job, 'review')
         note(job, `横切合成批次提交失败，跳过横切 —— ${String(err?.message ?? err)}`)
       })
   }
@@ -1423,8 +1482,7 @@ function createJobService(config) {
       tally(job, results, job.tasks, { replace: true })
       job.batchRef = null
       job.tasks = []
-      job.stage = 'index'
-      touch(job)
+      setStage(job, 'index')
       return
     }
     localReview(job)
@@ -1448,7 +1506,7 @@ function createJobService(config) {
         batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
       })
     }
-    if (!tasks.length) { job.stage = 'index'; touch(job); return }
+    if (!tasks.length) { setStage(job, 'index'); return }
     try {
       await submitOrRun(job, tasks)
       note(job, `校对批次已提交：${tasks.length} 篇`)
@@ -1456,8 +1514,7 @@ function createJobService(config) {
       note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)
       job.batchRef = null
       job.tasks = []
-      job.stage = 'index'
-      touch(job)
+      setStage(job, 'index')
     }
   }
 
@@ -1475,9 +1532,8 @@ function createJobService(config) {
     } else {
       note(job, '没有文章写成功，跳过 index/meta update（wiki 基线不变，可重新提交）')
     }
-    job.stage = 'done'
+    setStage(job, 'done')
     job.finishedAt = new Date().toISOString()
-    touch(job)
   }
 
   const STAGE_HANDLER = {
@@ -1508,7 +1564,7 @@ function createJobService(config) {
         }
         if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {
-          job.stage = 'cancelled'
+          setStage(job, 'cancelled')
           job.finishedAt = new Date().toISOString()
           if (job.batchRef) note(job, `已取消：批次 ${job.batchRef.batchId} 断点保留，重新调用 codewiki_generate 可续查收尾`)
           touch(job)
@@ -1551,6 +1607,9 @@ function createJobService(config) {
       articles: [],
       writtenCount: 0,
       failedCount: 0,
+      usage: { inputTok: 0, outputTok: 0, requests: 0, batchRequests: 0, realtimeRequests: 0, overTier2: 0 },
+      stageTimings: {},
+      stageStartedAt: new Date().toISOString(),
       notes: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1568,11 +1627,11 @@ function createJobService(config) {
     }
     job.credentialSource = k.source
     job.apiKey = k.key
-    job.stage = kind === 'full' ? 'plan' : 'articles'
+    setStage(job, kind === 'full' ? 'plan' : 'articles')
     if (kind === 'stale') job.tasks = prebuiltTasks ?? []
     if (kind === 'resume' && resumeBatch?.batchId) {
       // 断点自带阶段（0.4.3+）；旧断点无 stage 字段回退 articles——0.3.x 只有文章环节走批量
-      job.stage = STAGE_HANDLER[resumeBatch.stage] ? resumeBatch.stage : 'articles'
+      setStage(job, STAGE_HANDLER[resumeBatch.stage] ? resumeBatch.stage : 'articles')
       if (resumeBatch.crosscutSplit === true) job.crosscutSplit = true
       job.batchRef = { batchId: resumeBatch.batchId, stateFile: batchStateFile(cwd) }
       job.tasks = (resumeBatch.tasks ?? []).map((t) => ({
@@ -1910,6 +1969,7 @@ function installWebServer(ctx, service, extra = {}) {
                 id: last.id, kind: last.kind, stage: last.stage, auto: last.auto === true,
                 finishedAt: last.finishedAt ?? null, writtenCount: last.writtenCount ?? 0,
                 tps: last.tps ?? null, batchProgress: last.batchProgress ?? null,
+                batchSubmittedAt: last.batchSubmittedAt ?? null,
                 taskList: JOB_TERMINAL.has(last.stage) ? [] : (last.taskList ?? []),
               } : null,
             }
@@ -1917,12 +1977,14 @@ function installWebServer(ctx, service, extra = {}) {
               const binary = resolveBinary(c)
               const st = await runCw(binary, cwd, ['status'], 20000)
               const status = parseStatus(st.stdout)
+              const wp = await wikiPathFor(cwd, binary).catch(() => null)
               repos.push({
                 ...base,
                 state: status.state,
                 staleArticles: status.staleArticles.length,
                 changedFiles: status.changedFiles.length,
-                wikiPath: await wikiPathFor(cwd, binary).catch(() => null),
+                wikiPath: wp,
+                articleCount: wp ? countWikiArticles(wp) : null,
               })
             } catch (err) {
               repos.push({ ...base, state: 'error', error: String(err?.message ?? err) })
@@ -1937,6 +1999,8 @@ function installWebServer(ctx, service, extra = {}) {
               lastScan: schedState?.lastScan ? new Date(schedState.lastScan).toISOString() : null,
               scanning: schedState?.scanning === true,
               lastError: schedState?.lastError ?? null,
+              lastScanRepos: schedState?.lastScanRepos ?? null,
+              lastScanSubmitted: schedState?.lastScanSubmitted ?? null,
             },
           }
           reposCacheAt = Date.now()
@@ -2043,7 +2107,7 @@ export function apply(ctx, config) {
   const generateDef = generateToolDefinition(config, service)
   // 自动更新调度器：60s 心跳，到点对历史工作区逐个 scope=auto 判态提交。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
-  const schedState = { lastScan: 0, scanning: false, lastError: null }
+  const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null }
   let scanning = false
   const autoScan = async () => {
     const c = liveConfig(config)
@@ -2052,11 +2116,17 @@ export function apply(ctx, config) {
     scanning = true
     schedState.scanning = true
     schedState.lastScan = Date.now()
+    schedState.lastScanRepos = 0
+    schedState.lastScanSubmitted = 0
     try {
       const cwds = [...new Set(service.list().map((j) => j.cwd).filter(Boolean))]
       for (const cwd of cwds) {
         if (isExcluded(cwd, c.excludePaths)) continue
-        try { await generateDef.execute({ cwd, scope: 'auto', auto: true }, {}) } catch (err) {
+        schedState.lastScanRepos++
+        try {
+          const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})
+          if (r?.submitted === true) schedState.lastScanSubmitted++
+        } catch (err) {
           schedState.lastError = `${new Date().toISOString()} ${String(err?.message ?? err).slice(0, 200)}`
         }
       }
