@@ -113,6 +113,31 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: '最小 5；扫描对 jobs 历史工作区逐个 cw status 判态，仅提交有变更的。',
       excludePathsLabel: '排除清单',
       excludePathsHint: '这些目录（含子目录）不编译 CodeWiki；换行/分号/逗号分隔绝对路径。',
+      stepPlan: '规划',
+      stepArticles: '文章',
+      stepCrosscut: '横切',
+      stepCompose: '合成',
+      stepReview: '校对',
+      stepIndex: '索引',
+      perMin: '篇/分',
+      etaLabel: '剩余',
+      batchRunLabel: '批量执行中',
+      usageIn: '输入',
+      usageOut: '输出',
+      reqLabel: '请求',
+      batchChannel: '批量',
+      realtimeChannel: '实时',
+      overTierLabel: '个超 32k 档（3 倍价）',
+      activityLabel: '活动流',
+      lastCompile: '上次编译',
+      nextScan: '下次扫描',
+      scannedLabel: '扫描',
+      submittedLabel: '提交',
+      totalTimeLabel: '总耗时',
+      copyPath: '复制路径',
+      copiedLabel: '已复制',
+      runningCount: '个进行中',
+      agoSuffix: '前',
     })
     const en = () => ({
       title: 'CodeWiki',
@@ -203,6 +228,31 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: 'Minimum 5. Each scan runs cw status per historical workspace and submits only changed ones.',
       excludePathsLabel: 'Excluded paths',
       excludePathsHint: 'CodeWiki is never compiled under these directories (subtree included). Separate absolute paths with newlines, semicolons or commas.',
+      stepPlan: 'Plan',
+      stepArticles: 'Write',
+      stepCrosscut: 'Cross',
+      stepCompose: 'Compose',
+      stepReview: 'Proof',
+      stepIndex: 'Index',
+      perMin: 'articles/min',
+      etaLabel: 'remaining',
+      batchRunLabel: 'Batch running',
+      usageIn: 'in',
+      usageOut: 'out',
+      reqLabel: 'requests',
+      batchChannel: 'batch',
+      realtimeChannel: 'realtime',
+      overTierLabel: 'over the 32k tier (3× price)',
+      activityLabel: 'Activity',
+      lastCompile: 'last compile',
+      nextScan: 'Next scan',
+      scannedLabel: 'scanned',
+      submittedLabel: 'submitted',
+      totalTimeLabel: 'total',
+      copyPath: 'Copy path',
+      copiedLabel: 'Copied',
+      runningCount: 'running',
+      agoSuffix: 'ago',
     })
 
     const style = document.createElement('style')
@@ -238,7 +288,6 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-job][data-active="true"] { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 7%, transparent); }',
       '[data-dscw-p-stage][data-running="true"] { animation: dscw-pulse 1.6s ease-in-out infinite; }',
       '@keyframes dscw-pulse { 50% { opacity: 0.45; } }',
-      '[data-dscw-p-elapsed] { font-variant-numeric: tabular-nums; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-p-settings] { padding: 12px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; }',
       '[data-dscw-p-tabs] { display: flex; gap: 2px; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; padding: 2px; width: max-content; max-width: 100%; }',
       '[data-dscw-p-tab] { border: 0; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 1; padding: 5px 12px; border-radius: 6px; cursor: pointer; }',
@@ -257,6 +306,32 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-task][data-state="done"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-task][data-state="failed"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-textarea] { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
+      // 六阶段步骤条
+      '[data-dscw-p-steps] { display: flex; align-items: flex-start; margin-top: 2px; }',
+      '[data-dscw-p-step] { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; position: relative; }',
+      '[data-dscw-p-step]:not(:first-child)::before { content: ""; position: absolute; top: 5px; left: -50%; width: 100%; height: 1.5px; background: var(--dsw-alias-border-l3); }',
+      '[data-dscw-p-step][data-done="true"]::before { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); }',
+      '[data-dscw-p-dot] { position: relative; z-index: 1; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-layer-2)); box-sizing: border-box; }',
+      '[data-dscw-p-step][data-done="true"] [data-dscw-p-dot] { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); border-color: transparent; }',
+      '[data-dscw-p-step][data-running="true"] [data-dscw-p-dot] { border-color: var(--dsw-alias-brand-primary); }',
+      '[data-dscw-p-step][data-failed="true"] [data-dscw-p-dot] { background: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); border-color: transparent; }',
+      '[data-dscw-p-step][data-cancelled="true"] [data-dscw-p-dot] { background: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); border-color: transparent; }',
+      '[data-dscw-p-step] > span:last-child { font-size: 10px; line-height: 13px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }',
+      '[data-dscw-p-step][data-done="true"] > span:last-child, [data-dscw-p-step][data-running="true"] > span:last-child { color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-step][data-failed="true"] > span:last-child { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
+      '[data-dscw-p-step][data-cancelled="true"] > span:last-child { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); }',
+      // 吞吐徽标（tok/s + spark，或批量 篇/分 + ETA）
+      '[data-dscw-p-badge] { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 999px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }',
+      '[data-dscw-p-badge][data-tone="live"] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, currentColor) 40%, transparent); }',
+      '[data-dscw-p-badge] svg { display: block; }',
+      // 用量行 / 错误行 / 活动流
+      '[data-dscw-p-usage] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; word-break: break-all; }',
+      '[data-dscw-p-usage] [data-warn] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); }',
+      '[data-dscw-p-error] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); word-break: break-all; }',
+      '[data-dscw-p-activity] { margin-top: 2px; }',
+      '[data-dscw-p-activity] summary { cursor: pointer; user-select: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
+      '[data-dscw-p-activity] > div { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l3); }',
+      '[data-dscw-p-activity] > div > div { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
     if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
@@ -573,6 +648,126 @@ window.__ModuleLoader__.load({
           const parts = String(cwd ?? '').split(/[\\/]/).filter(Boolean)
           return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
         }
+        const fmtMs = (ms) => {
+          const s = Math.max(0, Math.floor(ms / 1000))
+          const h = Math.floor(s / 3600)
+          const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+          const ss = String(s % 60).padStart(2, '0')
+          return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+        }
+        const fmtTok = (n) => {
+          if (!Number.isFinite(n) || n <= 0) return null
+          if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+          if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+          return String(Math.round(n))
+        }
+        const fmtDur = (ms) => {
+          const m = Math.max(0, Math.round(ms / 60000))
+          if (m < 60) return `${m} min`
+          const h = Math.floor(m / 60)
+          return `${h} h ${m % 60} min`
+        }
+        const fmtAgo = (iso) => {
+          const ms = Date.now() - Date.parse(iso)
+          return Number.isFinite(ms) && ms >= 0 ? `${fmtDur(ms)} ${tBound('agoSuffix')}` : null
+        }
+        // tps 微趋势线：纯 SVG polyline，数据来自面板侧滚动窗口（30 点）
+        const Spark = ({ values, width = 56, height = 16 }) => {
+          const pts = (values ?? []).filter((v) => Number.isFinite(v) && v > 0)
+          if (pts.length < 2) return null
+          const max = Math.max(...pts)
+          const min = Math.min(...pts)
+          const span = max - min || 1
+          const step = width / (pts.length - 1)
+          const d = pts
+            .map((v, i) => `${i ? 'L' : 'M'}${(i * step).toFixed(1)},${(height - 2 - ((v - min) / span) * (height - 4)).toFixed(1)}`)
+            .join('')
+          return el('svg', { width, height, viewBox: `0 0 ${width} ${height}`, style: { flex: 'none' } },
+            el('path', { d, fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }))
+        }
+
+        // 六阶段步骤条：已完成绿点（title 带各阶段耗时）、当前阶段实心点+实时计时、
+        // 失败/取消在最后计时段标红/黄。终态 done 全绿。
+        const stepName = (s) => tBound(`step${s.charAt(0).toUpperCase()}${s.slice(1)}`)
+        const lastTimedStage = (job) => {
+          const keys = Object.keys(job.stageTimings ?? {})
+          return keys.length ? keys[keys.length - 1] : null
+        }
+        const stageBar = (job) => {
+          const idx = ACTIVE_STAGES.indexOf(job.stage)
+          const terminal = idx < 0
+          const failIdx = terminal && job.stage !== 'done' ? ACTIVE_STAGES.indexOf(lastTimedStage(job)) : -1
+          return el('div', { 'data-dscw-p-steps': '' },
+            ACTIVE_STAGES.map((s, i) => {
+              const done = terminal ? ((failIdx < 0 && job.stage === 'done') || i < failIdx) : i < idx
+              const running = !terminal && i === idx
+              const failedStep = terminal && failIdx >= 0 && i === failIdx
+              const dur = job.stageTimings?.[s]
+              const live = running && job.stageStartedAt ? ` ${fmtMs(Date.now() - Date.parse(job.stageStartedAt))}` : ''
+              const label = `${stepName(s)}${running || failedStep ? (live || (dur ? ` ${fmtMs(dur)}` : '')) : ''}`
+              return el('div', {
+                key: s, 'data-dscw-p-step': '',
+                'data-done': done ? 'true' : null,
+                'data-running': running ? 'true' : null,
+                'data-failed': failedStep && job.stage === 'failed' ? 'true' : null,
+                'data-cancelled': failedStep && job.stage === 'cancelled' ? 'true' : null,
+              },
+                el('span', { 'data-dscw-p-dot': '' }),
+                el('span', { title: `${stageLabel(s)}${dur ? ` · ${fmtMs(dur)}` : ''}` }, label))
+            }))
+        }
+        // 总进度：六阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
+        const STAGE_WEIGHTS = { plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
+        const overallPct = (job) => {
+          const idx = ACTIVE_STAGES.indexOf(job.stage)
+          if (idx < 0) return job.stage === 'done' ? 100 : null
+          let pct = 0
+          for (let i = 0; i < idx; i++) pct += STAGE_WEIGHTS[ACTIVE_STAGES[i]] ?? 0
+          const tl = Array.isArray(job.taskList) ? job.taskList : []
+          const frac = tl.length ? tl.filter((x) => x.state === 'done').length / tl.length : 0
+          return Math.min(99, Math.round((pct + (STAGE_WEIGHTS[job.stage] ?? 0) * frac) * 100))
+        }
+        // 吞吐徽标：实时通道显示 tok/s + spark；批量通道显示完成速率（篇/分，EWMA 平滑）+ ETA；
+        // 批次尚无完成样本时显示排队/执行时长（batchSubmittedAt 起算）
+        const throughputBadge = (job, sparkOf, rateOf) => {
+          if (!ACTIVE_STAGES.includes(job.stage)) return null
+          if (typeof job.tps === 'number' && job.tps > 0) {
+            return el('span', { 'data-dscw-p-badge': '', 'data-tone': 'live' },
+              `${job.tps >= 100 ? Math.round(job.tps) : job.tps.toFixed(1)} tok/s`,
+              el(Spark, { values: sparkOf(job.id) }))
+          }
+          if (job.batchSubmittedAt) {
+            const st = rateOf(job.id)
+            const bp = job.batchProgress
+            if (st?.rate > 0 && bp && bp.total > bp.completed) {
+              const eta = (bp.total - bp.completed) / st.rate
+              return el('span', { 'data-dscw-p-badge': '', 'data-tone': 'live' },
+                `${st.rate >= 10 ? Math.round(st.rate) : st.rate.toFixed(1)} ${tBound('perMin')}`,
+                ` · ${tBound('etaLabel')} ≈ ${eta >= 1 ? `${Math.ceil(eta)} min` : '<1 min'}`)
+            }
+            return el('span', { 'data-dscw-p-badge': '', 'data-tone': 'live' },
+              `${tBound('batchRunLabel')} ${fmtMs(Date.now() - Date.parse(job.batchSubmittedAt))}`)
+          }
+          return null
+        }
+        // 用量行：输入为提交时估算，输出为响应实测；超 32k 档请求数红字提示（3 倍价）
+        const usageLine = (job) => {
+          const u = job.usage
+          if (!u || (!u.inputTok && !u.outputTok)) return null
+          const inch = fmtTok(u.inputTok)
+          const outch = fmtTok(u.outputTok)
+          const bits = []
+          if (inch || outch) bits.push(`${inch ? `${tBound('usageIn')} ${inch}` : ''}${inch && outch ? ' / ' : ''}${outch ? `${tBound('usageOut')} ${outch} tok` : ''}`)
+          if (u.requests) {
+            const ch = u.batchRequests && u.realtimeRequests
+              ? ` (${tBound('batchChannel')} ${u.batchRequests} + ${tBound('realtimeChannel')} ${u.realtimeRequests})`
+              : u.batchRequests ? ` (${tBound('batchChannel')} ${u.batchRequests})` : ''
+            bits.push(`${tBound('reqLabel')} ${u.requests}${ch}`)
+          }
+          return el('div', { 'data-dscw-p-usage': '' },
+            bits.join(' · '),
+            u.overTier2 ? el('span', { 'data-warn': '' }, ` · ${u.overTier2} ${tBound('overTierLabel')}`) : null)
+        }
 
         // 总览标签页：所有工作区 wiki 的状态总览 + 自动更新调度信息（轮询 repos 端点）
         function ReposTab() {
@@ -651,6 +846,22 @@ window.__ModuleLoader__.load({
                   `${t('schedLast')}: ${sched?.lastScan ? new Date(sched.lastScan).toLocaleString() : t('schedNever')}`,
                   sched?.lastError ? ` · ${sched.lastError}` : '',
                 ),
+                sched?.enabled && sched?.lastScan
+                  ? (() => {
+                    // 下次扫描 = 上次扫描 + 间隔（60s 心跳有同量级误差，显示为约值）
+                    const next = Date.parse(sched.lastScan) + (sched.intervalMin ?? 0) * 60000
+                    const remain = next - Date.now()
+                    const stats = sched.lastScanRepos != null
+                      ? ` · ${t('scannedLabel')} ${sched.lastScanRepos} · ${t('submittedLabel')} ${sched.lastScanSubmitted ?? 0}`
+                      : ''
+                    return el('div', { 'data-dscw-p-meta': '' },
+                      `${t('nextScan')}: ${sched.scanning
+                        ? t('schedScanning')
+                        : remain > 0
+                          ? `${new Date(next).toLocaleTimeString()}（≈ ${fmtDur(remain)}）`
+                          : '—'}${stats}`)
+                  })()
+                  : null,
               ),
               err ? el('div', { 'data-dscw-p-empty': '' }, err) : null,
               repos.length
@@ -683,7 +894,11 @@ window.__ModuleLoader__.load({
                       const barTotal = ljActive && lj.batchProgress ? Math.max(lj.batchProgress.total, tl.length) : tl.length
                       const parts = []
                       if (st === 'stale') parts.push(`${t('stateStale')} ${r.staleArticles ?? 0} ${t('unitArticle')} · ${t('changedLabel')} ${r.changedFiles ?? 0}`)
-                      if (lj) parts.push(`${kindLabelOf(t, lj.kind)} · ${stageLabel(lj.stage)}${lj.auto ? ` · ${t('autoTag')}` : ''}`)
+                      if (r.articleCount) parts.push(`${r.articleCount} ${t('unitArticle')}`)
+                      if (lj) {
+                        parts.push(`${kindLabelOf(t, lj.kind)} · ${stageLabel(lj.stage)}${lj.auto ? ` · ${t('autoTag')}` : ''}`)
+                        if (!ljActive && lj.finishedAt) parts.push(`${t('lastCompile')} ${fmtAgo(lj.finishedAt)}`)
+                      }
                       if (ljActive && lj.batchProgress) parts.push(`${t('batchLabel')} ${lj.batchProgress.completed}/${lj.batchProgress.total}`)
                       if (ljActive && lj.tps) parts.push(`tps ${lj.tps}`)
                       return el(React.Fragment, null,
@@ -706,6 +921,12 @@ window.__ModuleLoader__.load({
           const [err, setErr] = React.useState(null)
           const [busyId, setBusyId] = React.useState(null)
           const [tab, setTab] = React.useState('overview')
+          const [copiedPath, setCopiedPath] = React.useState(null)
+          // 面板侧采样（2s 轮询差分）：tps 滚动窗口画 spark；批量完成速率 EWMA 算吞吐与 ETA
+          const sparkRef = React.useRef(new Map()) // jobId -> number[]
+          const batchRateRef = React.useRef(new Map()) // jobId -> { at, completed, rate }
+          const sparkOf = (id) => sparkRef.current.get(id) ?? []
+          const rateOf = (id) => batchRateRef.current.get(id) ?? null
 
           React.useEffect(() => {
             let alive = true
@@ -716,7 +937,27 @@ window.__ModuleLoader__.load({
               try {
                 const data = await apiGet(JOBS_PATH)
                 if (!alive) return
-                setJobs(Array.isArray(data.jobs) ? data.jobs : [])
+                const arr = Array.isArray(data.jobs) ? data.jobs : []
+                const now = Date.now()
+                for (const j of arr) {
+                  if (typeof j.tps === 'number' && j.tps > 0) {
+                    const h = sparkRef.current.get(j.id) ?? []
+                    h.push(j.tps)
+                    if (h.length > 30) h.shift()
+                    sparkRef.current.set(j.id, h)
+                  }
+                  const b = j.batchProgress
+                  if (j.batchSubmittedAt && b && typeof b.completed === 'number') {
+                    const prev = batchRateRef.current.get(j.id)
+                    if (!prev) batchRateRef.current.set(j.id, { at: now, completed: b.completed, rate: null })
+                    else if (b.completed > prev.completed && now > prev.at) {
+                      const inst = (b.completed - prev.completed) / ((now - prev.at) / 60000)
+                      const rate = prev.rate == null ? inst : prev.rate * 0.6 + inst * 0.4
+                      batchRateRef.current.set(j.id, { at: now, completed: b.completed, rate })
+                    } else batchRateRef.current.set(j.id, { ...prev, completed: b.completed })
+                  } else batchRateRef.current.delete(j.id)
+                }
+                setJobs(arr)
                 setErr(null)
               } catch (e) {
                 if (alive) setErr(String(e?.message ?? e))
@@ -741,16 +982,16 @@ window.__ModuleLoader__.load({
             }
             if (mountedRef.current) setBusyId(null)
           }
+          const copyPath = async (p) => {
+            try {
+              await navigator.clipboard.writeText(p)
+              setCopiedPath(p)
+              setTimeout(() => { setCopiedPath((cur) => (cur === p ? null : cur)) }, 1500)
+            } catch { /* 剪贴板权限拒绝时静默 */ }
+          }
 
           const kindLabel = (kind) => (t(`kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`))
 
-          const fmtElapsed = (ms) => {
-            const s = Math.max(0, Math.floor(ms / 1000))
-            const h = Math.floor(s / 3600)
-            const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
-            const ss = String(s % 60).padStart(2, '0')
-            return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-          }
           const isActive = (job) => ACTIVE_STAGES.includes(job.stage)
 
           // 按工作区（cwd）分组；保持首次出现顺序，组内最新在前（服务历史折叠区）
@@ -773,8 +1014,14 @@ window.__ModuleLoader__.load({
             const arts = Array.isArray(job.articles) ? job.articles : []
             const okCount = arts.filter((a) => a.ok).length
             const taskList = Array.isArray(job.taskList) ? job.taskList : []
-            const doneN = taskList.filter((x) => x.state === 'done').length
             const total = taskList.length || arts.length
+            const meta = []
+            if (total) meta.push(`${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`)
+            else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
+            if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
+            if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
+            if (active) meta.push(`${t('elapsedLabel')} ${fmtMs(Date.now() - Date.parse(job.createdAt))}`)
+            else if (job.finishedAt && job.createdAt) meta.push(`${t('totalTimeLabel')} ${fmtMs(Date.parse(job.finishedAt) - Date.parse(job.createdAt))}`)
             return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
@@ -782,10 +1029,7 @@ window.__ModuleLoader__.load({
                   'data-dscw-p-stage': '', 'data-state': job.stage,
                   'data-running': active ? 'true' : null,
                 }, stageLabel(job.stage)),
-                active
-                  ? el('span', { 'data-dscw-p-elapsed': '' },
-                    `${t('elapsedLabel')} ${fmtElapsed(Date.now() - Date.parse(job.createdAt))}`)
-                  : null,
+                throughputBadge(job, sparkOf, rateOf),
                 active
                   ? el(Button, {
                     variant: 'ghost', size: 'sm',
@@ -794,22 +1038,19 @@ window.__ModuleLoader__.load({
                   }, job.cancelRequested === true ? t('cancelRequestedLabel') : t('cancelJob'))
                   : null,
               ),
-              (typeof job.writtenCount === 'number' || arts.length || taskList.length)
-                ? el('div', { 'data-dscw-p-meta': '' },
-                  total
-                    ? `${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`
-                    : `${t('writtenLabel')} ${job.writtenCount ?? okCount} ${t('unitArticle')}`,
-                  job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '',
-                  active && job.batchProgress ? ` · ${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}` : '',
-                  job.tps ? ` · tps ${job.tps}` : '')
-                : null,
-              progressBar(
-                active && job.batchProgress ? job.batchProgress.completed : doneN,
-                active && job.batchProgress ? Math.max(job.batchProgress.total, taskList.length) : taskList.length,
-              ),
+              stageBar(job),
+              meta.length ? el('div', { 'data-dscw-p-meta': '' }, meta.join(' · ')) : null,
+              active ? progressBar(overallPct(job) ?? 0, 100) : null,
+              usageLine(job),
               (job.notes ?? []).length
                 ? el('div', { 'data-dscw-p-note': '' }, job.notes[job.notes.length - 1])
                 : null,
+              (job.notes ?? []).length > 1
+                ? el('details', { 'data-dscw-p-activity': '' },
+                  el('summary', null, `${t('activityLabel')} (${job.notes.length})`),
+                  el('div', null, job.notes.map((n, i) => el('div', { key: i }, n))))
+                : null,
+              job.error ? el('div', { 'data-dscw-p-error': '' }, job.error) : null,
               active && taskList.length
                 ? el('div', { 'data-dscw-p-tasklist': '' },
                   taskList.map((x) => el('div', { key: x.name, 'data-dscw-p-task': '', 'data-state': x.state },
@@ -817,7 +1058,13 @@ window.__ModuleLoader__.load({
                     el('span', null, x.name))))
                 : null,
               job.wikiPath
-                ? el('div', { 'data-dscw-p-meta': '' }, `${t('wikiAt')}${job.wikiPath}`)
+                ? el('div', { 'data-dscw-p-meta': '', style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                  el('span', {
+                    style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                    title: job.wikiPath,
+                  }, `${t('wikiAt')}${job.wikiPath}`),
+                  el(Button, { variant: 'ghost', size: 'sm', onClick: () => copyPath(job.wikiPath) },
+                    copiedPath === job.wikiPath ? t('copiedLabel') : t('copyPath')))
                 : null,
             )
           }
@@ -826,6 +1073,9 @@ window.__ModuleLoader__.load({
             return el('div', { 'data-dscw-p-page': '' },
               el('div', { 'data-dscw-p-head': '' },
                 el('h3', null, t('panelTitle')),
+                (jobs ?? []).filter(isActive).length
+                  ? el(Tag, null, `${(jobs ?? []).filter(isActive).length} ${t('runningCount')}`)
+                  : null,
               ),
               el('div', { 'data-dscw-p-tabs': '' },
                 [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['settings', t('tabSettings')]].map(([id, label]) =>
