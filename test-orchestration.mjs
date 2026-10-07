@@ -1,7 +1,7 @@
 // test-orchestration.mjs — dsh-codewiki 服务化编排冒烟：
-// mock 百炼批量 API（按上传 JSONL 的任务类型应答）+ 真实 cw CLI + 真实服务 tick，
+// mock 百炼批量对话 API（Batch Chat 同步端点，按 prompt 特征应答）+ 真实 cw CLI + 真实服务 tick，
 // 验证 codewiki_generate 提交制 + 服务阶段机（plan→articles→crosscut→review→index）、
-// stale 逐篇更新、孤儿断点续查、面板端点（jobs/control）与取消、无凭证诚实报错。
+// stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、无凭证诚实报错。
 // 运行：node test-orchestration.mjs
 import fs from 'node:fs'
 import os from 'node:os'
@@ -106,99 +106,61 @@ function makeFixtureRepo() {
   return dir
 }
 
-// mock 百炼批量 API：按上传 JSONL 的 custom_id 生成应答（plan/tN/arch/patterns/conceptN/proofN）
+// mock 百炼批量对话 API（0.5.0 Batch Chat）：全部环节都是单轮 chat/completions——
+// 批量通道打 batch.dashscope（同步排队，每请求一问一答），实时兜底打 dashscope.aliyuncs.com。
+// 按 prompt 首行特征分发应答（与真实 prompt 模板的区分句一一对应）。
 function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {}) {
-  const uploaded = []
-  let batchSeq = 0
   const originalFetch = globalThis.fetch
   const fetchCalls = []
   const json = (obj) => new Response(JSON.stringify(obj), { status: 200 })
+  const answerFor = (prompt) => {
+    if (prompt.includes('你是代码结构勘探员')) {
+      return JSON.stringify({
+        project: 'fixture',
+        modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: [`src/${mn}.py`] })),
+        concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
+      })
+    }
+    if (prompt.includes('你是 CodeWiki 文章作者')) {
+      const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
+      return articleMd(mn, `src/${mn}.py`, articleMarker)
+    }
+    if (prompt.includes('你是 CodeWiki 架构观察员')) {
+      return '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
+    }
+    if (prompt.includes('写系统总览')) return articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
+    if (prompt.includes('总结仓库反复出现的模式')) return articleMd('Patterns', `src/${modules[1] ?? modules[0]}.py`, articleMarker, 'pattern')
+    if (prompt.includes('写跨模块概念')) return articleMd('config-load', `src/${modules[0]}.py`, articleMarker, 'concept')
+    if (prompt.includes('你是 CodeWiki 审校员')) {
+      const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
+      return fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', `src/${modules[0]}.py`, 'PROOFED')
+    }
+    return '---\ntitle: unknown\n---\nunknown task'
+  }
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url)
-    fetchCalls.push(u)
-    if (u.endsWith('/files') && init.method === 'POST') {
-      const text = await init.body.get('file').text()
-      uploaded.push(text.trim().split('\n').map((l) => JSON.parse(l)))
-      return json({ id: `file-${batchSeq + 1}` })
+    const body = init.body ? JSON.parse(init.body) : {}
+    const prompt = String(body?.messages?.[0]?.content ?? '')
+    fetchCalls.push({ url: u, prompt })
+    if (!u.includes('/chat/completions')) return new Response('{}', { status: 404 })
+    if (stall) {
+      // 服务端排队不返回（Batch Chat 最长保持 1h）：挂起直到客户端断开（signal abort）
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('client aborted')), { once: true })
+        init.signal?.addEventListener('abort', () => {}, { once: true })
+      })
     }
-    if (u.endsWith('/batches') && init.method === 'POST') {
-      batchSeq += 1
-      return json({ id: `batch-${batchSeq}`, status: 'validating' })
-    }
-    const bm = u.match(/\/batches\/(batch-\d+)$/)
-    if (bm) {
-      if (stall) return json({ id: bm[1], status: 'in_progress', request_counts: { total: 2, completed: 1, failed: 0 } })
-      return json({ id: bm[1], status: 'completed', output_file_id: `out-${bm[1]}`, error_file_id: `err-${bm[1]}` })
-    }
-    const om = u.match(/\/files\/out-(batch-\d+)\/content$/)
-    if (om) {
-      const lines = uploaded[Number(om[1].split('-')[1]) - 1] ?? []
-      const out = lines.map((line) => {
-        const cid = line.custom_id
-        let content
-        if (cid === 'plan') {
-          content = JSON.stringify({
-            project: 'fixture',
-            modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: [`src/${mn}.py`] })),
-            concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
-          })
-        } else if (/^t\d+$/.test(cid)) {
-          const mn = modules[Number(cid.slice(1))] ?? modules[0]
-          content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(30000)}` : '')
-        } else if (cid.startsWith('obs')) {
-          // 观察任务（大 wiki 拆分路径）：单篇输入的正确性由测试对上传 JSONL 断言
-          content = '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
-        } else if (cid === 'arch') {
-          content = articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
-        } else if (cid === 'patterns') {
-          content = articleMd('Patterns', `src/${modules[1] ?? modules[0]}.py`, articleMarker, 'pattern')
-        } else if (cid.startsWith('concept')) {
-          content = articleMd('config-load', `src/${modules[0]}.py`, articleMarker, 'concept')
-        } else if (cid.startsWith('proof')) {
-          // 校对应保留原文章 frontmatter（真实模型被要求原样输出）；从请求嵌入的文章里提取
-          const fm = String(line?.body?.messages?.[0]?.content ?? '').match(/---\ntitle:[\s\S]*?\n---/)
-          content = fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', `src/${modules[0]}.py`, 'PROOFED')
-        } else {
-          content = '---\ntitle: unknown\n---\nunknown task'
-        }
-        return JSON.stringify({ custom_id: cid, response: { status_code: 200, body: { choices: [{ message: { content } }] } } })
-      }).join('\n') + '\n'
-      return new Response(out, { status: 200 })
-    }
-    if (u.includes('/chat/completions') && init.method === 'POST') {
-      // 阶段实时通道（0.4.5 submitOrRun）：与批量 mock 同一套应答语义，按 prompt 首行特征分发
-      const body = JSON.parse(init.body ?? '{}')
-      const prompt = String(body?.messages?.[0]?.content ?? '')
-      let content
-      if (prompt.includes('你是代码结构勘探员')) {
-        content = JSON.stringify({
-          project: 'fixture',
-          modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: [`src/${mn}.py`] })),
-          concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
-        })
-      } else if (prompt.includes('你是 CodeWiki 文章作者')) {
-        const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
-        content = articleMd(mn, `src/${mn}.py`, articleMarker) + (bigArticle ? `\n\n${'长'.repeat(30000)}` : '')
-      } else if (prompt.includes('你是 CodeWiki 架构观察员')) {
-        content = '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
-      } else if (prompt.includes('写系统总览')) {
-        content = articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
-      } else if (prompt.includes('总结仓库反复出现的模式')) {
-        content = articleMd('Patterns', `src/${modules[1] ?? modules[0]}.py`, articleMarker, 'pattern')
-      } else if (prompt.includes('写跨模块概念')) {
-        content = articleMd('config-load', `src/${modules[0]}.py`, articleMarker, 'concept')
-      } else if (prompt.includes('你是 CodeWiki 审校员')) {
-        const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
-        content = fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', `src/${modules[0]}.py`, 'PROOFED')
-      } else {
-        content = '---\ntitle: unknown\n---\nunknown realtime task'
-      }
-      return json({ choices: [{ message: { content } }], usage: { output_tokens: 128 } })
-    }
-    if (u.includes('/files/err-')) return new Response('', { status: 200 })
-    return new Response('{}', { status: 404 })
+    let content = answerFor(prompt)
+    if (bigArticle && prompt.includes('你是 CodeWiki 文章作者')) content += `\n\n${'长'.repeat(30000)}`
+    return json({ choices: [{ message: { content } }], usage: { output_tokens: 128 } })
   }
-  return { fetchCalls, uploaded, restore: () => { globalThis.fetch = originalFetch } }
+  const BATCH_URL = 'https://batch.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+  return {
+    fetchCalls,
+    batchPrompts: () => fetchCalls.filter((c) => c.url === BATCH_URL).map((c) => c.prompt),
+    realtimePrompts: () => fetchCalls.filter((c) => c.url.includes('/chat/completions') && !c.url.startsWith('https://batch.')).map((c) => c.prompt),
+    restore: () => { globalThis.fetch = originalFetch },
+  }
 }
 
 // 轮询 JOBS_FILE 等某 cwd 的最新 job 终态
@@ -282,7 +244,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(r1.stage === 'plan', `初始 stage=plan（实际 ${r1.stage}）`)
     check(r1.writtenCount === undefined, '返回值不含 writtenCount（编译交服务，不再就地等待）')
     const job = await waitJob(r1.cwd)
-    check(mock.fetchCalls.some((u) => u.endsWith('/files')) && mock.fetchCalls.some((u) => u.endsWith('/batches')), '规划批次已上传百炼')
+    check(mock.batchPrompts().some((p) => p.includes('勘探员')), '规划请求已走批量对话端点')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式+概念）`)
     const w = job.wikiPath
@@ -310,15 +272,13 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     check(r.submitted === true, '大 wiki 提交即返回')
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
-    const obsLines = (mock.uploaded ?? []).flat().filter((l) => String(l.custom_id).startsWith('obs'))
-    check(obsLines.length === 2, `上传 2 个观察任务（实际 ${obsLines.length}）`)
-    check(!mock.uploaded.flat().some((l) => l.custom_id === 'plan'), '混合模式：小 plan 走实时（批量上传行无 plan）')
-    check(mock.fetchCalls.some((u) => u.includes('/chat/completions')), '混合模式：plan 已走实时通道')
-    for (const l of obsLines) {
-      const prompt = String(l.body?.messages?.[0]?.content ?? '')
-      check((prompt.match(/^### /gm) ?? []).length === 1, `${l.custom_id}：观察输入只含一篇模块文章`)
+    const obsPrompts = mock.batchPrompts().filter((p) => p.includes('架构观察员'))
+    check(obsPrompts.length === 2, `批量端点收到 2 个观察请求（实际 ${obsPrompts.length}）`)
+    check(mock.realtimePrompts().some((p) => p.includes('勘探员')) && !mock.batchPrompts().some((p) => p.includes('勘探员')), '混合模式：小 plan 走实时（批量端点无 plan）')
+    for (const p of obsPrompts) {
+      check((p.match(/^### /gm) ?? []).length === 1, '观察请求输入只含一篇模块文章')
     }
-    check(!mock.uploaded.flat().some((l) => l.custom_id === 'arch' && String(l.body?.messages?.[0]?.content ?? '').includes('长'.repeat(100))), '合成批输入不含原文全文（只吃观察）')
+    check(!mock.batchPrompts().some((p) => p.includes('写系统总览') && p.includes('长'.repeat(100))), '合成请求输入不含原文全文（只吃观察）')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 经合成批落盘')
     check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
@@ -346,8 +306,8 @@ console.log('== batchMinTokens 混合：小仓库各阶段输入均低于阈值 
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 5 && job?.failedCount === 0, `实时通道编译 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇`)
-    check(mock.fetchCalls.every((u) => !u.includes('/batches')), '全程零批量端点（各阶段都走实时）')
-    check(mock.fetchCalls.some((u) => u.includes('/chat/completions')), '实时 chat/completions 已调用')
+    check(mock.fetchCalls.every((c) => !String(c.url).startsWith('https://batch.')), '全程零批量端点（各阶段都走实时）')
+    check(mock.realtimePrompts().length > 0, '实时 chat/completions 已调用')
     check((job.notes ?? []).some((n) => n.includes('走实时推理')), 'notes 记录实时分流决策')
     const jobsEp = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     const resJobs = fakeRes()
@@ -389,72 +349,61 @@ console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 art
   }
 }
 
-// ============================ 孤儿断点续查 ============================
-console.log('== codewiki_generate 孤儿断点续查（0.3.x 遗留 checkpoint 自动并入） ==')
+// ============================ 宿主重启重跑（Batch Chat 恢复路径） ============================
+console.log('== 0.5.0：宿主重启后批量/实时任务按持久化 prompt 快照重跑 ==')
 {
-  const orphanPath = path.join(mainRepo, '.codewiki', 'modules', 'orphan.md')
-  fs.mkdirSync(path.dirname(orphanPath), { recursive: true })
-  const h = crypto.createHash('sha1').update(mainRepo).digest('hex').slice(0, 12)
-  const checkpoint = path.join(os.tmpdir(), `dsh-codewiki-batch-${h}.json`)
-  fs.writeFileSync(checkpoint, JSON.stringify({
-    batchId: 'batch-orphan-1',
-    model: 'qwen3.7-flash',
-    tasks: [{ customId: 't0', name: 'modules/orphan.md', articlePath: orphanPath, keepInMemory: false }],
-  }), 'utf8')
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (url) => {
-    const u = String(url)
-    if (u.includes('/batches/batch-orphan-1')) return new Response(JSON.stringify({ id: 'batch-orphan-1', status: 'completed', output_file_id: 'out-orphan' }), { status: 200 })
-    if (u.includes('out-orphan')) {
-      return new Response(JSON.stringify({ custom_id: 't0', response: { status_code: 200, body: { choices: [{ message: { content: articleMd('orphan', 'src/core.py', 'Orphan-resumed') } }] } } }), { status: 200 })
-    }
-    return new Response('{}', { status: 404 })
-  }
+  // 场景 A：批量对话任务（batchchat-*）停在 articles，执行器随进程丢失
+  const repoA = makeFixtureRepo()
+  const mock = makeBatchMock({ articleMarker: 'Restarted-batch' })
+  const staleAt = new Date(Date.now() - 6 * 60000).toISOString()
+  const articlePath = path.join(repoA, '.codewiki', 'modules', 'core.md')
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [{
+    id: 'job-restart-batch', cwd: repoA, kind: 'full', scope: 'full', language: 'zh',
+    stage: 'articles', owner: 'svc-dead-instance', wikiPath: path.join(repoA, '.codewiki'),
+    plan: { project: 'fixture', modules: [{ name: 'core', summary: 'core summary', files: ['src/core.py'] }], concepts: [] },
+    batchRef: { batchId: 'batchchat-job-restart-batch' },
+    tasks: [{ customId: 't0', name: 'modules/core.md', articlePath, keepInMemory: false,
+      batchPrompt: '你是 CodeWiki 文章作者。目标：为模块「core」撰写文章 modules/core.md（重启恢复快照）' }],
+    articles: [], writtenCount: 0, failedCount: 0, notes: [],
+    createdAt: staleAt, updatedAt: staleAt,
+  }] }), 'utf8')
   try {
-    const r3 = await gen.execute({ cwd: mainRepo }, { agent: 'test-agent' })
-    console.log('  notes:', r3.notes.join(' | '))
-    check(r3.submitted === true && (r3.notes ?? []).some((n) => n.includes('batch-orphan-1')), '发现孤儿断点并入续查任务')
-    const job = await waitJob(r3.cwd)
-    check(job?.stage === 'done' && job?.kind === 'resume', `resume job 终态 done（kind=${job?.kind}）`)
-    check(fs.readFileSync(orphanPath, 'utf8').includes('Orphan-resumed'), '孤儿批次文章已收尾落盘')
-    check(!fs.existsSync(checkpoint), '续查收尾后断点文件删除')
+    const wx = makeCtx({})
+    apply(wx.ctx, {})
+    const job = await waitJob(repoA)
+    check(job?.stage === 'done', `批量任务重启后重跑至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(mock.batchPrompts().some((p) => p.includes('modules/core.md')), '重跑请求走批量对话端点')
+    check(fs.readFileSync(articlePath, 'utf8').includes('PROOFED'), '重跑文章落盘并经校对回写（restart 版为校对输入）')
+    check((job.notes ?? []).some((n) => n.includes('自动重跑阶段')), 'notes 记录重跑决策')
   } finally {
-    globalThis.fetch = originalFetch
+    mock.restore()
+    fs.rmSync(repoA, { recursive: true, force: true })
   }
-}
 
-// ============================ 断点阶段感知恢复 ============================
-console.log('== 断点 stage 字段：resume 按原阶段恢复（0.4.3+ 断点） ==')
-{
-  const proofPath = path.join(mainRepo, '.codewiki', 'modules', 'core.md')
-  const h = crypto.createHash('sha1').update(mainRepo).digest('hex').slice(0, 12)
-  const checkpoint = path.join(os.tmpdir(), `dsh-codewiki-batch-${h}.json`)
-  fs.writeFileSync(checkpoint, JSON.stringify({
-    batchId: 'batch-review-1',
-    model: 'qwen3.7-flash',
-    stage: 'review',
-    crosscutSplit: false,
-    tasks: [{ customId: 'proof0', name: 'modules/core.md', articlePath: proofPath, keepInMemory: true }],
-  }), 'utf8')
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (url) => {
-    const u = String(url)
-    if (u.includes('/batches/batch-review-1')) return new Response(JSON.stringify({ id: 'batch-review-1', status: 'completed', output_file_id: 'out-review' }), { status: 200 })
-    if (u.includes('out-review')) {
-      return new Response(JSON.stringify({ custom_id: 'proof0', response: { status_code: 200, body: { choices: [{ message: { content: articleMd('core', 'src/core.py', 'PROOFED-REVIEW') } }] } } }), { status: 200 })
-    }
-    return new Response('{}', { status: 404 })
-  }
+  // 场景 B：就地实时任务（batchId=local）结果随进程丢失，同样按快照重跑（统一走批量端点）
+  const repoB = makeFixtureRepo()
+  const mockB = makeBatchMock()
+  const staleAtB = new Date(Date.now() - 6 * 60000).toISOString()
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [{
+    id: 'job-restart-local', cwd: repoB, kind: 'full', scope: 'full', language: 'zh',
+    stage: 'plan', owner: 'svc-dead-instance-2', wikiPath: path.join(repoB, '.codewiki'),
+    batchRef: { batchId: 'local' },
+    tasks: [{ customId: 'plan', name: '_plan', keepInMemory: true,
+      batchPrompt: '你是代码结构勘探员（重启恢复快照）' }],
+    articles: [], writtenCount: 0, failedCount: 0, notes: [],
+    createdAt: staleAtB, updatedAt: staleAtB,
+  }] }), 'utf8')
   try {
-    const r4 = await gen.execute({ cwd: mainRepo }, { agent: 'test-agent' })
-    check(r4.stage === 'review', `resume 恢复到断点记录的 review 阶段（实际 ${r4.stage}）`)
-    const job = await waitJob(r4.cwd)
-    check(job?.stage === 'done', 'review 阶段断点续查后终态 done')
-    check(fs.readFileSync(proofPath, 'utf8').includes('PROOFED-REVIEW'), '校对任务收尾回写文章')
-    check(!fs.existsSync(checkpoint), '断点文件删除')
+    const wx = makeCtx({})
+    apply(wx.ctx, {})
+    const job = await waitJob(repoB)
+    check(job?.stage === 'done', `实时任务重启后重跑至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(mockB.batchPrompts().some((p) => p.includes('勘探员')), 'local 任务重跑统一走批量对话端点')
   } finally {
-    globalThis.fetch = originalFetch
+    mockB.restore()
+    fs.rmSync(repoB, { recursive: true, force: true })
   }
+  try { fs.unlinkSync(JOBS_FILE) } catch { /* 测试清理 */ }
 }
 
 // ============================ 并发提交占位 + 多实例合并 ============================
@@ -500,7 +449,7 @@ console.log('== 并发提交占位（凭证窗口）与 flush 磁盘合并 ==')
 console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/control（loopback 守卫 + 取消） ==')
 {
   const cancelRepo = makeFixtureRepo()
-  const mock = makeBatchMock({ stall: true }) // 批次永远 in_progress，job 停在 plan 阶段
+  const mock = makeBatchMock({ stall: true }) // 批量请求挂起不返回，job 停在 plan 阶段等取消
   try {
     const r4 = await gen.execute({ cwd: cancelRepo }, { agent: 'test-agent' })
     check(r4.submitted === true, '提交了一个将被取消的任务')
@@ -515,13 +464,13 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
     const jobsPayload = JSON.parse(resJobs.out)
     check(Array.isArray(jobsPayload.jobs) && jobsPayload.jobs.some((j) => j.id === r4.jobId), 'jobs 列表包含活动任务')
     check(jobsPayload.jobs.every((j) => !('apiKey' in j)), 'jobs 列表不泄漏 apiKey')
-    // 0.4.11：批量中间进度与逐任务明细透出
-    await new Promise((r) => setTimeout(r, 900)) // 等一拍 tick：settleJob 轮询批次带出 request_counts
+    // 0.4.11：批量中间进度与逐任务明细透出（stall 挂起：进度在、完成数为 0）
+    await new Promise((r) => setTimeout(r, 900)) // 等一拍 tick：submitBatchFor 落盘 batchProgress
     const resProg = fakeRes()
     jobsEp.handler(fakeReq(), resProg)
     const progJob = JSON.parse(resProg.out).jobs.find((j) => j.id === r4.jobId)
-    check(!!progJob?.batchProgress && progJob.batchProgress.total >= 2 && progJob.batchProgress.completed >= 1,
-      `批量中间进度 request_counts 透出（实际 ${JSON.stringify(progJob?.batchProgress)}）`)
+    check(!!progJob?.batchProgress && progJob.batchProgress.total >= 1 && progJob.batchProgress.completed === 0,
+      `批量中间进度透出且无完成数（实际 ${JSON.stringify(progJob?.batchProgress)}）`)
     check(Array.isArray(progJob?.taskList) && progJob.taskList.length >= 1 && progJob.taskList.every((x) => x.state === 'pending'),
       `taskList 活动期为待办明细（实际 ${JSON.stringify(progJob?.taskList)?.slice(0, 120)}）`)
     const reposEp = main.endpoints.find((e) => e.path === '/api/codewiki/repos')
@@ -535,7 +484,7 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
     check(resCancel.code === 200 && JSON.parse(resCancel.out).ok === true, '取消请求被接受')
     const job = await waitJob(cancelRepo)
     check(job?.stage === 'cancelled', `job 终态 cancelled（实际 ${job?.stage}）`)
-    check((job?.notes ?? []).some((n) => n.includes('断点保留')), '取消保留批次断点（可续查）')
+    check((job?.notes ?? []).some((n) => n.includes('在途请求已中断')), '取消中断批量在途请求（未完成不计费语义）')
     const res404 = fakeRes()
     await ctlEp.handler(fakeReq({ action: 'cancel', jobId: 'job-none' }), res404)
     check(res404.code === 404, '取消未知 jobId 404')

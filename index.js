@@ -174,17 +174,42 @@ export function estimateTokens(text) {
   return cjk + Math.ceil((s.length - cjk) / 3.5)
 }
 
-// 同步单轮调用（实时价）：批量单行预算装不下的 oversized 任务的兜底通道，
-// 与批量共用同一凭证与模型。零子代理——只是不走 Batch File 通道。
-async function bailianChat({ apiKey, model, thinkingBudget, prompt }) {
+// 同步单轮调用：批量对话通道（batch=true，实时价 5 折）与实时兜底共用同一实现，
+// 仅 base_url 不同。零子代理。
+// 组合多个 signal（外部取消 + 批量超时）：任一 abort 即联动。AbortSignal.any 需要 Node 20.3+，
+// 宿主版本不可假设，手动联动。
+function linkedSignal(...signals) {
+  const ac = new AbortController()
+  for (const s of signals) {
+    if (!s) continue
+    if (s.aborted) { ac.abort(s.reason); break }
+    s.addEventListener('abort', () => ac.abort(s.reason), { once: true })
+  }
+  return ac.signal
+}
+
+async function bailianChat({ apiKey, model, thinkingBudget, prompt, batch = false, signal }) {
   const body = { model, messages: [{ role: 'user', content: prompt }] }
   body.enable_thinking = thinkingBudget > 0
   if (thinkingBudget > 0) body.thinking_budget = thinkingBudget
-  const text = await bailianRequest('/chat/completions', apiKey, {
+  // 批量对话端点：请求体与实时完全一致，base_url 换 batch.dashscope（同步排队，5 折价，
+  // 服务端最长保持 1h，超时未调度不计费）。排队时长不可控，客户端超时顶格 1h。
+  const call = (sig) => fetch(`${batch ? BATCH_CHAT_BASE : BAILIAN_BASE}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: sig,
+  }).then(async (res) => {
+    const text = await res.text()
+    if (!res.ok) throw new Error(`百炼 chat/completions 失败（HTTP ${res.status}）：${text.slice(0, 300)}`)
+    return text
   })
+  const text = batch
+    ? await call(linkedSignal(signal, AbortSignal.timeout(BATCH_CHAT_TIMEOUT_MS)))
+      .catch((err) => (err?.name === 'TimeoutError' || err?.name === 'TypeError') // 超时/网络错误：未调度不计费，重试一次
+        ? call(linkedSignal(signal, AbortSignal.timeout(BATCH_CHAT_TIMEOUT_MS)))
+        : Promise.reject(err))
+    : await call(signal)
   const j = JSON.parse(text)
   const content = j?.choices?.[0]?.message?.content
   if (typeof content !== 'string') throw new Error('实时调用响应缺少 content')
@@ -192,7 +217,7 @@ async function bailianChat({ apiKey, model, thinkingBudget, prompt }) {
 }
 
 // 任务结果统一出口：keepInMemory 任务（规划/校对）把 content 带回内存由服务侧消费，
-// 文章任务直接落盘。批量收尾（settleBatch）与实时兜底共用。
+// 文章任务直接落盘。实时兜底与批量对话通道共用。
 function applyTaskResult(task, content, notes) {
   if (task.keepInMemory) return { name: task.name, ok: true, stopReason: 'completed', content }
   try {
@@ -205,24 +230,26 @@ function applyTaskResult(task, content, notes) {
   }
 }
 
-// 实时通道并发池（0.4.5 混合主通道，也服务超大批量任务的兜底）：按 maxConcurrency
-// 同时在飞的同步请求逐个消费任务队列。onTaskDone 每任务上报 {outputTokens, durationMs}
-// 供 tps 采样。返回 Map(customId → 结果)，与 parseBatchResults 同构（{ok, stopReason, content?}）。
-export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone }) {
+// 并发池（0.4.5 实时兜底主执行器，0.5.0 起也是 Batch Chat 通道的执行器）：按 maxConcurrency
+// 同时在飞的同步请求逐个消费任务队列，batch=true 时打批量对话端点（5 折价）。signal 用于
+// 取消时中断在飞请求。onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
+// 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
+export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone, batch = false, signal }) {
   const results = new Map()
   let cursor = 0
   const worker = async () => {
     for (;;) {
+      if (signal?.aborted) return
       const i = cursor++
       if (i >= tasks.length) return
       const t = tasks[i]
       try {
         const startedAt = Date.now()
-        const { content, outputTokens } = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt })
+        const { content, outputTokens } = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt, batch, signal })
         if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
       } catch (err) {
-        notes.push(`实时兜底 ${t.name} 失败 —— ${String(err?.message ?? err)}`)
+        notes.push(`${t.name} 请求失败 —— ${String(err?.message ?? err)}`)
         results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
       }
     }
@@ -232,13 +259,18 @@ export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, c
 }
 
 // ---------------------------------------------------------------------------
-// 批量推理（阿里云百炼 Batch File，OpenAI 兼容接口，实时价的 50%）
+// 批量推理（阿里云百炼 Batch Chat，OpenAI 兼容接口，实时价的 50%）
 // 全部环节（规划/写文章/横切/校对）都是单轮文本生成，统一走这条通道：任务内联
-// 输入 → JSONL 上传 → 轮询批次 → 收尾落盘。输入按 token 预算装填，压在
-// qwen3.7-flash ≤32k 输入低价档；装不下的单文件走实时兜底（bailianChat）。
+// 输入 → 批量对话端点同步并发提交（服务端排队，连接保持至结果一次性返回）。
+// 输入按 token 预算装填，压在 qwen3.7-flash ≤32k 输入低价档；装不下的单文件
+// 走实时兜底（bailianChat 实时端点）。没有服务端持久批次——请求随连接生死。
 // ---------------------------------------------------------------------------
 
 const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+// 批量对话端点（华北2 北京）：请求体与实时 chat/completions 完全一致，仅换 base_url；
+// 服务端最长保持 3600s，客户端超时可配 60–3600s，超时未调度不计费可重试。
+const BATCH_CHAT_BASE = 'https://batch.dashscope.aliyuncs.com/compatible-mode/v1'
+const BATCH_CHAT_TIMEOUT_MS = 3600 * 1000
 // 单个批量请求的输入 token 预算：qwen3.7-flash 输入 ≤32k 档单价最低（约 $0.03/M，
 // 批量再 5 折 ≈ $0.015/M），留 ~4k 余量吸收估算误差与消息骨架开销。
 const BATCH_TOKEN_BUDGET = 28000
@@ -315,120 +347,6 @@ function batchArticlePrompt({ language, mission, sourcesText, prevArticle }) {
   return parts.join('\n')
 }
 
-// 纯函数：任务行 → JSONL 文本。enable_thinking/thinking_budget 必须在 body 顶层与 model 同级
-//（百炼批量推理明确禁止放进 extra_body）。
-export function buildBatchJsonl(tasks, { model, thinkingBudget }) {
-  const thinking = thinkingBudget > 0
-  return tasks.map((t) => {
-    const body = { model, messages: [{ role: 'user', content: t.batchPrompt }] }
-    body.enable_thinking = thinking
-    if (thinking) body.thinking_budget = thinkingBudget
-    return JSON.stringify({ custom_id: t.customId, method: 'POST', url: '/v1/chat/completions', body })
-  }).join('\n') + '\n'
-}
-
-// 纯函数：结果文件（+可选错误文件）→ Map(customId → { ok, content?, error? })。
-// 结果行 { custom_id, response: { status_code, body: { choices: [ { message: { content } } ] } } }；
-// 错误行 { custom_id, error: { message } }；坏行静默跳过（对账时按缺失处理）。
-export function parseBatchResults(outputText, errorText = '') {
-  const out = new Map()
-  const lines = (s) => String(s ?? '').split(/\r?\n/).filter((l) => l.trim())
-  for (const line of lines(outputText)) {
-    let j
-    try { j = JSON.parse(line) } catch { continue }
-    if (!j || typeof j.custom_id !== 'string') continue
-    const sc = j?.response?.status_code
-    const content = j?.response?.body?.choices?.[0]?.message?.content
-    if (sc === 200 && typeof content === 'string') out.set(j.custom_id, { ok: true, content })
-    else out.set(j.custom_id, { ok: false, error: `HTTP ${sc ?? '?'}` })
-  }
-  for (const line of lines(errorText)) {
-    let j
-    try { j = JSON.parse(line) } catch { continue }
-    if (!j || typeof j.custom_id !== 'string') continue
-    const msg = String(j?.error?.message ?? j?.error ?? '')
-    if (!msg) continue
-    const prev = out.get(j.custom_id)
-    if (prev && !prev.ok) prev.error = `${prev.error}: ${msg}` // 结果行给了状态码，错误文件补行级原因
-    else if (!prev) out.set(j.custom_id, { ok: false, error: msg })
-  }
-  return out
-}
-
-async function bailianRequest(pathName, apiKey, init = {}) {
-  const res = await fetch(`${BAILIAN_BASE}${pathName}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${apiKey}`, ...(init.headers ?? {}) },
-  })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`百炼 API ${pathName} 失败（HTTP ${res.status}）：${text.slice(0, 300)}`)
-  return text
-}
-
-const BATCH_TERMINAL = new Set(['completed', 'failed', 'expired', 'cancelled'])
-
-// 批次收尾：终态后下载结果（与错误）文件、逐行落盘、清理断点文件。
-// 任何一步失败都折算成逐篇失败记录，不向上抛（断点文件仅在校验到终态后删除）。
-export async function settleBatch({ batchId, tasks, apiKey, stateFile, notes, onProgress }) {
-  const byCustomId = new Map(tasks.map((t) => [t.customId, t]))
-  const results = tasks.map((t) => ({ name: t.name, ok: false, stopReason: 'error' }))
-  const finish = () => { try { fs.unlinkSync(stateFile) } catch { /* 已不存在亦可 */ } }
-  let status
-  try {
-    status = JSON.parse(await bailianRequest(`/batches/${batchId}`, apiKey))
-  } catch (err) {
-    notes.push(`批量任务 ${batchId} 状态查询失败（断点保留，可重试）—— ${String(err?.message ?? err)}`)
-    return results
-  }
-  if (!BATCH_TERMINAL.has(status?.status)) {
-    // 中间进度（OpenAI batch 兼容的 request_counts）经 onProgress 透给任务卡，不影响收尾循环
-    const rc = status?.request_counts
-    if (typeof onProgress === 'function' && rc) {
-      try { onProgress({ total: rc.total ?? tasks.length, completed: rc.completed ?? 0, failed: rc.failed ?? 0 }) } catch { /* 进度回调失败不阻断轮询 */ }
-    }
-    return null
-  }
-  if (status.status !== 'completed') {
-    // 失败原因字段两形态兼容：error.message（对象）或 errors（数组）
-    const errText = status?.error?.message
-      ?? (Array.isArray(status?.errors) ? status.errors.map((e) => e?.message ?? JSON.stringify(e)).filter(Boolean).join('; ') : '')
-    notes.push(`批量任务 ${batchId} 终态 ${status.status}${errText ? `：${errText}` : ''}`)
-    finish()
-    return results
-  }
-  try {
-    const outputText = await bailianRequest(`/files/${status.output_file_id}/content`, apiKey)
-    let errorText = ''
-    if (status.error_file_id) {
-      try { errorText = await bailianRequest(`/files/${status.error_file_id}/content`, apiKey) } catch { /* 无错误文件亦可 */ }
-    }
-    const parsed = parseBatchResults(outputText, errorText)
-    for (let i = 0; i < tasks.length; i++) {
-      const task = tasks[i]
-      const r = parsed.get(task.customId)
-      if (!r?.ok) {
-        results[i].stopReason = 'error'
-        notes.push(`批量任务 ${task.name} 失败 —— ${r ? r.error : '结果文件中无此请求（行级错误未回传）'}`)
-        continue
-      }
-      results[i] = applyTaskResult(task, r.content, notes)
-    }
-  } catch (err) {
-    notes.push(`批量任务 ${batchId} 结果下载失败（断点保留，可重试）—— ${String(err?.message ?? err)}`)
-    return results
-  }
-  finish()
-  return results
-}
-
-// 断点文件：<tmp>/dsh-codewiki-batch-<cwd 哈希>.json —— 记一个未收尾批次，
-// 供下次 codewiki_generate 自动续查（批次最长 24h，远超单次工具等待预算）。
-function batchStateFile(cwd) {
-  // ponytail: sha1 作目录指纹即可，无对抗场景
-  const h = crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 12)
-  return path.join(os.tmpdir(), `dsh-codewiki-batch-${h}.json`)
-}
-
 /** apply 时捕获的宿主上下文，批量路径经它向宿主凭据库取模型渠道凭证 */
 let hostCtxRef = null
 
@@ -479,35 +397,6 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
     prepared.push(t)
   }
   return { prepared, oversized }
-}
-
-// 提交一个批次（JSONL → 文件上传 → /batches），并写断点文件。服务 tick 用 settleBatch
-// 轮询收尾，不再有 exec 就地等待路径。
-export async function submitBatch(prepared, { apiKey, model, thinkingBudget, stateFile, notes, stage, crosscutSplit }) {
-  const jsonl = buildBatchJsonl(prepared, { model, thinkingBudget })
-  const form = new FormData()
-  form.append('purpose', 'batch')
-  form.append('file', new Blob([jsonl], { type: 'application/jsonl' }), 'codewiki-batch.jsonl')
-  const file = JSON.parse(await bailianRequest('/files', apiKey, { method: 'POST', body: form }))
-  const batch = JSON.parse(await bailianRequest('/batches', apiKey, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input_file_id: file.id,
-      endpoint: '/v1/chat/completions',
-      completion_window: '24h',
-      metadata: { ds_name: 'dsh-codewiki' },
-    }),
-  }))
-  fs.writeFileSync(stateFile, JSON.stringify({
-    batchId: batch.id,
-    model,
-    stage: stage ?? null,
-    crosscutSplit: crosscutSplit === true,
-    tasks: prepared.map((t) => ({ customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true })),
-  }), 'utf8')
-  notes.push(`批量任务已提交：${batch.id}（${prepared.length} 个任务，模型 ${model}，思考预算 ${thinkingBudget || '关'}）`)
-  return batch.id
 }
 
 // ---------------------------------------------------------------------------
@@ -823,8 +712,7 @@ async function wikiPathFor(cwd, binary, signal) {
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
 //   full   = plan → articles → crosscut →（超预算拆分时 compose）→ review → index
 //   stale  = articles（任务在提交时预构建）→ review → index
-//   resume = 从断点记录的阶段恢复（0.3.x 断点无 stage 字段回退 articles）→ review → index
-// 全部模型调用都是单轮文本生成，统一走百炼批量推理（实时价 5 折）；单文件超
+// 全部模型调用都是单轮文本生成，统一走百炼批量对话（Batch Chat，实时价 5 折）；单文件超
 // 32k 预算先升 200k 大档重装继续批量，仍装不下才实时兜底（bailianChat）。规划/横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // ---------------------------------------------------------------------------
@@ -1059,33 +947,39 @@ function createJobService(config) {
     return k.key
   }
 
-  // 批次收尾统一入口：异常折算成 null（断点保留，下轮 tick 重试）
+  // 批次收割统一入口：返回 null = 阶段还在跑，下轮 tick 再看。
   async function settleJob(job) {
-    // submitOrRun 就地实时完成的阶段：结果直取，不查百炼批次
-    if (job.batchRef.batchId === 'local') {
+    // submitOrRun 就地实时完成的阶段：结果直取；结果丢失（宿主重启）则落到下方重跑逻辑
+    if (job.batchRef.batchId === 'local' && localResults.has(job.id)) {
       const rs = localResults.get(job.id)
       localResults.delete(job.id)
+      job.batchProgress = null
+      return rs
+    }
+    // 批量对话（异步执行器）：结果进 batchResults 等收割；null = 执行器整体失败（已 fail）
+    if (batchResults.has(job.id)) {
+      const rs = batchResults.get(job.id)
+      batchResults.delete(job.id)
+      if (rs) job.batchProgress = null // 已收割，中间进度作废
       return rs ?? []
     }
-    try {
-      const rs = await settleBatch({
-        batchId: job.batchRef.batchId,
-        tasks: job.tasks,
-        apiKey: await apiKeyOf(job),
-        stateFile: job.batchRef.stateFile,
-        notes: job.notes,
-        onProgress: (rc) => { job.batchProgress = rc; touch(job) },
-      })
-      if (rs) job.batchProgress = null // 批次已终态收尾，中间进度作废
-      return rs
-    } catch (err) {
-      note(job, `批次 ${job.batchRef?.batchId} 收尾异常（断点保留，下轮重试）—— ${String(err?.message ?? err)}`)
+    if (batchRuns.has(job.id)) return null // 执行器在跑
+    // 执行器丢失（宿主重启）：Batch Chat 请求随连接生死，无法续查——按 job.tasks
+    // 持久化的 batchPrompt 快照重跑本阶段，是唯一恢复路径（幂等：文章重写覆盖）。
+    const tasks = job.tasks ?? []
+    const runnable = tasks.filter((t) => typeof t.batchPrompt === 'string' && t.batchPrompt.length)
+    if (runnable.length && runnable.length === tasks.length) {
+      note(job, `批量对话执行器丢失（宿主重启），自动重跑阶段 ${job.stage}（${tasks.length} 个请求）`)
+      job.batchProgress = { completed: 0, total: tasks.length }
+      startBatchChatRun(job, tasks)
       return null
     }
+    fail(job, '批量对话请求因宿主重启丢失且无法重跑（任务缺少 prompt 快照），请重新提交')
+    return null
   }
 
   // keepInMemory 结果的落盘闸门：输出必须以 frontmatter 开头，坏输出不写 wiki。
-  // keepInMemory 任务（横切/校对）在 settleBatch 不落盘，唯一写盘点在这里——
+  // keepInMemory 任务（横切/校对）在批量阶段不落盘，唯一写盘点在这里——
   // 不能再走 applyTaskResult（它对 keepInMemory 只回内存不落盘）。
   function writeValidated(job, task, content) {
     if (typeof content !== 'string' || !content.trimStart().startsWith('---')) {
@@ -1126,31 +1020,72 @@ function createJobService(config) {
     }
   }
 
-  async function submitBatchFor(job, prepared) {
+  // 批量对话执行器：后台并发池打 batch 端点，结果进 batchResults 由 settleJob 收割，
+  // tick 不被小时级请求阻塞。batchRuns 是存活性标记，batchAborters 供取消中断在飞请求。
+  const batchRuns = new Map()     // jobId → 执行器 Promise
+  const batchResults = new Map()  // jobId → results[]（null = 执行器整体失败，已 fail）
+  const batchAborters = new Map() // jobId → AbortController
+  function startBatchChatRun(job, prepared) {
+    const c = liveConfig(config)
+    const ac = new AbortController()
+    batchAborters.set(job.id, ac)
+    let doneCount = 0
+    const run = apiKeyOf(job)
+      .then((apiKey) => runRealtimeTasks(prepared, {
+        apiKey,
+        model: c.batchModel,
+        thinkingBudget: c.batchThinkingBudget,
+        concurrency: c.maxConcurrency,
+        notes: job.notes,
+        batch: true,
+        signal: ac.signal,
+        onTaskDone: (s) => {
+          doneCount += 1
+          job.batchProgress = { completed: doneCount, total: prepared.length }
+          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
+          touch(job)
+        },
+      }))
+      .then(
+        (rs) => batchResults.set(job.id, [...rs.values()]),
+        (err) => {
+          batchResults.set(job.id, null)
+          if (!JOB_TERMINAL.has(job.stage)) {
+            const msg = `批量对话执行失败 —— ${String(err?.message ?? err)}`
+            note(job, msg)
+            fail(job, msg)
+          }
+        },
+      )
+      .finally(() => {
+        batchRuns.delete(job.id); batchAborters.delete(job.id)
+        if (JOB_TERMINAL.has(job.stage)) batchResults.delete(job.id) // 取消/失败后不残留未收割结果
+        touch(job)
+      })
+    batchRuns.set(job.id, run)
+    return run
+  }
+
+  function submitBatchFor(job, prepared) {
     const c = liveConfig(config)
     // 请求实际输入超 32k 档的按 3 倍价计费，提交前明示
     const tier2 = prepared.filter((t) => estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET).length
-    if (tier2) note(job, `${tier2} 个请求输入超 32k 档，按 3 倍价计费`)
-    const batchId = await submitBatch(prepared, {
-      apiKey: await apiKeyOf(job),
-      model: c.batchModel,
-      thinkingBudget: c.batchThinkingBudget,
-      stateFile: batchStateFile(job.cwd),
-      notes: job.notes,
-      stage: job.stage,
-      crosscutSplit: job.crosscutSplit === true,
-    })
-    job.batchRef = { batchId, stateFile: batchStateFile(job.cwd) }
+    if (tier2) note(job, `${tier2} 个请求输入超 32k 档，按 3 倍价计费（批量对话仍 5 折）`)
+    job.batchRef = { batchId: `batchchat-${job.id}` } // 无服务端批次 id，仅标记「批量在途」
     job.tasks = prepared.map((t) => ({
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+      batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
     }))
+    job.batchProgress = { completed: 0, total: prepared.length }
+    startBatchChatRun(job, prepared)
+    note(job, `批量对话已启动：${prepared.length} 个请求（模型 ${c.batchModel}，并发 ${c.maxConcurrency}，服务端最长保持 1h）`)
     touch(job)
   }
 
   // 阶段级混合通道（batchMinTokens）：单阶段请求输入估算低于阈值的直接实时并发执行——
   // 批量 5 折但要排队（分钟~小时级），小请求排队成本高于省下的差价。执行完把结果以
   // batchId 'local' 挂进 batchRef，settleJob 下一 tick 原路收割，各阶段收割逻辑零改动。
-  const localResults = new Map() // jobId → results[]，与 settleBatch 返回同构
+  const localResults = new Map() // jobId → results[]，与 runRealtimeTasks 返回同构
   async function submitOrRun(job, prepared) {
     const c = liveConfig(config)
     if (c.batchMinTokens > 0) {
@@ -1169,9 +1104,10 @@ function createJobService(config) {
           },
         })
         localResults.set(job.id, [...rt.values()])
-        job.batchRef = { batchId: 'local', stateFile: batchStateFile(job.cwd) }
+        job.batchRef = { batchId: 'local' }
         job.tasks = prepared.map((t) => ({
           customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+          batchPrompt: t.batchPrompt, // 宿主重启后按快照重跑（统一走批量对话端点）
         }))
         touch(job)
         return
@@ -1510,7 +1446,13 @@ function createJobService(config) {
         if (job.cancelRequested) {
           job.stage = 'cancelled'
           job.finishedAt = new Date().toISOString()
-          if (job.batchRef) note(job, `已取消：批次 ${job.batchRef.batchId} 断点保留，重新调用 codewiki_generate 可续查收尾`)
+          // 批量对话无服务端批次可保留：中断在飞请求（未完成请求不计费），丢弃未收割结果
+          const ac = batchAborters.get(job.id)
+          if (ac) ac.abort()
+          batchResults.delete(job.id)
+          localResults.delete(job.id)
+          if (job.batchRef?.batchId === 'local') note(job, '已取消：阶段实时结果已丢弃')
+          else if (job.batchRef) note(job, '已取消：批量对话在途请求已中断（未完成请求不计费）')
           touch(job)
           continue
         }
@@ -1530,7 +1472,7 @@ function createJobService(config) {
     }
   }
 
-  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, resumeBatch, auto }) {
+  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto }) {
     const c0 = liveConfig(config)
     if (isExcluded(cwd, c0.excludePaths)) {
       throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
@@ -1570,16 +1512,6 @@ function createJobService(config) {
     job.apiKey = k.key
     job.stage = kind === 'full' ? 'plan' : 'articles'
     if (kind === 'stale') job.tasks = prebuiltTasks ?? []
-    if (kind === 'resume' && resumeBatch?.batchId) {
-      // 断点自带阶段（0.4.3+）；旧断点无 stage 字段回退 articles——0.3.x 只有文章环节走批量
-      job.stage = STAGE_HANDLER[resumeBatch.stage] ? resumeBatch.stage : 'articles'
-      if (resumeBatch.crosscutSplit === true) job.crosscutSplit = true
-      job.batchRef = { batchId: resumeBatch.batchId, stateFile: batchStateFile(cwd) }
-      job.tasks = (resumeBatch.tasks ?? []).map((t) => ({
-        customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
-      }))
-      note(job, `续查孤儿断点批次 ${resumeBatch.batchId}（${job.tasks.length} 个任务）`)
-    }
     persist()
     flush() // 先落盘再推进：tick 中途崩溃也能从文件恢复
     void tick() // 立即推进一步，不等首个 tick 间隔
@@ -1622,10 +1554,10 @@ function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节走阿里云百炼批量推理（实时价 50%，输入按 ≤32k token 低价档分块装填）。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节走阿里云百炼批量对话 Batch Chat（实时价 50%，输入按 ≤32k token 低价档分块装填）。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
-      '进度：设置侧边栏 CodeWiki 面板，或 GET /api/codewiki/jobs（回环地址）；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进；孤儿批次断点在重新调用本工具时自动并入续查。',
-      '凭证自动取模型设置「阿里百炼云」渠道（或插件设置 batchApiKey），取不到时报错而不是降级子代理。全量编译小仓库也要几分钟（批次排队+生成），适合后台调用。',
+      '进度：设置侧边栏 CodeWiki 面板，或 GET /api/codewiki/jobs（回环地址）；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的批量请求自动重跑当前阶段）。',
+      '凭证自动取模型设置「阿里百炼云」渠道（或插件设置 batchApiKey），取不到时报错而不是降级子代理。全量编译小仓库也要几分钟（批量排队+生成），适合后台调用。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -1691,17 +1623,6 @@ function generateToolDefinition(cfg, svc) {
         result.jobId = active.id
         result.stage = active.stage
         result.scope = active.scope
-        return result
-      }
-
-      // 孤儿断点续查（历史遗留或取消任务留下的未收尾批次）
-      const pending = readJsonFile(batchStateFile(cwd))
-      if (pending?.batchId && Array.isArray(pending.tasks) && pending.tasks.length) {
-        const { job } = await svc.submit({ kind: 'resume', cwd, wikiPath, scope, language, resumeBatch: pending, auto })
-        notes.push(`发现未收尾的批量任务 ${pending.batchId}（${pending.tasks.length} 个），已并入任务 ${job.id} 由服务续查收尾`)
-        result.jobId = job.id
-        result.stage = job.stage
-        result.submitted = true
         return result
       }
 
