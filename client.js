@@ -46,8 +46,8 @@ window.__ModuleLoader__.load({
       batchThinkingBudget: '批量思考预算',
       batchThinkingBudgetHint: '0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。',
       batchMinTokens: '阶段实时阈值',
-      batchMinTokensHint: '单阶段请求输入估算低于该值（token）时走实时并发推理（免批量排队，快）；≥ 该值才提交百炼批量（实时价 5 折）。0=全部走批量。',
-      invalidBatchMinTokens: '阶段实时阈值须为 0–1000000 的整数',
+      batchMinTokensHint: '单阶段请求输入估算低于该值（token）时走实时并发推理（免批量排队，快）；≥ 该值才提交百炼批量（实时价 5 折）。0=全部走批量。大仓库想强制全部实时，可设 99999999。',
+      invalidBatchMinTokens: '阶段实时阈值须为 0–99999999 的整数',
       invalidBatchThinking: '批量思考预算须为 0–32768 的整数。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
@@ -136,8 +136,8 @@ window.__ModuleLoader__.load({
       batchThinkingBudget: 'Batch thinking budget',
       batchThinkingBudgetHint: '0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output.',
       batchMinTokens: 'Stage realtime threshold',
-      batchMinTokensHint: 'When a stage\'s estimated prompt input is below this many tokens, run it via realtime concurrent calls (no batch queueing, faster); at or above it, submit to Bailian batch (50% of realtime price). 0 = always batch.',
-      invalidBatchMinTokens: 'Stage realtime threshold must be an integer 0–1000000',
+      batchMinTokensHint: 'When a stage\'s estimated prompt input is below this many tokens, run it via realtime concurrent calls (no batch queueing, faster); at or above it, submit to Bailian batch (50% of realtime price). 0 = always batch. To force realtime for large repos, set 99999999.',
+      invalidBatchMinTokens: 'Stage realtime threshold must be an integer 0–99999999',
       invalidBatchThinking: 'Batch thinking budget must be an integer between 0 and 32768.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
@@ -382,7 +382,7 @@ window.__ModuleLoader__.load({
               return
             }
             const minTok = Number(draft?.batchMinTokens)
-            if (Number.isFinite(minTok) && (minTok < 0 || minTok > 1000000 || !Number.isInteger(minTok))) {
+            if (Number.isFinite(minTok) && (minTok < 0 || minTok > 99999999 || !Number.isInteger(minTok))) {
               setError(t('invalidBatchMinTokens'))
               return
             }
