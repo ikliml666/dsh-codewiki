@@ -237,6 +237,7 @@ console.log('== 系统提示 wiki 维护提醒 ==')
   const repoWith = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-remind-'))
   const repoWithout = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-remind-'))
   fs.mkdirSync(path.join(repoWith, '.codewiki'))
+  fs.writeFileSync(path.join(repoWith, 'CodeWiki.md'), '# CodeWiki\n') // 守护要求仓库根存在 CodeWiki.md
   const a1 = makeMockAgent(repoWith)
   const a2 = makeMockAgent(repoWithout)
   const reminderConfig = {}
@@ -248,6 +249,13 @@ console.log('== 系统提示 wiki 维护提醒 ==')
   check(sec?.name === 'codewiki:update-reminder', `section 名 codewiki:update-reminder（实际 ${sec?.name}）`)
   check(typeof sec?.text === 'function' && sec.text().includes('codewiki_generate'), '有 .codewiki 的会话提醒文本非空且指向 codewiki_generate')
   check(typeof a2.sections[0]?.text === 'function' && a2.sections[0].text() === '', '无 .codewiki 的会话提醒文本为空（不注入噪音）')
+  // 守护收紧（139052c）：.codewiki 存在但仓库根无 CodeWiki.md 同样不注入
+  const repoMdMissing = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-remind-'))
+  fs.mkdirSync(path.join(repoMdMissing, '.codewiki'))
+  const a3 = makeMockAgent(repoMdMissing)
+  for (const [, fn] of listeners) await fn({ agent: a3.agent })
+  check((a3.sections[0]?.text?.() ?? 'x') === '', '有 .codewiki 但根无 CodeWiki.md 的会话提醒为空（守护收紧）')
+  fs.rmSync(repoMdMissing, { recursive: true, force: true })
   reminderConfig.updateReminder = false
   check(sec.text() === '', 'updateReminder=false 后提醒文本为空（运行时开关生效）')
   fs.rmSync(repoWith, { recursive: true, force: true })
@@ -356,6 +364,10 @@ console.log('== batchMinTokens 混合：小仓库各阶段输入均低于阈值 
     console.log('  DEBUG summary:', JSON.stringify(summary))
     const dbg = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     check(summary?.tps > 0, `实时通道 tps 采样聚合（summary.tps=${summary?.tps}）`)
+    check(typeof summary?.stageStartedAt === 'string' && !!summary?.stageTimings
+      && Object.keys(summary.stageTimings).length >= 1, 'summary 带阶段起始时刻与各阶段耗时')
+    check(!!summary?.usage && summary.usage.outputTok > 0 && summary.usage.realtimeRequests > 0,
+      `usage 输出实测/请求数累计（${JSON.stringify(summary?.usage)}）`)
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'core.md 实时落盘')
     check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 实时落盘（keepInMemory 经 writeValidated）')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '校对实时回写')
@@ -530,6 +542,11 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
     const repoRow11 = (JSON.parse(resRepos11.out).repos ?? []).find((x) => x.cwd === cancelRepo)
     check(repoRow11?.lastJob?.taskList?.length >= 1 && repoRow11.lastJob.tps !== undefined && repoRow11.lastJob.batchProgress !== undefined,
       'repos 总览活动任务带 taskList/batchProgress/tps')
+    check(typeof repoRow11?.lastJob?.batchSubmittedAt === 'string',
+      `repos lastJob 带批量排队起始时刻（batchSubmittedAt=${repoRow11?.lastJob?.batchSubmittedAt}）`)
+    check(typeof repoRow11?.articleCount === 'number', `repos 带 wiki 篇数（${repoRow11?.articleCount}）`)
+    const sched11 = JSON.parse(resRepos11.out).scheduler
+    check(sched11 && 'lastScanRepos' in sched11 && 'lastScanSubmitted' in sched11, 'scheduler 序列化带扫描统计字段')
     const resCancel = fakeRes()
     await ctlEp.handler(fakeReq({ action: 'cancel', jobId: r4.jobId }), resCancel)
     check(resCancel.code === 200 && JSON.parse(resCancel.out).ok === true, '取消请求被接受')

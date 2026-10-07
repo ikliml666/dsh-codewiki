@@ -48,13 +48,14 @@ check(!JSON.stringify(on0.body.messages).includes('thinking'), '思考参数不�
 // ---------- 3. parseBatchResults ----------
 section('parseBatchResults：结果行/错误行/坏行')
 const output = [
-  JSON.stringify({ custom_id: 'a', response: { status_code: 200, body: { choices: [{ message: { content: '# 文章A' } }] } } }),
+  JSON.stringify({ custom_id: 'a', response: { status_code: 200, body: { choices: [{ message: { content: '# 文章A' } }], usage: { output_tokens: 128 } } } }),
   JSON.stringify({ custom_id: 'b', response: { status_code: 400, body: {} } }),
   'not-json-garbage',
 ].join('\n')
 const errors = [JSON.stringify({ custom_id: 'c', error: { message: 'quota exceeded' } })].join('\n')
 const parsed = parseBatchResults(output, errors)
 check(parsed.get('a')?.ok === true && parsed.get('a').content === '# 文章A', '200 行 → ok + content')
+check(parsed.get('a')?.outputTokens === 128, 'usage.output_tokens 提取为 outputTokens（用量累计入口）')
 check(parsed.get('b')?.ok === false && parsed.get('b').error.includes('400'), '非 200 行 → 失败，error 带 HTTP 码')
 check(parsed.get('c')?.ok === false && parsed.get('c').error === 'quota exceeded', '错误文件行 → 失败 + message')
 check(parsed.size === 3, '坏行跳过不占位（size=3）')
