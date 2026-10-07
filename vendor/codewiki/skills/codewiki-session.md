@@ -13,22 +13,23 @@ At the start of any coding session in a git repository.
 1. Run `cw status` to check wiki state.
 
 2. **If no wiki exists** (first time):
-   - Run `cw init`
-   - Perform full compile (see below)
+   - Run the `codewiki_generate` tool with scope=auto — it initializes the wiki and runs the full compile (see below)
 
 3. **If "not yet compiled":**
-   - Perform full compile (see below)
+   - Run `codewiki_generate` with scope=full
 
 4. **If stale articles listed:**
-   - For each stale article, launch a background Agent to re-read the source files and update the article
-   - Once all agents complete, run `cw index` then `cw meta update`
+   - Preferred: run `codewiki_generate` with scope=stale
+   - Fallback (tool unavailable): re-read the source files and update each stale article yourself, then run `cw index` and `cw meta update`
 
 5. **If "up to date":**
    - Skip, proceed with user's task
 
 ## Full Compile
 
-Use subagents to parallelize the work. One agent per module means each gets full attention and the compile finishes faster.
+Preferred: call the `codewiki_generate` tool (scope=full). It submits the whole pipeline to the host's resident job service (plan → articles → cross-cut → review → index), which compiles everything with batched inference — no subagents, no manual orchestration. Track progress in the CodeWiki panel; the wiki lands in `<repo>/.codewiki/` with the entry file at `<repo>/CodeWiki.md`.
+
+The manual orchestration below is a FALLBACK for when the tool is unavailable. Never mix it with a tool run on the same wiki.
 
 ### Step 1: Discover modules
 
@@ -39,7 +40,7 @@ logical groupings (e.g. `main/models.py` + `main/admin.py` = data layer, `psa_sa
 
 For each module, launch a background Agent with this prompt:
 
-> Read every file in [module files list]. Write a wiki article at ~/.codewiki/<project>/modules/<name>.md.
+> Read every file in [module files list]. Write a wiki article at <repo>/.codewiki/modules/<name>.md (absolute path — the repo root, not your shell cwd).
 > 
 > The article MUST include:
 > - YAML frontmatter with title, type: module, source_files (list every file you read), and tags
@@ -67,7 +68,7 @@ After module agents complete, launch agents for:
 
 Launch a background Agent to verify the wiki:
 
-> Read every article in ~/.codewiki/<project>/. For each article:
+> Read every article in <repo>/.codewiki/. For each article:
 > 1. Check that every file listed in source_files actually exists in the repo
 > 2. Spot-check 3 function names and line numbers against the actual source
 > 3. Check that no major source file is missing from all articles

@@ -42,7 +42,7 @@ export const Config = z.object({
   batchMinTokens: z.number().default(30000).volatile().description('阶段实时阈值：单阶段请求输入估算低于该值时走实时并发推理（免批量排队，快），≥ 该值才提交百炼批量（5 折）；0=全部走批量'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('实时兜底请求并发上限（超预算任务走同步调用时生效），硬顶 8'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
-  updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库存在 .codewiki/ 时出现，收尾时提醒更新 wiki）'),
+  updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
@@ -1986,13 +1986,15 @@ function installWebServer(ctx, service, extra = {}) {
 // 插件入口
 // ---------------------------------------------------------------------------
 
-// 会话系统提示里的 wiki 维护提醒：只在会话仓库存在 .codewiki/ 时出现。
-// text 回调每次组装时求值——cwd、.codewiki 存在性、开关全部实时读取，
-// 关闭开关/项目切换/删掉 wiki 都无需重启。
-function reminderText() {
+// 会话系统提示里的 wiki 维护提醒：只在会话仓库根存在 wiki 入口 CodeWiki.md 时出现。
+// 判定不看 .codewiki/ 目录——半途建出的空骨架（只有空子目录）会骗过目录存在性检查，
+// 提醒却指向一个读不到的入口。无 CodeWiki.md = 无可维护的 wiki。text 回调每次组装时
+// 求值——cwd、入口文件存在性、开关全部实时读取，关闭开关/项目切换/删掉 wiki 都无需重启。
+function reminderText(cwd) {
   return [
-    '【CodeWiki 维护】本仓库存在 .codewiki/ 活 wiki，涉及代码改动的任务收尾时必须：',
+    '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
     '- 运行 codewiki_generate（scope=auto 即可）更新受影响文章，或手工流程 cw status → 更新命中文章 → cw index → cw meta update；',
+    `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
     '- 修 bug 补 learnings/，设计决策补 decisions/；.codewiki/ 的改动与本次代码改动一起提交；',
     '- 任务未更新 wiki 视为未完成（规程详见 codewiki 技能）。',
   ].join('\n')
@@ -2013,8 +2015,8 @@ function installUpdateReminder(ctx, config) {
         text: () => {
           if (val(config?.updateReminder) === false) return ''
           const cwd = String(agent.session?.header?.cwd ?? '')
-          if (!cwd || !fs.existsSync(path.join(cwd, '.codewiki'))) return ''
-          return reminderText()
+          if (!cwd || !fs.existsSync(path.join(cwd, 'CodeWiki.md'))) return ''
+          return reminderText(cwd)
         },
       })
     })

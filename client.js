@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
       enabled: '启用插件',
       enabledHint: '停用后 cw 与 codewiki_generate 两个工具立即报错。',
       updateReminder: 'wiki 维护提醒',
-      updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库存在 .codewiki/ 时出现，提醒改完代码后更新 wiki。',
+      updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，提醒改完代码后更新 wiki。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '实时兑底并发上限',
