@@ -774,6 +774,7 @@ window.__ModuleLoader__.load({
             const okCount = arts.filter((a) => a.ok).length
             const taskList = Array.isArray(job.taskList) ? job.taskList : []
             const doneN = taskList.filter((x) => x.state === 'done').length
+            const total = taskList.length || arts.length
             return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
@@ -795,8 +796,8 @@ window.__ModuleLoader__.load({
               ),
               (typeof job.writtenCount === 'number' || arts.length || taskList.length)
                 ? el('div', { 'data-dscw-p-meta': '' },
-                  active && arts.length
-                    ? `${t('writtenLabel')} ${okCount}/${arts.length} ${t('unitArticle')}`
+                  total
+                    ? `${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`
                     : `${t('writtenLabel')} ${job.writtenCount ?? okCount} ${t('unitArticle')}`,
                   job.failedCount ? ` · ${t('failedLabel')} ${job.failedCount}` : '',
                   active && job.batchProgress ? ` · ${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}` : '',
