@@ -27,6 +27,13 @@ codewiki_generate 全量编译后，`.codewiki/_index.md` 里子目录文章的 
 
 本仓库现有 _index.md 已用该函数实际修复（`[[learnings/update-reminder-entry-gap|…]]`）。
 
+## 上游验证（2026-10-10，用户发来 github.com/mraza007/codewiki 后核实）
+
+- 上游 main：Cargo.toml `version = "0.1.0"`；config.rs `wiki_home() = ~/.codewiki`、`wiki_path = ~/.codewiki/<project>`（project_name 从 git remote origin 派生，回退目录名）；README 设计原则 "Central location. All wikis live at ~/.codewiki/. Survives repo deletion."。**上游从未有过仓库内 .codewiki 架构**——从上游重装不可能找回现役二进制的行为。
+- 现役二进制实证：`cw path` 恒返回 `cwd/.codewiki`（非 git 目录也是）；命令集与帮助文本（"Manage LLM-compiled code wikis"）与上游逐字一致 → 魔改集中在路径语义 + projects 枚举，但二进制内嵌 `codewikiLocal` 等未知标识说明魔改全貌不可考。
+- `~/.codewiki/deepseek-harness/` 是 10-01 `cw init` 留下的中心架构脚手架（_meta.yaml+空目录，无文章 → `cw projects` 显示 `[not compiled]`）；现役 `projects` 仍枚举中心目录（兼容保留），与插件流水线无关。
+- 若未来要重建真源码：clone 上游 v0.1.0 → 重新实施路径魔改（config.rs + 涉及 status/index/meta 输出的部分）→ 风险点是插件 parseStatus 依赖的三态输出字符串必须逐字一致，需先 strings 对比现役二进制。在那之前插件层收口（本篇）继续有效。
+
 ## 教训
 
 1. **cargo path 安装的源码放 Temp = 定时丢失**。装完应把源码落盘到稳定位置（如 vendor/ 同步更新或独立仓库），.crates2.json 是事后追查安装来源的唯一线索。
