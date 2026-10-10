@@ -52,3 +52,7 @@ cp target/release/cw.exe ~/.cargo/bin/cw.exe   # PATH 里的全局二进制
 ## 已知有意差异（相对丢失的现役二进制）
 
 - **内嵌 skill 模板文本**：本 fork 构建时嵌入 `skills/codewiki-session.md` 的 0.5.0.x 现代化文案（codewiki_generate 优先、CodeWiki 面板、`<repo>/CodeWiki.md` 入口承诺）；丢失版二进制嵌入的是子代理时代旧文案（launch background Agent / Use subagents / `~/.codewiki/` 中心制指引）。两二进制 strings 对比 139 行差异主要来源即此（其余为 chrono 0.4.44/0.4.45 panic 路径等编译杂音，无行为影响）。`cw setup claude-code` 写出的文本对应各自内嵌版本——插件不依赖该路径（dsh 插件始终用自己的 `skills/codewiki-session.md`）。
+
+## 构建噪音（已知可忽略）
+
+- `cargo build` 产生 1 个 `dead_code` 警告：`WikiMeta.tags` 字段从未被读取（上游固有，meta 写入但 index 渲染不消费）。有意不修——二进制是验证过的工件（md5 见验证记录），为消一个无害警告重编译反而破坏「仓库源码 ↔ 已装二进制」的一致性记录；上游若在渲染中消费 tags 会自然消除。
