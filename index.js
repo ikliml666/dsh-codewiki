@@ -131,7 +131,27 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 //   'No wiki found. Run `cw init` first.' / 'Wiki has not been compiled yet.'
 //   'Wiki is up to date.' / 'Changed since last compile (<hash>):' + '  M <file>'
 //   'Stale articles:' + '  ! <article>'
-function parseStatus(stdout) {
+// Windows 下 cw（Rust `Path::display()`）输出的文章相对路径用 `\` 分隔——
+// 污染 stale 文章路径与 _index.md 的 [[...]] 链接。统一规范化为 `/`。
+// 注：根治本应在 Rust 上游修（Path 分隔符），但现役 cw 二进制的源码
+// （Temp/cw-src，cargo path 安装）已被清理，vendor/codewiki 是旧架构过期快照
+// （wiki 在 ~/.codewiki/<project>，编译产物 "No wiki found"，勿从它构建安装），
+// 故在插件层收口：路径进插件即规范化，cw index 落盘后修正链接。
+export function normalizeArticlePath(p) { return String(p ?? '').replace(/\\/g, '/') }
+
+// cw index 直接写盘 _index.md：把 [[link|title]] 链接内的 `\` 规范化为 `/`。
+// 只动链接头（`[[` 到 `|` 之间），不碰标题与正文；文件不存在时静默跳过。
+export function normalizeIndexLinks(cwd) {
+  const p = path.join(cwd, '.codewiki', '_index.md')
+  let text
+  try { text = fs.readFileSync(p, 'utf8') } catch { return false }
+  const fixed = text.replace(/\[\[([^\]|\n]*?)\|/g, (m, link) => `[[${link.replace(/\\/g, '/')}|`)
+  if (fixed === text) return false
+  fs.writeFileSync(p, fixed)
+  return true
+}
+
+export function parseStatus(stdout) {
   const s = stdout ?? ''
   if (s.includes('No wiki found')) return { state: 'missing', changedFiles: [], staleArticles: [] }
   if (s.includes('has not been compiled yet')) return { state: 'uncompiled', changedFiles: [], staleArticles: [] }
@@ -140,8 +160,8 @@ function parseStatus(stdout) {
   const staleArticles = []
   for (const m of s.matchAll(/^\s+[M!]\s+(.+)$/gm)) {
     const line = m[1].trim()
-    if (m[0].trimStart().startsWith('M')) changedFiles.push(line)
-    else staleArticles.push(line)
+    if (m[0].trimStart().startsWith('M')) changedFiles.push(normalizeArticlePath(line))
+    else staleArticles.push(normalizeArticlePath(line))
   }
   return { state: 'stale', changedFiles, staleArticles }
 }
@@ -1564,6 +1584,7 @@ function createJobService(config) {
         const meta = await runCw(binary, job.cwd, ['meta', 'update'], 120000)
         note(job, `cw index exit ${idx.exitCode}，cw meta update exit ${meta.exitCode}`)
         if (idx.exitCode !== 0 || meta.exitCode !== 0) note(job, '收尾命令存在失败，编译基线可能未刷新，可重试编译')
+        if (idx.exitCode === 0 && normalizeIndexLinks(job.cwd)) note(job, '_index.md 链接路径已规范化（\\ → /）')
       } catch (err) {
         note(job, `cw index/meta 执行异常 —— ${String(err?.message ?? err)}`)
       }
