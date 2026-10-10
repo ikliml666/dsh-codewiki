@@ -77,15 +77,17 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 
 | 功能组件 | 实现位置 | 说明 |
 | :--- | :--- | :--- |
-| **Job Service 工厂** | `index.js:698-940` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
-| **Tick 主循环** | `index.js:822-870` | `tick()` 方法，驱动阶段机状态转换。 |
-| **阶段处理器** | `index.js:~840-870` | `tickPlan`, `tickArticles`, `tickCrosscut`, `tickReview`, `tickIndex` 等具体阶段逻辑。 |
-| **批量提交** | `index.js:485-510` | `submitBatch`，处理 JSONL 构建和百炼 API 调用。 |
-| **批量结算** | `index.js:410-470` | `settleBatch`，处理断点续查和结果落盘。 |
-| **实时兜底** | `index.js:280-305` | `runRealtimeTasks`，处理超大任务的并发聊天请求。 |
-| **凭证解析** | `index.js:495-520` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1020-1140` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
+| **Job Service 工厂** | `index.js:1042-1743` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
+| **Tick 主循环** | `index.js:1612` | `tick()` 方法，驱动阶段机状态转换。 |
+| **阶段处理器** | `index.js:1305-1611` | `tickPlan`(1305), `tickArticles`(1336), `tickCrosscut`(1421), `tickReview`(1536), `tickIndex`(1579)。 |
+| **批量提交** | `index.js:563` | `submitBatch`，处理 JSONL 构建和百炼 API 调用。 |
+| **批量结算** | `index.js:448` | `settleBatch`，处理断点续查和结果落盘。 |
+| **实时兜底** | `index.js:284` | `runRealtimeTasks`，处理超大任务的并发聊天请求。 |
+| **凭证解析** | `index.js:517` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
+| **面板后端 API** | `index.js:1937` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
 | **前端面板组件** | `client.js:918` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
 | **API 封装** | `client.js:343-349` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
 | **阶段权重定义** | `client.js:720` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
+
+行号基线：main `d14f7c9`（单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。

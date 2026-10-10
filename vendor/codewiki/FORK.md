@@ -47,3 +47,8 @@ cp target/release/cw.exe ~/.cargo/bin/cw.exe   # PATH 里的全局二进制
 - 旧二进制备份：`bin/cw.exe.bak-20261010`（md5 `835702929c4ec44149ad97ae25192955`，即丢失源码的最后产物）。
 - 新二进制 md5 `952b0282523ad016c13688cc594afdd8`。
 - 对比验证：探测仓库上 init/path/status（未编译态）/meta update/index/projects 逐字节一致；`_index.md` 与 stale 清单唯一差异为 `\`→`/`（预期修复）；真实仓库（dsh-codewiki）验证 stale 检测与全链路正常，插件测试 23 断言 + 编排 117 项全过，`cw index` 原生输出与插件规范化后的 `_index.md` 逐字节一致。
+- 补测分支（新旧输出一致）：重复 `cw init`（Wiki already exists）、last_compiled_commit 不在历史（"no longer in history." + "Full recompile recommended."）。
+
+## 已知有意差异（相对丢失的现役二进制）
+
+- **内嵌 skill 模板文本**：本 fork 构建时嵌入 `skills/codewiki-session.md` 的 0.5.0.x 现代化文案（codewiki_generate 优先、CodeWiki 面板、`<repo>/CodeWiki.md` 入口承诺）；丢失版二进制嵌入的是子代理时代旧文案（launch background Agent / Use subagents / `~/.codewiki/` 中心制指引）。两二进制 strings 对比 139 行差异主要来源即此（其余为 chrono 0.4.44/0.4.45 panic 路径等编译杂音，无行为影响）。`cw setup claude-code` 写出的文本对应各自内嵌版本——插件不依赖该路径（dsh 插件始终用自己的 `skills/codewiki-session.md`）。

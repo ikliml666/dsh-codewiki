@@ -103,7 +103,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 [codewiki_generate Tool] (index.js)
     │ normalizeCwd → cw status → JobService.submit
     ▼
-[JobService] (index.js:~36+)
+[JobService] (index.js:1042)
     │ tick (10s) → plan → articles → crosscut → compose → review → index
     │           ├─ Batch Inference (Bailian)
     │           └─ Realtime Fallback (if oversized)

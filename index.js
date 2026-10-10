@@ -127,16 +127,16 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
   })
 }
 
-// 上游 main.rs 的三态输出 + 逐行清单：
+// cw（本地 fork，源码 vendor/codewiki，行为基线上游 main 64323823）的三态输出
+//   + 逐行清单：
 //   'No wiki found. Run `cw init` first.' / 'Wiki has not been compiled yet.'
 //   'Wiki is up to date.' / 'Changed since last compile (<hash>):' + '  M <file>'
 //   'Stale articles:' + '  ! <article>'
-// Windows 下 cw（Rust `Path::display()`）输出的文章相对路径用 `\` 分隔——
-// 污染 stale 文章路径与 _index.md 的 [[...]] 链接。统一规范化为 `/`。
-// 注：根治本应在 Rust 上游修（Path 分隔符），但现役 cw 二进制的源码
-// （Temp/cw-src，cargo path 安装）已被清理，vendor/codewiki 是旧架构过期快照
-// （wiki 在 ~/.codewiki/<project>，编译产物 "No wiki found"，勿从它构建安装），
-// 故在插件层收口：路径进插件即规范化，cw index 落盘后修正链接。
+// cw 0.5.0.2 起 Rust 层已用 rel_path_string 输出 `/` 分隔路径；本层规范化
+// 保留为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
+// 历史：0.5.0.1 时真源码丢失（Temp/cw-src 被清理、vendor 是过期快照），
+// 曾只能在插件层收口；0.5.0.2 重建 fork 后根治下沉到 Rust，见
+// vendor/codewiki/FORK.md 与 .codewiki/learnings/cw-binary-source-lost.md。
 export function normalizeArticlePath(p) { return String(p ?? '').replace(/\\/g, '/') }
 
 // cw index 直接写盘 _index.md：把 [[link|title]] 链接内的 `\` 规范化为 `/`。
