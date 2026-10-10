@@ -5,7 +5,9 @@ source_files:
   - .gitignore
   - CHANGELOG.md
   - CodeWiki.md
+  - client.js
   - cordis.patch.yml
+  - index.js
   - package.json
   - README.md
 tags: [metadata, configuration, changelog, documentation, codewiki]
@@ -13,7 +15,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 
 ## Overview
 
-`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.5.0.1 的核心功能演进，包括从子代理编排到全批量流水线、侧边栏面板集成以及 CodeWiki 入口自动生成的重大架构变更。
+`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.5.0.2 的核心功能演进，包括从子代理编排到全批量流水线、侧边栏面板集成、服务化任务调度以及 vendor/codewiki 本地化重构等重大架构变更。
 
 ## Key Components
 
@@ -27,6 +29,26 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
   - `dsh.client.platform`: `"web"`，指示宿主将 `client.js` 注入浏览器环境。
   - `dsh.bundle.patch`: `"cordis.patch.yml"`，指定 bundle 形式的挂载补丁。
   - `dependencies`: 依赖 `@deepseek-ai/schemastery` (^3.18.4)。
+
+### `client.js` (根目录)
+- **描述**: 插件页设置卡片与侧边栏面板（浏览器半侧）。
+- **内容**:
+  - **注册**: `__ModuleLoader__.load({id:'@local/dsh-codewiki'})` → `plugins.item`（order 30，设置表单）+ `main`/`sidebar.panellist` 双 slot（key/id='codewiki'，order 52，任务面板）。
+  - **CodewikiCard**: 快照订阅（revision 变更才覆盖草稿）；表单：运行节（enabled/updateReminder/maxConcurrency/articleLanguage/binaryPath）+ 批量节（batchApiKey/batchModel/batchThinkingBudget）；保存条 `form.mutate` 单层 op + revision CAS。
+  - **CodewikiPanel**: 2s 轮询 `GET /api/codewiki/jobs`，任务卡（仓库名/类型/阶段/已写篇数/notes/wiki 路径）+ 六阶段步骤条（各阶段耗时 `stageTimings`）+ 双通道吞吐徽标（实时 tok/s+spark；批量 篇/分+ETA，`batchSubmittedAt` 起算）+ 用量行（`usage` 输入估算/输出实测/超 32k 档红字）+ 活动流与 `error` 渲染 + 加权总进度条 + 复制 wiki 路径，活动任务可取消（POST control）；总览行带 `articleCount`/上次编译相对时间，调度卡带下次扫描倒计时与扫描统计（`lastScanRepos/lastScanSubmitted`）；`PanelIcon` 内联 SVG。
+
+### `index.js` (根目录)
+- **描述**: 插件全部逻辑（单文件，Node ESM）。
+- **关键类/函数**:
+  - `Config`（~36）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。
+  - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过。
+  - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）。
+  - **批量推理模块** — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（实时兑底并发池，结果与批量同构）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（兑底单轮）。
+  - `createJobService` — 宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调，下限 250ms）推进阶段机 plan→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`（compose 仅当横切输入超 28k 预算：每篇模块文章一个观察任务并发跑，settle 后以观察 pack 提交合成批；总量装得下则单批直出）；校对按「预算−文章 token」动态装填源码，装不下升大档（200k）重装；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（只剥 apiKey；多实例安全：job 带 owner=创建实例、tick 只推进自家 job，flush 脏标记+mergeFromDisk 磁盘吸收防互相覆盖，tick 进程级 `JOBS_FILE.lock` 串行，cancel 标记每轮 tick 从磁盘跨实例拾取）；submit 占位先行（stage=submitting 挡住凭证窗口内的并发重复提交）；批次未终态保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`（0.4.3+ 记 stage/crosscutSplit，resume 按原阶段恢复），下次提交自动续查（resume job）；取消幂等（cancelRequested 跨 tick 存活，取消保留断点可续查）；`writeValidated` 校验 frontmatter 后直接写盘（keepInMemory 任务的唯一写盘点）。
+  - `cwToolDefinition` — cw CLI 封装工具（子命令白名单）。
+  - `generateToolDefinition` — 纯提交制：normalizeCwd → 凭证解析（无凭证诚实报错，不回退子代理）→ cw status 判态 → 孤儿断点并入（resume）→ 任务预构建（clean 短路 / stale 逐篇直达 articles / 全量走 plan）→ `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用。
+  - webServer 端点 — `GET /api/codewiki/jobs`（任务列表，不含 apiKey）与 `POST /api/codewiki/control {action:'cancel',jobId}`，仅回环放行（403）。
+  - `apply` — `ctx.inject(['tools','webServer','credentials'])` 注册两工具 + 端点；`agent/created` 布提醒。
 
 ### `cordis.patch.yml` (根目录)
 - **描述**: Cordis 插件系统的 YAML 挂载补丁，用于本地开发和 Bundle 安装。
@@ -60,11 +82,13 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
   - `node_modules/`
   - `vendor/codewiki/target/` (Rust 构建产物)
   - `*.log`
+  - `bin/*.bak-*` (cw 二进制备份)
 
 ### `CHANGELOG.md` (根目录)
 - **描述**: 详细的版本变更历史，记录了架构重构、性能优化和 bug 修复。
 - **关键版本**:
-  - **0.5.0.1**: 自动补建 `CodeWiki.md` 入口，修复编译收尾门控不变量。
+  - **0.5.0.2**: vendor/codewiki 真源码本地重建，反斜杠 Rust 层根治，取证收敛。
+  - **0.5.0.1**: 自动补建 `CodeWiki.md` 入口，修复编译收尾门控不变量，Windows 路径规范化收口。
   - **0.5.0**: 面板信息密度改版，六阶段步骤条，双通道吞吐，用量统计。
   - **0.4.0**: 服务化全批量流水线，零子代理，侧边栏面板，32k 分块并行。
   - **0.3.0**: 引入阿里云百炼批量推理（Batch File），写文章环节降本。
@@ -80,7 +104,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
     │ normalizeCwd → cw status → JobService.submit
     ▼
 [JobService] (index.js:~36+)
-    │ tick (10s) → plan → articles → crosscut → review → index
+    │ tick (10s) → plan → articles → crosscut → compose → review → index
     │           ├─ Batch Inference (Bailian)
     │           └─ Realtime Fallback (if oversized)
     ▼
@@ -104,7 +128,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 3. **任务流**: 
    - `execute` 预构建任务（含 token 预算分块）。
    - `JobService.submit` 立即返回 `{submitted, jobId, stage}`。
-   - 后台 `tick` 推进阶段机：规划 → 写文章 → 横切 → 审校 → 索引。
+   - 后台 `tick` 推进阶段机：规划 → 写文章 → 横切 → 合成（可选）→ 审校 → 索引。
    - 批次未终态保留断点 (`os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`)，跨会话续查。
    - 成功文章落盘，校对结果回写，最终调用 `cw index` + `cw meta update`。
 4. **面板流**: 浏览器端 `CodewikiPanel` 每 2 秒轮询 `GET /api/codewiki/jobs`，渲染任务进度、吞吐量、用量统计和错误信息。

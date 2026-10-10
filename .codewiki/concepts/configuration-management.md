@@ -11,7 +11,7 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 
 ## Overview
 
-`configuration-management` 是 CodeWiki 插件中负责定义、持久化、注入及动态同步配置数据的核心概念。它确立了从静态元数据到运行时动态设置的完整生命周期，确保插件行为（如模型选择、并发限制、排除路径）与宿主环境（DeepSeek Harness）及用户偏好保持一致。该概念贯穿了插件的挂载阶段、初始化阶段以及运行时的热更新阶段，实现了“声明式配置”与“命令式执行”的解耦。
+`configuration-management` 是 dsh-codewiki 插件中负责定义、持久化、注入及动态同步配置数据的核心概念。它确立了从静态元数据到运行时动态设置的完整生命周期，确保插件行为（如模型选择、并发限制、排除路径）与宿主环境（DeepSeek Harness）及用户偏好保持一致。该概念贯穿了插件的挂载阶段、初始化阶段以及运行时的热更新阶段，实现了“声明式配置”与“命令式执行”的解耦。
 
 ## Involved Modules
 

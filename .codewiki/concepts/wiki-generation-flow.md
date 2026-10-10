@@ -9,15 +9,13 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 
 ## Overview
 
-`wiki-generation-flow` 描述了 CodeWiki 插件从触发编译到最终生成完整文档仓库的端到端自动化流程。该概念核心在于 `index.js` 模块中的 `createJobService` 所驱动的阶段机（Stage Machine），它将复杂的文档生成任务分解为规划、文章生成、横切合成、审校和索引五个主要阶段，并通过阿里云百炼批量推理与实时兜底相结合的策略处理大并发任务。整个流程由后台 Tick 循环异步推进，前端通过 `client-interface` 模块提供的 API 进行状态轮询和可视化监控，同时底层文件监听机制（如 `observability` 模块所示）确保了文件系统事件的可见性。
+`wiki-generation-flow` 描述了 CodeWiki 插件从触发编译到最终生成完整文档仓库的端到端自动化流程。该概念核心在于 `index.js` 模块中的 `createJobService` 所驱动的阶段机（Stage Machine），它将复杂的文档生成任务分解为规划、文章生成、横切合成、审校和索引五个主要阶段，并通过阿里云百炼批量推理与实时兜底相结合的策略处理大并发任务。整个流程由后台 Tick 循环异步推进，前端通过 `client.js` 提供的 API 进行状态轮询和可视化监控。
 
 ## Involved Modules
 
 1.  **`core-logic`**: 流程的核心引擎。负责定义 `codewiki_generate` 工具、管理 `JobService` 实例、执行阶段转换逻辑（Tick Handlers）、调用百炼 API 以及协调 Rust CLI `cw`。
 2.  **`client-interface`**: 用户交互层。提供侧边栏面板 (`CodewikiPanel`) 和设置表单 (`CodewikiCard`)，通过轮询后端 API 展示进度、控制任务并同步配置。
 3.  **`documentation-and-config`**: 元数据与入口层。定义了 `CodeWiki.md` 的生成目标、插件配置结构以及变更日志历史，确保输出符合 `<repo>/.codewiki/` 约定。
-4.  **`testing-suite`**: 验证层。通过 `test-orchestration.mjs` 等脚本验证阶段机流转、断点续查及并发控制的正确性，确保流程健壮性。
-5.  **`observability`**: 可观测性层。虽然主要记录文件 watcher 事件，但其日志结构（Job ID, mtime, notes）反映了底层作业的生命周期状态，辅助诊断流程延迟。
 
 ## Flow
 
@@ -48,7 +46,7 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 *   **Phase 3: Crosscut (横切合成)**
     *   读取已生成的模块文章。
     *   打包文本 (`packArticles`)，若超预算则截断。
-    *   提交横切任务（架构 `_architecture.md`、模式 `_patterns.md`、概念 `wiki-generation-flow` 等）。
+    *   提交横切任务（架构 `_architecture.md`、模式 `_patterns.md`、概念等）。
     *   同样采用批量/实时混合策略。
     *   落盘至 `.codewiki/` 根目录。
     *   进入 `review` 阶段。
@@ -91,4 +89,3 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 | **API 封装** | `client.js:343-349` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
 | **阶段权重定义** | `client.js:720` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
-| **测试编排验证** | `test-orchestration.mjs:260-285` | `codewiki_generate (Full)` 测试用例，验证全链路流程。 |

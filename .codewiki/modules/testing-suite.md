@@ -21,7 +21,7 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `estimateTokens` | 18-23 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
+| `estimateTokens` | 17-23 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
 | `buildBatchJsonl` | 26-41 | 构建 JSONL 格式任务。验证：尾随换行、custom_id/method/url 结构、thinkingBudget=0 时 disable thinking、budget>0 时 enable thinking 且参数不进 messages。 |
 | `parseBatchResults` | 44-56 | 解析批量结果输出。验证：200 状态码提取 content/outputTokens、非 200 标记失败、错误文件提取 message、坏行跳过。 |
 | `collectSources` | 59-72 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
@@ -40,9 +40,9 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `cw.execute` (MSYS) | 35-45 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
-| `cw.execute` (Windows) | 48-58 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
-| `cw.execute` (Invalid) | 61-67 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
+| `cw.execute` (MSYS) | 36-46 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
+| `cw.execute` (Windows) | 49-59 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
+| `cw.execute` (Invalid) | 62-68 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
 
 ### `test-orchestration.mjs`
 **文件**: `test-orchestration.mjs`
