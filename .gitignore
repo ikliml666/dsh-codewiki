@@ -1,3 +1,6 @@
 node_modules/
 vendor/codewiki/target/
 *.log
+
+# cw 二进制备份（丢失源码的最后产物，安全网）
+bin/*.bak-*

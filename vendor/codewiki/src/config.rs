@@ -34,8 +34,9 @@ pub fn project_name(repo_path: &Path) -> Result<String> {
         .context("Could not determine project name from directory")
 }
 
-/// Full path to this project's wiki: ~/.codewiki/<project>/
+/// Full path to this project's wiki: <repo>/.codewiki (in-repo; FORK MOD —
+/// upstream puts wikis at ~/.codewiki/<project>; this fork keeps the wiki
+/// inside the repository so it is version-controlled with the code).
 pub fn wiki_path(repo_path: &Path) -> Result<PathBuf> {
-    let name = project_name(repo_path)?;
-    Ok(wiki_home()?.join(name))
+    Ok(repo_path.join(".codewiki"))
 }

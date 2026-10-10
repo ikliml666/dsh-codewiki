@@ -187,7 +187,7 @@ fn cmd_status() -> anyhow::Result<()> {
                 if let Some(ref sources) = fm.source_files {
                     if sources.iter().any(|s| changed_files.contains(s)) {
                         let rel = entry.path().strip_prefix(&wiki).unwrap_or(entry.path());
-                        stale_articles.push(rel.display().to_string());
+                        stale_articles.push(rel_path_string(rel));
                     }
                 }
             }
@@ -240,7 +240,7 @@ fn cmd_index() -> anyhow::Result<()> {
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
     {
         let rel = entry.path().strip_prefix(&wiki).unwrap_or(entry.path());
-        let rel_str = rel.display().to_string();
+        let rel_str = rel_path_string(rel);
 
         if rel_str.starts_with('_') {
             continue;
@@ -328,4 +328,12 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
+}
+
+/// Render a wiki-relative path with '/' separators on every platform.
+/// FORK FIX: Rust Path::display emits '\' on Windows, which polluted stale
+/// lists and _index.md [[...]] links; article paths are canonical '/'
+/// everywhere else (frontmatter source_files, plugin parsing).
+fn rel_path_string(rel: &std::path::Path) -> String {
+    rel.to_string_lossy().replace('\\', "/")
 }

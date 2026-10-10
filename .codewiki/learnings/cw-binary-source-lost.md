@@ -40,6 +40,17 @@ codewiki_generate 全量编译后，`.codewiki/_index.md` 里子目录文章的 
 2. **vendor 快照必须与现役二进制同源**，否则「改 vendor 上游」是看似根治的陷阱——编译成功≠构建出的是现役二进制；动手前先验证 vendor 产物与现役二进制的行为差异（本例一行 `cw index` 就暴露了）。
 3. 无法改上游时，在自己可控的边界收口（消费点规范化）并如实记录原因，比留下误导性的半成品修复更诚实。
 
+## 源码重建（2026-10-10 同日完成——本篇的结局）
+
+用户拍板「源码复制到本地一份保存在本地，在本地重构源码」，当天完成：
+
+1. **取证收敛**：`git clone` 上游 main（64323823，2026-04-06）并与 vendor 快照 diff——**逐字节一致**，vendor 就是上游；`cw init` 探测确认现役二进制 init 也建仓库内 `.codewiki`；`meta.rs`/`frontmatter.rs` 与真实 `_meta.yaml`/文章 frontmatter 字段逐一吻合。
+2. **魔改面收敛到单点**：上游全部命令经 `config::wiki_path()` 取 wiki 位置——把 `wiki_path` 改为 `repo_path.join(".codewiki")` 即可让 init/status/meta/index/path 全部仓库内化；`cw projects` 用独立的 `wiki_home()`（中心目录），与现役「projects 枚举中心、deepseek-harness 脚手架 `[not compiled]`」的行为吻合。此前看到的 `codewikiLocal` 字符串是 `.codewiki`+`Local…` 两个串的拼接假象。
+3. **重施魔改 + 根治反斜杠**：vendor/codewiki/src/config.rs 单点改 `wiki_path`；main.rs 新增 `rel_path_string()`（`to_string_lossy().replace('\\', "/")`）替换两处 `Path::display()`（stale 清单 main.rs:190、_index.md 链接 main.rs:243）——最初想做的根治这次真正落地。
+4. **对比验证**：探测仓库上 init/path/status（未编译态）/meta update/index/projects 与旧二进制逐字节一致；`_index.md` 与 stale 清单唯一差异 `\`→`/`（预期）；真实仓库 stale 检测正常（`! modules/auth.md` 正斜杠）。坑：`git diff <last>..HEAD` 只看**已提交**变更，探测脚本里未提交的改动测不出 stale；`cargo install --path` 因 SSL 吊销检查离线失败，直接复制编译产物安装。
+5. **安装**：新二进制（md5 `952b0282523ad016c13688cc594afdd8`）同步到 `bin/cw.exe` 与 `~/.cargo/bin/cw.exe`；旧二进制备份 `bin/cw.exe.bak-20261010`（835702…，gitignore）。插件测试 23 断言 + 编排 117 项全过；本仓库 `cw index` 原生输出与插件规范化后的 `_index.md` 逐字节一致——`normalizeIndexLinks` 降级为纵深防御。
+6. fork 基线/魔改/构建/警告文档化在 `vendor/codewiki/FORK.md`；**此后改 cw 行为直接改本目录源码，不再有「源码在哪」的问题**。
+
 ## Connections
 
 - [[core-logic]]：normalizeArticlePath / parseStatus / normalizeIndexLinks / tickIndex 所在模块。
