@@ -1,3 +1,18 @@
+I will now generate the updated `modules/documentation-and-config.md` article based on the provided source code. I have analyzed all the files including `.gitignore`, `CHANGELOG.md`, `CodeWiki.md`, `client.js` (structure only), `cordis.patch.yml`, `package.json`, and `README.md`.
+
+Key updates from the old version:
+1.  **Version**: Updated to `0.5.0.3`.
+2.  **Architecture**: The pipeline is fully batch-driven with a host-resident JobService. No subagents for compilation.
+3.  **Components**:
+    *   `index.js`: Contains `Config`, `installUpdateReminder`, `runCw`, `parseStatus`, Batch Inference modules (`estimateTokens`, `collectSources`, `prepareArticleTasks`, `buildBatchJsonl`, `parseBatchResults`, `settleBatch`, `runRealtimeTasks`, `resolveBatchApiKey`, `bailianChat`), `createJobService`, `cwToolDefinition`, `generateToolDefinition`, webServer endpoints, and `apply`.
+    *   `client.js`: Contains `CodewikiCard` (settings) and `CodewikiPanel` (sidebar panel with 6-stage progress, dual-channel throughput, usage stats).
+    *   `vendor/codewiki/`: Local fork of upstream, with `config.rs` modified for wiki path and `main.rs` for Windows path normalization.
+4.  **Data Flow**: Detailed flow for config, credentials, tasks (with job persistence and orphan takeover), and panel polling.
+5.  **Known Issues**: Hot reload limits, junction dependency, cw version detection, path compatibility, batch inference restrictions.
+
+I will now write the full article.
+
+```markdown
 ---
 title: documentation-and-config
 type: module
@@ -15,7 +30,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 
 ## Overview
 
-`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.5.0.2 的核心功能演进，包括从子代理编排到全批量流水线、侧边栏面板集成、服务化任务调度以及 vendor/codewiki 本地化重构等重大架构变更。
+`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.5.0.3 的核心功能演进，包括从子代理编排到全批量流水线、侧边栏面板集成、服务化任务调度、孤儿任务接管、面板信息密度改版以及 vendor/codewiki 本地化重构等重大架构变更。当前版本（0.5.0.3）实现了零子代理编译：`codewiki_generate` 为纯提交制，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼批量推理完成。
 
 ## Key Components
 
@@ -40,7 +55,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 ### `index.js` (根目录)
 - **描述**: 插件全部逻辑（单文件，Node ESM）。
 - **关键类/函数**:
-  - `Config`（~36）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。
+  - `Config`（index.js:36）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。
   - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过。
   - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）。
   - **批量推理模块** — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（实时兑底并发池，结果与批量同构）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（兑底单轮）。
@@ -87,6 +102,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 ### `CHANGELOG.md` (根目录)
 - **描述**: 详细的版本变更历史，记录了架构重构、性能优化和 bug 修复。
 - **关键版本**:
+  - **0.5.0.3**: 新增 test-wiki-anchors.mjs 自动校验锚点，记录 cargo dead_code 警告为已知可忽略。
   - **0.5.0.2**: vendor/codewiki 真源码本地重建，反斜杠 Rust 层根治，取证收敛。
   - **0.5.0.1**: 自动补建 `CodeWiki.md` 入口，修复编译收尾门控不变量，Windows 路径规范化收口。
   - **0.5.0**: 面板信息密度改版，六阶段步骤条，双通道吞吐，用量统计。
@@ -146,3 +162,4 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 3. **上游版本探测**: 上游 `cw` 无 `--version` 命令；`cw path` 在未 init 仓库退回插件侧 fallback (`<cwd>/.codewiki`)。
 4. **路径兼容**: 上游 stale 文章路径输出反斜杠 (`modules\app.md`)，插件消费侧已归一化为 `/`。
 5. **批量推理限制**: 仅北京地域独立计费，不支持缓存/免费额度；断点最长 24h（百炼批次窗口），过期作废。
+```

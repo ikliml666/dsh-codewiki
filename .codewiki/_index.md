@@ -13,6 +13,5 @@
 
 - [[modules/client-interface|client-interface]]
 - [[modules/core-logic|core-logic]]
-- [[modules/documentation-and-config|documentation-and-config]]
 - [[modules/observability|observability]]
 - [[modules/testing-suite|testing-suite]]

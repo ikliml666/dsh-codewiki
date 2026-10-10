@@ -8,7 +8,7 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 
 ## Overview
 
-本文记录 `cw` CLI（Rust 编写的 CodeWiki 编译器）二进制源码丢失事件、插件层路径规范化修复的演进，以及最终通过 fork 上游源码完成根治的全过程。核心教训在于：`cargo path` 安装将源码置于临时目录导致不可恢复；盲目修改 vendor 快照会因架构差异导致“编译成功但行为错误”的陷阱；在无法控制上游时，应在消费点（插件层）收口并如实记录。
+本文记录 `cw` CLI（Rust 编写的 CodeWiki 编译器）二进制源码丢失事件、插件层路径规范化修复的演进，以及最终通过 fork 上游源码完成根治的全过程。核心教训在于：`cargo install` 将源码置于临时目录导致不可恢复；盲目修改 vendor 快照会因架构差异导致“编译成功但行为错误”的陷阱；在无法控制上游时，应在消费点（插件层）收口并如实记录。当前代码已重建 fork，路径规范化下沉至 Rust 层，插件层保留纵深防御。
 
 ## Key Components
 
@@ -16,7 +16,7 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 
 以下函数负责在插件层拦截 Windows 反斜杠污染，确保 `_index.md` 链接与 stale 任务路径跨平台安全：
 
-- **`normalizeArticlePath(p)`** (`index.js:140`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。
+- **`normalizeArticlePath(p)`** (`index.js:140`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
 - **`parseStatus(stdout)`** (`index.js:154`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
 - **`normalizeIndexLinks(cwd)`** (`index.js:144`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
 - **`tickIndex(job)`** (`index.js:1579`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
@@ -26,7 +26,7 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 - **`createJobService(config)`** (`index.js:1042`): 工厂函数，创建任务调度器。包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法。内部维护 `jobs` 数组、锁机制 (`acquireTickLock`)、断点续查 (`batchStateFile`) 及 TPS 采样。
 - **`generateToolDefinition(cfg, svc)`** (`index.js:1744`): 定义 `codewiki_generate` 工具。执行逻辑包括：`cw status` 判态 → 幂等检查 → 孤儿断点续查 → scope 修正 → 提交后台 job。
 - **`cwToolDefinition(cfg)`** (`index.js:773`): 定义 `cw` CLI 薄封装工具。提供 `init`, `status`, `index`, `meta`, `path`, `projects`, `setup`, `uninstall` 子命令。
-- **`resolveBinary(cfg)`** (`index.js:81`): 解析 `cw` 可执行文件路径。优先级：`cfg.binaryPath` > PATH 探测 (`where`/`which`) > 插件自带 `bin/cw(.exe)`。
+- **`resolveBinary(cfg)`** (`index.js:81`): 解析 `cw` 可执行文件路径。优先级：`cfg.binaryPath` > PATH 探测 (`where`/`which`) > 插件自带 `bin/cw(.exe)`。注释强调：PATH 优先，避免捆绑二进制落后于源码时出现分叉。
 
 ### 配置项 (Config)
 
@@ -118,9 +118,9 @@ cw index 落盘 _index.md
 ## Known Issues
 
 1. **vendor 快照误导**：早期尝试修改 `vendor/codewiki` 源码根治反斜杠问题，但因 vendor 是旧架构（wiki 位于 `~/.codewiki/`）而非现役二进制（wiki 位于仓库内 `.codewiki/`），导致“编译成功但行为错误”。教训：vendor 必须与现役二进制同源，否则修改无效。
-2. **源码丢失风险**：`cargo path` 安装的 Rust 项目源码位于系统临时目录（如 `Temp/cw-src`），易被清理。事后追查仅能通过 `.crates2.json` 定位。教训：重要依赖源码应落盘至稳定位置（如 `vendor/` 或独立仓库）。
+2. **源码丢失风险**：`cargo install` 安装的 Rust 项目源码位于系统临时目录（如 `Temp/cw-src`），易被清理。事后追查仅能通过 `.crates2.json` 定位。教训：重要依赖源码应落盘至稳定位置（如 `vendor/` 或独立仓库）。
 3. **上游架构差异**：上游 `mraza007/codewiki` 始终使用中心式 wiki 架构（`~/.codewiki/`），从未支持仓库内 `.codewiki/`。现役二进制是经过魔改的私有版本。教训：无法改上游时，在消费点（插件层）收口更可靠。
-4. **路径分隔符污染**：Windows 下 Rust `Path::display()` 输出 `\`，污染 `_index.md` 的 Obsidian 链接格式。已在插件层通过 `normalizeIndexLinks` 和 `normalizeArticlePath` 解决。
+4. **路径分隔符污染**：Windows 下 Rust `Path::display()` 输出 `\`，污染 `_index.md` 的 Obsidian 链接格式。已在插件层通过 `normalizeIndexLinks` 和 `normalizeArticlePath` 解决，并在 cw 0.5.0.2 起下沉至 Rust 层根治。
 5. **断点续查兼容性**：旧版断点文件（0.3.x）无 `stage` 字段，回退到 `articles` 阶段；新版（0.4.3+）携带 `stage` 和 `crosscutSplit` 标志。`submit` 函数需兼容两种形态。
 ## 审核补记（2026-10-10 下午）
 

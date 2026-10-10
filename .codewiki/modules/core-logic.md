@@ -14,7 +14,7 @@ tags: [CodeWiki, CLI, Batch Inference, Job Service, DeepSeek Harness]
 
 ### 配置与常量
 
-- **Config Schema** (L29-L58): 使用 `@deepseek-ai/schemastery` 定义插件配置项，包括 `enabled`, `binaryPath`, `batchModel`, `batchApiKey`, `batchThinkingBudget`, `batchMinTokens`, `maxConcurrency`, `articleLanguage`, `excludePaths`, `autoUpdate` 等。
+- **Config Schema** (L29-L58): 使用 `@deepseek-ai/schemastery` 定义插件配置项，包括 `enabled`, `binaryPath`, `batchModel`, `batchApiKey`, `batchThinkingBudget`, `batchMinTokens`, `maxConcurrency`, `articleLanguage`, `excludePaths`, `autoUpdate`, `autoUpdateMin`, `workspaceOnly`, `updateReminder` 等。
 - **liveConfig()** (L74-L103): 解析并规范化配置，提供默认值和安全边界（如并发硬顶 8）。
 - **BATCH_TOKEN_BUDGET** (L186): 批量请求输入 token 预算 (28000)，以适配低价档。
 - **BATCH_TOKEN_HARD_LIMIT** (L190): 最大输入 token 限制 (200000)，超此值需走实时兜底。
