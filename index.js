@@ -2121,10 +2121,10 @@ function installWebServer(ctx, service, extra = {}) {
 function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
-    '- 运行 codewiki_generate（scope=auto 即可）更新受影响文章，或手工流程 cw status → 更新命中文章 → cw index → cw meta update；',
+    '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——learnings/、decisions/ 补文章与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
-    '- 修 bug 补 learnings/，设计决策补 decisions/；.codewiki/ 的改动与本次代码改动一起提交；',
-    '- 任务未更新 wiki 视为未完成（规程详见 codewiki 技能）。',
+    '- .codewiki/ 的改动与本次代码改动一起提交；',
+    '- 收尾未调用 codewiki_generate 视为任务未完成。',
   ].join('\n')
 }
 
