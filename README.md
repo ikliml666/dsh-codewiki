@@ -28,7 +28,7 @@
 - `defaultReasoningEffort`：编译子代理默认思考程度（`reasoningEffort`，adapter 自有值，如 `off`/`low`/`high`/`max`）；留空跟随所选模型默认。0.2.6 起，设置页下拉来自模型目录对当前 provider+model 广播的档位，目录不可用时退文本输入；调用参数 `reasoningEffort` 优先于本配置。
 - `maxConcurrency`：写文章并发上限，默认 2。
 - `articleLanguage`：文章语言，默认中文。
-- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾时 `codewiki_generate`（或手工 `cw status`→更新→`cw index`→`cw meta update`）、learnings/decisions 补文章、wiki 与代码同提交。0.2.5 起。
+- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖），wiki 与代码同提交。0.2.5 起。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
 
 ## 安装（本地 file:/// 直挂）
