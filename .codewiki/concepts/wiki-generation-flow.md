@@ -24,7 +24,6 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 *   **状态检查**: `core-logic` 执行 `cw status` 判断仓库状态（missing/uncompiled/clean/stale）。
 *   **Job 创建**:
     *   若存在活跃任务，返回现有 Job ID。
-    *   若存在孤儿断点（Orphan Checkpoint），尝试接管并恢复。
     *   否则，创建新 Job，解析凭证（`resolveBatchApiKey`），初始状态设为 `plan` 或 `articles`，并持久化至 `JOBS_FILE`。
 
 ### 2. 阶段机推进 (Pipeline Execution)
@@ -37,9 +36,9 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 
 *   **Phase 2: Articles (文章生成)**
     *   根据计划收集源文件内容 (`collectSources`)。
-    *   **Token 预算检查**: 估算 Token 数，若超过 `BATCH_TOKEN_HARD_LIMIT` (200k)，转入实时兜底；否则构建 JSONL。
-    *   **批量推理**: 调用 `submitBatch` 上传至百炼，保存断点 (`os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`)。
-    *   **实时兜底**: 若超大或批量失败，使用 `runRealtimeTasks` 并发池调用 `bailianChat`。
+    *   **Token 预算检查**: 估算 Token 数，单文件超过 `BATCH_TOKEN_HARD_LIMIT` (200k) 装不进大档时转入实时兜底。
+    *   **批量对话**: `submitBatchFor`/`submitOrRun` 启动 `startBatchChatRun` 后台并发池，同步打批量对话端点（`batch.dashscope.aliyuncs.com`，实时价 5 折，服务端最长保持 1h）。
+    *   **实时兜底**: 超大任务或 `batchMinTokens` 阈值以下的小阶段，使用 `runRealtimeTasks` 并发池调用 `bailianChat` 实时端点。
     *   **落盘**: 结果解析后写入 `.codewiki/modules/`。
     *   进入 `crosscut` 阶段。
 
@@ -68,8 +67,8 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 *   **渲染**: 解析 Job 数据，计算总进度权重 (`STAGE_WEIGHTS`)，渲染六阶段步骤条、吞吐量徽标和用量信息。
 *   **控制**: 用户可通过 UI 发起取消 (`apiPost(CONTROL_PATH, { action: 'cancel' })`) 或刷新操作。
 
-### 4. 异常与断点 (Resilience)
-*   **断点续查**: 批量任务中途失败时，保留断点文件。下次 Tick 检测到断点，重新加载状态并继续后续阶段。
+### 4. 异常与恢复 (Resilience)
+*   **宿主重启重跑**: Batch Chat 请求随连接生死，无服务端持久批次。执行器丢失时按 `job.tasks` 持久化的 `batchPrompt` 快照自动重跑当前阶段（幂等：文章重写覆盖）。
 *   **孤儿接管**: 若某 Job 长时间无心跳（>5分钟），其他实例可接管其任务。
 *   **并发冲突**: 多实例提交同一仓库时，通过磁盘合并 (`mergeFromDisk`) 避免任务丢失。
 
@@ -77,14 +76,15 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 
 | 功能组件 | 实现位置 | 说明 |
 | :--- | :--- | :--- |
-| **Job Service 工厂** | `index.js:1042-1737` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
-| **Tick 主循环** | `index.js:1612-1651` | `tick()` 方法，驱动阶段机状态转换。 |
-| **阶段处理器** | `index.js:1305-1610` | `tickPlan`(1305), `tickArticles`(1336), `tickCrosscut`(1421), `tickCompose`(1487), `tickReview`(1536), `tickIndex`(1579)。 |
-| **批量提交** | `index.js:563-588` | `submitBatch`，处理 JSONL 构建和百炼 API 调用。 |
-| **批量结算** | `index.js:448-499` | `settleBatch`，处理断点续查和结果落盘。 |
-| **实时兜底** | `index.js:284-305` | `runRealtimeTasks`，处理超大任务的并发聊天请求。 |
-| **凭证解析** | `index.js:517-537` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1937-2111` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
+| **Job Service 工厂** | `index.js:926-1654` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
+| **Tick 主循环** | `index.js:1533-1578` | `tick()` 方法，驱动阶段机状态转换。 |
+| **阶段处理器** | `index.js:1226-1532` | `tickPlan`(1226), `tickArticles`(1257), `tickCrosscut`(1342), `tickCompose`(1408), `tickReview`(1457), `tickIndex`(1500)。 |
+| **批量对话执行器** | `index.js:1129-1171` | `startBatchChatRun`，后台并发池打批量对话端点（同步排队 5 折），结果进 `batchResults` 等收割。 |
+| **阶段提交** | `index.js:1171-1216` | `submitBatchFor`（批量对话启动）与 `submitOrRun`（`batchMinTokens` 阈值下直接实时并发）。 |
+| **批量结算** | `index.js:1052-1078` | `settleJob`，收割 localResults/batchResults；宿主重启按 batchPrompt 快照重跑。 |
+| **实时兜底** | `index.js:310-336` | `runRealtimeTasks`，并发池同时服务实时兜底与批量对话通道（batch=true 换端点）。 |
+| **凭证解析** | `index.js:431-451` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
+| **面板后端 API** | `index.js:1843-2017` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
 | **前端面板组件** | `client.js:918-1133` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
 | **API 封装** | `client.js:343-355` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |

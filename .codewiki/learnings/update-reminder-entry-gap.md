@@ -27,20 +27,20 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
     3. 写入包含 `.codewiki` 绝对路径指引、`codewiki_generate` 收尾要求及“人工改写不覆盖”声明的 Markdown 内容。
   - **签名**: `export function ensureWikiEntry(cwd, language = '中文')`
 
-- `reminderText(cwd)` (`index.js:2121`): 
+- `reminderText(cwd)` (`index.js:2027`): 
   - **用途**: 动态生成提醒文案。
   - **逻辑**: 仅当 `updateReminder` 为真且 `CodeWiki.md` 存在时返回多行提醒文本；否则返回空字符串。
 
-- `installUpdateReminder(ctx, config)` (`index.js:2131`): 
+- `installUpdateReminder(ctx, config)` (`index.js:2037`): 
   - **用途**: 将提醒注入到 Agent 系统提示中。
   - **逻辑**: 
     1. 通过 `ctx.on('agent/created')` 监听新会话。
     2. 注入 `systemPrompt` section，order 设为 2901（紧接 TOOL_REPORT 之后）。
     3. `text` 回调实时求值：检查 `config.updateReminder` 开关及 `fs.existsSync(path.join(cwd, 'CodeWiki.md'))`。
 
-- `cwToolDefinition.execute` (`index.js:813`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
+- `cwToolDefinition.execute` (`index.js:698`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
 
-- `generateToolDefinition.execute` (`index.js:1787`): 编译工具的执行逻辑，负责判态、提交任务。
+- `generateToolDefinition.execute` (`index.js:1704`): 编译工具的执行逻辑，负责判态、提交任务。
 
 - `parseStatus(stdout)` (`index.js:154`): 解析 `cw status` 输出，提取 `state`, `changedFiles`, `staleArticles`。
 
