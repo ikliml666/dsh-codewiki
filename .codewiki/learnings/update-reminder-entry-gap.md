@@ -3,7 +3,6 @@ title: update-reminder-entry-gap
 type: learning
 source_files:
   - index.js
-  - test-wiki-entry.mjs
 tags: [reminder, gating, invariant, bugfix, hook]
 ---
 
