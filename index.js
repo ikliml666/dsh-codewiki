@@ -5,6 +5,7 @@
 //                       服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进，全部环节走百炼批量推理
 //                       （任务输入压在 ≤32k token 低价档，Batch 再打 5 折），零子代理；
 //                       超预算任务用同一凭证的同步 chat/completions 实时兜底。
+//   codewiki_progress — 只读查编译进度：提交后随时查 stage/百分比/篇数/失败原因，立即返回不等待。
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -1664,7 +1665,7 @@ function generateToolDefinition(cfg, svc) {
     description: [
       '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节走阿里云百炼批量对话 Batch Chat（实时价 50%，输入按 ≤32k token 低价档分块装填）。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
-      '进度：设置侧边栏 CodeWiki 面板，或 GET /api/codewiki/jobs（回环地址）；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的批量请求自动重跑当前阶段）。',
+      '进度：调用即提交后请继续手头工作，不要等待或反复轮询；需要进度时用 codewiki_progress 工具（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的批量请求自动重跑当前阶段）。',
       '凭证自动取模型设置「阿里百炼云」渠道（或插件设置 batchApiKey），取不到时报错而不是降级子代理。全量编译小仓库也要几分钟（批量排队+生成），适合后台调用。',
     ].join('\n'),
     parameters: {
@@ -1801,6 +1802,107 @@ function generateToolDefinition(cfg, svc) {
       result.stage = job.stage
       result.submitted = true
       return result
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 工具 3：codewiki_progress（只读查进度——提交后轮询，不阻塞、不等待）
+// 提交制下模型最常见的误用是「提交后空等/反复问编译好没有」；本工具把 jobSummary
+// （与侧边栏面板同源）直接暴露成只读查询，一行看出 stage/百分比/篇数/失败原因。
+// ---------------------------------------------------------------------------
+
+function samePath(a, b) {
+  const norm = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
+  return norm(a) === norm(b)
+}
+
+function progressView(job) {
+  const taskList = job.taskList ?? []
+  const done = taskList.filter((t) => t.state === 'done').length
+  return { ...job, progress: taskList.length ? Math.round((done / taskList.length) * 100) : null }
+}
+
+function progressToolDefinition(cfg, svc) {
+  return {
+    name: 'codewiki_progress',
+    description: [
+      '查询 CodeWiki 编译任务进度（只读，立即返回，不等待编译完成）。',
+      'codewiki_generate 是提交制：调用即返回，编译由宿主后台服务推进——提交后直接继续手头工作，需要进度时再调用本工具（数据与侧边栏 CodeWiki 面板同源）。',
+      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（plan/articles/crosscut/compose/review/index/done/failed/cancelled）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: '可选：只查该仓库（git 仓库根或子目录）的任务；省略则列出全部任务' },
+        jobId: { type: 'string', description: '可选：只查指定任务 id（codewiki_generate 返回值里的 jobId）' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          jobs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                cwd: { type: 'string' },
+                kind: { type: 'string' },
+                scope: { type: 'string' },
+                stage: { type: 'string' },
+                progress: { type: 'number' },
+                writtenCount: { type: 'number' },
+                failedCount: { type: 'number' },
+                cancelRequested: { type: 'boolean' },
+                taskList: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, state: { type: 'string' } } } },
+                batchProgress: { type: 'object' },
+                stageTimings: { type: 'object' },
+                usage: { type: 'object' },
+                tps: { type: 'number' },
+                notes: { type: 'array', items: { type: 'string' } },
+                error: { type: 'string' },
+                createdAt: { type: 'string' },
+                updatedAt: { type: 'string' },
+                finishedAt: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['jobs'],
+      },
+      render(args, value) {
+        if (!value.jobs.length) return [{ type: 'text', text: 'codewiki_progress：没有匹配的编译任务' }]
+        const lines = [`codewiki_progress：${value.jobs.length} 个任务`]
+        for (const j of value.jobs) {
+          const pct = j.progress === null ? '' : ` ${j.progress}%`
+          const head = `${j.id} ${j.cwd}｜${j.kind}/${j.scope}｜stage=${j.stage}${pct}｜写 ${j.writtenCount} 篇/失败 ${j.failedCount}${j.cancelRequested ? '｜取消中' : ''}`
+          lines.push(head)
+          for (const t of (j.taskList ?? [])) {
+            const mark = t.state === 'done' ? '✓' : t.state === 'failed' ? '✗' : '·'
+            lines.push(`  ${mark} ${t.name}`)
+          }
+          if (j.error) lines.push(`  错误：${j.error}`)
+          for (const n of (j.notes ?? []).slice(-3)) lines.push(`  · ${n}`)
+        }
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    execute: async (args) => {
+      const c = liveConfig(cfg)
+      if (!c.enabled) throw new Error('codewiki_progress：插件已在设置中停用（codewiki → enabled）')
+      if (!svc) throw new Error('codewiki_progress：编排服务未初始化')
+      let list = svc.list()
+      const jobId = String(args.jobId ?? '').trim()
+      if (jobId) {
+        list = list.filter((j) => j.id === jobId)
+      } else {
+        const cwd = normalizeCwd(args.cwd)
+        if (cwd) list = list.filter((j) => samePath(j.cwd, cwd))
+      }
+      return { jobs: list.map(progressView) }
     },
   }
 }
@@ -2028,6 +2130,7 @@ function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
     '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——learnings/、decisions/ 补文章与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
+    '- codewiki_generate 是后台编译：调用即返回，编译由宿主服务推进——不要等待编译完成，提交后继续其他工作，需要进度时用 codewiki_progress 工具查询；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
     '- .codewiki/ 的改动与本次代码改动一起提交；',
     '- 收尾未调用 codewiki_generate 视为任务未完成。',
@@ -2108,7 +2211,7 @@ export function apply(ctx, config) {
   ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    for (const definition of [cwToolDefinition(config), generateDef]) {
+    for (const definition of [cwToolDefinition(config), generateDef, progressToolDefinition(config, service)]) {
       const disposer = tools.register(definition)
       if (typeof disposer === 'function') {
         if (typeof ctx.effect === 'function') ctx.effect(() => disposer)

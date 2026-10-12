@@ -234,6 +234,8 @@ check(name === 'dsh-codewiki', `插件名 ${name}`)
 check(main.registered.get('cw') && main.registered.get('codewiki_generate'), 'cw 与 codewiki_generate 两个工具均已注册')
 const gen = main.registered.get('codewiki_generate')
 const cwTool = main.registered.get('cw')
+const prog = main.registered.get('codewiki_progress')
+check(!!prog, 'codewiki_progress 工具已注册')
 
 console.log('== cw 工具 ==')
 {
@@ -361,7 +363,43 @@ console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 art
   }
 }
 
-// ============================ 宿主重启重跑（Batch Chat 恢复路径） ============================
+// ============================ codewiki_progress 只读查进度 ============================
+console.log('== codewiki_progress：注册、cwd/jobId 过滤、百分比与明细 ==')
+{
+  // 终态 job：taskList 全 done，progress=100
+  const doneRows = await prog.execute({ cwd: mainRepo }, { agent: 'test-agent' })
+  check(doneRows.jobs.length >= 1 && doneRows.jobs.every((j) => j.cwd === mainRepo), '按 cwd 过滤返回该仓库任务（含大小写/斜杠归一化）')
+  const last = doneRows.jobs[doneRows.jobs.length - 1]
+  check(last?.stage === 'done' && last.progress === 100, `终态 job stage=done 且 progress=100（实际 ${last?.stage}/${last?.progress}）`)
+  check((last?.taskList ?? []).length > 0 && last.taskList.every((t) => t.state === 'done'), 'progress 输出带全 done 的 taskList')
+  check(typeof last?.usage === 'object' && last.usage !== null, 'progress 输出带 usage 用量块')
+  // jobId 过滤 + 无匹配
+  const byId = await prog.execute({ jobId: last.id }, { agent: 'test-agent' })
+  check(byId.jobs.length === 1 && byId.jobs[0].id === last.id, '按 jobId 过滤返回单条')
+  const none = await prog.execute({ jobId: 'job-does-not-exist' }, { agent: 'test-agent' })
+  check(none.jobs.length === 0, 'jobId 无匹配时返回空列表')
+  const other = await prog.execute({ cwd: 'C:/definitely-not-a-compiled-repo' }, { agent: 'test-agent' })
+  check(other.jobs.length === 0, '其他仓库 cwd 无任务')
+  // render：不抛错且含 stage 字样
+  const text = prog.output.render({ cwd: mainRepo }, { jobs: doneRows.jobs }).map((x) => x.text).join('\n')
+  check(/codewiki_progress/.test(text) && /stage=/.test(text) && /✓/.test(text), 'render 输出含任务头/stage/完成标记')
+  // 进行中 job：百分比 = done/总数
+  const midRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  try {
+    const r = await gen.execute({ cwd: midRepo }, { agent: 'test-agent' })
+    check(r.submitted === true, '进度查询用仓库已提交编译')
+    const mid = (await prog.execute({ cwd: midRepo }, { agent: 'test-agent' })).jobs.find((j) => j.id === r.jobId)
+    check(mid?.stage === 'plan' && (mid?.progress === null || (mid.progress >= 0 && mid.progress <= 100)),
+      `进行中 job stage 正确且百分比合法（stage=${mid?.stage}，progress=${mid?.progress}）`)
+    await waitJob(midRepo)
+    const fin = (await prog.execute({ jobId: r.jobId }, { agent: 'test-agent' })).jobs[0]
+    check(fin?.stage === 'done' && fin.progress === 100, `完成后 progress=100（实际 ${fin?.stage}/${fin?.progress}）`)
+  } finally {
+    mock.restore()
+    fs.rmSync(midRepo, { recursive: true, force: true })
+  }
+}
 console.log('== 0.5.0：宿主重启后批量/实时任务按持久化 prompt 快照重跑 ==')
 {
   // 场景 A：批量对话任务（batchchat-*）停在 articles，执行器随进程丢失
