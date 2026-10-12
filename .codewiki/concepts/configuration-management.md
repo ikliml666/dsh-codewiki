@@ -45,7 +45,7 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 2.  **Schema 校验与默认值 (Schema Validation & Defaults)**:
     *   **源**: `core-logic` 模块。
     *   **动作**: 当插件加载或配置变更时，`core-logic` 依据 Schema 对传入的配置进行校验。若缺少字段，则应用 `liveConfig()` 中定义的默认值（如 `maxConcurrency: 8`, `enabled: true`）。
-    *   **位置**: `core-logic` 模块源码。
+    *   **位置**: `core-logic` 模块源码 (`index.js`)。
 
 3.  **运行时解析 (Runtime Resolution)**:
     *   **源**: `core-logic` 的 `execute` 方法。

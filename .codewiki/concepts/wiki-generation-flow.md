@@ -76,18 +76,19 @@ tags: [wiki-generation, job-service, batch-inference, pipeline, observability]
 
 | 功能组件 | 实现位置 | 说明 |
 | :--- | :--- | :--- |
-| **Job Service 工厂** | `index.js:926-1654` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
-| **Tick 主循环** | `index.js:1533-1578` | `tick()` 方法，驱动阶段机状态转换。 |
-| **阶段处理器** | `index.js:1226-1532` | `tickPlan`(1226), `tickArticles`(1257), `tickCrosscut`(1342), `tickCompose`(1408), `tickReview`(1457), `tickIndex`(1500)。 |
-| **批量对话执行器** | `index.js:1129-1171` | `startBatchChatRun`，后台并发池打批量对话端点（同步排队 5 折），结果进 `batchResults` 等收割。 |
-| **阶段提交** | `index.js:1171-1216` | `submitBatchFor`（批量对话启动）与 `submitOrRun`（`batchMinTokens` 阈值下直接实时并发）。 |
-| **批量结算** | `index.js:1052-1078` | `settleJob`，收割 localResults/batchResults；宿主重启按 batchPrompt 快照重跑。 |
-| **实时兜底** | `index.js:310-336` | `runRealtimeTasks`，并发池同时服务实时兜底与批量对话通道（batch=true 换端点）。 |
-| **凭证解析** | `index.js:431-451` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1843-2017` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
+| **Job Service 工厂** | `index.js:927-1652` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
+| **Tick 主循环** | `index.js:1534-1580` | `tick()` 方法，驱动阶段机状态转换。 |
+| **阶段处理器** | `index.js:1227-1524` | `tickPlan`(1227), `tickArticles`(1258), `tickCrosscut`(1343), `tickCompose`(1409), `tickReview`(1458), `tickIndex`(1501)。 |
+| **批量对话执行器** | `index.js:1130-1171` | `startBatchChatRun`，后台并发池打批量对话端点（同步排队 5 折），结果进 `batchResults` 等收割。 |
+| **阶段提交** | `index.js:1172-1226` | `submitBatchFor`（批量对话启动）与 `submitOrRun`（`batchMinTokens` 阈值下直接实时并发）。 |
+| **批量结算** | `index.js:1053-1085` | `settleJob`，收割 localResults/batchResults；宿主重启按 batchPrompt 快照重跑。 |
+| **实时兜底** | `index.js:311-357` | `runRealtimeTasks`，并发池同时服务实时兜底与批量对话通道（batch=true 换端点）。 |
+| **凭证解析** | `index.js:432-457` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
+| **面板后端 API** | `index.js:1945-2127` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
 | **前端面板组件** | `client.js:918-1133` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
 | **API 封装** | `client.js:343-355` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
 | **阶段权重定义** | `client.js:720` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
+| **只读查进度工具** | `index.js:1826-1912` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
 
-行号基线：main `7a61424`（单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。
+行号基线：main `590a585`（单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。

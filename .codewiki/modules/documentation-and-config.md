@@ -55,7 +55,8 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 ### `index.js` (根目录)
 - **描述**: 插件全部逻辑（单文件，Node ESM）。
 - **关键类/函数**:
-  - `Config`（index.js:36）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。
+  - `Config`（index.js:37）— schemastery 设置：enabled / binaryPath / maxConcurrency（实时兑底并发，1–8）/ articleLanguage / updateReminder / 批量三项（batchApiKey 留空自动取模型设置「阿里百炼云」渠道凭证、batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。
+  - `codewiki_progress` 工具（`progressToolDefinition`，index.js:1826）— 只读查编译进度：可选 cwd/jobId 过滤，返回 jobSummary 同源数据 + taskList 完成百分比，render 输出 stage=xx NN% 与任务明细；与 `codewiki_generate`（提交制）配套，让模型不必空等编译完成。
   - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过。
   - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）。
   - **批量推理模块** — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `buildBatchJsonl`（enable_thinking+thinking_budget 在 body 顶层）/ `parseBatchResults`（结果+错误文件行合并）/ `settleBatch`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（实时兑底并发池，结果与批量同构）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（兑底单轮）。
@@ -63,7 +64,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
   - `cwToolDefinition` — cw CLI 封装工具（子命令白名单）。
   - `generateToolDefinition` — 纯提交制：normalizeCwd → 凭证解析（无凭证诚实报错，不回退子代理）→ cw status 判态 → 孤儿断点并入（resume）→ 任务预构建（clean 短路 / stale 逐篇直达 articles / 全量走 plan）→ `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用。
   - webServer 端点 — `GET /api/codewiki/jobs`（任务列表，不含 apiKey）与 `POST /api/codewiki/control {action:'cancel',jobId}`，仅回环放行（403）。
-  - `apply` — `ctx.inject(['tools','webServer','credentials'])` 注册两工具 + 端点；`agent/created` 布提醒。
+  - `apply` — `ctx.inject(['tools','webServer','credentials'])` 注册三工具（`cw` / `codewiki_generate` / `codewiki_progress`）+ 端点；`agent/created` 布提醒。
 
 ### `cordis.patch.yml` (根目录)
 - **描述**: Cordis 插件系统的 YAML 挂载补丁，用于本地开发和 Bundle 安装。

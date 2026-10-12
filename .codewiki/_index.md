@@ -12,6 +12,5 @@
 ## Module
 
 - [[modules/client-interface|client-interface]]
-- [[modules/core-logic|core-logic]]
 - [[modules/observability|observability]]
 - [[modules/testing-suite|testing-suite]]
