@@ -12,5 +12,9 @@
 ## Module
 
 - [[modules/client-interface|client-interface]]
+- [[modules/core-application|core-application]]
+- [[modules/documentation-and-config|documentation-and-config]]
+- [[modules/git-and-ops-artifacts|git-and-ops-artifacts]]
 - [[modules/observability|observability]]
+- [[modules/test-suite|test-suite]]
 - [[modules/testing-suite|testing-suite]]

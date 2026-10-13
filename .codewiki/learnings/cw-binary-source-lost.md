@@ -16,25 +16,26 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 
 以下函数负责在插件层拦截 Windows 反斜杠污染，确保 `_index.md` 链接与 stale 任务路径跨平台安全：
 
-- **`normalizeArticlePath(p)`** (`index.js:141`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
-- **`parseStatus(stdout)`** (`index.js:155`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
-- **`normalizeIndexLinks(cwd)`** (`index.js:145`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
-- **`ensureWikiEntry(cwd, language)`** (`index.js:188`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
-- **`tickIndex(job)`** (`index.js:1501`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
+- **`normalizeArticlePath(p)`** (`index.js:138`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
+- **`parseStatus(stdout)`** (`index.js:152`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
+- **`normalizeIndexLinks(cwd)`** (`index.js:142`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
+- **`ensureWikiEntry(cwd, language)`** (`index.js:185`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
+- **`tickIndex(job)`** (`index.js:1430`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
 
-### 编排服务与批量流水线
+### 编排服务与编译流水线
 
-- **`createJobService(config)`** (`index.js:927`): 工厂函数，创建任务调度器。包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法。内部维护 `jobs` 数组、锁机制 (`acquireTickLock`)、批量对话执行器 (`startBatchChatRun`/`settleJob`) 及 TPS 采样。
-- **`generateToolDefinition(cfg, svc)`** (`index.js:1662`): 定义 `codewiki_generate` 工具。执行逻辑包括：`cw status` 判态 → 幂等检查 → scope 修正 → 提交后台 job。
-- **`cwToolDefinition(cfg)`** (`index.js:659`): 定义 `cw` CLI 薄封装工具。提供 `init`, `status`, `index`, `meta`, `path`, `projects`, `setup`, `uninstall` 子命令。
-- **`resolveBinary(cfg)`** (`index.js:82`): 解析 `cw` 可执行文件路径。优先级：`cfg.binaryPath` > PATH 探测 (`where`/`which`) > 插件自带 `bin/cw(.exe)`。注释强调：PATH 优先，避免捆绑二进制落后于源码时出现分叉。
+- **`createJobService(config)`** (`index.js:899`): 工厂函数，创建任务调度器。包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法。内部维护 `jobs` 数组、锁机制 (`acquireTickLock`)、阶段执行器 (`startBatchChatRun`/`settleJob`) 及 TPS 采样。
+- **`generateToolDefinition(cfg, svc)`** (`index.js:1589`): 定义 `codewiki_generate` 工具。执行逻辑包括：`cw status` 判态 → 幂等检查 → scope 修正 → 提交后台 job。
+- **`cwToolDefinition(cfg)`** (`index.js:631`): 定义 `cw` CLI 薄封装工具。提供 `init`, `status`, `index`, `meta`, `path`, `projects`, `setup`, `uninstall` 子命令。
+- **`resolveBinary(cfg)`** (`index.js:79`): 解析 `cw` 可执行文件路径。优先级：`cfg.binaryPath` > PATH 探测 (`where`/`which`) > 插件自带 `bin/cw(.exe)`。注释强调：PATH 优先，避免捆绑二进制落后于源码时出现分叉。
 
 ### 配置项 (Config)
 
-- **`Config`** (`index.js:37`): 基于 `@deepseek-ai/schemastery` 的定义对象。关键字段：
+- **`Config`** (`index.js:36`): 基于 `@deepseek-ai/schemastery` 的定义对象。关键字段：
     - `binaryPath`: `cw` 可执行文件路径（留空优先用 PATH）。
-    - `batchModel`: 批量推理模型（默认 `qwen3.7-flash`）。
-    - `batchApiKey`: 阿里云百炼 API Key。
+    - `batchModel`: 编译模型（全部模型环节共用，默认 `qwen3.7-flash`）。
+    - `batchApiKey`: 阿里云百炼 API Key（存量凭证字段，设置页不再渲染）。
+    - `batchThinkingBudget`: 思考预算。
     - `excludePaths`: 排除编译的绝对路径清单。
     - `autoUpdate`: 是否启用自动增量编译。
     - `workspaceOnly`: 任务页是否仅显示已添加工作区的任务。
@@ -45,7 +46,7 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 ┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │  Tool Layer  │────>│  Job Service     │────>│  Bailian Batch  │
 │ (cw /        │     │  (index.js       │     │  / Realtime     │
-│  generate)   │     │   :594+)         │     │  (DashScope)    │
+│  generate)   │     │   :405+)         │     │  (DashScope)    │
 └──────────────┘     │                  │     └─────────────────┘
                      │  Stage Machine:  │              │
                      │  plan -> articles│              │
@@ -67,7 +68,7 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 1. 用户调用 `codewiki_generate`，触发 `cw status` 获取仓库状态。
 2. 根据状态（missing/uncompiled/stale/clean）决定提交 `full`、`stale` 或 `resume` 类型的 job。
 3. Job 进入阶段机：`plan`（规划模块）→ `articles`（批量写模块文章）→ `crosscut`（横切：架构/模式/概念，可能拆分为观察批+合成批）→ `review`（批量校对）→ `index`（执行 `cw index` 并规范化链接）。
-4. 全部模型调用走百炼批量推理（5折价），超预算任务实时兜底。
+4. 全部模型调用走百炼普通入口（chat/completions，后台并发池，无专用批量端点）；装不下 32k 档的任务升 200k 大档装填。
 5. `cw` CLI 封装工具直接调用本地二进制，用于状态查询、初始化、索引重建等运维操作。
 
 ## Data Flow
@@ -78,10 +79,10 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 cw status 输出
       │
       ▼
- parseStatus() [index.js:155]
+ parseStatus() [index.js:152]
       │  匹配 /^\s+[M!]\s+(.+)$/gm
       ▼
- normalizeArticlePath(line) [index.js:141]
+ normalizeArticlePath(line) [index.js:138]
       │  replace(/\\/g, '/')
       ▼
  标准化路径 (/)
@@ -92,7 +93,7 @@ cw status 输出
 cw index 落盘 _index.md
       │
       ▼
- normalizeIndexLinks(cwd) [index.js:145]
+ normalizeIndexLinks(cwd) [index.js:142]
       │  正则 /\[\[([^\]|\n]*?)\|/g
       │  替换链接头部 \ 为 /
       ▼
@@ -102,7 +103,7 @@ cw index 落盘 _index.md
 ### 编译流水线阶段
 
 1. **Plan**: 扫描源码文件 (`scanRepoFiles`) → 提交批量规划请求 → 解析 JSON 计划（模块/概念分组）。
-2. **Articles**: 按模块分组提交批量写文章请求 → 处理 oversized 任务（实时兜底）→ 落盘模块文章。
+2. **Articles**: 按模块分组提交写文章请求 → 处理 oversized 任务（升 200k 大档装填）→ 落盘模块文章。
 3. **Crosscut**: 
    - 若总 token ≤ 预算：单批直出 `_architecture.md`, `_patterns.md`, `concepts/*`。
    - 若超预算：拆分观察批（每模块一篇观察）→ 合成批（基于观察写横切文章）。
@@ -113,8 +114,7 @@ cw index 落盘 _index.md
 
 - [[core-logic]]：`normalizeArticlePath` / `parseStatus` / `normalizeIndexLinks` / `tickIndex` 所在模块。
 - [[testing-suite]]：`test-wiki-entry.mjs` 23 断言（含规范化组）。
-- [[batch-inference]]：百炼批量推理与实时兜底机制。
-- [[job-service]]：`createJobService` 阶段机与断点续查逻辑。
+- [[job-service]]：`createJobService` 阶段机与断点续查逻辑。（注：`[[batch-inference]]` 链接已随 0.6.0 批量通道删除移除——全部模型环节走百炼普通入口，无独立批量机制可引。）
 
 ## Known Issues
 

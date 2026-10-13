@@ -65,7 +65,7 @@ tags: [configuration, settings, plugin-system, configForms, patch]
     *   **源**: `core-logic` 的各个 Tick 处理器。
     *   **动作**: 配置项直接决定流水线行为。例如：
         *   `excludePaths`: 在 `scanRepoFiles` 中过滤文件。
-        *   `batchModel` / `batchThinkingBudget`: 决定批量推理的参数。
+        *   `batchModel` / `batchThinkingBudget`: 决定编译模型与思考预算（全部模型环节共用，走百炼普通入口）。
         *   `autoUpdate`: 控制 `autoScan` 调度器是否启动。
     *   **位置**: `core-logic` 模块源码 (`tickPlan`, `scanRepoFiles`, `autoScan`)。
 
@@ -73,12 +73,12 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 
 | 功能点 | 模块 | 文件 | 行号/位置 | 描述 |
 | :--- | :--- | :--- | :--- | :--- |
-| **配置 Schema 定义** | core-logic | `index.js` | L29-L58 | 使用 schemastery 定义所有可配置字段的类型、默认值和约束。 |
-| **配置解析与规范化** | core-logic | `index.js` | L74-L103 | `liveConfig()` 函数，合并默认值与安全边界（如硬顶并发数）。 |
-| **凭证解析链** | core-logic | `index.js` | L506-L530 | `resolveBatchApiKey()`，处理 API Key 的优先级逻辑。 |
+| **配置 Schema 定义** | core-logic | `index.js` | L36-L48 | 使用 schemastery 定义所有可配置字段的类型、默认值和约束。 |
+| **配置解析与规范化** | core-logic | `index.js` | L51-L77 | `val()`/`liveConfig()` 函数，合并默认值与安全边界（如硬顶并发数）。 |
+| **凭证解析链** | core-logic | `index.js` | L404-L424 | `resolveBatchApiKey()`，处理 API Key 的优先级逻辑。 |
 | **挂载补丁定义** | documentation-and-config | `cordis.patch.yml` | Root | 定义插件 ID 和初始空配置 `{}`。 |
 | **插件入口依赖** | documentation-and-config | `package.json` | Root | 声明 `dsh.bundle.patch` 指向补丁文件。 |
-| **配置表单组件** | client-interface | `client.js` | L402-L520 | `CodewikiCard` 组件：`snapshot`/`draft` 状态（L405-L406）、`form.mutate` 保存（L473）、`discard`（L481）。 |
-| **配置读写接口** | client-interface | `client.js` | L367-L379 | `ctx.configForms.get(NS)` 取表单、`whileServed` 热生效挂载；写回走 `form.mutate(ops, revision)`。 |
-| **排除路径过滤** | core-logic | `index.js` | L445-L470 | `scanRepoFiles()` 中使用 `excludePaths` 配置过滤源码。 |
-| **自动更新开关** | core-logic | `index.js` | L1206-L1225 | `autoScan()` 根据 `autoUpdate` 配置决定是否启动调度器。 |
+| **配置表单组件** | client-interface | `client.js` | L390-L520 | `CodewikiCard` 组件：`snapshot`/`draft` 状态、`form.mutate` 保存（L456）、`discard`。 |
+| **配置读写接口** | client-interface | `client.js` | L355-L371 | `ctx.configForms.get(NS)` 取表单、`whileServed` 热生效挂载；写回走 `form.mutate(ops, revision)`。 |
+| **排除路径过滤** | core-logic | `index.js` | L807-L830 | `scanRepoFiles()` 中使用 `excludePaths` 配置过滤源码。 |
+| **自动更新开关** | core-logic | `index.js` | L2112-L2140 | `autoScan()` 根据 `autoUpdate` 配置决定是否启动调度器。 |
