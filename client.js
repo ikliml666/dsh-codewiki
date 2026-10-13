@@ -35,20 +35,14 @@ window.__ModuleLoader__.load({
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，提醒改完代码后更新 wiki。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
-      maxConcurrency: '实时兑底并发上限',
-      maxConcurrencyHint: '1–8；硬顶 8。仅超预算单文件的实时兑底请求使用。',
-      secBatch: '批量编译（百炼）',
-      secBatchHint: 'codewiki_generate 提交后由宿主服务推进阶段机（规划→写文章→横切→审校→索引），全程百炼批量推理（实时价 50%），零子代理。凭证自动取模型设置「阿里百炼云」渠道，此处可覆盖。',
-      batchApiKey: '百炼 API Key',
-      batchApiKeyHint: 'DashScope API Key（sk-…）。留空时自动使用模型设置「阿里百炼云」渠道的凭证；此处填写则覆盖它。',
-      batchModel: '批量模型',
-      batchModelHint: '默认 qwen3.7-flash；仅华北2 支持，须用别名（快照版如 qwen3.7-flash-2026-07-15 不支持批量）。',
-      batchThinkingBudget: '批量思考预算',
+      maxConcurrency: '编译并发上限',
+      maxConcurrencyHint: '1–8；硬顶 8。编译请求（chat/completions）后台并发池的并发数。',
+      secCompile: '编译模型（百炼）',
+      secCompileHint: 'codewiki_generate 的全部模型环节（规划/写文章/横切/校对）都走百炼普通入口（chat/completions），凭证自动取模型设置「阿里百炼云」渠道。',
+      batchModel: '编译模型',
+      batchModelHint: '全部模型环节共用（规划/写文章/横切/校对）。默认 qwen3.7-flash。',
+      batchThinkingBudget: '思考预算',
       batchThinkingBudgetHint: '0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。',
-      batchMinTokens: '阶段实时阈值',
-      batchMinTokensHint: '单阶段请求输入估算低于该值（token）时走实时并发推理（免批量排队，快）；≥ 该值才提交百炼批量（实时价 5 折）。0=全部走批量。大仓库想强制全部实时，可设 99999999。',
-      invalidBatchMinTokens: '阶段实时阈值须为 0–99999999 的整数',
-      invalidBatchThinking: '批量思考预算须为 0–32768 的整数。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -121,7 +115,7 @@ window.__ModuleLoader__.load({
       stepIndex: '索引',
       perMin: '篇/分',
       etaLabel: '剩余',
-      batchRunLabel: '批量执行中',
+      batchRunLabel: '执行中',
       usageIn: '输入',
       usageOut: '输出',
       reqLabel: '请求',
@@ -150,20 +144,14 @@ window.__ModuleLoader__.load({
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
-      maxConcurrency: 'Realtime fallback concurrency',
-      maxConcurrencyHint: '1–8; hard cap 8. Used only by realtime fallback requests for oversized single files.',
-      secBatch: 'Batch compilation (Bailian)',
-      secBatchHint: 'After codewiki_generate submits, a host service drives the stage machine (plan → articles → crosscut → review → index) entirely through Bailian batch inference (50% of realtime price), zero subagents. Credentials come from the "阿里百炼云" provider in model settings; override here if needed.',
-      batchApiKey: 'Bailian API key',
-      batchApiKeyHint: 'DashScope API key (sk-…). Leave empty to reuse the credential of the "阿里百炼云" provider from model settings; a value here overrides it.',
-      batchModel: 'Batch model',
-      batchModelHint: 'Default qwen3.7-flash; North China 2 only, alias required (e.g. the qwen3.7-flash-2026-07-15 snapshot does not support batch).',
-      batchThinkingBudget: 'Batch thinking budget',
+      maxConcurrency: 'Compile concurrency',
+      maxConcurrencyHint: '1–8; hard cap 8. Concurrency of the background pool of compile requests (chat/completions).',
+      secCompile: 'Compile model (Bailian)',
+      secCompileHint: 'Every model step of codewiki_generate (plan / articles / crosscut / proofreading) goes through the plain Bailian endpoint (chat/completions); credentials resolve automatically from the "阿里百炼云" provider in model settings.',
+      batchModel: 'Compile model',
+      batchModelHint: 'Shared by every model step (plan / articles / crosscut / proofreading). Default qwen3.7-flash.',
+      batchThinkingBudget: 'Thinking budget',
       batchThinkingBudgetHint: '0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output.',
-      batchMinTokens: 'Stage realtime threshold',
-      batchMinTokensHint: 'When a stage\'s estimated prompt input is below this many tokens, run it via realtime concurrent calls (no batch queueing, faster); at or above it, submit to Bailian batch (50% of realtime price). 0 = always batch. To force realtime for large repos, set 99999999.',
-      invalidBatchMinTokens: 'Stage realtime threshold must be an integer 0–99999999',
-      invalidBatchThinking: 'Batch thinking budget must be an integer between 0 and 32768.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -236,7 +224,7 @@ window.__ModuleLoader__.load({
       stepIndex: 'Index',
       perMin: 'articles/min',
       etaLabel: 'remaining',
-      batchRunLabel: 'Batch running',
+      batchRunLabel: 'Running',
       usageIn: 'in',
       usageOut: 'out',
       reqLabel: 'requests',
@@ -456,14 +444,9 @@ window.__ModuleLoader__.load({
               setError(t('invalidBatchThinking'))
               return
             }
-            const minTok = Number(draft?.batchMinTokens)
-            if (Number.isFinite(minTok) && (minTok < 0 || minTok > 99999999 || !Number.isInteger(minTok))) {
-              setError(t('invalidBatchMinTokens'))
-              return
-            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'batchMinTokens', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -547,21 +530,11 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            // 批量编译（百炼）
+            // 编译模型（百炼普通入口）
             el('section', { 'data-dscw-field': '' },
-              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secBatch'))),
-              el('div', { 'data-dscw-hint': '' }, t('secBatchHint')),
+              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secCompile'))),
+              el('div', { 'data-dscw-hint': '' }, t('secCompileHint')),
               el('div', { 'data-dscw-grid': '' },
-                el('label', null, t('batchApiKey')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    type: 'password',
-                    value: String(draft.batchApiKey ?? ''),
-                    onChange: (e) => setPath('batchApiKey', e.target.value),
-                    placeholder: 'sk-…',
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('batchApiKeyHint')),
-                ),
                 el('label', null, t('batchModel')),
                 el(Input, {
                   value: String(draft.batchModel ?? ''),
@@ -576,15 +549,6 @@ window.__ModuleLoader__.load({
                     placeholder: '0',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint')),
-                ),
-                el('label', null, t('batchMinTokens')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    value: String(draft.batchMinTokens ?? 0),
-                    onChange: (e) => setPath('batchMinTokens', Number(e.target.value)),
-                    placeholder: '30000',
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('batchMinTokensHint')),
                 ),
               ),
             ),

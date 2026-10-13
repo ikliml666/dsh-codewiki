@@ -1,5 +1,5 @@
-// test-batch.mjs — 批量对话（Batch Chat）通道自检：纯函数（源码装填/token 估算/
-// 任务装配/本地规划/横切装填/仓库勘探）+ mock fetch（批量端点/重试/取消/实时兜底）
+// test-batch.mjs — 编译执行链自检：纯函数（源码装填/token 估算/任务装配/本地规划/
+// 横切装填/仓库勘探）+ mock fetch（普通端点/并发池/取消/超大兜底）
 // 跑法：node test-batch.mjs（Node ≥20，全局 fetch/FormData/Blob）
 import fs from 'node:fs'
 import os from 'node:os'
@@ -36,7 +36,7 @@ check(cs.text.includes('### a.ts') && cs.text.includes('export const A = 1'), '�
 check(cs.text.includes('missing.ts') && cs.text.includes('文件不存在'), '缺失文件在文内标注')
 check(cs.skipped.length === 0 && cs.oversized === false, '预算充足时无跳过')
 const tiny = collectSources(tmpRoot, ['a.ts', 'b.ts'], 10)
-check(tiny.oversized === true && tiny.text.includes('export const A = 1'), '首文件即超预算 → oversized（原文返回转实时兜底）')
+check(tiny.oversized === true && tiny.text.includes('export const A = 1'), '首文件即超预算 → oversized（原文返回转超大兜底）')
 const firstBlock = '### a.ts\n\n```\nexport const A = 1\n```\n\n'
 const small = collectSources(tmpRoot, ['a.ts', 'b.ts'], estimateTokens(firstBlock) + 1)
 check(small.oversized === false && small.skipped.includes('b.ts'), '预算装不下第二文件 → skipped')
@@ -66,13 +66,13 @@ fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
 const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
 check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
 const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装仍走批量')
+check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装继续')
 check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档任务 prompt 内联完整源码')
 const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
-check(hugePrep.prepared.length === 0 && hugePrep.oversized.length === 1, '单文件连 200k 大档都装不下 → oversized（转实时兜底）')
+check(hugePrep.prepared.length === 0 && hugePrep.oversized.length === 1, '单文件连 200k 大档都装不下 → oversized（转超大兜底）')
 
-// ---------- 4. runRealtimeTasks：Batch Chat 通道 ----------
-section('runRealtimeTasks batch:true：批量对话端点与请求体')
+// ---------- 4. runRealtimeTasks：普通端点并发池 ----------
+section('runRealtimeTasks：百炼普通端点与请求体')
 const originalFetch = globalThis.fetch
 let batchCalls = []
 let handler = null // 可切换的 fetch 处理器（url, init）=> Response-like
@@ -89,51 +89,27 @@ handler = () => mockJson({ choices: [{ message: { content: '---\ntitle: B\n---\n
 const batchNotes = []
 const batchRes = await runRealtimeTasks(kmTasks, {
   apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, concurrency: 2,
-  notes: batchNotes, batch: true,
+  notes: batchNotes,
 })
-check(batchCalls.length === 2, '每任务一个同步批量请求（2 任务 2 请求）')
-check(batchCalls.every((c) => c.url === 'https://batch.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'), '请求打批量对话端点（batch.dashscope）')
+check(batchCalls.length === 2, '每任务一个同步请求（2 任务 2 请求）')
+check(batchCalls.every((c) => c.url === 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'), '请求打百炼普通端点（dashscope.aliyuncs.com）')
 check(batchCalls[0].body.model === 'qwen3.7-flash' && batchCalls[0].body.enable_thinking === false, 'body 顶层 model + enable_thinking:false（budget=0）')
 check(!('thinking_budget' in batchCalls[0].body), 'budget=0 不带 thinking_budget 键')
 check(batchCalls[0].body.messages.length === 1 && batchCalls[0].body.messages[0].content === '批量任务A', '单条 user 消息承载 prompt')
 check(batchRes.size === 2 && batchRes.get('b0').ok && fs.readFileSync(path.join(outDir, 'b0.md'), 'utf8').includes('批量结果'), '磁盘任务落盘成功')
 check(batchRes.get('b1').ok && batchRes.get('b1').content.includes('批量结果'), 'keepInMemory 结果带 content')
 
-section('runRealtimeTasks batch:true：思考参数与 tps 采样')
+section('runRealtimeTasks：思考参数与 tps 采样')
 batchCalls = []
 const tpsDone = []
 handler = () => mockJson({ choices: [{ message: { content: 'ok' } }], usage: { output_tokens: 128 } })
 await runRealtimeTasks(
   [{ customId: 'x', name: '_x', keepInMemory: true, batchPrompt: 'P' }],
-  { apiKey: 'sk', model: 'm', thinkingBudget: 1024, concurrency: 1, notes: [], batch: true, onTaskDone: (s) => tpsDone.push(s) },
+  { apiKey: 'sk', model: 'm', thinkingBudget: 1024, concurrency: 1, notes: [], onTaskDone: (s) => tpsDone.push(s) },
 )
 check(batchCalls[0].body.enable_thinking === true && batchCalls[0].body.thinking_budget === 1024, 'budget=1024 → enable_thinking:true + thinking_budget:1024（body 顶层）')
 check(!JSON.stringify(batchCalls[0].body.messages).includes('thinking'), '思考参数不进 messages')
 check(tpsDone.length === 1 && tpsDone[0].outputTokens === 128 && tpsDone[0].durationMs >= 0, 'onTaskDone 上报 outputTokens/durationMs')
-
-section('runRealtimeTasks batch:true：超时/网络错误重试一次，HTTP 失败不重试')
-batchCalls = []
-let failFirst = true
-handler = () => {
-  if (failFirst) { failFirst = false; throw new TypeError('fetch failed') }
-  return mockJson({ choices: [{ message: { content: '---\ntitle: R\n---\n重试成功' } }] })
-}
-const retryNotes = []
-const retryRes = await runRealtimeTasks(
-  [{ customId: 'r0', name: 'modules/r.md', articlePath: path.join(outDir, 'r.md'), batchPrompt: '抖动任务' }],
-  { apiKey: 'sk', model: 'm', thinkingBudget: 0, concurrency: 1, notes: retryNotes, batch: true },
-)
-check(retryRes.get('r0').ok === true && fs.readFileSync(path.join(outDir, 'r.md'), 'utf8').includes('重试成功'), 'TypeError 后重试一次成功')
-check(batchCalls.length === 2, `网络错误恰好重试一次（请求数 ${batchCalls.length}）`)
-batchCalls = []
-handler = () => mockJson({ error: { message: 'quota' } }, 500)
-const httpFailNotes = []
-await runRealtimeTasks(
-  [{ customId: 'h0', name: 'modules/h.md', articlePath: path.join(outDir, 'h.md'), batchPrompt: 'HTTP500' }],
-  { apiKey: 'sk', model: 'm', thinkingBudget: 0, concurrency: 1, notes: httpFailNotes, batch: true },
-)
-check(batchCalls.length === 1, 'HTTP 500 不重试（未成功请求不计费语义）')
-check(httpFailNotes.some((n) => n.includes('HTTP 500')), '失败记账进 notes')
 
 section('runRealtimeTasks：外部 signal 中止')
 batchCalls = []
@@ -141,14 +117,14 @@ const abortAc = new AbortController()
 handler = () => mockJson({ choices: [{ message: { content: 'late' } }] })
 const abortPromise = runRealtimeTasks(
   ['a0', 'a1', 'a2'].map((id, i) => ({ customId: id, name: `modules/a${i}.md`, articlePath: path.join(outDir, `a${i}.md`), batchPrompt: `任务${i}` })),
-  { apiKey: 'sk', model: 'm', thinkingBudget: 0, concurrency: 1, notes: [], batch: true, signal: abortAc.signal },
+  { apiKey: 'sk', model: 'm', thinkingBudget: 0, concurrency: 1, notes: [], signal: abortAc.signal },
 )
 abortAc.abort()
 const abortedRes = await abortPromise
 check(abortedRes.size < 3, `中止后不再消费剩余任务（结果 ${abortedRes.size}/3）`)
 
-// ---------- 5. runRealtimeTasks：oversized 实时兜底 ----------
-section('runRealtimeTasks（实时兜底）：并发池 + 失败记账')
+// ---------- 5. runRealtimeTasks：失败记账 ----------
+section('runRealtimeTasks：并发池 + 失败记账')
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url)
   if (u.endsWith('/chat/completions')) {
@@ -168,7 +144,7 @@ const rtTasks = [
   { customId: 'rt2', name: 'modules/boom.md', articlePath: path.join(outDir, 'boom.md'), batchPrompt: 'boom 任务' },
 ]
 const rt = await runRealtimeTasks(rtTasks, { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, concurrency: 2, notes: rtNotes })
-check(rt.size === 3, '实时兜底返回 3 条结果（Map）')
+check(rt.size === 3, '返回 3 条结果（Map）')
 check(rt.get('rt0').ok && fs.readFileSync(rtDisk, 'utf8').includes('实时结果'), '磁盘任务落盘成功')
 check(rt.get('rt1').ok && rt.get('rt1').content === '内存结果', 'keepInMemory 结果带 content')
 check(rt.get('rt2').ok === false && rtNotes.some((n) => n.includes('simulated network error')), '失败记账进 notes，不中断其他任务')
