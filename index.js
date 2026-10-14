@@ -12,6 +12,7 @@ import crypto from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -896,7 +897,27 @@ function jobSummary(job) {
   }
 }
 
-function createJobService(config) {
+// ---------------------------------------------------------------------------
+// 编译终态实时唤醒：对发起会话 steer 一条消息（与子代理 send_message 同机制，纯插件侧
+// 现有 API，零 IPC）。agentsRef 由 apply() 经 ctx.inject(['agents']) 赋值；无 agent 上下文
+// （面板/自动调度提交）与冷会话（会话已关）一律静默跳过——系统提示 section 拉取仍兜底。
+// ---------------------------------------------------------------------------
+let agentsRef = null
+
+export function wakeCompileSession(job, outcome, agents = agentsRef) {
+  if (!job?.sessionId || !agents || typeof agents.get !== 'function') return
+  let agent
+  try { agent = agents.get(job.sessionId) } catch { return }
+  if (!agent || typeof agent.steer !== 'function') return
+  const text = outcome === 'failed'
+    ? `【CodeWiki 编译失败】任务 ${job.id}（${job.cwd}）失败：${job.error ?? '未知原因'}——可用 codewiki_progress 查详情，处理后重新提交。`
+    : `【CodeWiki 编译完成·请提交改动】任务 ${job.id} 已完成（写入 ${job.writtenCount} 篇文章）：检查 .codewiki/ 与 CodeWiki.md 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不要 git add -A）；已入库或无需提交则忽略本消息。`
+  try {
+    agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'codewiki' } }))
+  } catch { /* 唤醒失败不影响编译任务本身 */ }
+}
+
+function createJobService(config, onSettled) {
   const jobs = loadJobs()
   for (const j of jobs) rememberRepo(j.cwd) // 一次性种子：旧历史进已知仓库清单
   let timer = null
@@ -1004,11 +1025,13 @@ function createJobService(config) {
   }
 
   function fail(job, msg) {
+    const fromSubmit = job.stage === 'submitting' // 提交期失败：错误随工具调用同步返回，无需再唤醒
     setStage(job, 'failed')
     job.error = msg
     job.finishedAt = new Date().toISOString()
     note(job, `任务失败：${msg}`)
     touch(job)
+    if (!fromSubmit) onSettled?.(job, 'failed') // sessionId 守卫在 wakeCompileSession 内
   }
 
   // 凭证：内存缓存优先；不落盘，重启后重解析（凭证库可能已就绪/已更换）
@@ -1350,15 +1373,15 @@ function createJobService(config) {
   }
 
   function submitComposeBatch(job, observationsText) {
-    return submitBatchFor(job, crosscutTasks(job, observationsText))
-      .then(() => {
-        note(job, `横切合成批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念（输入=模块观察）`)
-      })
-      .catch((err) => {
-        // 文章已写成功，合成提交失败降级跳过横切，不推翻整个任务
-        setStage(job, 'review')
-        note(job, `横切合成批次提交失败，跳过横切 —— ${String(err?.message ?? err)}`)
-      })
+    // 0.6.0 起 submitBatchFor 是同步函数（返回 undefined），不能再 .then 链——改为 try/catch
+    try {
+      submitBatchFor(job, crosscutTasks(job, observationsText))
+      note(job, `横切合成批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念（输入=模块观察）`)
+    } catch (err) {
+      // 文章已写成功，合成提交失败降级跳过横切，不推翻整个任务
+      setStage(job, 'review')
+      note(job, `横切合成批次提交失败，跳过横切 —— ${String(err?.message ?? err)}`)
+    }
   }
 
   // 本地核对：frontmatter 必填 + source_files 存在性（只记账，不删文）
@@ -1449,6 +1472,7 @@ function createJobService(config) {
     }
     setStage(job, 'done')
     job.finishedAt = new Date().toISOString()
+    if (job.writtenCount > 0) onSettled?.(job, 'done') // 实时唤醒发起会话（无 sessionId 时内部静默）
   }
 
   const STAGE_HANDLER = {
@@ -1505,7 +1529,7 @@ function createJobService(config) {
     }
   }
 
-  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto }) {
+  async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId }) {
     const c0 = liveConfig(config)
     if (isExcluded(cwd, c0.excludePaths)) {
       throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
@@ -1520,6 +1544,7 @@ function createJobService(config) {
       owner: instanceId,
       stage: 'submitting',
       auto: auto === true,
+      sessionId: sessionId ?? null, // 发起会话：编译终态 steer 唤醒（面板/自动调度为 null，不唤醒）
       plan: null,
       batchRef: null,
       tasks: [],
@@ -1640,6 +1665,7 @@ function generateToolDefinition(cfg, svc) {
       const auto = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
+      const sessionId = exec?.agent?.id ?? null // 发起会话：编译终态时 steer 唤醒（面板/自动调度无 agent 上下文=不唤醒）
 
       const binary = resolveBinary(c)
       const statusRes = await runCw(binary, cwd, ['status'], 120000, exec?.signal)
@@ -1655,6 +1681,7 @@ function generateToolDefinition(cfg, svc) {
       // 幂等：同仓库已有活动任务直接返回
       const active = svc.findActive(cwd)
       if (active) {
+        if (sessionId) active.sessionId = sessionId // 最近一次关心该仓库的会话拿唤醒权
         notes.push(`该仓库已有进行中的编译任务 ${active.id}（stage ${active.stage}），本次调用直接返回现有任务`)
         result.jobId = active.id
         result.stage = active.stage
@@ -1694,7 +1721,7 @@ function generateToolDefinition(cfg, svc) {
           }
         }).filter(Boolean)
         if (tasks.length) {
-          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto })
+          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto, sessionId })
           notes.push(`已提交 ${tasks.length} 篇过期文章更新任务 ${job.id}`)
           result.jobId = job.id
           result.stage = job.stage
@@ -1723,7 +1750,7 @@ function generateToolDefinition(cfg, svc) {
         notes.push('cw init 完成')
       }
 
-      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto })
+      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
       notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部走百炼普通入口）`)
       result.jobId = job.id
       result.stage = job.stage
@@ -1745,7 +1772,7 @@ function updateToolDefinition(cfg, generateDef) {
     name: 'codewiki_update',
     description: [
       '提交 CodeWiki 更新请求（日常维护入口，scope=auto 语义）：无 wiki 走全量编译，有变更走逐篇更新，已是最新则直接报告。调用即提交、立即返回——请继续下一项工作，不要等待或反复轮询（进度可用 codewiki_progress 查询）。',
-      '更新完成后，本会话系统提示会出现「CodeWiki 编译完成·请提交改动」提醒：届时检查并提交 .codewiki/ 与 CodeWiki.md 的改动（插件不代跑 git）。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
+      '更新完成后你会收到实时唤醒消息「CodeWiki 编译完成·请提交改动」（编译结束即刻 steer 送达本会话，无需轮询；系统提示 section 亦有同款提醒兜底）：届时检查并提交 .codewiki/ 与 CodeWiki.md 的改动（插件不代跑 git）。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -2193,7 +2220,8 @@ function installUpdateReminder(ctx, config) {
 
 export function apply(ctx, config) {
   hostCtxRef = ctx
-  const service = createJobService(config)
+  if (typeof ctx.inject === 'function') ctx.inject(['agents'], (rc) => { agentsRef = rc?.agents ?? rc })
+  const service = createJobService(config, wakeCompileSession)
   service.start()
   // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，
   // 写成 () => service.stop() 会在启动时当场停掉服务（返回 undefined 也无 disposer）

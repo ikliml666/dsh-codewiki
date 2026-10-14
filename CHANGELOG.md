@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0 — 2026-10-14
+
+### 编译终态实时唤醒发起会话（用户需求：借用子智能体发送消息机制）
+
+- 背景：0.7.0 的提交提醒靠系统提示 section 拉取（会话因别的原因醒来才看得到）。调研确认 DSH 唯一的续步队列就是 Agent inbox（subagent/continuation.ts:7-11），子代理 send_message 对父会话最终也是 `agent.steer()`；插件经 `ctx.inject(['agents'])` 拿同一注册表即可纯插件侧实时唤醒，harness 零改动。先例：dsh-turn-verify-guard 插件同机制在线运行。
+- 新增 `wakeCompileSession(job, outcome, agents?)`（index.js，export 供测试）：编译终态对发起会话 `steer(createUserMessage({...source:{kind:'plugin',plugin:'codewiki'}}))`——done（writtenCount>0）发「【CodeWiki 编译完成·请提交改动】」、failed 发「【CodeWiki 编译失败】」；sessionId 缺失（面板/自动调度提交）、会话不在注册表（冷会话）、steer 异常一律静默跳过（系统提示 section 拉取兜底仍在）。
+- 会话来源：generate execute 记 `exec.agent?.id`（工具执行上下文自带发起 agent，tools/src/index.ts:338）→ submit 存 `job.sessionId`；同仓库重复调用（幂等路径）最新会话拿唤醒权。createJobService 增 onSettled 回调参数（apply 传 wakeCompileSession）：tickIndex done 且 writtenCount>0、fail 且非提交期（提交期失败随工具调用同步返回，不重复唤醒）时触发。
+- 依赖：node_modules 目录联接引 `@deepseek-ai/dsh-llm`（及 dsh-typert-protocol/util-crypto/util-values/brand/timeout/cordis/cosmokit 等宿主包，junction 模式同 dsh-turn-verify-guard；node_modules/ 不入 git）。
+- 修复 0.6.0 回归：submitComposeBatch 仍按 Promise 链式调 `submitBatchFor(...).then(...)`，而 submitBatchFor 自 0.6.0 起是同步函数（返回 undefined）——横切精准拆分分支（模块文章总量超预算）提交合成批时抛 `Cannot read properties of undefined (reading 'then')` 致任务 failed。改 try/catch 同步调用。
+- 测试基建突破：会话沙箱拦 node 子进程 Temp 写入（mkdtemp EPERM）——TEMP/TMP 重定向到仓库内 .tmp-test 后 test-orchestration.mjs 首次完整跑通（编排冒烟全 PASS，test-batch 51/0）；测试残留目录已清理。顺带修正 0.7.0 测试缺陷：wrapper 断言改临时替换 gen.execute（原 fakeGen 未注入）、commitHintText 60s 缓存跨断言污染改独立 fixture 仓库、同秒提交/编译竞态 sleep 隔开；新增 wakeCompileSession 单测（done/failed 文案、source 标记、无 sessionId/冷会话/registry 抛/steer 抛/缺省 agentsRef 全静默）与端到端断言（sess-e2e 提交 → 终态 steer 捕获）。
+- 版本 0.8.0；README 工具表与 updateReminder 说明同步；test-orchestration.mjs 增补 wakeCompileSession 断言（done/failed 文案、无 sessionId 不唤醒、冷会话不唤醒）。
+
 ## 0.7.0 — 2026-10-14
 
 ### 新增 codewiki_update 日常维护工具 + 编译完成提交提醒（用户需求）

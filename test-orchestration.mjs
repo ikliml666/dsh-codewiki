@@ -1,7 +1,8 @@
 // test-orchestration.mjs — dsh-codewiki 服务化编排冒烟：
 // mock 百炼普通入口（chat/completions，按 prompt 特征应答）+ 真实 cw CLI + 真实服务 tick，
 // 验证 codewiki_generate 提交制 + 服务阶段机（plan→articles→crosscut→review→index）、
-// stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、无凭证诚实报错。
+// stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、无凭证诚实报错、
+// 编译终态 steer 实时唤醒发起会话（0.8.0）。
 // 运行：node test-orchestration.mjs
 import fs from 'node:fs'
 import os from 'node:os'
@@ -30,7 +31,7 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false } = {}) {
+function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false, agentGet = null } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
@@ -43,7 +44,7 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, work
         return ref === 'ALIYUN_BAILIAN_API_KEY' && apiKey ? { value: apiKey, source: 'file' } : undefined
       },
     },
-    agents: { list: () => agents },
+    agents: agentGet ? { list: () => agents, get: agentGet } : { list: () => agents },
     tools: { register(def) { registered.set(def.name, def); return () => {} } },
   }
   if (workspaces !== null) {
@@ -225,7 +226,8 @@ console.log('== 系统提示 wiki 维护提醒 ==')
 // ============================ 注册与 cw 工具 ============================
 console.log('== 注册 ==')
 const mainRepo = makeFixtureRepo()
-const main = makeCtx()
+const e2eSteers = [] // 编译终态 steer 唤醒捕获（sess-e2e 专属）
+const main = makeCtx({ agentGet: (id) => (id === 'sess-e2e' ? { steer: (m) => e2eSteers.push({ id, m }) } : undefined) })
 const mainConfig = {}
 apply(main.ctx, mainConfig)
 check(name === 'dsh-codewiki', `插件名 ${name}`)
@@ -244,7 +246,7 @@ console.log('== cw 工具 ==')
 // ============================ codewiki_update 工具 + 提交提醒 ============================
 console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHintText ==')
 {
-  // wrapper 单测：mock generateDef，验证 scope 强制、note 追加、错误前缀改写
+  // wrapper 单测：mock generateDef（临时替换注册的 gen.execute，测完还原），验证 scope 强制、note 追加、错误前缀改写
   const captured = []
   const fakeGen = {
     execute: async (args) => {
@@ -254,15 +256,19 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
     },
   }
   const { commitHintText } = await import('./index.js')
+  const origGenExecute = gen.execute
+  gen.execute = fakeGen.execute
   const upd = main.registered.get('codewiki_update')
   check(!!upd, 'codewiki_update 工具已注册')
-  const r = await upd.execute({ cwd: mainRepo, scope: 'full' })
-  check(captured[0]?.scope === 'auto', 'scope 强制为 auto（调用方传 full 也被覆盖）')
-  check(r.submitted === true && r.jobId === 'job-x', '透传 generate 结果（submitted/jobId）')
-  check((r.notes ?? []).some((n) => n.includes('继续下一项')), '提交后追加「继续下一项」引导 note')
-  await upd.execute({ cwd: 'boom' }).then(() => check(false, '错误应向上抛'), (e) => {
-    check(String(e?.message).includes('codewiki_update'), '错误消息前缀改写为 codewiki_update')
-  })
+  try {
+    const r = await upd.execute({ cwd: mainRepo, scope: 'full' })
+    check(captured[0]?.scope === 'auto', 'scope 强制为 auto（调用方传 full 也被覆盖）')
+    check(r.submitted === true && r.jobId === 'job-x', '透传 generate 结果（submitted/jobId）')
+    check((r.notes ?? []).some((n) => n.includes('继续下一项')), '提交后追加「继续下一项」引导 note')
+    await upd.execute({ cwd: 'boom' }).then(() => check(false, '错误应向上抛'), (e) => {
+      check(String(e?.message).includes('codewiki_update'), '错误消息前缀改写为 codewiki_update')
+    })
+  } finally { gen.execute = origGenExecute }
 
   // commitHintText 单测：git fixture 仓库 + 合成 jobs
   // （cwd 带 CodeWiki.md 才有意义，但本函数不做入口检查——门控在 section 回调）
@@ -292,14 +298,56 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
       const g3 = (...a) => execFileSync('git', a, { cwd: repo2 })
       g3('add', '.')
       g3('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki first')
-      const h3 = commitHintText(repo2, oldJob) // 编译(2020) 早于 wiki 提交(刚刚) → 静默
+      const h3 = commitHintText(repo2, oldJob) // 编译(2020) 早于 wiki 提交(刚刚) → 静默（此空结果会进 60s 缓存）
       check(h3 === '', '编译完成时间早于 .codewiki 最后提交 → 不提醒')
-      const h4 = commitHintText(repo2, [{ id: 'job-h3', cwd: repo2, stage: 'done', writtenCount: 2, finishedAt: new Date().toISOString() }])
-      check(h4.includes('CodeWiki 编译完成·请提交改动'), '编译完成时间晚于 .codewiki 最后提交 → 提醒')
-      const h5 = commitHintText(repo2, [{ id: 'job-h4', cwd: repo2, stage: 'done', writtenCount: 0, finishedAt: new Date().toISOString() }])
-      check(h5 === '', 'writtenCount=0（没有文章写成功）→ 不提醒')
+      // 缓存键是 cwd：repo2 已缓存空文本，h4/h5 换全新仓库绕开缓存，验证「编译晚于提交 → 提醒」
+      const repo3 = makeFixtureRepo()
+      try {
+        fs.mkdirSync(path.join(repo3, '.codewiki'))
+        fs.writeFileSync(path.join(repo3, '.codewiki', 'a.md'), 'x\n')
+        const g4 = (...a) => execFileSync('git', a, { cwd: repo3 })
+        g4('add', '.')
+        g4('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki first')
+        await new Promise((r) => setTimeout(r, 1100)) // jobSec > commitSec 严格大于：隔开同一秒的提交与编译竞态
+        const h4 = commitHintText(repo3, [{ id: 'job-h3', cwd: repo3, stage: 'done', writtenCount: 2, finishedAt: new Date().toISOString() }])
+        check(h4.includes('CodeWiki 编译完成·请提交改动'), '编译完成时间晚于 .codewiki 最后提交 → 提醒')
+      } finally { fs.rmSync(repo3, { recursive: true, force: true }) }
+      // h4 的「提醒」文本已进 repo3 缓存——h5 换新仓库验证 writtenCount=0 → 静默
+      const repo4 = makeFixtureRepo()
+      try {
+        const h5 = commitHintText(repo4, [{ id: 'job-h4', cwd: repo4, stage: 'done', writtenCount: 0, finishedAt: new Date().toISOString() }])
+        check(h5 === '', 'writtenCount=0（没有文章写成功）→ 不提醒')
+      } finally { fs.rmSync(repo4, { recursive: true, force: true }) }
     } finally { fs.rmSync(repo2, { recursive: true, force: true }) }
   } finally { fs.rmSync(hintRepo, { recursive: true, force: true }) }
+}
+
+// ============================ wakeCompileSession：编译终态 steer 唤醒 ============================
+console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_message 同机制） ==')
+{
+  const { wakeCompileSession } = await import('./index.js')
+  const steered = []
+  const fakeAgent = { steer: (m) => steered.push(m) }
+  const fakeAgents = { get: (id) => (id === 'sess-1' ? fakeAgent : undefined) }
+  const doneJob = { id: 'job-w1', cwd: 'C:/r', sessionId: 'sess-1', writtenCount: 4 }
+  wakeCompileSession(doneJob, 'done', fakeAgents)
+  check(steered.length === 1, 'done → steer 一次')
+  const t1 = String(steered[0]?.content?.[0]?.text ?? '')
+  check(t1.includes('CodeWiki 编译完成·请提交改动') && t1.includes('job-w1'), '完成消息含标题与任务 id')
+  check(t1.includes('.codewiki') && t1.includes('docs(wiki)'), '完成消息含提交动作指引')
+  check(steered[0]?.source?.kind === 'plugin' && steered[0]?.source?.plugin === 'codewiki', 'source 标记 plugin/codewiki')
+  wakeCompileSession({ ...doneJob, error: '百炼凭证失效' }, 'failed', fakeAgents)
+  const t2 = String(steered[1]?.content?.[0]?.text ?? '')
+  check(t2.includes('CodeWiki 编译失败') && t2.includes('百炼凭证失效'), 'failed 消息含失败原因')
+  wakeCompileSession({ ...doneJob, sessionId: null }, 'done', fakeAgents)
+  wakeCompileSession(doneJob, 'done', { get: () => undefined }) // 冷会话：注册表查不到
+  check(steered.length === 2, '无 sessionId / 冷会话 → 不唤醒')
+  wakeCompileSession(doneJob, 'done', { get: () => { throw new Error('registry gone') } })
+  check(steered.length === 2, 'registry.get 抛异常 → 静默不抛')
+  wakeCompileSession(doneJob, 'done', { get: () => ({ steer: () => { throw new Error('steer boom') } }) })
+  check(steered.length === 2, 'steer 抛异常 → 静默不抛')
+  wakeCompileSession(doneJob, 'done') // 缺省 agentsRef：测试进程内为 main ctx 的 agents（无 get）→ 静默
+  check(steered.length === 2, '缺省 agents（宿主未注入或无 get）→ 静默')
 }
 
 // ============================ 全量编译（服务阶段机） ============================
@@ -307,7 +355,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
 {
   const mock = makeBatchMock()
   try {
-    const r1 = await gen.execute({ cwd: mainRepo }, { agent: 'test-agent' })
+    const r1 = await gen.execute({ cwd: mainRepo }, { agent: { id: 'sess-e2e' } })
     console.log('  notes:', r1.notes.join(' | '))
     check(r1.submitted === true && typeof r1.jobId === 'string', '提交即返回（jobId 非空）')
     check(r1.stage === 'plan', `初始 stage=plan（实际 ${r1.stage}）`)
@@ -316,6 +364,10 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(mock.batchPrompts().some((p) => p.includes('勘探员')), '规划请求已走百炼普通端点')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式+概念）`)
+    check(e2eSteers.length === 1 && e2eSteers[0].id === 'sess-e2e', '编译终态实时唤醒发起会话（exec.agent.id → steer）')
+    const wakeText = String(e2eSteers[0]?.m?.content?.[0]?.text ?? '')
+    check(wakeText.includes('CodeWiki 编译完成·请提交改动') && wakeText.includes(r1.jobId), '唤醒消息为完成文案且含任务 id')
+    check(e2eSteers[0]?.m?.source?.kind === 'plugin' && e2eSteers[0]?.m?.source?.plugin === 'codewiki', '唤醒消息 source=plugin/codewiki')
     const w = job.wikiPath
     check(fs.existsSync(path.join(w, 'modules', 'core.md')), 'modules/core.md 落盘')
     check(fs.existsSync(path.join(w, 'modules', 'util.md')), 'modules/util.md 落盘')
