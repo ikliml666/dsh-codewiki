@@ -18,6 +18,8 @@ tags: [version-control, logging, probes, error-handling]
 - **行 2**: `vendor/codewiki/target/` - 忽略特定 vendor 下的构建目标目录。
 - **行 3**: `*.log` - 忽略所有扩展名为 `.log` 的文件，涵盖运行时产生的大型日志。
 - **行 5-6**: `bin/*.bak-*` - 注释说明：用于 cw 二进制备份，作为丢失源码时的安全网。
+- **行 8**: `.orch-test-out.txt` - 忽略编排测试输出文件。
+- **行 9**: `.probe3.txt` - 忽略内部探针状态文件。
 
 ### 2. Internal Probe State (`.probe3.txt`)
 - **文件**: `.probe3.txt`
@@ -43,6 +45,8 @@ tags: [version-control, logging, probes, error-handling]
 │ • node_modules/      │       │ • Error: EPERM          │
 │ • *.log              │       │ • Syscall: mkdtempSync  │
 │ • bin/*.bak-*        │       │ • Path: .tmptest/...    │
+│ • .orch-test-out.txt │       │                         │
+│ • .probe3.txt        │       │                         │
 └──────────────────────┘       └─────────────────────────┘
            ▲                               ▲
            │                               │
@@ -57,7 +61,7 @@ tags: [version-control, logging, probes, error-handling]
 
 ## Data Flow
 1. **构建与运行阶段**: 项目生成 `node_modules`、`vendor/codewiki/target/` 以及各类 `.log` 文件。
-2. **版本控制过滤**: `.gitignore` 拦截上述文件，确保它们不被提交。同时，`bin/*.bak-*` 的二进制备份也被忽略，尽管其被标记为“安全网”，但可能因包含二进制大文件或避免版本冲突而被显式排除。
+2. **版本控制过滤**: `.gitignore` 拦截上述文件，确保它们不被提交。同时，`bin/*.bak-*` 的二进制备份也被忽略，尽管其被标记为“安全网”，但可能因包含二进制大文件或避免版本冲突而被显式排除。此外，运行时产生的 `.orch-test-out.txt` 和 `.probe3.txt` 也被纳入忽略列表，防止非源代码文件入库。
 3. **探针记录**: 运行时探针状态写入 `.probe3.txt`，内容为静态字符串 `probe`。
 4. **测试执行与异常捕获**: 编排测试脚本 `test-orchestration.mjs` 尝试在 `.tmptest` 目录下创建临时文件夹。由于权限不足（EPERM），操作失败，错误详情被输出并保存至 `.orch-test-out.txt`。
 

@@ -76,19 +76,19 @@ tags: [wiki-generation, job-service, bailian-endpoint, pipeline, observability]
 
 | 功能组件 | 实现位置 | 说明 |
 | :--- | :--- | :--- |
-| **Job Service 工厂** | `index.js:899-1580` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
-| **Tick 主循环** | `index.js:1463-1580` | `tick()` 方法，驱动阶段机状态转换。 |
-| **阶段处理器** | `index.js:1156-1461` | `tickPlan`(1156), `tickArticles`(1187), `tickCrosscut`(1272), `tickCompose`(1338), `tickReview`(1387), `tickIndex`(1430)。 |
-| **阶段执行器** | `index.js:1095-1134` | `startBatchChatRun`，后台并发池打百炼普通入口，结果进 `batchResults` 等收割。 |
-| **阶段提交** | `index.js:1136-1154` | `submitBatchFor`（阶段提交入口）。 |
-| **阶段结算** | `index.js:1025-1088` | `settleJob`，收割 batchResults；宿主重启按 batchPrompt 快照重跑。 |
-| **并发池执行** | `index.js:287-309` | `runRealtimeTasks`，唯一执行器，全部阶段请求走百炼普通入口。 |
-| **凭证解析** | `index.js:404-424` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1933-2107` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
+| **Job Service 工厂** | `index.js:920-1485` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
+| **Tick 主循环** | `index.js:1487-1596` | `tick()` 方法，驱动阶段机状态转换。 |
+| **阶段处理器** | `index.js:1179-1485` | `tickPlan`(1179), `tickArticles`(1210), `tickCrosscut`(1295), `tickCompose`(1361), `tickReview`(1410), `tickIndex`(1453)。 |
+| **阶段执行器** | `index.js:1118-1157` | `startBatchChatRun`，后台并发池打百炼普通入口，结果进 `batchResults` 等收割。 |
+| **阶段提交** | `index.js:1159-1175` | `submitBatchFor`（阶段提交入口）。 |
+| **阶段结算** | `index.js:1048-1116` | `settleJob`，收割 batchResults；宿主重启按 batchPrompt 快照重跑。 |
+| **并发池执行** | `index.js:288-319` | `runRealtimeTasks`，唯一执行器，全部阶段请求走百炼普通入口。 |
+| **凭证解析** | `index.js:405-425` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
+| **面板后端 API** | `index.js:1960-2132` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
 | **前端面板组件** | `client.js:882-1098` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
 | **API 封装** | `client.js:331-348` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
 | **阶段权重定义** | `client.js:684` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
-| **只读查进度工具** | `index.js:1814-1908` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
+| **只读查进度工具** | `index.js:1841-1958` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
 
-行号基线：e43040c（0.7.0，新增 codewiki_update 工具与编译完成提交提醒后；单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。
+行号基线：2820e85（0.8.0，新增编译终态 steer 唤醒后；单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。

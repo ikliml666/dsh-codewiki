@@ -14,12 +14,12 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
 
 ### 常量与配置
 
-- `Config.updateReminder` (`index.js:44`): 布尔值配置项（默认 `true`），控制是否在会话系统提示中注入 CodeWiki 维护提醒。
-- `Config.articleLanguage` (`index.js:43`): 字符串配置项（默认 `'中文'`），决定生成的入口文件语言。
+- `Config.updateReminder` (`index.js:45`): 布尔值配置项（默认 `true`），控制是否在会话系统提示中注入 CodeWiki 维护提醒。
+- `Config.articleLanguage` (`index.js:44`): 字符串配置项（默认 `'中文'`），决定生成的入口文件语言。
 
 ### 函数
 
-- `ensureWikiEntry(cwd, language)` (`index.js:185`): 
+- `ensureWikiEntry(cwd, language)` (`index.js:186`): 
   - **用途**: 检查并生成仓库根 `CodeWiki.md` 入口文件。
   - **逻辑**: 
     1. 若 `cwd` 为空或文件已存在，返回 `false`（幂等，不覆盖人工入口）。
@@ -27,32 +27,28 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
     3. 写入包含 `.codewiki` 绝对路径指引、`codewiki_generate` 收尾要求及“人工改写不覆盖”声明的 Markdown 内容。
   - **签名**: `export function ensureWikiEntry(cwd, language = '中文')`
 
-- `reminderText(cwd)` (`index.js:2149`): 
-  - **用途**: 动态生成提醒文案。
-  - **逻辑**: 仅当 `updateReminder` 为真且 `CodeWiki.md` 存在时返回多行提醒文本；否则返回空字符串。
+- `commitHintText(cwd, jobs)` (`index.js:2149`, export 供测试): 同一 section 兼职的编译完成提交提醒——最近一次成功编译（stage=done 且 writtenCount>0）的 `finishedAt` 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交（`git log -1 --format=%ct` 时间戳派生，零持久状态）时注入「【CodeWiki 编译完成·请提交改动】」；提交后时间戳反超自动静默，60s TTL 缓存。
 
-- `commitHintText(cwd, jobs)` (`index.js:2122`, export 供测试): 同一 section 兼职的编译完成提交提醒——最近一次成功编译（stage=done 且 writtenCount>0）的 `finishedAt` 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交（`git log -1 --format=%ct` 时间戳派生，零持久状态）时注入「【CodeWiki 编译完成·请提交改动】」；提交后时间戳反超自动静默，60s TTL 缓存。
-
-- `installUpdateReminder(ctx, config)` (`index.js:2160`): 
+- `installUpdateReminder(ctx, config)` (`index.js:2187`): 
   - **用途**: 将提醒注入到 Agent 系统提示中。
   - **逻辑**: 
     1. 通过 `ctx.on('agent/created')` 监听新会话。
     2. 注入 `systemPrompt` section，order 设为 2901（紧接 TOOL_REPORT 之后）。
     3. `text` 回调实时求值：检查 `config.updateReminder` 开关及 `fs.existsSync(path.join(cwd, 'CodeWiki.md'))`。
 
-- `cwToolDefinition.execute` (`index.js:671`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
+- `cwToolDefinition.execute` (`index.js:672`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
 
-- `generateToolDefinition.execute` (`index.js:1632`): 编译工具的执行逻辑，负责判态、提交任务。
+- `generateToolDefinition.execute` (`index.js:1657`): 编译工具的执行逻辑，负责判态、提交任务。
 
-- `parseStatus(stdout)` (`index.js:152`): 解析 `cw status` 输出，提取 `state`, `changedFiles`, `staleArticles`。
+- `parseStatus(stdout)` (`index.js:153`): 解析 `cw status` 输出，提取 `state`, `changedFiles`, `staleArticles`。
 
-- `normalizeArticlePath(p)` (`index.js:138`): 将 Windows 反斜杠路径规范化为正斜杠。
+- `normalizeArticlePath(p)` (`index.js:139`): 将 Windows 反斜杠路径规范化为正斜杠。
 
-- `normalizeIndexLinks(cwd)` (`index.js:142`): 修正 `_index.md` 中链接头的反斜杠。
+- `normalizeIndexLinks(cwd)` (`index.js:143`): 修正 `_index.md` 中链接头的反斜杠。
 
-- `liveConfig(config)` (`index.js:55`): 从 Zod 对象中提取并标准化配置值。
+- `liveConfig(config)` (`index.js:56`): 从 Zod 对象中提取并标准化配置值。
 
-- `val(x)` (`index.js:51`): 辅助函数，处理 Zod 代理对象的 `.get()` 方法。
+- `val(x)` (`index.js:52`): 辅助函数，处理 Zod 代理对象的 `.get()` 方法。
 
 ### 测试
 
