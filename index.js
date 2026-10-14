@@ -1734,6 +1734,67 @@ function generateToolDefinition(cfg, svc) {
 }
 
 // ---------------------------------------------------------------------------
+// 工具 2b：codewiki_update（日常维护入口：提交更新请求即返回，完成后提醒提交改动）
+// 与 codewiki_generate 的差别只在语义与引导文案：固定 scope=auto，返回值明确告诉
+// 模型「继续下一项、不要等待」；编译完成后由系统提示的提交提醒（commitHintText）
+// 把「该提交 .codewiki 改动了」送回主模型——插件不代跑 git，提交动作留给模型。
+// ---------------------------------------------------------------------------
+
+function updateToolDefinition(cfg, generateDef) {
+  return {
+    name: 'codewiki_update',
+    description: [
+      '提交 CodeWiki 更新请求（日常维护入口，scope=auto 语义）：无 wiki 走全量编译，有变更走逐篇更新，已是最新则直接报告。调用即提交、立即返回——请继续下一项工作，不要等待或反复轮询（进度可用 codewiki_progress 查询）。',
+      '更新完成后，本会话系统提示会出现「CodeWiki 编译完成·请提交改动」提醒：届时检查并提交 .codewiki/ 与 CodeWiki.md 的改动（插件不代跑 git）。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: '仓库绝对路径（git 仓库；Windows 支持 C:/... 与 Git-Bash /c/... 形式）' },
+        language: { type: 'string', description: '文章语言，默认取插件设置（中文）' },
+      },
+      required: ['cwd'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          cwd: { type: 'string' },
+          scope: { type: 'string' },
+          wikiPath: { type: 'string' },
+          state: { type: 'string' },
+          jobId: { type: 'string' },
+          stage: { type: 'string' },
+          submitted: { type: 'boolean' },
+          notes: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['cwd', 'scope', 'wikiPath', 'state', 'submitted', 'notes'],
+      },
+      render(args, value) {
+        const lines = [`codewiki_update（${value.cwd}）`]
+        if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
+        if (value.submitted) lines.push(`更新已开始（任务 ${value.jobId}，stage ${value.stage}）——已提交后台编译，请继续下一项工作，不要等待；完成后系统提示会出现「请提交改动」提醒`)
+        else lines.push(`无需更新（state ${value.state}）——wiki 已是最新，继续手头工作即可`)
+        for (const n of value.notes) lines.push(`· ${n}`)
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    execute: async (args, exec) => {
+      try {
+        const result = await generateDef.execute({ ...args, scope: 'auto' }, exec)
+        if (result.submitted === true) {
+          result.notes.push('更新已在后台进行：继续下一项工作，不要等待；更新完成后系统提示会出现「CodeWiki 编译完成·请提交改动」提醒，按提醒提交 .codewiki/ 与 CodeWiki.md')
+        }
+        return result
+      } catch (err) {
+        throw new Error(String(err?.message ?? err).replaceAll('codewiki_generate', 'codewiki_update'))
+      }
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 工具 3：codewiki_progress（只读查进度——提交后轮询，不阻塞、不等待）
 // 提交制下模型最常见的误用是「提交后空等/反复问编译好没有」；本工具把 jobSummary
 // （与侧边栏面板同源）直接暴露成只读查询，一行看出 stage/百分比/篇数/失败原因。
@@ -2053,6 +2114,38 @@ function installWebServer(ctx, service, extra = {}) {
 // 判定不看 .codewiki/ 目录——半途建出的空骨架（只有空子目录）会骗过目录存在性检查，
 // 提醒却指向一个读不到的入口。无 CodeWiki.md = 无可维护的 wiki。text 回调每次组装时
 // 求值——cwd、入口文件存在性、开关全部实时读取，关闭开关/项目切换/删掉 wiki 都无需重启。
+// 编译完成后的提交提醒：最近一次成功编译（stage=done 且有文章写成功）的完成时间晚于
+// .codewiki/（与 CodeWiki.md）最后一次 git 提交时间 → 该次编译产物尚未入库，系统提示
+// 注入「请提交改动」。零状态派生（jobs 文件 + git log 时间戳），提交后时间戳反超自动静默；
+// 非 git 仓库/读 jobs 失败一律不提醒。60s TTL 缓存：text 回调每次组装系统提示都求值。
+const commitHintCache = new Map() // cwd -> { at, text }
+export function commitHintText(cwd, jobs = loadJobs()) {
+  const key = path.normalize(String(cwd ?? ''))
+  const hit = commitHintCache.get(key)
+  if (hit && Date.now() - hit.at < 60000) return hit.text
+  let text = ''
+  try {
+    const latest = jobs
+      .filter((j) => j.stage === 'done' && (j.writtenCount ?? 0) > 0 && j.finishedAt && samePath(j.cwd, cwd))
+      .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0]
+    if (latest) {
+      const g = spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', '.codewiki', 'CodeWiki.md'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      const commitSec = Number.parseInt(String(g.stdout ?? '').trim(), 10)
+      const jobSec = Math.floor(Date.parse(latest.finishedAt) / 1000)
+      if (Number.isFinite(jobSec) && (!Number.isFinite(commitSec) || jobSec > commitSec)) {
+        const mins = Math.max(1, Math.round((Date.now() - Date.parse(latest.finishedAt)) / 60000))
+        text = [
+          `【CodeWiki 编译完成·请提交改动】本仓库 wiki 编译已完成（${mins} 分钟前，任务 ${latest.id}，写入 ${latest.writtenCount} 篇文章），编译产物尚未提交 git：`,
+          '- 检查 .codewiki/ 与 CodeWiki.md 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不要 git add -A）；与当前任务代码改动同轮收尾时可一起提交；',
+          '- 若这些产物已入库或判断无需提交，忽略本提醒（提交后提醒自动消失）。',
+        ].join('\n')
+      }
+    }
+  } catch { /* 非 git 仓库 / jobs 读取失败 → 不提醒 */ }
+  commitHintCache.set(key, { at: Date.now(), text })
+  return text
+}
+
 function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
@@ -2080,7 +2173,8 @@ function installUpdateReminder(ctx, config) {
           if (val(config?.updateReminder) === false) return ''
           const cwd = String(agent.session?.header?.cwd ?? '')
           if (!cwd || !fs.existsSync(path.join(cwd, 'CodeWiki.md'))) return ''
-          return reminderText(cwd)
+          const hint = commitHintText(cwd)
+          return hint ? `${reminderText(cwd)}\n\n${hint}` : reminderText(cwd)
         },
       })
     })
@@ -2105,6 +2199,7 @@ export function apply(ctx, config) {
   // 写成 () => service.stop() 会在启动时当场停掉服务（返回 undefined 也无 disposer）
   if (typeof ctx.effect === 'function') ctx.effect(() => () => service.stop())
   const generateDef = generateToolDefinition(config, service)
+  const updateDef = updateToolDefinition(config, generateDef)
   // 自动更新调度器：60s 心跳，到点对历史工作区逐个 scope=auto 判态提交。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
   const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null }
@@ -2138,7 +2233,7 @@ export function apply(ctx, config) {
   ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    for (const definition of [cwToolDefinition(config), generateDef, progressToolDefinition(config, service)]) {
+    for (const definition of [cwToolDefinition(config), generateDef, updateDef, progressToolDefinition(config, service)]) {
       const disposer = tools.register(definition)
       if (typeof disposer === 'function') {
         if (typeof ctx.effect === 'function') ctx.effect(() => disposer)

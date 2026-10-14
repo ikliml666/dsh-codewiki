@@ -241,6 +241,67 @@ console.log('== cw 工具 ==')
   check(st.exitCode === 0 && /No wiki found/i.test(st.stdout), 'cw status 判定 missing 态')
 }
 
+// ============================ codewiki_update 工具 + 提交提醒 ============================
+console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHintText ==')
+{
+  // wrapper 单测：mock generateDef，验证 scope 强制、note 追加、错误前缀改写
+  const captured = []
+  const fakeGen = {
+    execute: async (args) => {
+      captured.push(args)
+      if (args.cwd === 'boom') throw new Error('codewiki_generate：cwd 不存在')
+      return { cwd: args.cwd, scope: args.scope, wikiPath: 'w', state: 'stale', jobId: 'job-x', stage: 'plan', submitted: true, notes: [] }
+    },
+  }
+  const { commitHintText } = await import('./index.js')
+  const upd = main.registered.get('codewiki_update')
+  check(!!upd, 'codewiki_update 工具已注册')
+  const r = await upd.execute({ cwd: mainRepo, scope: 'full' })
+  check(captured[0]?.scope === 'auto', 'scope 强制为 auto（调用方传 full 也被覆盖）')
+  check(r.submitted === true && r.jobId === 'job-x', '透传 generate 结果（submitted/jobId）')
+  check((r.notes ?? []).some((n) => n.includes('继续下一项')), '提交后追加「继续下一项」引导 note')
+  await upd.execute({ cwd: 'boom' }).then(() => check(false, '错误应向上抛'), (e) => {
+    check(String(e?.message).includes('codewiki_update'), '错误消息前缀改写为 codewiki_update')
+  })
+
+  // commitHintText 单测：git fixture 仓库 + 合成 jobs
+  // （cwd 带 CodeWiki.md 才有意义，但本函数不做入口检查——门控在 section 回调）
+  const hintRepo = makeFixtureRepo()
+  try {
+    const fin = new Date(Date.now() - 60_000).toISOString()
+    const jobs = [{ id: 'job-h1', cwd: hintRepo, stage: 'done', writtenCount: 3, finishedAt: fin }]
+    // fixture 仓库没有 .codewiki/：git log 空 → commitSec=NaN → 提醒必现
+    const h1 = commitHintText(hintRepo, jobs)
+    check(h1.includes('CodeWiki 编译完成·请提交改动') && h1.includes('job-h1'), '无 .codewiki 提交史 → 注入提交提醒')
+    check(h1.includes('git add') || h1.includes('.codewiki'), '提醒含提交动作指引')
+    // 编译时间早于最近一次 .codewiki 提交 → 静默（构造：先提交一次带 .codewiki 的 commit）
+    fs.mkdirSync(path.join(hintRepo, '.codewiki'))
+    fs.writeFileSync(path.join(hintRepo, '.codewiki', 'a.md'), 'x\n')
+    const git2 = (...a) => execFileSync('git', a, { cwd: hintRepo })
+    git2('add', '.')
+    git2('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki')
+    const h2 = commitHintText(path.join(hintRepo, 'subdir-nope'), jobs) // 不同 cwd：绕开 60s 缓存
+    check(h2 === '', '不同仓库无匹配 job → 空')
+    const oldJob = [{ id: 'job-h2', cwd: hintRepo, stage: 'done', writtenCount: 1, finishedAt: '2020-01-01T00:00:00.000Z' }]
+    // 缓存键是 cwd：hintRepo 刚才已缓存「提醒」文本——用大小写/尾斜杠变体绕开不可靠，
+    // 直接换一个全新 fixture 仓库验证「已提交 → 静默」
+    const repo2 = makeFixtureRepo()
+    try {
+      fs.mkdirSync(path.join(repo2, '.codewiki'))
+      fs.writeFileSync(path.join(repo2, '.codewiki', 'a.md'), 'x\n')
+      const g3 = (...a) => execFileSync('git', a, { cwd: repo2 })
+      g3('add', '.')
+      g3('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki first')
+      const h3 = commitHintText(repo2, oldJob) // 编译(2020) 早于 wiki 提交(刚刚) → 静默
+      check(h3 === '', '编译完成时间早于 .codewiki 最后提交 → 不提醒')
+      const h4 = commitHintText(repo2, [{ id: 'job-h3', cwd: repo2, stage: 'done', writtenCount: 2, finishedAt: new Date().toISOString() }])
+      check(h4.includes('CodeWiki 编译完成·请提交改动'), '编译完成时间晚于 .codewiki 最后提交 → 提醒')
+      const h5 = commitHintText(repo2, [{ id: 'job-h4', cwd: repo2, stage: 'done', writtenCount: 0, finishedAt: new Date().toISOString() }])
+      check(h5 === '', 'writtenCount=0（没有文章写成功）→ 不提醒')
+    } finally { fs.rmSync(repo2, { recursive: true, force: true }) }
+  } finally { fs.rmSync(hintRepo, { recursive: true, force: true }) }
+}
+
 // ============================ 全量编译（服务阶段机） ============================
 console.log('== codewiki_generate 全量编译：提交即返回，服务推进阶段机 ==')
 {
