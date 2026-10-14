@@ -5,7 +5,6 @@ source_files:
   - index.js
   - client.js
   - cordis.patch.yml
-  - package.json
 tags: [configuration, settings, plugin-system, configForms, patch]
 ---
 
@@ -13,72 +12,143 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 
 `configuration-management` 是 dsh-codewiki 插件中负责定义、持久化、注入及动态同步配置数据的核心概念。它确立了从静态元数据到运行时动态设置的完整生命周期，确保插件行为（如模型选择、并发限制、排除路径）与宿主环境（DeepSeek Harness）及用户偏好保持一致。该概念贯穿了插件的挂载阶段、初始化阶段以及运行时的热更新阶段，实现了“声明式配置”与“命令式执行”的解耦。
 
-## Involved Modules
+## Key Components
 
-1.  **documentation-and-config**:
-    *   负责配置的**静态定义**与**元数据**。
-    *   通过 `package.json` 中的 `dsh.bundle.patch` 字段指定补丁文件。
-    *   通过 `cordis.patch.yml` 定义插件的基础挂载结构及初始空配置对象 `{}`。
-    *   通过 `README.md` 向用户文档化所有 volatile（易变）设置项及其含义。
+### `index.js` (Core Logic & Schema)
 
-2.  **core-logic**:
-    *   负责配置的**解析**、**校验**与**运行时应用**。
-    *   使用 `@deepseek-ai/schemastery` 在 `index.js` 中定义严格的配置 Schema。
-    *   提供 `liveConfig()` 函数，在每次工具执行时解包并规范化配置。
-    *   处理配置中的敏感信息（如 `batchApiKey`）解析逻辑。
+**常量与全局状态**
+*   `Config` (L37-L50): 使用 `@deepseek-ai/schemastery` 定义的 Zod-like 配置对象模式。定义了所有可配置字段的类型、默认值 (`default`)、易变性 (`volatile`) 及描述。
+    *   `enabled`: boolean, default true.
+    *   `binaryPath`: string, default ''.
+    *   `batchModel`: string, default 'qwen3.7-flash'.
+    *   `batchApiKey`: string, default ''.
+    *   `batchThinkingBudget`: number, default 0.
+    *   `maxConcurrency`: number, default 8.
+    *   `articleLanguage`: string, default '中文'.
+    *   `updateReminder`: boolean, default true.
+    *   `excludePaths`: string, default ''.
+    *   `autoUpdate`: boolean, default false.
+    *   `autoUpdateMin`: number, default 30.
+    *   `workspaceOnly`: boolean, default true.
+*   `CONCURRENCY_HARD_CAP` (L22): 硬编码并发上限 8。
+*   `hostCtxRef` (L404): 存储宿主上下文引用，用于凭证解析。
+*   `agentsRef` (L911): 存储代理实例引用，用于编译完成后的唤醒。
 
-3.  **client-interface**:
-    *   负责配置的**用户交互**、**视图渲染**与**双向同步**。
-    *   通过 `CodewikiCard` 组件提供可视化表单，允许用户在 UI 层修改配置。
-    *   利用宿主的 `configForms` 服务实现配置的读写与热加载（无需重启宿主）。
-    *   维护前端状态（`snapshot`, `draft`）以支持撤销/重做和即时反馈。
+**核心函数**
+*   `liveConfig(config)` (L56-L74): 运行时配置解析器。接收原始配置对象，应用默认值，进行类型转换和安全边界检查（如 `maxConcurrency` 限制在 1-8 之间，`batchThinkingBudget` 限制在 0-32768 之间）。返回规范化后的配置对象。
+*   `resolveBatchApiKey(hostCtx, cfg)` (L411-L431): 异步凭证解析链。优先级：显式 `batchApiKey` > 宿主凭据库 (`credentials` 服务) > 失败返回 null。支持超时保护 (3s)。
+*   `installUpdateReminder(ctx, config)` (L2195-L2227): 安装会话系统提示中的 wiki 维护提醒。通过 `ctx.on('agent/created')` 和 `ctx.inject(['agents'])` 注入 section。仅在仓库根存在 `CodeWiki.md` 且 `updateReminder` 为 true 时生效。
+*   `commitHintText(cwd, jobs)` (L2157-L2182): 生成编译完成后的提交提醒文本。比较最近一次成功编译时间与 `.codewiki/` 的最后 git 提交时间，若编译后未提交则生成提醒。包含 60s TTL 缓存。
+*   `apply(ctx, config)` (L2229-L2282): 插件入口。初始化 Job Service，注册工具 (`cw`, `codewiki_generate`, `codewiki_update`, `codewiki_progress`)，启动自动更新调度器 (`autoScan`)，安装 Web Server 端点，安装更新提醒。
+*   `createJobService(config, onSettled)` (L926-L1614): 创建后台编译任务编排服务。管理 Jobs 文件的读写、锁机制、阶段推进逻辑。
+*   `scanRepoFiles(cwd)` (L814-L837): 扫描仓库源码文件，排除黑名单目录和二进制后缀，限制文件大小和总数。
+*   `autoScan()` (L2243-L2265): 自动更新调度器的主循环。定时扫描已编译工作区，检测到变更自动提交增量编译。
+*   `excludedItem(cwd, list)` / `isExcluded(cwd, list)` (L224-L236): 判断目录是否在排除清单中。
 
-## Flow
+### `client.js` (Client Interface)
 
-配置数据的流动遵循“定义 -> 注入 -> 解析 -> 交互 -> 回写”的闭环：
+**组件**
+*   `CodewikiCard` (L390): React 设置卡片组件。
+    *   **Props**: `view` ('summary' | 'page'), `t` (翻译函数)。
+    *   **State**: `snapshot` (来自 `configForms` 的只读快照), `draft` (本地编辑草稿), `notice` (操作反馈), `error` (错误信息)。
+    *   **Methods**:
+        *   `setPath(key, value)`: 更新 `draft` 状态。
+        *   `save()`: 验证输入（如并发数范围），调用 `form.mutate(ops, snapshot.revision)` 提交更改。
+        *   `discard()`: 重置 `draft` 为当前 `snapshot.value`。
+*   `ReposTab` (L737): 侧边栏面板中的“总览”标签页。显示各仓库的 Wiki 状态、排除情况、自动更新调度信息。支持直接在此处排除/取消排除仓库（修改 `excludePaths`）。
+*   `CodewikiPanel` (L882-L1098): 侧边栏主面板。包含“任务”、“总览”、“设置”三个标签页。轮询 `/api/codewiki/jobs` 获取实时进度。
+*   `PanelIcon` (L1084): 侧边栏图标 SVG。
 
-1.  **静态定义与挂载 (Static Definition & Mounting)**:
-    *   **源**: `package.json` 声明 `dsh.bundle.patch: "cordis.patch.yml"`。
-    *   **动作**: Cordis 插件系统读取 `cordis.patch.yml`，将插件注册为 `codewiki` ID，并传入初始 `config: {}`。
-    *   **位置**: 插件根目录 (`package.json`, `cordis.patch.yml`)。
+**辅助函数**
+*   `zh()` / `en()` (L27 / L136): 中英文词典定义。
+*   `apiGet(p)` / `apiPost(p, data)` (L331 / L337): 封装 Fetch 请求，处理 JSON 响应和错误。
+*   `stageLabel(stage)` / `kindLabelOf(kind)`: 将内部阶段/类型代码映射为本地化字符串。
 
-2.  **Schema 校验与默认值 (Schema Validation & Defaults)**:
-    *   **源**: `core-logic` 模块。
-    *   **动作**: 当插件加载或配置变更时，`core-logic` 依据 Schema 对传入的配置进行校验。若缺少字段，则应用 `liveConfig()` 中定义的默认值（如 `maxConcurrency: 8`, `enabled: true`）。
-    *   **位置**: `core-logic` 模块源码 (`index.js`)。
+### `cordis.patch.yml` (Mounting Configuration)
 
-3.  **运行时解析 (Runtime Resolution)**:
-    *   **源**: `core-logic` 的 `execute` 方法。
-    *   **动作**: 在 `codewiki_generate` 或 `cw` 工具执行前，调用 `liveConfig(ctx)`。此过程不仅应用本地默认值，还解析凭证链（显式 Key > 宿主凭据库 > 子代理回退）。
-    *   **位置**: `core-logic` 模块源码 (`resolveBatchApiKey`, `liveConfig`)。
+*   **内容**: 定义插件 ID `codewiki`，指定源文件路径 `file:///.../index.js`，初始配置 `config: {}`。
+*   **作用**: 供 Bundle 形式安装使用，告知 Cordis 插件系统如何加载本插件。
 
-4.  **UI 交互与热更新 (UI Interaction & Hot Reload)**:
-    *   **源**: `client-interface` 模块。
-    *   **动作**:
-        *   **读取**: `CodewikiCard` 订阅 `form.getSnapshot()`，从宿主配置服务获取当前配置快照。
-        *   **编辑**: 用户在 React 表单中修改 `draft` 状态。
-        *   **写入**: 点击保存时，调用 `form.mutate()` 发送 Patch 操作至宿主。
-        *   **同步**: 宿主更新全局配置，其他实例（包括后台 Worker）下次读取时自动生效。
-    *   **位置**: `client-interface` 模块源码 (`CodewikiCard`, `form.mutate`)。
+### `package.json` (Metadata)
 
-5.  **配置驱动的行为控制 (Configuration-Driven Behavior)**:
-    *   **源**: `core-logic` 的各个 Tick 处理器。
-    *   **动作**: 配置项直接决定流水线行为。例如：
-        *   `excludePaths`: 在 `scanRepoFiles` 中过滤文件。
-        *   `batchModel` / `batchThinkingBudget`: 决定编译模型与思考预算（全部模型环节共用，走百炼普通入口）。
-        *   `autoUpdate`: 控制 `autoScan` 调度器是否启动。
-    *   **位置**: `core-logic` 模块源码 (`tickPlan`, `scanRepoFiles`, `autoScan`)。
+*   **字段**:
+    *   `name`: `@local/dsh-codewiki`
+    *   `dsh.bundle.patch`: `cordis.patch.yml` (指向补丁文件)。
+    *   `main`: `index.js`
+    *   `exports`: 导出 `.` 和 `./client`。
 
-## Implementation Map
+## Architecture
 
-| 功能点 | 模块 | 文件 | 行号/位置 | 描述 |
-| :--- | :--- | :--- | :--- | :--- |
-| **配置 Schema 定义** | core-logic | `index.js` | L36-L48 | 使用 schemastery 定义所有可配置字段的类型、默认值和约束。 |
-| **配置解析与规范化** | core-logic | `index.js` | L51-L77 | `val()`/`liveConfig()` 函数，合并默认值与安全边界（如硬顶并发数）。 |
-| **凭证解析链** | core-logic | `index.js` | L404-L424 | `resolveBatchApiKey()`，处理 API Key 的优先级逻辑。 |
-| **挂载补丁定义** | documentation-and-config | `cordis.patch.yml` | Root | 定义插件 ID 和初始空配置 `{}`。 |
-| **插件入口依赖** | documentation-and-config | `package.json` | Root | 声明 `dsh.bundle.patch` 指向补丁文件。 |
-| **配置表单组件** | client-interface | `client.js` | L390-L520 | `CodewikiCard` 组件：`snapshot`/`draft` 状态、`form.mutate` 保存（L456）、`discard`。 |
-| **配置读写接口** | client-interface | `client.js` | L355-L371 | `ctx.configForms.get(NS)` 取表单、`whileServed` 热生效挂载；写回走 `form.mutate(ops, revision)`。 |
-| **排除路径过滤** | core-logic | `index.js` | L807-L830 | `scanRepoFiles()` 中使用 `excludePaths` 配置过滤源码。 |
-| **自动更新开关** | core-logic | `index.js` | L2112-L2140 | `autoScan()` 根据 `autoUpdate` 配置决定是否启动调度器。 |
+```text
+┌──────────────────────┐       ┌──────────────────────┐
+│   Host Environment   │       │   DeepSeek Harness   │
+│   (Cordis/Config)    │◄─────►│   Plugin System      │
+└──────────┬───────────┘       └──────────┬───────────┘
+           │                              │
+           │ 1. Mount via                 │
+           │    cordis.patch.yml          │
+           ▼                              ▼
+┌──────────────────────┐       ┌──────────────────────┐
+│   Static Config      │       │   Core Logic         │
+│   (patch.yml)        │──────►│   (index.js)         │
+└──────────────────────┘       │  - liveConfig()      │
+                               │  - resolveBatchApi() │
+                               └──────────┬───────────┘
+                                          │ 2. Runtime Resolution
+                                          ▼
+┌──────────────────────┐       ┌──────────────────────┐
+│   Client UI          │◄─────►│   Job Service        │
+│   (client.js)        │       │   (index.js)         │
+│  - CodewikiCard      │       │  - createJobService  │
+│  - ReposTab          │       │  - autoScan          │
+└──────────────────────┘       └──────────────────────┘
+```
+
+1.  **Static Config**: `cordis.patch.yml` 和 `package.json` 提供初始挂载信息和空配置。
+2.  **Core Logic**: `index.js` 中的 `apply` 函数被 Cordis 调用，传入初始 `config: {}`。`liveConfig` 在此阶段应用默认值。
+3.  **Runtime Resolution**: 工具执行时，`liveConfig` 再次被调用以获取最新配置。`resolveBatchApiKey` 动态获取凭证。
+4.  **Client UI**: `client.js` 通过 `ctx.configForms.get(NS)` 订阅配置变化。`CodewikiCard` 允许用户修改配置，并通过 `form.mutate` 写回宿主。
+5.  **Job Service**: 配置项（如 `excludePaths`, `autoUpdate`）直接影响 `scanRepoFiles` 和 `autoScan` 的行为。
+
+## Data Flow
+
+1.  **Initialization**:
+    *   Cordis 读取 `cordis.patch.yml`，加载 `index.js`。
+    *   `apply(ctx, {})` 被调用。
+    *   `createJobService({}, ...)` 初始化，此时配置均为默认值。
+    *   `installUpdateReminder` 注册系统提示 Section。
+    *   `installWebServer` 注册 API 端点。
+
+2.  **User Modification**:
+    *   用户在侧边栏或插件页打开 `CodewikiCard`。
+    *   `CodewikiCard` 订阅 `form.getSnapshot()`，获取当前配置。
+    *   用户修改 `draft` 状态（例如更改 `batchModel`）。
+    *   用户点击 "Save"。
+    *   `save()` 调用 `form.mutate([{ op: 'set', path: ['batchModel'], value: 'new-model' }], revision)`。
+    *   宿主更新全局配置存储。
+    *   `CodewikiCard` 收到新的 `snapshot`，更新 `draft`。
+    *   后台 `Job Service` 在下一次 `liveConfig` 调用时获取新值。
+
+3.  **Runtime Usage**:
+    *   用户触发 `codewiki_generate`。
+    *   `execute` 方法调用 `liveConfig(cfg)` 获取最新配置。
+    *   `resolveBatchApiKey` 解析 API Key。
+    *   `submit` 创建 Job，开始流水线。
+    *   流水线各阶段（Plan, Articles, Crosscut, Review, Index）根据配置（如 `maxConcurrency`, `batchModel`）执行。
+
+4.  **Auto Update**:
+    *   `autoScan` 定时器触发。
+    *   遍历已知仓库，调用 `generateDef.execute({ scope: 'auto' })`。
+    *   若仓库有变更，提交增量编译任务。
+
+## Connections
+
+*   [[job-service]]: Configuration directly controls the behavior of the Job Service (e.g., concurrency, model selection).
+*   [[credential-resolution]]: `resolveBatchApiKey` is a key part of configuration management for sensitive data.
+*   [[ui-settings]]: `CodewikiCard` is the primary UI component for configuration management.
+
+## Known Issues
+
+*   **Credential Source Persistence**: The `credentialSource` is stored in the Job object but not persisted to disk in a way that survives host restarts if the job is cancelled/fails early. However, the `apiKey` itself is also not persisted, so it must be re-resolved. This is by design for security, but means re-resolution happens on every tick/job start.
+*   **Config Race Conditions**: If multiple instances of the plugin are running (e.g., during testing or rapid reloads), they might read stale configs. The `configForms` mechanism aims to handle this via revisions, but race conditions in `liveConfig` calls between instances could theoretically lead to inconsistent states if not careful. The `dirtyIds` and `mergeFromDisk` logic in `Job Service` helps mitigate state loss, but config sync relies on the host's `configForms` service consistency.
+*   **Exclude Paths Regex**: The exclusion logic uses simple string matching and normalization. Complex path patterns or symbolic links might not be handled perfectly.

@@ -21,14 +21,14 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `estimateTokens` | 31-40 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
-| `collectSources` | 43-61 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
-| `prepareArticleTasks` | 64-98 | 任务装配。验证：prompt 含 mission/language/源码/旧文上下文、超大文件拆分（28k vs 200k）、oversized 转超大兜底。 |
-| `runRealtimeTasks` | 101-178 | 后台并发池（唯一执行器）。验证：并发执行、失败记账进 notes、keepInMemory 结果返回、失败不落盘。 |
-| `localPlan` | 181-193 | 本地规划兜底。验证：按顶层目录分组（src/root/docs）。 |
-| `packArticles` | 196-210 | 横切输入装填。验证：预算内整篇、超预算截断头部并标注、frontmatter 保留。 |
-| `scanRepoFiles` | 213-232 | 仓库勘探黑名单。验证：跳过 node_modules/.git/二进制/超大/空文件。 |
-| `resolveBatchApiKey` | 243-276 | 凭证解析链。验证：显式配置优先 > 宿主凭据库 > null 回退。 |
+| `estimateTokens` | 22-28 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
+| `collectSources` | 29-43 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
+| `prepareArticleTasks` | 44-73 | 任务装配。验证：prompt 含 mission/language/源码/旧文上下文、超大文件拆分（28k vs 200k）、oversized 转超大兜底。 |
+| `runRealtimeTasks` | 74-152 | 后台并发池（唯一执行器）。验证：并发执行、失败记账进 notes、keepInMemory 结果返回、失败不落盘。 |
+| `localPlan` | 153-165 | 本地规划兜底。验证：按顶层目录分组（src/root/docs）。 |
+| `packArticles` | 166-178 | 横切输入装填。验证：预算内整篇、超预算截断头部并标注、frontmatter 保留。 |
+| `scanRepoFiles` | 179-199 | 仓库勘探黑名单。验证：跳过 node_modules/.git/二进制/超大/空文件。 |
+| `resolveBatchApiKey` | 200-227 | 凭证解析链。验证：显式配置优先 > 宿主凭据库 > null 回退。 |
 
 ### `test-cwd-paths.mjs`
 **文件**: `test-cwd-paths.mjs`
@@ -36,9 +36,9 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `cw.execute` (MSYS) | 48-62 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
-| `cw.execute` (Windows) | 65-77 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
-| `cw.execute` (Invalid) | 80-89 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
+| `cw.execute` (MSYS) | 30-46 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
+| `cw.execute` (Windows) | 47-58 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
+| `cw.execute` (Invalid) | 61-71 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
 
 ### `test-orchestration.mjs`
 **文件**: `test-orchestration.mjs`
@@ -46,29 +46,29 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `makeCtx` | 45-100 | 构造宿主上下文 Mock。支持 inject 两种风格、credentials 模拟、workspaceRegistry 异常模拟。 |
-| `makeMockAgent` | 103-117 | 构造 Agent Mock。捕获 systemPrompt section 注册。 |
-| `makeFixtureRepo` | 120-130 | 创建 Git 仓库 Fixture。 |
-| `makeBatchMock` | 133-185 | Mock 百炼模型 API。按 custom_id 分发 plan/article/arch/patterns/concept/proof 应答。 |
-| `waitJob` | 188-202 | 轮询 JOBS_FILE 等待 Job 终态。 |
-| `fakeReq` / `fakeRes` | 205-216 | HTTP 请求/响应 Fake 对象构造器。 |
-| `apply` (System Prompt) | 220-253 | 验证 `.codewiki` 存在且根有 `CodeWiki.md` 时才注入提醒，否则为空。 |
-| `codewiki_generate` (Full) | 260-290 | 全量编译验证：提交即返回、服务推进阶段机、终态 done、文章落盘、校对回写。 |
-| `codewiki_generate` (Big Wiki) | 293-322 | 大 Wiki 横切拆分：观察任务 map + 合成批 reduce，避免单次 prompt 超限。 |
-| `codewiki_generate` (Stale) | 325-346 | Stale 逐篇更新：仅更新声明了变更文件的关联文章。 |
-| `codewiki_generate` (Orphan) | 349-366 | 孤儿断点续查：自动发现遗留 checkpoint 并入续查。 |
-| `codewiki_generate` (Resume Stage) | 369-402 | 断点阶段感知恢复：按原 stage（如 review）恢复执行。 |
-| `Concurrent Submit` | 405-432 | 并发提交占位与 flush 磁盘合并：多实例共享同一 job，不丢失外部 job。 |
-| `Panel Endpoints` | 435-484 | 面板端点验证：`GET /api/codewiki/jobs` (回环守卫、进度透出)、`POST /api/codewiki/control` (取消、404)。 |
-| `Exclude Paths` | 487-514 | 排除清单验证：compile 与直调均拒绝排除路径。 |
-| `Known Repos` | 517-544 | 已知仓库登记：独立于 job 历史，refresh 动作清缓存。 |
-| `Workspace Only` | 547-574 | 工作区任务过滤：jobs/repos 端点按 workspaceOnly 配置过滤。 |
-| `Registry Exception` | 577-594 | Registry 异常防御：list() 抛错时降级不过滤。 |
-| `Output Schema` | 597-614 | 工具输出 schema 校验：null/undefined 类型匹配。 |
-| `Foreign Orphan` | 617-639 | 孤儿任务接管：停更超时 foreign 任务被接管并 cancel。 |
-| `No Credentials` | 642-649 | 无凭证诚实报错：不尝试子代理回退。 |
-| `Strict Cordis` | 652-669 | 严格 cordis 语义：未 inject 服务属性访问即抛。 |
-| `Temp Cleanup` | 672-689 | Temp 残留清理：启动时移除 Temp 目录终态任务，保留活动与工作区任务。 |
+| `makeCtx` | 34-97 | 构造宿主上下文 Mock。支持 inject 两种风格、credentials 模拟、workspaceRegistry 异常模拟。 |
+| `makeMockAgent` | 82-97 | 构造 Agent Mock。捕获 systemPrompt section 注册。 |
+| `makeFixtureRepo` | 98-111 | 创建 Git 仓库 Fixture。 |
+| `makeBatchMock` | 112-165 | Mock 百炼模型 API。按 custom_id 分发 plan/article/arch/patterns/concept/proof 应答。 |
+| `waitJob` | 166-195 | 轮询 JOBS_FILE 等待 Job 终态。 |
+| `fakeReq` / `fakeRes` | 181-194 | HTTP 请求/响应 Fake 对象构造器。 |
+| `apply` (System Prompt) | 195-225 | 验证 `.codewiki` 存在且根有 `CodeWiki.md` 时才注入提醒，否则为空。 |
+| `codewiki_generate` (Full) | 353-384 | 全量编译验证：提交即返回、服务推进阶段机、终态 done、文章落盘、校对回写。 |
+| `codewiki_generate` (Big Wiki) | 385-414 | 大 Wiki 横切拆分：观察任务 map + 合成批 reduce，避免单次 prompt 超限。 |
+| `codewiki_generate` (Stale) | 448-470 | Stale 逐篇更新：仅更新声明了变更文件的关联文章。 |
+| `codewiki_generate` (Orphan) | 508-537 | 孤儿断点续查：自动发现遗留 checkpoint 并入续查。 |
+| `codewiki_generate` (Resume Stage) | 538-563 | 断点阶段感知恢复：按原 stage（如 review）恢复执行。 |
+| `Concurrent Submit` | 564-602 | 并发提交占位与 flush 磁盘合并：多实例共享同一 job，不丢失外部 job。 |
+| `Panel Endpoints` | 603-656 | 面板端点验证：`GET /api/codewiki/jobs` (回环守卫、进度透出)、`POST /api/codewiki/control` (取消、404)。 |
+| `Exclude Paths` | 657-711 | 排除清单验证：compile 与直调均拒绝排除路径。 |
+| `Known Repos` | 712-751 | 已知仓库登记：独立于 job 历史，refresh 动作清缓存。 |
+| `Workspace Only` | 752-798 | 工作区任务过滤：jobs/repos 端点按 workspaceOnly 配置过滤。 |
+| `Registry Exception` | 799-828 | Registry 异常防御：list() 抛错时降级不过滤。 |
+| `Output Schema` | 829-868 | 工具输出 schema 校验：null/undefined 类型匹配。 |
+| `Foreign Orphan` | 869-902 | 孤儿任务接管：停更超时 foreign 任务被接管并 cancel。 |
+| `No Credentials` | 903-914 | 无凭证诚实报错：不尝试子代理回退。 |
+| `Strict Cordis` | 915-938 | 严格 cordis 语义：未 inject 服务属性访问即抛。 |
+| `Temp Cleanup` | 939-965 | Temp 残留清理：启动时移除 Temp 目录终态任务，保留活动与工作区任务。 |
 
 ### `test-wiki-entry.mjs`
 **文件**: `test-wiki-entry.mjs`
@@ -76,7 +76,7 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `ensureWikiEntry` | 24-58 | 验证：缺失生成中文/英文入口、已有不覆盖、空 cwd 安全返回 false、幂等性。 |
+| `ensureWikiEntry` | 20-76 | 验证：缺失生成中文/英文入口、已有不覆盖、空 cwd 安全返回 false、幂等性。 |
 
 ## Architecture
 

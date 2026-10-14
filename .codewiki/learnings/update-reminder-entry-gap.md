@@ -27,18 +27,18 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
     3. 写入包含 `.codewiki` 绝对路径指引、`codewiki_generate` 收尾要求及“人工改写不覆盖”声明的 Markdown 内容。
   - **签名**: `export function ensureWikiEntry(cwd, language = '中文')`
 
-- `commitHintText(cwd, jobs)` (`index.js:2149`, export 供测试): 同一 section 兼职的编译完成提交提醒——最近一次成功编译（stage=done 且 writtenCount>0）的 `finishedAt` 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交（`git log -1 --format=%ct` 时间戳派生，零持久状态）时注入「【CodeWiki 编译完成·请提交改动】」；提交后时间戳反超自动静默，60s TTL 缓存。
+- `commitHintText(cwd, jobs)` (`index.js:2157`, export 供测试): 同一 section 兼职的编译完成提交提醒——最近一次成功编译（stage=done 且 writtenCount>0）的 `finishedAt` 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交（`git log -1 --format=%ct` 时间戳派生，零持久状态）时注入「【CodeWiki 编译完成·请提交改动】」；提交后时间戳反超自动静默，60s TTL 缓存。
 
-- `installUpdateReminder(ctx, config)` (`index.js:2187`): 
+- `installUpdateReminder(ctx, config)` (`index.js:2195`): 
   - **用途**: 将提醒注入到 Agent 系统提示中。
   - **逻辑**: 
     1. 通过 `ctx.on('agent/created')` 监听新会话。
     2. 注入 `systemPrompt` section，order 设为 2901（紧接 TOOL_REPORT 之后）。
     3. `text` 回调实时求值：检查 `config.updateReminder` 开关及 `fs.existsSync(path.join(cwd, 'CodeWiki.md'))`。
 
-- `cwToolDefinition.execute` (`index.js:672`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
+- `cwToolDefinition.execute` (`index.js:678`): cw CLI 封装工具的执行逻辑，负责解析状态、运行子进程。
 
-- `generateToolDefinition.execute` (`index.js:1657`): 编译工具的执行逻辑，负责判态、提交任务。
+- `generateToolDefinition.execute` (`index.js:1664`): 编译工具的执行逻辑，负责判态、提交任务。
 
 - `parseStatus(stdout)` (`index.js:153`): 解析 `cw status` 输出，提取 `state`, `changedFiles`, `staleArticles`。
 

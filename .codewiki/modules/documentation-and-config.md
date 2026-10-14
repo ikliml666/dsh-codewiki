@@ -16,7 +16,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 
 ## Overview
 
-`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.8.0 的核心功能演进，包括从子代理编排到全批量流水线、侧边栏面板集成、服务化任务调度、孤儿任务接管、面板信息密度改版、进度工具新增、删除百炼专用批量通道（统一走普通入口）、新增日常维护工具 `codewiki_update` 以及最终实现编译终态实时唤醒发起会话等重大架构变更。当前版本（0.8.0）实现了零子代理编译：`codewiki_generate` 为纯提交制，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼普通入口完成；同时新增 `codewiki_update` 作为日常维护入口，固定 scope=auto，并支持在编译完成后向主模型注入「请提交改动」提醒，且通过 `wakeCompileSession` 机制实现实时唤醒发起会话。
+`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.8.1 的核心功能演进。当前版本（0.8.1）实现了零子代理编译：`codewiki_generate` 与 `codewiki_update` 均为纯提交制，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼普通入口完成；同时新增 `codewiki_progress` 只读查进度工具，并支持在编译完成后向主模型注入「请提交改动」提醒，且通过 `wakeCompileSession` 机制实现实时唤醒发起会话。排除清单报错已增强为返回命中的具体条目。
 
 ## Key Components
 
@@ -24,7 +24,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 - **描述**: 定义插件的元数据、导出路径及宿主识别标志。
 - **字段**:
   - `name`: `@local/dsh-codewiki`
-  - `version`: `0.8.0`
+  - `version`: `0.8.1`
   - `description`: CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (plain Bailian endpoint, zero subagents) with a sidebar panel.
   - `private`: `true`
   - `type`: `"module"`
@@ -50,8 +50,8 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 - **描述**: 插件全部逻辑（单文件，Node ESM）。
 - **关键类/函数**:
   - `Config`（index.js:37）— schemastery 设置：enabled / binaryPath / maxConcurrency（编译并发上限，1–8）/ articleLanguage / updateReminder / 编译模型两项（batchModel 默认 `qwen3.7-flash`、batchThinkingBudget 默认 0=关思考），全部 `.volatile()`，execute/tick 时热读取。注：`batchMinTokens` 等批量阈值配置已在 0.6.0 中删除。
-  - `codewiki_progress` 工具（`progressToolDefinition`，index.js:1841）— 只读查编译进度：可选 cwd/jobId 过滤，返回 jobSummary 同源数据 + taskList 完成百分比，render 输出 stage=xx NN% 与任务明细；与 `codewiki_generate`（提交制）配套，让模型不必空等编译完成。
-  - `codewiki_update` 工具（`updateToolDefinition`，index.js:1770）— 日常维护入口：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「继续下一项、不要等待」；错误消息里的 `codewiki_generate` 字样改写为 `codewiki_update`；参数仅 cwd/language（scope=full/stale 仍走 `codewiki_generate`）；apply() 注册为第四个工具。
+  - `codewiki_progress` 工具（`progressToolDefinition`，index.js:1849-1966）— 只读查编译进度：可选 cwd/jobId 过滤，返回 jobSummary 同源数据 + taskList 完成百分比，render 输出 stage=xx NN% 与任务明细；与 `codewiki_generate`（提交制）配套，让模型不必空等编译完成。
+  - `codewiki_update` 工具（`updateToolDefinition`，index.js:1778）— 日常维护入口：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「继续下一项、不要等待」；错误消息里的 `codewiki_generate` 字样改写为 `codewiki_update`；参数仅 cwd/language（scope=full/stale 仍走 `codewiki_generate`）；apply() 注册为第四个工具。
   - `installUpdateReminder` — `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过。
   - `runCw` / `parseStatus` — cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）。
   - **模型执行模块** — `estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（文章+旧文上下文+customId，超预算拆任务）/ `settleJob`（终态收尾；keepInMemory 任务 content 进结果不落盘，由服务写盘）/ `runRealtimeTasks`（后台并发池，唯一执行器）/ `resolveBatchApiKey`（凭据库解析链 3s 超时）/ `bailianChat`（同步单轮）。注：0.6.0 起全部请求统一走百炼普通入口 `chat/completions`，无专用批量端点。
@@ -62,6 +62,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
   - `apply` — `ctx.inject(['tools','webServer','credentials'])` 注册四工具（`cw` / `codewiki_generate` / `codewiki_progress` / `codewiki_update`）+ 端点；`agent/created` 布提醒。
   - `commitHintText`（export 供测试）— 编译完成提交提醒：update-reminder 系统 prompt section 兼职——最近一次成功编译（stage=done 且 writtenCount>0）的 finishedAt 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「【CodeWiki 编译完成·请提交改动】」提醒（只 add 这两个路径、docs(wiki) 前缀、禁 git add -A；模型自己提交，插件不代跑 git）。零持久状态：时间戳派生自 jobs 文件与 git log，提交后时间戳反超自动静默；非 git 仓库/无 .codewiki 提交史（log 空）/读 jobs 失败一律不提醒；60s TTL 缓存。受 updateReminder 开关与「仓库根存在 CodeWiki.md」门控约束。
   - `wakeCompileSession`（index.js，export 供测试）— 编译终态对发起会话 `steer(createUserMessage({...source:{kind:'plugin',plugin:'codewiki'}}))`——done（writtenCount>0）发「【CodeWiki 编译完成·请提交改动】」、failed 发「【CodeWiki 编译失败】」；sessionId 缺失（面板/自动调度提交）、会话不在注册表（冷会话）、steer 异常一律静默跳过（系统提示 section 拉取兜底仍在）。
+  - `excludedItem(cwd, list)` — 返回命中的排除清单条目原文（0.8.1 新增）；`isExcluded` 改为 `excludedItem(...) !== null` 的布尔包装。
 
 ### `cordis.patch.yml` (根目录)
 - **描述**: Cordis 插件系统的 YAML 挂载补丁，用于本地开发和 Bundle 安装。
@@ -102,9 +103,10 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 ### `CHANGELOG.md` (根目录)
 - **描述**: 详细的版本变更历史，记录了架构重构、性能优化和 bug 修复。
 - **关键版本**:
-  - **0.8.0**: 编译终态实时唤醒发起会话（用户需求：借用子智能体发送消息机制）。新增 `wakeCompileSession(job, outcome, agents?)`，编译终态对发起会话 steer 直达，与子代理消息同机制。
-  - **0.7.0**: 新增 codewiki_update 日常维护工具 + 编译完成提交提醒（用户需求）。
-  - **0.6.0**: 删除百炼批量推理通道：编译全部改走普通入口（用户决策）。删 BATCH_CHAT_BASE/BATCH_CHAT_TIMEOUT_MS、bailianChat 的 batch 参数与 1h 超时/重试包装、linkedSignal、submitOrRun 阈值分流整函数与 localResults 就地实时路径；6 个提交点统一 `submitBatchFor`；startBatchChatRun/settleJob 文案与记账改「阶段执行器」措辞；Config schema 删 batchMinTokens；client.js 设置页删「批量编译（百炼）」节；测试重写。
+  - **0.8.1**: 工具拒绝编译时报错同时返回命中的排除项。新增 `excludedItem` 函数，报错信息携带命中排除项原文。
+  - **0.8.0**: 编译终态实时唤醒发起会话。新增 `wakeCompileSession`，编译终态对发起会话 steer 直达，与子代理消息同机制。
+  - **0.7.0**: 新增 codewiki_update 日常维护工具 + 编译完成提交提醒。
+  - **0.6.0**: 删除百炼批量推理通道：编译全部改走普通入口。删 BATCH_CHAT_BASE/BATCH_CHAT_TIMEOUT_MS、bailianChat 的 batch 参数与 1h 超时/重试包装、linkedSignal、submitOrRun 阈值分流整函数与 localResults 就地实时路径；6 个提交点统一 `submitBatchFor`；startBatchChatRun/settleJob 文案与记账改「阶段执行器」措辞；Config schema 删 batchMinTokens；client.js 设置页删「批量编译（百炼）」节；测试重写。
   - **0.5.0.6**: 新增 codewiki_progress 只读查进度工具（后台编译语义对模型显式化）。
   - **0.5.0.5**: 百炼批量通道从 Batch File 切换为 Batch Chat（省钱需求落地）。
   - **0.5.0.4**: 收尾提醒封死「手工流程」逃生通道。
