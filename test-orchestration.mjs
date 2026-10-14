@@ -677,20 +677,20 @@ console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
     const job = await waitJob(exRepo)
     check(job?.stage === 'done', `compile 提交的任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
 
-    // 4) 排除清单：compile 与直调都拒绝
+    // 4) 排除清单：compile 与直调都拒绝，报错同时返回命中的排除项（0.8.1）
     mainConfig.excludePaths = exRepo
     const resC2 = fakeRes()
     await ctlEp.handler(fakeReq({ action: 'compile', cwd: exRepo }, '127.0.0.1', 'POST'), resC2)
     const c2 = JSON.parse(resC2.out)
-    check(resC2.code === 400 && c2.ok === false && String(c2.error).includes('排除清单'), 'compile 对排除仓库 400 拒绝')
+    check(resC2.code === 400 && c2.ok === false && String(c2.error).includes('排除清单') && String(c2.error).includes('命中排除项') && String(c2.error).includes(exRepo), 'compile 对排除仓库 400 拒绝（报错含命中排除项）')
     let err = null
     try { await gen.execute({ cwd: exRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
-    check(err && String(err.message).includes('排除清单'), '直调对排除仓库抛错')
+    check(err && String(err.message).includes('命中排除项') && String(err.message).includes(exRepo), '直调对排除仓库抛错（报错含命中排除项）')
     const sub = path.join(exRepo, 'packages', 'app')
     fs.mkdirSync(sub, { recursive: true })
     let err2 = null
     try { await gen.execute({ cwd: sub }, { agent: 'test-agent' }) } catch (e) { err2 = e }
-    check(err2 && String(err2.message).includes('排除清单'), '子目录同样被排除')
+    check(err2 && String(err2.message).includes('命中排除项') && String(err2.message).includes(exRepo), '子目录同样被排除（报错排除项为父目录条目）')
     delete mainConfig.excludePaths
 
     // 5) repos 总览：排除标记 + 状态 + scheduler 块

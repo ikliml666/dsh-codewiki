@@ -218,15 +218,21 @@ export function ensureWikiEntry(cwd, language = '中文') {
   return true
 }
 
-// 排除清单：换行/分号/逗号分隔的绝对路径；cwd 等于某项或位于其子树内即被排除（Windows 大小写不敏感）
-function isExcluded(cwd, list) {
+// 排除清单：换行/分号/逗号分隔的绝对路径；cwd 等于某项或位于其子树内即被排除（Windows 大小写不敏感）。
+// excludedItem 返回命中的排除项原文（工具报错据此告诉模型是哪条排除项拒绝了此工作区）；
+// isExcluded 保持布尔语义（面板 repos 总览 excluded 字段依赖布尔）。
+function excludedItem(cwd, list) {
   const items = String(list ?? '').split(/[\n;，,]+/).map((s) => s.trim()).filter(Boolean)
-  if (!items.length || !cwd) return false
+  if (!items.length || !cwd) return null
   const n = path.normalize(cwd).toLowerCase().replace(/[\\/]+$/, '')
-  return items.some((item) => {
+  const hit = items.find((item) => {
     const m = path.normalize(item).toLowerCase().replace(/[\\/]+$/, '')
     return n === m || n.startsWith(m + '\\') || n.startsWith(m + '/')
   })
+  return hit ?? null
+}
+function isExcluded(cwd, list) {
+  return excludedItem(cwd, list) !== null
 }
 
 // ---------------------------------------------------------------------------
@@ -1531,8 +1537,9 @@ function createJobService(config, onSettled) {
 
   async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId }) {
     const c0 = liveConfig(config)
-    if (isExcluded(cwd, c0.excludePaths)) {
-      throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
+    const exHit = excludedItem(cwd, c0.excludePaths)
+    if (exHit) {
+      throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（命中排除项：${exHit}；在插件设置或面板「设置」页编辑排除清单）`)
     }
     rememberRepo(cwd)
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
@@ -1660,7 +1667,8 @@ function generateToolDefinition(cfg, svc) {
       if (!svc) throw new Error('codewiki_generate：编排服务未初始化')
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
-      if (isExcluded(cwd, c.excludePaths)) throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（在插件设置或面板「设置」页编辑排除清单）`)
+      const exHit = excludedItem(cwd, c.excludePaths)
+      if (exHit) throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（命中排除项：${exHit}；在插件设置或面板「设置」页编辑排除清单）`)
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
       const auto = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
       const language = String(args.language ?? '').trim() || c.articleLanguage
