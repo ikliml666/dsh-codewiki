@@ -21,7 +21,7 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `estimateTokens` | 17-24 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
+| `estimateTokens` | 18-24 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
 | `collectSources` | 27-48 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
 | `prepareArticleTasks` | 51-96 | 任务装配。验证：prompt 含 mission/language/源码/旧文上下文、超大文件拆分（28k vs 200k）、oversized 转超大兜底。 |
 | `runRealtimeTasks` | 99-212 | 后台并发池（唯一执行器）。验证：并发执行、失败记账进 notes、keepInMemory 结果返回、失败不落盘。 |

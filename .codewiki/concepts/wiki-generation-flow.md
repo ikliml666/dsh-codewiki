@@ -84,11 +84,11 @@ tags: [wiki-generation, job-service, bailian-endpoint, pipeline, observability]
 | **阶段结算** | `index.js:1025-1088` | `settleJob`，收割 batchResults；宿主重启按 batchPrompt 快照重跑。 |
 | **并发池执行** | `index.js:287-309` | `runRealtimeTasks`，唯一执行器，全部阶段请求走百炼普通入口。 |
 | **凭证解析** | `index.js:404-424` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1872-2046` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
+| **面板后端 API** | `index.js:1933-2107` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
 | **前端面板组件** | `client.js:882-1098` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
 | **API 封装** | `client.js:331-348` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
 | **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
 | **阶段权重定义** | `client.js:684` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
-| **只读查进度工具** | `index.js:1753-1870` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
+| **只读查进度工具** | `index.js:1814-1908` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
 
-行号基线：0c6017f（0.6.0，批量通道删除后；单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。
+行号基线：e43040c（0.7.0，新增 codewiki_update 工具与编译完成提交提醒后；单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。

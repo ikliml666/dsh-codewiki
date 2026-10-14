@@ -27,11 +27,13 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
     3. 写入包含 `.codewiki` 绝对路径指引、`codewiki_generate` 收尾要求及“人工改写不覆盖”声明的 Markdown 内容。
   - **签名**: `export function ensureWikiEntry(cwd, language = '中文')`
 
-- `reminderText(cwd)` (`index.js:2056`): 
+- `reminderText(cwd)` (`index.js:2149`): 
   - **用途**: 动态生成提醒文案。
   - **逻辑**: 仅当 `updateReminder` 为真且 `CodeWiki.md` 存在时返回多行提醒文本；否则返回空字符串。
 
-- `installUpdateReminder(ctx, config)` (`index.js:2067`): 
+- `commitHintText(cwd, jobs)` (`index.js:2122`, export 供测试): 同一 section 兼职的编译完成提交提醒——最近一次成功编译（stage=done 且 writtenCount>0）的 `finishedAt` 晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交（`git log -1 --format=%ct` 时间戳派生，零持久状态）时注入「【CodeWiki 编译完成·请提交改动】」；提交后时间戳反超自动静默，60s TTL 缓存。
+
+- `installUpdateReminder(ctx, config)` (`index.js:2160`): 
   - **用途**: 将提醒注入到 Agent 系统提示中。
   - **逻辑**: 
     1. 通过 `ctx.on('agent/created')` 监听新会话。
@@ -66,13 +68,13 @@ CodeWiki 编译流水线在 `tickIndex` 阶段新增 `ensureWikiEntry` 调用，
 │  │                  │   │                              │   │
 │  │ tickIndex(job)   │──►│ ensureWikiEntry(cwd, lang)   │   │
 │  │ (final stage)    │   │  → creates CodeWiki.md       │   │
-│  └──────────────────┘   └──────────────┬───────────────┘   │
-│                                        │                   │
-│  ┌─────────────────────────────────────▼─────────────────┐ │
+│  └──────────────────┘   └──────┬───────────────────────┘   │
+│                                 │                         │
+│  ┌──────────────────────────────▼───────────────────────┐ │
 │  │              installUpdateReminder                    │ │
 │  │  agent/created hook → systemPrompt.section            │ │
 │  │  text() callback: fs.existsSync(CodeWiki.md)?         │ │
-│  └───────────────────────────────────────────────────────┘ │
+│  └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
