@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.4 — 2026-10-15
+
+### 文章阶段超预算分割：观察批 map + 合成请求 reduce（避开 32k 三倍价，用户需求）
+
+- 背景：文章阶段一个模块的源码总量超 28k token 预算时，原先整体升 200k 大档继续装填（实测单阶段 9 个请求超 32k 档、按 3 倍价计费，441.9k 输入）；且 collectSources 把装不下的文件静默 skip（「不得涉及它们」），超预算内容直接丢失。用户要求：超预算必须拆分成多个 ≤28k 请求，而不是升大档。
+- 新增 `batchArticleObservePrompt(language,moduleName,sourcesText,batchIndex,batchTotal)`（index.js）：分批观察 prompt，要求保留全部函数/类/导出名、常量默认值、行号、调用关系、文件清单；禁 frontmatter。
+- 新增 `batchArticleComposePrompt({language,mission,moduleName,observationsText,prevArticle})`：观察包 → 完整文章，沿用观察中的「文件:行号」，汇总 source_files，articleFormatSection() 收尾。
+- `prepareArticleTasks`（index.js:441-497）分割判定：collectSources 28k 装填后 prompt 估算 >BATCH_TOKEN_BUDGET **或存在装不下的溢出文件**（overflowFiles，堵静默 skip）→ 逐单文件重新分批，batches.length>1 → 每批一个观察任务 `{customId:'split{n}o{i}', name:'<article>#obs{i}', keepInMemory:true, splitFor, composePlan:{mission,articlePath,prevArticlePath,batchCount,files}}`；单文件占满分不出多批时落回 BATCH_TOKEN_HARD_LIMIT 大档（原行为）。
+- `tickArticles` 收割侧两段状态机：results 含 `#obs` → 按 articleName 分组（composedArticles Set 去重，每篇一条合成任务）→ 从持久化任务快照重建合成任务（customId `o\d+$`→`c`）→ submitBatchFor 合成轮 → 下一轮收割写盘；观察全失败该篇缺席并 note；部分失败合成基于剩余观察。
+- `submitBatchFor` 持久化 job.tasks 补带 `splitFor/composePlan`（宿主重启后收割重建合成所需的元数据，原快照会丢）。
+- 测试：test-batch.mjs §3 改分割语义断言 + 新 3b 节（4×90KB fixture：obs 任务 ≥2、batchPrompt token ≤28000、splitFor/composePlan 绑定）；test-orchestration.mjs 新 e2e 块（bigSources 仓库：4 观察批 → 2 合成 → modules/*.md 落盘 → PROOFED 校对回写 → 零 3 倍价 notes）；makeBatchMock 加 bigSources 参数与「文章观察员」应答分支。
+- 回归：test-batch/orchestration/wiki-entry/cwd-paths 全 EXIT=0；test-wiki-anchors 失败均为 .codewiki 锚过期，由重编译刷新。
+- 版本 0.8.4。
+
 ## 0.8.3 — 2026-10-15
 
 ### 规划阶段改走主模型（避开百炼 32k 三倍价，用户需求）

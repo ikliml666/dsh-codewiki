@@ -66,10 +66,31 @@ fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
 const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
 check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
 const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装继续')
+check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装继续（分不出多批不拆分）')
 check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档任务 prompt 内联完整源码')
 const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
 check(hugePrep.prepared.length === 0 && hugePrep.oversized.length === 1, '单文件连 200k 大档都装不下 → oversized（转超大兜底）')
+
+// 3b. prepareArticleTasks：多文件超预算 → 观察→合成分割
+section('prepareArticleTasks：多文件超预算 → 观察批分割')
+for (let i = 0; i < 4; i += 1) {
+  fs.writeFileSync(path.join(workRoot, `part${i}.ts`), 'y'.repeat(90 * 1024))
+}
+const splitPrep = prepareArticleTasks([{
+  name: 'modules/splitme.md', mission: '分割任务',
+  sources: ['part0.ts', 'part1.ts', 'part2.ts', 'part3.ts'],
+  articlePath: path.join(outDir, 'splitme.md'),
+}], { cwd: workRoot, language: '中文' })
+check(splitPrep.oversized.length === 0, '分割任务不进 oversized')
+const obsTasks = splitPrep.prepared.filter((t) => t.name.endsWith('#obs0') || t.name.includes('#obs'))
+check(obsTasks.length >= 2, `多文件超预算拆出 ≥2 个观察批（实际 ${obsTasks.length}）`)
+check(obsTasks.every((t) => t.keepInMemory === true), '观察任务 keepInMemory（不直接落盘）')
+check(obsTasks.every((t) => estimateTokens(t.batchPrompt) <= 28000), `观察批 prompt 全部 ≤28k token（最大 ${Math.max(...obsTasks.map((t) => estimateTokens(t.batchPrompt)))}）`)
+check(obsTasks.every((t) => t.splitFor === 'modules/splitme.md'), '观察任务 splitFor 指向所属文章')
+check(obsTasks.every((t) => t.composePlan?.articlePath === path.join(outDir, 'splitme.md') && t.composePlan?.mission === '分割任务'), 'composePlan 携带 articlePath 与 mission')
+check(obsTasks.some((t) => t.batchPrompt.includes('第 1 批')) && obsTasks.some((t, i) => t.batchPrompt.includes(`第 ${i + 1} 批`)), '观察 prompt 标注批次序号')
+const plainStill = prepareArticleTasks([{ name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') }], { cwd: workRoot, language: '中文' })
+check(plainStill.prepared.length === 1 && !plainStill.prepared[0].name.includes('#obs'), '预算内普通任务不分割')
 
 // ---------- 4. runRealtimeTasks：普通端点并发池 ----------
 section('runRealtimeTasks：百炼普通端点与请求体')

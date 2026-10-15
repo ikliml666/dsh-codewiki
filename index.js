@@ -431,20 +431,63 @@ export async function resolveBatchApiKey(hostCtx, cfg) {
 }
 
 // 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
-// 分配 customId。单文件超预算先升大档（BATCH_TOKEN_HARD_LIMIT）重装继续走批量，
-// 连大档都装不下才转超大兜底通道。
+// 分配 customId。
+// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时不再升 200k 大档吃 3 倍价，
+// 而是按文件装填拆成多个 ≤28k 观察批（_split/ 任务，keepInMemory），收割后拼观察包
+// 提交一个合成请求写完整文章。单文件连观察批预算都装不下（collectSources oversized）
+// 才升大档重装；连大档都装不下才转超大兜底通道。full/stale 两条流都在本层生效。
+// 返回 { prepared, oversized }：prepared 含普通任务与 _split/ 观察任务，
+// 观察任务带 splitFor（所属文章 name）与 composePlan（重建合成任务所需，仅内存轮使用）。
 export function prepareArticleTasks(tasks, { cwd, language }) {
   const prepared = []
   const oversized = []
   for (const t of tasks) {
-    let { text, oversized: tooBig } = collectSources(cwd, t.sources)
+    let { text, oversized: tooBig, skipped: overflowFiles } = collectSources(cwd, t.sources)
     if (tooBig) {
       ;({ text, oversized: tooBig } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
     }
     const prevArticle = t.prevArticlePath
       ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
       : ''
+    // 分割判定：prompt 估算超单请求预算，或 28k 装填有文件被跳过（collectSources 只装得下
+    // 前缀，余下文件本会被「不得涉及」静默甩掉——截图场景）。两者都说明该模块一请求写不完。
+    if (!tooBig && (overflowFiles.length > 0 || estimateTokens(batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })) > BATCH_TOKEN_BUDGET)) {
+      // 总量超单请求预算：按 28k 逐文件装填分批，产出观察任务组
+      const batches = []
+      for (const rel of t.sources) {
+        const one = collectSources(cwd, [rel])
+        if (one.oversized) continue // 单文件连观察预算都超：不参与分批，走下方大档重装兜底
+        const last = batches[batches.length - 1]
+        if (last && estimateTokens(last.text + '\n' + one.text) <= BATCH_TOKEN_BUDGET) {
+          last.text += '\n' + one.text
+          last.files.push(rel)
+        } else {
+          batches.push({ text: one.text, files: [rel] })
+        }
+      }
+      if (batches.length > 1) {
+        const base = `split${prepared.length}`
+        batches.forEach((b, i) => {
+          prepared.push({
+            customId: `${base}o${i}`,
+            name: `${t.name}#obs${i}`,
+            keepInMemory: true,
+            batchPrompt: batchArticleObservePrompt(language, t.name, b.text, i, batches.length),
+            splitFor: t.name,
+            composePlan: {
+              mission: t.mission, articlePath: t.articlePath,
+              prevArticlePath: t.prevArticlePath ?? null,
+              batchCount: batches.length, files: b.files,
+            },
+          })
+        })
+        continue
+      }
+      // 分不出多批（单文件占了全部体积）：落回大档装填，照旧提交（升档按 3 倍价），维持旧行为
+      ;({ text, skipped: overflowFiles } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
+    }
     t.batchPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })
+    delete t.splitFor; delete t.composePlan // 复用任务对象时清残留分割字段
     if (tooBig) { oversized.push(t); continue }
     t.customId = t.customId ?? `t${prepared.length}`
     prepared.push(t)
@@ -606,6 +649,58 @@ function batchObservePrompt(language, moduleName, articleText) {
     '',
     articleText,
   ].join('\n')
+}
+
+// 文章分割观察 prompt（模块源码超单请求预算时）：一批源码 → 该批源码的紧凑技术观察。
+// 与横切观察不同，这里观察对象是源码而非文章，输出要保留写文章所需的全部细节。
+function batchArticleObservePrompt(language, moduleName, sourcesText, batchIndex, batchTotal) {
+  return [
+    `你是 CodeWiki 文章观察员。观察全文用${language}书写。`,
+    '',
+    `任务：模块「${moduleName}」的源码量大，已按文件分成 ${batchTotal} 批（本批为第 ${batchIndex + 1} 批）。`,
+    '通读下文本批源码，输出紧凑而完整的技术观察（markdown），供后续不看源码直接写整篇模块文章。必含：',
+    '1. 本批每个文件的职责与关键实现（保留全部函数/类/导出名、重要常量与默认值、关键行号）；',
+    '2. 文件间调用关系与数据流（谁调用谁、入参/返回值形状）；',
+    '3. 错误处理、边界条件与非显然行为；',
+    '4. 本批文件清单（POSIX 相对路径）。',
+    '',
+    '要求：宁全勿简——被你省略的细节合成阶段将永远缺失；但禁止贴大段源码，引用「文件:行号」即可。',
+    '只输出观察正文——禁止 frontmatter、禁止用代码围栏整体包裹。',
+    '',
+    sourcesText,
+  ].join('\n')
+}
+
+// 文章分割合成 prompt：全部批次观察（+可选旧文）→ 完整模块文章。
+// 输入体积 = 各批观察之和，远小于原始源码，天然不超单请求预算。
+function batchArticleComposePrompt({ language, mission, moduleName, observationsText, prevArticle }) {
+  const parts = [
+    `你是 CodeWiki 文章作者。文章全文用${language}书写。`,
+    '',
+    `任务：${mission}`,
+    '',
+    `模块「${moduleName}」源码量大，已由多个观察员分批通读并产出观察。以下观察覆盖该模块全部源码：`,
+    '',
+    observationsText,
+  ]
+  if (prevArticle) {
+    parts.push(
+      '',
+      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags）：',
+      '',
+      prevArticle,
+    )
+  }
+  parts.push(
+    '',
+    '只依据上述观察写完整文章；观察中引用的「文件:行号」直接沿用，不得发明未出现的文件或符号。',
+    '直接输出完整文章：以 --- frontmatter 开始（title/type/source_files/tags），',
+    'source_files 汇总各批观察列出的全部源文件（POSIX 风格相对路径）。',
+    '只输出文章本身——禁止用 markdown 代码围栏整体包裹、禁止任何解释文字。',
+    '',
+    articleFormatSection(),
+  )
+  return parts.join('\n')
 }
 
 // 批量校对 prompt：输入=文章全文+source_files 源码，输出=修正后整文（服务侧校验后才落盘）。
@@ -1173,6 +1268,9 @@ function createJobService(config, onSettled) {
     job.tasks = prepared.map((t) => ({
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
       batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
+      // 分割观察任务（#obs）的合成重建元数据：splitFor 指向所属文章 name，
+      // composePlan 携带 mission/articlePath/prevArticlePath——收割时从持久化快照重建合成任务
+      ...(t.splitFor ? { splitFor: t.splitFor, composePlan: t.composePlan } : {}),
     }))
     job.batchProgress = { completed: 0, total: prepared.length }
     startBatchChatRun(job, prepared)
@@ -1281,9 +1379,66 @@ function createJobService(config, onSettled) {
     if (job.batchRef) {
       const results = await settleJob(job)
       if (results === null) return
-      tally(job, results, job.tasks)
+      const tasks = job.tasks
       job.batchRef = null
       job.tasks = []
+      // 文章分割观察批收割：拼观察包，为每篇分割文章提交一个合成请求（keepInMemory，直写盘）
+      const splitObs = results.filter((r) => r.name.includes('#obs'))
+      if (splitObs.length) {
+        const byArticle = new Map()
+        for (const r of splitObs) {
+          const articleName = r.name.slice(0, r.name.indexOf('#obs'))
+          if (!byArticle.has(articleName)) byArticle.set(articleName, { batches: [], failed: 0 })
+          const slot = byArticle.get(articleName)
+          if (r.ok && r.content) slot.batches.push(r.content)
+          else slot.failed += 1
+        }
+        const composeTasks = []
+        const composedArticles = new Set() // 每篇文章只重建一条合成任务（多批共享）
+        for (const r of tasks) {
+          if (!r.name.includes('#obs') || !r.composePlan) continue
+          const articleName = r.name.slice(0, r.name.indexOf('#obs'))
+          if (composedArticles.has(articleName)) continue
+          composedArticles.add(articleName)
+          const slot = byArticle.get(articleName)
+          if (!slot) continue
+          if (slot.failed >= slot.batches.length || !slot.batches.length) {
+            note(job, `模块文章 ${articleName} 观察全部失败，该篇缺席本轮编译`)
+            continue
+          }
+          if (slot.failed) note(job, `${slot.failed} 个观察批失败，合成基于剩余观察进行`)
+          const plan = r.composePlan
+          const prevArticle = plan.prevArticlePath
+            ? (() => { try { return fs.readFileSync(plan.prevArticlePath, 'utf8') } catch { return '' } })()
+            : ''
+          composeTasks.push({
+            customId: `${r.customId.replace(/o\d+$/, '')}c`,
+            name: articleName,
+            keepInMemory: true,
+            articlePath: plan.articlePath,
+            batchPrompt: batchArticleComposePrompt({
+              language: job.language,
+              mission: plan.mission,
+              moduleName: articleName,
+              observationsText: slot.batches.map((b, i) => `#### 观察批 ${i + 1}\n\n${b}`).join('\n\n'),
+              prevArticle,
+            }),
+          })
+        }
+        if (composeTasks.length) {
+          try {
+            await submitBatchFor(job, composeTasks)
+            note(job, `收到 ${splitObs.length} 份观察，提交 ${composeTasks.length} 个文章合成请求`)
+            return
+          } catch (err) {
+            fail(job, `文章合成批次提交失败 —— ${String(err?.message ?? err)}`)
+            return
+          }
+        }
+        setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
+        return
+      }
+      tally(job, results, tasks)
       if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
       setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
       return

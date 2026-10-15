@@ -110,7 +110,7 @@ function makeFixtureRepo() {
 
 // mock 百炼普通入口（0.6.0 起唯一通道）：全部环节都是单轮 chat/completions 后台并发池。
 // 按 prompt 首行特征分发应答（与真实 prompt 模板的区分句一一对应）。
-function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {}) {
+function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, bigSources = false } = {}) {
   const originalFetch = globalThis.fetch
   const fetchCalls = []
   const json = (obj) => new Response(JSON.stringify(obj), { status: 200 })
@@ -118,9 +118,13 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
     if (prompt.includes('你是代码结构勘探员')) {
       return JSON.stringify({
         project: 'fixture',
-        modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: [`src/${mn}.py`] })),
+        modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: bigSources ? [`src/${mn}.py`, `src/${mn}2.py`] : [`src/${mn}.py`] })),
         concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
       })
+    }
+    if (prompt.includes('你是 CodeWiki 文章观察员')) {
+      // 文章分割观察批：应答一段观察文本（合成阶段凭它产文）
+      return '观察：模块职责与关键实现（来自分批观察）。\n\n文件清单：见上文。\n'
     }
     if (prompt.includes('你是 CodeWiki 文章作者')) {
       const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
@@ -529,6 +533,40 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
   } finally {
     mock.restore()
     fs.rmSync(bigRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 大模块：文章观察→合成分割 ============================
+console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
+{
+  const splitRepo = makeFixtureRepo()
+  // 每模块两个 90KB 源文件：28k 装填必 skipped → 触发观察批分割
+  for (const mn of ['core', 'util']) {
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(90 * 1024))
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(90 * 1024))
+  }
+  execFileSync('git', ['add', '-A'], { cwd: splitRepo })
+  execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
+  const mock = makeBatchMock({ bigSources: true })
+  try {
+    const r = await gen.execute({ cwd: splitRepo }, { agent: 'test-agent' })
+    check(r.submitted === true, '分割仓库提交即返回')
+    const job = await waitJob(r.cwd, { timeout: 45000 })
+    console.log('  notes:', (job?.notes ?? []).join(' | '))
+    const obsPrompts = mock.batchPrompts().filter((p) => p.includes('你是 CodeWiki 文章观察员'))
+    const composePrompts = mock.batchPrompts().filter((p) => p.includes('多个观察员分批通读'))
+    check(obsPrompts.length === 4, `4 个观察批请求（2 模块 × 2 批，实际 ${obsPrompts.length}）`)
+    check(obsPrompts.every((p) => !p.includes('你是 CodeWiki 文章作者')), '观察请求不是文章请求')
+    check(composePrompts.length === 2, `2 个合成请求（每模块 1 个，实际 ${composePrompts.length}）`)
+    check(composePrompts.every((p) => p.includes('分批观察')), '合成请求吃观察包')
+    check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'modules/core.md 经合成落盘')
+    check(fs.existsSync(path.join(job.wikiPath, 'modules', 'util.md')), 'modules/util.md 经合成落盘')
+    check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '分割文章照常进校对回写')
+    check(!(job.notes ?? []).some((n) => n.includes('3 倍价')), '文章阶段零请求超 32k 档（无 3 倍价明示）')
+  } finally {
+    mock.restore()
+    fs.rmSync(splitRepo, { recursive: true, force: true })
   }
 }
 
