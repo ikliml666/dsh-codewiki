@@ -1881,15 +1881,15 @@ function progressToolDefinition(cfg, svc) {
                 failedCount: { type: 'number' },
                 cancelRequested: { type: 'boolean' },
                 taskList: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, state: { type: 'string' } } } },
-                batchProgress: { type: ['object', 'null'] },
+                batchProgress: { oneOf: [{ type: 'object' }, { type: 'null' }] },
                 stageTimings: { type: 'object' },
                 usage: { type: 'object' },
-                tps: { type: ['number', 'null'] },
+                tps: { oneOf: [{ type: 'number' }, { type: 'null' }] },
                 notes: { type: 'array', items: { type: 'string' } },
-                error: { type: ['string', 'null'] },
+                error: { oneOf: [{ type: 'string' }, { type: 'null' }] },
                 createdAt: { type: 'string' },
                 updatedAt: { type: 'string' },
-                finishedAt: { type: ['string', 'null'] },
+                finishedAt: { oneOf: [{ type: 'string' }, { type: 'null' }] },
               },
             },
           },
@@ -2270,10 +2270,16 @@ export function apply(ctx, config) {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
     for (const definition of [cwToolDefinition(config), generateDef, updateDef, progressToolDefinition(config, service)]) {
-      const disposer = tools.register(definition)
-      if (typeof disposer === 'function') {
-        if (typeof ctx.effect === 'function') ctx.effect(() => disposer)
-        else ctx.on?.('dispose', () => { try { disposer() } catch { /* 忽略 */ } })
+      // 单工具 schema 违规只丢该工具：宿主 register 校验（assertSupportedJsonSchema）抛错时
+      // 不能让它炸掉回调——cordis 会把 apply 回调失败视为 fiber FAILED 并回滚已注册的全部工具
+      try {
+        const disposer = tools.register(definition)
+        if (typeof disposer === 'function') {
+          if (typeof ctx.effect === 'function') ctx.effect(() => disposer)
+          else ctx.on?.('dispose', () => { try { disposer() } catch { /* 忽略 */ } })
+        }
+      } catch (err) {
+        console.error(`[codewiki] 工具 ${definition.name} 注册失败（该工具不可用）：`, err?.message ?? err)
       }
     }
   })

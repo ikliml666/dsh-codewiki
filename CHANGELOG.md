@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.2 — 2026-10-15
+
+### 修复：4 个 cw 工具在新宿主全部消失（根因：progress schema type 数组）
+
+- 现象：宿主更新后 cw/codewiki_generate/codewiki_update/codewiki_progress 4 个工具全部消失，但面板端点（GET /api/codewiki/jobs）正常——工具注册回调整体未生效。
+- 根因（最小复现坐实）：0.7.0 修复 progress 输出 schema 的 nullable 字段时用了 `type: ['object','null']` 数组形态（4 处：batchProgress/tps/error/finishedAt）；新宿主 ToolRuntime.register 强制 JSON Schema 子集（assertSupportedJsonSchema，type 必须单字符串——"type arrays are not supported"）。注册循环第 4 个定义（progress）抛错 → apply 回调失败 → cordis 把该 fiber 判 FAILED 并**回滚其全部 effect**（含已成功注册的前 3 个工具）→ 4 个全没，宿主吞错（exit=0 静默无日志）。纯 cordis 复现脚本验证：抛错后 registered=(none)，与真实宿主观察完全一致。
+- 修复 ①：4 处 type 数组改子集合法的 nullable 表达 `{ oneOf: [{type:'object'},{type:'null'}] }` 等价形态（oneOf 恰两支、不与 type 并存，均在新子集白名单内）。
+- 修复 ②（防御）：工具注册循环加 per-definition try/catch——未来任一工具 schema 违规只丢该工具并 console.error，不再炸回调回滚全部。
+- 回归验证：node --check ✓；静态断言 index.js 无 `type: [` 残留 ✓；端到端模拟宿主校验 4 工具全部注册 ✓；单工具失败隔离（progress 模拟抛错，其余 3 个存活）✓；test-batch.mjs 51/0 ✓；test-orchestration.mjs 全 PASS ✓。
+- 版本 0.8.2。
+
 ## 0.8.1 — 2026-10-14
 
 ### 工具拒绝编译时报错同时返回命中的排除项（用户需求）
