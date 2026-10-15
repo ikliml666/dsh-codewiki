@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -1202,14 +1202,78 @@ function createJobService(config, onSettled) {
     const files = scanRepoFiles(job.cwd)
     if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
     const fileLines = files.map((f) => `- ${f.path}（${f.bytes}B）`).join('\n')
+    const prompt = batchPlannerPrompt(fileLines)
+    // 主模型规划：发起会话 agent 可用且能解析其当前路由时走 ctx.llm（无 32k 低价档
+    // 限制，避免整份文件清单超档按 3 倍价；主模型也不占百炼并发池）。失败降级百炼批量。
+    const main = await runMainModelPlan(job, prompt)
+    if (main !== null) {
+      const plan = parsePlan(main)
+      if (plan) {
+        job.plan = plan
+        note(job, `规划（主模型）：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
+        setStage(job, 'articles')
+        return
+      }
+      note(job, '主模型规划未产出可用 JSON，降级百炼批量规划')
+    }
     const planTask = {
       customId: 'plan', name: '_plan', keepInMemory: true,
-      batchPrompt: batchPlannerPrompt(fileLines),
+      batchPrompt: prompt,
     }
     try {
       await submitBatchFor(job, [planTask])
     } catch (err) {
       fail(job, `规划批次提交失败 —— ${String(err?.message ?? err)}`)
+    }
+  }
+
+  // 主模型规划：取发起会话 agent 的当前路由（agent.session.requestHeader()?.config
+  // 的 {provider, model}，auto-review 同款读法），经宿主 ctx.llm.stream 单轮流收集。
+  // 返回模型输出文本；不可用（无 agent/无 llm/无路由/请求失败）返回 null 走批量回退。
+  async function runMainModelPlan(job, prompt) {
+    try {
+      if (!job.sessionId || !agentsRef || typeof agentsRef.get !== 'function') return null
+      let agent
+      try { agent = agentsRef.get(job.sessionId) } catch { return null }
+      const cfg = agent?.session?.requestHeader?.()?.config
+      if (!cfg?.provider || !cfg?.model) return null
+      let llm = hostCtxRef?.llm
+      if (!llm || typeof llm.stream !== 'function') {
+        // 真实 cordis 属性访问失败（服务未挂到实例上）走 inject 同构取法（resolveBatchApiKey 同款）
+        const got = await hostCtxRef?.inject?.(['llm'])
+        llm = Array.isArray(got) ? got[0] : got?.llm ?? got
+      }
+      if (!llm || typeof llm.stream !== 'function') return null
+      const ac = new AbortController()
+      batchAborters.set(job.id, ac) // 取消编译 = 中断规划请求
+      try {
+        note(job, `规划走主模型（${cfg.model}），避开 32k 低价档限制`)
+        addUsage(job, { inputTok: estimateTokens(prompt), requests: 1, realtime: true })
+        const assembler = new BlockAssembler()
+        for await (const chunk of llm.stream({
+          provider: cfg.provider,
+          model: cfg.model,
+          messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'codewiki' } })],
+          temperature: 0,
+          signal: ac.signal,
+        })) {
+          assembler.push(chunk)
+        }
+        const finish = assembler.finish
+        if (finish.kind === 'error' || finish.kind === 'aborted') {
+          note(job, `主模型规划流终止（${finish.kind}）—— ${String(finish.failure?.message ?? '')}`)
+          return null
+        }
+        if (assembler.usage) addUsage(job, { outputTok: assembler.usage.outputTokens ?? 0 })
+        const text = assembler.blocks().filter((b) => b.type === 'text').map((b) => b.text).join('')
+        return text || null
+      } finally {
+        batchAborters.delete(job.id)
+        touch(job)
+      }
+    } catch (err) {
+      note(job, `主模型规划异常 —— ${String(err?.message ?? err)}`)
+      return null
     }
   }
 

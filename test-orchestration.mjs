@@ -31,7 +31,7 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false, agentGet = null } = {}) {
+function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
@@ -46,6 +46,7 @@ function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, work
     },
     agents: agentGet ? { list: () => agents, get: agentGet } : { list: () => agents },
     tools: { register(def) { registered.set(def.name, def); return () => {} } },
+    ...(llm ? { llm } : {}),
   }
   if (workspaces !== null) {
     services.workspaceRegistry = { list: () => workspaces.map((p) => ({ path: p })) }
@@ -348,6 +349,125 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   check(steered.length === 2, 'steer 抛异常 → 静默不抛')
   wakeCompileSession(doneJob, 'done') // 缺省 agentsRef：测试进程内为 main ctx 的 agents（无 get）→ 静默
   check(steered.length === 2, '缺省 agents（宿主未注入或无 get）→ 静默')
+}
+
+// ============================ 主模型规划（ctx.llm.stream，避开 32k 三倍价） ============================
+console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.stream） ==')
+{
+  // fake 主模型路由：ctx.llm.stream 按 provider/model 分发，勘探员 prompt 回规划 JSON
+  const llmCalls = []
+  const fakeLlm = {
+    stream(options) {
+      llmCalls.push(options)
+      const self = this
+      async function* gen() {
+        const text = String(options.messages?.[0]?.content?.[0]?.text ?? '')
+        if (text.includes('你是代码结构勘探员')) {
+          yield { type: 'block-start', index: 0, blockType: 'text' }
+          yield { type: 'text-delta', index: 0, text: '```json\n' }
+          yield { type: 'text-delta', index: 0, text: JSON.stringify({
+            project: 'fixture-mm',
+            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
+            concepts: [],
+          }) }
+          yield { type: 'text-delta', index: 0, text: '\n```' }
+          yield { type: 'block-end', index: 0, block: { type: 'text', text: '```json\n' + JSON.stringify({
+            project: 'fixture-mm',
+            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
+            concepts: [],
+          }) + '\n```' } }
+        }
+        yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 55 } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+      return gen.call(self)
+    },
+  }
+  // 场景 1：agent 带路由 → 规划走主模型，百炼零规划请求
+  const mmRepo = makeFixtureRepo()
+  const mock = makeBatchMock()
+  const mmCtx = makeCtx({
+    agentGet: (id) => (id === 'sess-mm' ? {
+      steer: () => {},
+      session: { requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'main-model-x' } }) },
+    } : undefined),
+    llm: fakeLlm,
+  })
+  apply(mmCtx.ctx, {})
+  const mmGen = mmCtx.registered.get('codewiki_generate')
+  try {
+    const r = await mmGen.execute({ cwd: mmRepo }, { agent: { id: 'sess-mm' } })
+    check(r.submitted === true, '主模型规划：提交即返回')
+    const job = await waitJob(r.cwd)
+    console.log('  notes:', (job?.notes ?? []).join(' | '))
+    check(llmCalls.length === 1, `ctx.llm.stream 恰被调 1 次（实际 ${llmCalls.length}）`)
+    check(llmCalls[0]?.provider === 'deepseek-official' && llmCalls[0]?.model === 'main-model-x', '路由取自发起会话 requestHeader config')
+    check(llmCalls[0]?.messages?.[0]?.content?.[0]?.text?.includes('你是代码结构勘探员'), '规划 prompt 原文进主模型消息')
+    check(!mock.batchPrompts().some((p) => p.includes('勘探员')), '百炼端点零规划请求（不走批量通道）')
+    check(mock.batchPrompts().some((p) => p.includes('你是 CodeWiki 文章作者')), '文章阶段仍走百炼批量')
+    check(job?.stage === 'done', `主模型规划任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(job?.plan?.project === 'fixture-mm' && job?.plan?.modules?.length === 1, '主模型 JSON 计划被解析入库（含剥围栏）')
+    check((job?.notes ?? []).some((n) => n.includes('规划走主模型')), 'notes 记录主模型决策')
+    check((job?.notes ?? []).some((n) => n.includes('规划（主模型）：1 个模块')), 'notes 记录主模型规划结果')
+    check(job?.usage?.outputTok >= 55, `输出 token 实测入账（实际 ${job?.usage?.outputTok}）`)
+    check(!(job?.usage?.overTier2), '主模型规划不计超档（overTier2=0）')
+  } finally {
+    mock.restore()
+    fs.rmSync(mmRepo, { recursive: true, force: true })
+  }
+
+  // 场景 2：主模型输出不是合法 JSON → 降级百炼批量规划，任务照常完成
+  const badLlm = {
+    stream() {
+      return (async function* () {
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: '抱歉我不会' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: '抱歉我不会' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const fbRepo = makeFixtureRepo()
+  const mock2 = makeBatchMock()
+  const fbCtx = makeCtx({
+    agentGet: (id) => (id === 'sess-mm' ? {
+      steer: () => {},
+      session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) },
+    } : undefined),
+    llm: badLlm,
+  })
+  apply(fbCtx.ctx, {})
+  const fbGen = fbCtx.registered.get('codewiki_generate')
+  try {
+    const r = await fbGen.execute({ cwd: fbRepo }, { agent: { id: 'sess-mm' } })
+    const job = await waitJob(r.cwd)
+    check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(mock2.batchPrompts().some((p) => p.includes('勘探员')), '降级后规划请求走百炼端点')
+    check((job?.notes ?? []).some((n) => n.includes('主模型规划未产出可用 JSON')), 'notes 记录降级决策')
+  } finally {
+    mock2.restore()
+    fs.rmSync(fbRepo, { recursive: true, force: true })
+  }
+
+  // 场景 3：无 sessionId（面板提交）→ 直接走批量路径，不碰 ctx.llm
+  const panelRepo = makeFixtureRepo()
+  const mock3 = makeBatchMock()
+  llmCalls.length = 0
+  const pCtx = makeCtx({ llm: fakeLlm })
+  apply(pCtx.ctx, {})
+  const pGen = pCtx.registered.get('codewiki_generate')
+  try {
+    const r = await pGen.execute({ cwd: panelRepo }, { agent: 'test-agent' })
+    const job = await waitJob(r.cwd)
+    check(job?.stage === 'done', `面板提交任务终态 done（实际 ${job?.stage}）`)
+    check(llmCalls.length === 0, '无发起会话 → 不碰 ctx.llm')
+    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走百炼批量（现状不变）')
+  } finally {
+    mock3.restore()
+    fs.rmSync(panelRepo, { recursive: true, force: true })
+  }
+  // 本块 apply 过新 ctx，恢复 main 的 agentsRef，避免污染后续 e2e 唤醒断言
+  apply(main.ctx, mainConfig)
 }
 
 // ============================ 全量编译（服务阶段机） ============================

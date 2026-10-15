@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.3 — 2026-10-15
+
+### 规划阶段改走主模型（避开百炼 32k 三倍价，用户需求）
+
+- 背景：规划阶段把全仓文件清单塞进一个百炼请求，仓库一大就超 32k 低价档（实测 41.8k 单请求按 3 倍价计费），且规划串行拖慢整体编译。用户要求改由发起会话的主模型执行规划。
+- 新增 `runMainModelPlan(job, prompt)`（index.js）：取发起会话 agent（`agentsRef.get(job.sessionId)`）→ `agent.session.requestHeader()?.config` 拿主模型 {provider, model} → `ctx.llm.stream()`（hostCtxRef 属性 + inject(['llm']) 双取法，兼容 mock ctx 与真实 cordis）+ `BlockAssembler` 收文本，`createUserMessage` 带 `source:{kind:'plugin',plugin:'codewiki'}`；temperature 0；AbortController 入 batchAborters（取消编译可中断规划）；usage 按实测 outputTokens + estimateTokens(input) 记账（requests:1, realtime:true）。
+- tickPlan 改造：先主模型规划 → parsePlan 成功入库并 note「规划（主模型）」；主模型不可用（无 sessionId/路由/llm）或未产出可用 JSON → 降级百炼批量规划（原 submitBatchFor 路径与 batchRef 收割逻辑零改动）。
+- 测试（test-orchestration.mjs 新块 3 场景）：①agent 带路由 → ctx.llm 恰 1 次、百炼零规划请求、计划入库（fixture-mm）、overTier2 不计；②主模型回非 JSON → 降级百炼、done；③无 sessionId → 不碰 llm、批量照旧。makeCtx 增 llm 注入选项。踩坑：fake 流 block-end 必须携带与 delta 一致的完整 block（BlockAssembler closed-block-wins 语义），空 block 导致文本为空误走回退。
+- 回归：test-orchestration/batch/wiki-entry/cwd-paths 全 EXIT=0；test-wiki-anchors 失败均为 .codewiki 文章行号锚过期（新增代码使行号后移），由本次 codewiki_generate 重编译刷新。
+- 版本 0.8.3。
+
 ## 0.8.2 — 2026-10-15
 
 ### 修复：4 个 cw 工具在新宿主全部消失（根因：progress schema type 数组）
