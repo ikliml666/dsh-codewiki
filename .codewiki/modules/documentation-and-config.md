@@ -10,13 +10,14 @@ source_files:
   - index.js
   - package.json
   - README.md
+  - test-batch.mjs
   - test-orchestration.mjs
 tags: [metadata, configuration, changelog, documentation, codewiki]
 ---
 
 ## Overview
 
-`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.8.1 的核心功能演进。当前版本（0.8.1）实现了零子代理编译：`codewiki_generate` 与 `codewiki_update` 均为纯提交制，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼普通入口完成；同时新增 `codewiki_progress` 只读查进度工具，并支持在编译完成后向主模型注入「请提交改动」提醒，且通过 `wakeCompileSession` 机制实现实时唤醒发起会话。排除清单报错已增强为返回命中的具体条目。
+`documentation-and-config` 模块负责管理 `@local/dsh-codewiki` 插件的项目元数据、配置补丁、变更日志历史以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为，并通过 `CHANGELOG.md` 记录了从 0.1.0 到 0.8.2 的核心功能演进。当前版本（0.8.2）实现了零子代理编译：`codewiki_generate`、`codewiki_update`、`codewiki_progress` 与 `cw` 均为纯工具或提交制入口，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼普通入口完成；同时支持在编译完成后向主模型注入「请提交改动」提醒，且通过 `wakeCompileSession` 机制实现实时唤醒发起会话。排除清单报错已增强为返回命中的具体条目。
 
 ## Key Components
 
@@ -24,7 +25,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 - **描述**: 定义插件的元数据、导出路径及宿主识别标志。
 - **字段**:
   - `name`: `@local/dsh-codewiki`
-  - `version`: `0.8.1`
+  - `version`: `0.8.2`
   - `description`: CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (plain Bailian endpoint, zero subagents) with a sidebar panel.
   - `private`: `true`
   - `type`: `"module"`
@@ -103,6 +104,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 ### `CHANGELOG.md` (根目录)
 - **描述**: 详细的版本变更历史，记录了架构重构、性能优化和 bug 修复。
 - **关键版本**:
+  - **0.8.2**: 修复 4 个 cw 工具在新宿主全部消失（根因：progress schema type 数组）。4 处 type 数组改子集合法的 nullable 表达 `{ oneOf: [{type:'object'},{type:'null'}] }` 等价形态；工具注册循环加 per-definition try/catch。
   - **0.8.1**: 工具拒绝编译时报错同时返回命中的排除项。新增 `excludedItem` 函数，报错信息携带命中排除项原文。
   - **0.8.0**: 编译终态实时唤醒发起会话。新增 `wakeCompileSession`，编译终态对发起会话 steer 直达，与子代理消息同机制。
   - **0.7.0**: 新增 codewiki_update 日常维护工具 + 编译完成提交提醒。

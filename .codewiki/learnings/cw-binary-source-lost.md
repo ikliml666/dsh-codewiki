@@ -79,10 +79,10 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 cw status 输出
       │
       ▼
- parseStatus() [index.js:113]
+ parseStatus() [index.js:137]
       │  匹配 /^\s+[M!]\s+(.+)$/gm
       ▼
- normalizeArticlePath(line) [index.js:106]
+ normalizeArticlePath(line) [index.js:139]
       │  replace(/\\/g, '/')
       ▼
  标准化路径 (/)
@@ -93,7 +93,7 @@ cw status 输出
 cw index 落盘 _index.md
       │
       ▼
- normalizeIndexLinks(cwd) [index.js:97]
+ normalizeIndexLinks(cwd) [index.js:119]
       │  正则 /\[\[([^\]|\n]*?)\|/g
       │  替换链接头部 \ 为 /
       ▼
