@@ -1014,7 +1014,7 @@ export function wakeCompileSession(job, outcome, agents = agentsRef) {
     ? `【CodeWiki 编译失败】任务 ${job.id}（${job.cwd}）失败：${job.error ?? '未知原因'}——可用 codewiki_progress 查详情，处理后重新提交。`
     : `【CodeWiki 编译完成·请提交改动】任务 ${job.id} 已完成（写入 ${job.writtenCount} 篇文章）：检查 .codewiki/ 与 CodeWiki.md 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不要 git add -A）；已入库或无需提交则忽略本消息。`
   try {
-    agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'codewiki' } }))
+    agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
   } catch { /* 唤醒失败不影响编译任务本身 */ }
 }
 
@@ -1351,7 +1351,7 @@ function createJobService(config, onSettled) {
         for await (const chunk of llm.stream({
           provider: cfg.provider,
           model: cfg.model,
-          messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'codewiki' } })],
+          messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin:codewiki' } })],
           temperature: 0,
           signal: ac.signal,
         })) {
