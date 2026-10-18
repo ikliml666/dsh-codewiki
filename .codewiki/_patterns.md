@@ -2,13 +2,6 @@
 title: patterns
 type: module
 source_files:
-  - src/index.js
-  - src/client.js
-  - test/test-batch.mjs
-  - test/test-cwd-paths.mjs
-  - test/test-orchestration.mjs
-  - test/test-wiki-anchors.mjs
-  - test/test-wiki-entry.mjs
   - package.json
   - cordis.patch.yml
 tags: [patterns, architecture, testing, error-handling, concurrency]
@@ -16,11 +9,11 @@ tags: [patterns, architecture, testing, error-handling, concurrency]
 
 ## Overview
 
-`dsh-codewiki` 模块是一个基于 Cordis 插件系统的 CodeWiki 编译与管理工具。它通过标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。核心架构分为后端编排（`index.js`）、前端面板（`client.js`）及全链路测试套件。关键模式包括：提交-异步推进的状态机、多层 Token 预算与降级策略、跨平台路径规范化、以及防御性的并发控制与孤儿任务接管机制。
+`dsh-codewiki` 模块是一个基于 Cordis 插件系统的 CodeWiki 编译与管理工具。它通过标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。核心架构分为后端编排、前端面板及全链路测试套件。关键模式包括：提交-异步推进的状态机、多层 Token 预算与降级策略、跨平台路径规范化、以及防御性的并发控制与孤儿任务接管机制。
 
 ## Key Components
 
-### `src/index.js` (后端核心)
+### 后端核心 (`index.js`)
 
 **常量与配置**
 *   `CONCURRENCY_HARD_CAP = 8`: 编译请求并发上限硬顶 [[index.js]]。
@@ -51,7 +44,7 @@ tags: [patterns, architecture, testing, error-handling, concurrency]
 *   **BatchProgress**: 包含 `at`, `completed`, `rate` (EWMA 速率用于 ETA 估算) [[index.js ~425]]。
 *   **SparkRef**: `Map<jobId, number[]>`，存储最近 30 个 tps 值用于绘制 Sparkline [[index.js ~420]]。
 
-### `src/client.js` (前端 UI)
+### 前端 UI (`client.js`)
 
 **组件**
 *   **`CodewikiCard`**: 设置卡片，依赖 `ctx.configForms.get(NS)` 读写配置 [[client.js ~250]]。
