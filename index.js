@@ -1005,6 +1005,11 @@ function jobSummary(job) {
 // ---------------------------------------------------------------------------
 let agentsRef = null
 
+// llm 服务引用：cordis 严格语义下直接访问 ctx.llm 会抛「cannot get property "llm"
+// without inject」（0.8.5 前的 typeof 守卫拦不住），规划阶段因此全程降级百炼。
+// 与 agentsRef 同款：apply 时经 ctx.inject(['llm']) 在注入时取服务。
+let llmRef = null
+
 export function wakeCompileSession(job, outcome, agents = agentsRef) {
   if (!job?.sessionId || !agents || typeof agents.get !== 'function') return
   let agent
@@ -1325,32 +1330,33 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // 主模型规划：取发起会话 agent 的当前路由（agent.session.requestHeader()?.config
-  // 的 {provider, model}，auto-review 同款读法），经宿主 ctx.llm.stream 单轮流收集。
+  // 主模型规划：直接继承发起会话当前对话的模型——优先取会话已路由的 requestHeader
+  // config（{provider, model}），未路由过则退回 agent.options（创建时的路由），
+  // 与 compaction 的 latest ?? agentTarget 同序。经宿主 llm 服务单轮流收集。
   // 返回模型输出文本；不可用（无 agent/无 llm/无路由/请求失败）返回 null 走批量回退。
   async function runMainModelPlan(job, prompt) {
     try {
       if (!job.sessionId || !agentsRef || typeof agentsRef.get !== 'function') return null
       let agent
       try { agent = agentsRef.get(job.sessionId) } catch { return null }
-      const cfg = agent?.session?.requestHeader?.()?.config
-      if (!cfg?.provider || !cfg?.model) return null
-      let llm = hostCtxRef?.llm
+      const routed = agent?.session?.requestHeader?.()?.config
+      const provider = routed?.provider || agent?.options?.provider || ''
+      const model = routed?.model || agent?.options?.model || ''
+      if (!provider || !model) return null
+      const llm = llmRef
       if (!llm || typeof llm.stream !== 'function') {
-        // 真实 cordis 属性访问失败（服务未挂到实例上）走 inject 同构取法（resolveBatchApiKey 同款）
-        const got = await hostCtxRef?.inject?.(['llm'])
-        llm = Array.isArray(got) ? got[0] : got?.llm ?? got
+        note(job, '主模型规划不可用（llm 服务未注入），降级百炼批量规划')
+        return null
       }
-      if (!llm || typeof llm.stream !== 'function') return null
       const ac = new AbortController()
       batchAborters.set(job.id, ac) // 取消编译 = 中断规划请求
       try {
-        note(job, `规划走主模型（${cfg.model}），避开 32k 低价档限制`)
+        note(job, `规划走主模型（${model}），避开 32k 低价档限制`)
         addUsage(job, { inputTok: estimateTokens(prompt), requests: 1, realtime: true })
         const assembler = new BlockAssembler()
         for await (const chunk of llm.stream({
-          provider: cfg.provider,
-          model: cfg.model,
+          provider,
+          model,
           messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin:codewiki' } })],
           temperature: 0,
           signal: ac.signal,
@@ -2448,6 +2454,7 @@ function installUpdateReminder(ctx, config) {
 export function apply(ctx, config) {
   hostCtxRef = ctx
   if (typeof ctx.inject === 'function') ctx.inject(['agents'], (rc) => { agentsRef = rc?.agents ?? rc })
+  if (typeof ctx.inject === 'function') ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })
   const service = createJobService(config, wakeCompileSession)
   service.start()
   // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，

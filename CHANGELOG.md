@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.6 — 2026-10-18
+
+### 修复：规划阶段没有真正继承当前对话模型（用户需求）
+
+- 现象：用户要求「修改规划调用模型，直接继承当前对话的模型进行」。代码看似早已这么做（0.8.3 的 `runMainModelPlan`），但实际每次全量编译都降级百炼 —— `%TEMP%/dsh-codewiki-jobs.json` 里两条 full 任务的 notes 首条均为 `主模型规划异常 —— cannot get property "llm" without inject`。
+- 根因：`runMainModelPlan` 里 `let llm = hostCtxRef?.llm` 在真实 cordis 下**访问即抛**（未 inject 的服务属性不允许读，`typeof` 守卫拦不住），异常被函数外层 catch 吞成一条 note → 规划恒走批量 qwen3.7-flash。原 inject 兜底也走不到（异常先抛）。
+- 修复 ①：新增模块级 `llmRef`，`apply()` 里 `ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })`，与 `agentsRef` 同款；`runMainModelPlan` 只读 `llmRef`，删掉 `hostCtxRef?.llm` 属性访问与那段走不通的 inject 兜底。服务未注入时明确 note「主模型规划不可用（llm 服务未注入）」再降级。
+- 修复 ②（更贴近「当前对话模型」）：路由解析改为「会话已路由 `session.requestHeader()?.config` → 未路由退回 `agent.options.{provider,model}`」，与 compaction 的 `latest ?? agentTarget` 同序，不再因会话尚未路由而静默降级。
+- 测试：test-orchestration.mjs 新增场景 1b —— mock ctx 上把 `llm` 定义成抛错 getter（复刻真宿主故障），断言规划仍走主模型、路由取自 `agent.options`、notes 无「主模型规划异常」、计划正常入库。
+- 回归：node --check ✓；test-orchestration / test-batch / test-wiki-entry / test-cwd-paths 全 EXIT=0。
+- 版本 0.8.6。
+
 ## 0.8.5 — 2026-10-18
 
 ### 适配 DSH 0.2.1-rc.2：wake/plan source 形态 + engines.dsh 声明

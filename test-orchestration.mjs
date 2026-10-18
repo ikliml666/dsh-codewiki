@@ -420,6 +420,38 @@ console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.str
     fs.rmSync(mmRepo, { recursive: true, force: true })
   }
 
+  // 场景 1b：真实 cordis 严格语义（ctx.llm 属性访问即抛）+ 会话未路由 → 路由退 agent.options
+  {
+    const strictRepo = makeFixtureRepo()
+    const mockS = makeBatchMock()
+    llmCalls.length = 0
+    const sCtx = makeCtx({
+      agentGet: (id) => (id === 'sess-strict' ? {
+        steer: () => {},
+        session: { requestHeader: () => undefined },
+        options: { provider: 'deepseek-official', model: 'conv-model-y' },
+      } : undefined),
+      llm: fakeLlm,
+    })
+    // 0.8.5 真宿主故障点：未 inject 的服务属性访问直接抛（旧实现据此全程降级百炼）
+    Object.defineProperty(sCtx.ctx, 'llm', {
+      get() { throw new Error('cannot get property "llm" without inject') },
+    })
+    apply(sCtx.ctx, {})
+    const sGen = sCtx.registered.get('codewiki_generate')
+    try {
+      const r = await sGen.execute({ cwd: strictRepo }, { agent: { id: 'sess-strict' } })
+      const job = await waitJob(r.cwd)
+      check(llmCalls.length === 1, `严格语义下仍走主模型（stream 调用 ${llmCalls.length}）`)
+      check(llmCalls[0]?.model === 'conv-model-y', '未路由时继承 agent.options 的对话模型')
+      check(!(job?.notes ?? []).some((n) => n.includes('主模型规划异常')), 'notes 无「主模型规划异常」')
+      check(job?.plan?.project === 'fixture-mm', '严格语义下主模型计划入库')
+    } finally {
+      mockS.restore()
+      fs.rmSync(strictRepo, { recursive: true, force: true })
+    }
+  }
+
   // 场景 2：主模型输出不是合法 JSON → 降级百炼批量规划，任务照常完成
   const badLlm = {
     stream() {
