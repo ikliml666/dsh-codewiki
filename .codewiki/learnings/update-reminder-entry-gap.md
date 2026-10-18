@@ -14,8 +14,8 @@ CodeWiki 插件通过 `ensureWikiEntry` 在编译收尾阶段自动创建仓库�
 
 ### 常量与配置
 
-- `Config.updateReminder` (`index.js:38`): 布尔值配置项（默认 `true`），控制是否在会话系统提示中注入 CodeWiki 维护提醒。
-- `Config.articleLanguage` (`index.js:37`): 字符串配置项（默认 `'中文'`），决定生成的入口文件语言。
+- `Config.updateReminder` (`index.js:40`): 布尔值配置项（默认 `true`），控制是否在会话系统提示中注入 CodeWiki 维护提醒。
+- `Config.articleLanguage` (`index.js:39`): 字符串配置项（默认 `'中文'`），决定生成的入口文件语言。
 
 ### 函数
 

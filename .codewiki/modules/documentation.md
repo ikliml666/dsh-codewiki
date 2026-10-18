@@ -10,7 +10,7 @@ tags: [documentation, changelog, wiki, static-assets]
 
 ## Overview
 
-`documentation` 模块负责维护项目的静态文档资源，核心文件包括变更日志（`CHANGELOG.md`）、项目 Wiki 入口（`CodeWiki.md`）和自述文件（`README.md`）。这些文件共同构成了 `@local/dsh-codewiki` 插件的元数据层，记录了从 v0.1.0 到 v0.8.5 的完整演进历史、架构设计、安装指南及工具行为规范。
+`documentation` 模块负责维护 `@local/dsh-codewiki` 插件的静态文档资源，核心文件包括变更日志（`CHANGELOG.md`）、项目 Wiki 入口（`CodeWiki.md`）和自述文件（`README.md`）。这些文件共同构成了插件的元数据层，记录了从 v0.1.0 到 v0.8.6 的完整演进历史、架构设计、安装指南及工具行为规范。
 
 该模块不仅作为人类阅读的项目文档，其内容还通过 `codewiki_generate` 工具被编译为 `<repo>/.codewiki/` 下的结构化文章，供智能体在会话中检索和使用。特别是 `CodeWiki.md`，它定义了插件自身的代码库结构，是“自举”编译的起点。
 
@@ -18,7 +18,8 @@ tags: [documentation, changelog, wiki, static-assets]
 
 ### CHANGELOG.md
 位于仓库根目录，记录所有版本变更。格式遵循 Keep a Changelog 风格，按版本号倒序排列。
-- **v0.8.5 (2026-10-18)**：适配 DSH 0.2.1-rc.2 宿主协议。修正 `source` 形态为 `{kind:'plugin:codewiki'}`；新增 `engines.dsh` 声明以控制兼容性；修复测试断言。
+- **v0.8.6 (2026-10-18)**：修复规划阶段模型继承问题。新增模块级 `llmRef`，路由解析改为优先会话配置；解决 `hostCtxRef?.llm` 访问即抛导致的规划降级百炼问题。
+- **v0.8.5 (2026-10-18)**：适配 DSH 0.2.1-rc.2 宿主协议。修正 `source` 形态为 `{kind:'plugin:codewiki'}`；新增 `engines.dsh` 声明以控制兼容性。
 - **v0.8.4 (2026-10-15)**：实现文章阶段超预算分割机制。引入 `batchArticleObservePrompt` 和 `batchArticleComposePrompt`，将大源文件拆分为多个 ≤28k token 的观察批，再合成文章，避免触发 32k 档 3 倍价计费。
 - **v0.8.3 (2026-10-15)**：规划阶段改走主模型。新增 `runMainModelPlan`，优先使用发起会话的主模型执行规划，仅在不可用时降级至百炼批量推理，以避开 32k 三倍价并加速编译。
 - **v0.8.2 (2026-10-15)**：修复工具注册崩溃问题。根因是 `progress` schema 使用了 `type: ['object','null']` 数组形态，新宿主强制 JSON Schema 子集导致注册循环抛错并回滚全部效果。修复为 `oneOf` 结构并增加单工具防御性 try/catch。

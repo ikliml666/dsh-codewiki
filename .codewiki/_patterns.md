@@ -1,110 +1,144 @@
 ---
 title: patterns
-type: pattern
+type: module
 source_files:
-  - index.js
-  - client.js
-  - test-batch.mjs
-  - test-cwd-paths.mjs
-  - test-orchestration.mjs
-  - test-wiki-anchors.mjs
-  - test-wiki-entry.mjs
+  - src/index.js
+  - src/client.js
+  - test/test-batch.mjs
+  - test/test-cwd-paths.mjs
+  - test/test-orchestration.mjs
+  - test/test-wiki-anchors.mjs
+  - test/test-wiki-entry.mjs
   - package.json
   - cordis.patch.yml
-  - CHANGELOG.md
-tags: [naming, error-handling, build-test, directory, architecture]
+tags: [patterns, architecture, testing, error-handling, concurrency]
 ---
 
 ## Overview
 
-`dsh-codewiki` 仓库通过一系列标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。这些模式涵盖了从文件命名约定、错误处理风格到构建流程、目录结构及核心架构逻辑。以下总结了反复出现的五个关键模式，并引用了具体的模块文章作为证据。
+`dsh-codewiki` 模块是一个基于 Cordis 插件系统的 CodeWiki 编译与管理工具。它通过标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。核心架构分为后端编排（`index.js`）、前端面板（`client.js`）及全链路测试套件。关键模式包括：提交-异步推进的状态机、多层 Token 预算与降级策略、跨平台路径规范化、以及防御性的并发控制与孤儿任务接管机制。
 
-## Naming Conventions
+## Key Components
 
-**1. 测试文件与日志文件的隐式前缀/后缀约定**
-项目采用特定的文件扩展名和命名前缀来区分不同类型的运行时工件和测试脚本。
-*   **测试脚本**：使用 `.mjs` 扩展名（ES Modules），并以 `test-` 开头明确标识其功能领域。例如 `test-batch.mjs` 用于编译执行链自检，`test-orchestration.mjs` 用于服务编排冒烟测试 [[modules/test-suite]]。
-*   **临时日志/探针**：以 `.` 开头且包含 `tmp-test` 或特定探针名称，用于隔离测试输出和运行时状态，避免污染版本控制。例如 `.tmp-test-batch.log` 记录底层 AI 调用行为，`.probe3.txt` 用于模块存活检测 [[modules/runtime-artifacts]]。
-*   **配置与元数据**：`package.json` 定义标准 Node.js 元数据，而 `cordis.patch.yml` 遵循 DSH 插件系统的 YAML 规范，ID 固定为 `codewiki` [[modules/configuration-and-metadata]]。
+### `src/index.js` (后端核心)
 
-**2. 函数与变量命名语义化**
-核心逻辑中的函数名直接反映其行为意图，便于在复杂的状态机中追踪流程。
-*   **资源收集与估算**：`estimateTokens` 负责粗略计算 Token 数，`collectSources` 负责将源码内联为 Markdown 文本，`scanRepoFiles` 负责仓库勘探 [[modules/core-application]]。
-*   **任务装配与执行**：`prepareArticleTasks` 组装 Prompt，`runRealtimeTasks` 执行并发请求，`packArticles` 处理预算超标的装填策略 [[modules/test-suite]]。
-*   **路径与状态处理**：`normalizeArticlePath` 统一路径分隔符，`parseStatus` 解析 CLI 输出，`resolveBatchApiKey` 处理凭证优先级 [[modules/core-application]]。
+**常量与配置**
+*   `CONCURRENCY_HARD_CAP = 8`: 编译请求并发上限硬顶 [[index.js]]。
+*   `ACTIVE_STAGES`: 活跃阶段列表 `['plan', 'articles', 'crosscut', 'compose', 'review', 'index']` [[index.js]]。
+*   `STAGE_WEIGHTS`: 总进度权重映射 (`plan: 0.05`, `articles: 0.6`, `crosscut: 0.1`, `compose: 0.05`, `review: 0.15`, `index: 0.05`) [[index.js ~450]]。
 
-## Error Handling Style
+**公开函数/类**
 
-**1. 显式报错与清晰的消息反馈**
-在涉及文件系统操作和外部工具调用时，采用抛出包含具体上下文信息的错误，而非静默失败。
-*   **路径验证**：当工作目录不存在时，`cw.execute` 会抛出包含 "cwd 不存在" 字样的清晰错误，确保调试时可快速定位 [[modules/test-suite]]。
-*   **凭证缺失**：若缺少 API Key，系统会诚实报错，无子代理回退，防止静默失败导致的不确定性 [[modules/test-suite]]。
-*   **排除清单拦截**：当编译被排除清单拦截时，返回命中的具体排除项原文，帮助模型或用户定位问题 [[modules/documentation]]。
+| 函数名 | 行号范围 | 用途 |
+| :--- | :--- | :--- |
+| `apply(ctx, config)` | ~20 | 插件入口，注册工具、服务及 HTTP 端点 [[index.js]]。 |
+| `updateReminder(job)` | ~2000+ | 生成系统提示中的提醒文本，受 `updateReminder` 开关和 `CodeWiki.md` 存在性门控约束 [[index.js]]。 |
+| `commitHintText(job)` | ~2000+ | 检查最近一次成功编译的 `finishedAt` 是否晚于 `.codewiki/` 和 `CodeWiki.md` 的最后 git 提交时间。若是，返回「【CodeWiki 编译完成·请提交改动】」 [[index.js]]。 |
+| `wakeCompileSession(job, outcome, agents?)` | ~2100+ | 编译终态时，向发起会话发送消息，提醒其提交改动或查看失败原因 [[index.js]]。 |
+| `progressView(job)` | ~2200+ | 将 Job 状态转换为面板展示的进度视图，计算六阶段加权进度百分比 [[index.js]]。 |
+| `renderProgress(job)` | ~2200+ | 格式化输出进度信息：`stage=xx NN% + ✓/✗/· 任务明细 + 错误 + 最近 3 条 notes` [[index.js]]。 |
+| `progressToolDefinition()` | ~2300+ | 定义 `codewiki_progress` 工具，支持 `cwd` 和 `jobId` 过滤 [[index.js]]。 |
+| `excludedItem(cwd, list)` | ~2400+ | 遍历 `excludePaths`，使用 `samePath` 进行归一化匹配，返回命中的条目或 `null` [[index.js]]。 |
+| `isExcluded(cwd, list)` | ~2400+ | `excludedItem(...) !== null` 的布尔包装 [[index.js]]。 |
+| `normalizeCwd(cwd)` | ~2500+ | Windows 路径规范化，将 MSYS 风格路径 `/x/...` 转换为 `X:/...` [[index.js]]。 |
+| `ensureWikiEntry(repo, lang)` | ~10 | 缺失时生成中文或英文入口，包含 `.codewiki` 绝对路径和 `codewiki_generate` 指引 [[index.js]]。 |
+| `normalizeArticlePath(path)` | ~10 | 将 Windows `\` 转换为 `/`，`undefined` 返回空串 [[index.js]]。 |
+| `parseStatus(stdout)` | ~10 | 解析 `cw status` 输出，规范化 `changedFiles` 和 `staleArticles` 中的路径 [[index.js]]。 |
+| `normalizeIndexLinks(repo)` | ~10 | 修复 `_index.md` 中双链链接头部的 `\` 为 `/`，幂等操作 [[index.js]]。 |
 
-**2. 降级与兜底策略 (Fallback & Budgeting)**
-针对大语言模型调用的 Token 限制和潜在的网络/计费风险，设计了多层兜底机制。
-*   **Token 预算分层**：单请求输入默认预算 `BATCH_TOKEN_BUDGET` 为 28000，超大任务兜底预算 `BATCH_TOKEN_HARD_LIMIT` 为 200000 [[modules/core-application]]。
-*   **超大文件处理**：当源文件超过预算时，`prepareArticleTasks` 会将其升档至 200k 档位；若连 200k 都无法装下，则标记为 `oversized` 并跳过或拆分 [[modules/test-suite]]。
-*   **横切拆分 (Map-Reduce)**：当横切内容超预算时，先拆分为多个“观察”任务（≤28k token），再合成批处理，避免触发高价的大档计费 [[modules/documentation]]。
+**数据结构**
+*   **Job**: 包含 `sessionId`, `cwd`, `stage`, `stageTimings`, `usage`, `notes`, `batchProgress`, `taskList` 等字段。
+*   **BatchProgress**: 包含 `at`, `completed`, `rate` (EWMA 速率用于 ETA 估算) [[index.js ~425]]。
+*   **SparkRef**: `Map<jobId, number[]>`，存储最近 30 个 tps 值用于绘制 Sparkline [[index.js ~420]]。
 
-**3. 防御性编程与异常捕获**
-在关键路径上增加 try/catch 和降级逻辑，确保单一故障点不会导致整个服务崩溃。
-*   **Schema 校验防御**：修复因 JSON Schema 子集限制导致的注册循环抛错，改为 `oneOf` 结构并增加单工具防御性 try/catch [[modules/documentation]]。
-*   **Registry 异常降级**：当 `workspaceRegistry.list()` 抛错时，面板端点会降级不过滤，确保数据不丢失 [[modules/test-suite]]。
-*   **孤儿任务接管**：宿主重启后，自动检测并接管停更超过 5 分钟的陈旧 Foreign Job，防止任务永久挂起 [[modules/test-suite]]。
+### `src/client.js` (前端 UI)
 
-## Build/Test Process
+**组件**
+*   **`CodewikiCard`**: 设置卡片，依赖 `ctx.configForms.get(NS)` 读写配置 [[client.js ~250]]。
+    *   `save()`: 校验 `maxConcurrency` (1-8) 和 `batchThinkingBudget` (0-32768)，使用乐观锁 `snapshot.revision` 防止冲突 [[client.js ~290-315]]。
+*   **`CodewikiPanel`**: 侧边栏面板，每 2s 轮询 `/api/codewiki/jobs` [[client.js ~430]]。
+    *   `ReposTab`: 轮询 `/api/codewiki/repos`，展示仓库状态，支持手动触发编译或排除路径 [[client.js ~380-410]]。
+    *   `jobCard`: 渲染单个 Job 详情，包含阶段条、进度条、吞吐徽标、用量信息、活动日志 [[client.js ~460-520]]。
+    *   `stageBar`: 六阶段步骤条，根据 `job.stage` 高亮当前/已完成/失败阶段 [[client.js ~330-360]]。
+    *   `Spark`: SVG 折线图组件，基于 `sparkRef` 数据绘制，仅当有至少 2 个有效 tps 点时绘制 [[client.js ~310-320]]。
 
-**1. 自动化测试套件覆盖全链路**
-测试不仅覆盖单元测试，还涵盖集成、编排和内容完整性校验，形成闭环。
-*   **编译执行链自检 (`test-batch.mjs`)**：验证纯函数逻辑、Mock 网络请求、本地规划及凭证解析，覆盖 `estimateTokens`、`collectSources` 等核心算法 [[modules/test-suite]]。
-*   **服务化编排冒烟测试 (`test-orchestration.mjs`)**：验证 `dsh-codewiki` 插件的服务生命周期，包括提交、阶段机推进、并发控制、面板端点及持久化恢复 [[modules/test-suite]]。
-*   **Wiki 内容完整性校验 (`test-wiki-anchors.mjs`)**：静态扫描生成的 Markdown 文件，验证源码引用行号的准确性，拦截幻觉行号 [[modules/test-suite]]。
-*   **入口自动生成测试 (`test-wiki-entry.mjs`)**：验证 `ensureWikiEntry` 生成逻辑及路径规范化函数的正确性 [[modules/test-suite]]。
+### 测试文件
 
-**2. 跨平台路径兼容性验证**
-专门设计测试用例验证 Windows 和 MSYS 环境下的路径处理，确保 CLI 工具的健壮性。
-*   **MSYS 路径转换**：验证 `cw.execute` 在处理 `/e/x` 类 MSYS 路径时能正确转换为 Windows 形式并执行 [[modules/test-suite]]。
-*   **Windows 路径状态**：验证 `cw status` 在不同 CWD 形态下返回真实的三态结果，而非 "No wiki found" [[modules/test-suite]]。
+*   **`test/test-batch.mjs`**: 单元测试脚本，验证纯函数逻辑（token 估算、任务装配、并发池执行、本地规划、横切装填、凭证解析） [[test-batch.mjs]]。
+*   **`test/test-cwd-paths.mjs`**: 验证 `cw` 工具在不同操作系统路径格式下的兼容性修复 [[test-cwd-paths.mjs]]。
+*   **`test/test-orchestration.mjs`**: 全功能冒烟测试，模拟宿主环境，验证完整生命周期 [[test-orchestration.mjs]]。
+*   **`test/test-wiki-anchors.mjs`**: 校验 Wiki 文章中引用的源码行号锚点的真实性 [[test-wiki-anchors.mjs]]。
+*   **`test/test-wiki-entry.mjs`**: 测试 `CodeWiki.md` 入口自动生成及 Windows 路径规范化 [[test-wiki-entry.mjs]]。
 
-**3. 运行时工件与日志分析**
-通过解析 `.tmp-test-*.log` 和 `watcher2.log` 等运行时工件，验证后台任务的真实行为。
-*   **批量执行日志**：`.tmp-test-batch.log` 记录了 59 个通过的测试用例，详细展示了 Token 估算、源码收集、任务装配及实时任务执行的细节 [[modules/runtime-artifacts]]。
-*   **编排日志**：`.tmp-test-orchestration.log` 记录了高级别的工作流，如 Wiki 维护提醒注入、会话唤醒及面板 API 交互 [[modules/runtime-artifacts]]。
+## Architecture
 
-## Directory & Structure Conventions
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                        Host Environment                       │
+│  (Cordis Plugin System, Git CLI, File System)                │
+└───────────────┬───────────────────────────────┬──────────────┘
+                │                               │
+                ▼                               ▼
+┌─────────────────────────┐       ┌─────────────────────────┐
+│      index.js           │       │      client.js          │
+│  (Backend / Logic)      │       │  (Frontend / UI)        │
+│                         │       │                         │
+│  - apply(ctx, config)   │◄─────►│  - CodewikiCard         │
+│  - createJobService     │  API  │  - CodewikiPanel        │
+│  - tickArticles         │       │                         │
+│  - wakeCompileSession   │       │  Polls:                 │
+│  - progressView         │       │  GET /jobs (2s)         │
+│  - excludedItem         │       │  GET /repos (10s)       │
+│  - normalizeCwd         │       │                         │
+└───────────────┬─────────┘       └─────────────────────────┘
+                │
+                ▼
+┌─────────────────────────┐
+│   LLM Providers         │
+│  (DashScope/Bailian)    │
+│                         │
+│  - runRealtimeTasks     │
+│  - localPlan            │
+│  - packArticles         │
+└─────────────────────────┘
+```
 
-**1. 模块化源码结构**
-核心业务逻辑集中在 `index.js`（后端/宿主侧）和 `client.js`（浏览器端 UI），通过 `package.json` 的 `exports` 字段进行子路径导出。
-*   **`index.js`**：负责 CodeWiki CLI 封装、编译流水线编排、Web API 接口提供及插件应用逻辑 [[modules/core-application]]。
-*   **`client.js`**：负责 React UI 实现，包括设置表单、侧边栏面板及进度监控组件 [[modules/core-application]]。
+## Data Flow
 
-**2. 测试文件组织**
-测试文件独立于源码，位于 `modules/test-suite.md` 描述的集合中，每个测试文件对应一个特定的验证领域。
-*   **`test-batch.mjs`**：聚焦底层工具函数和 Mock 逻辑。
-*   **`test-cwd-paths.mjs`**：聚焦路径兼容性。
-*   **`test-orchestration.mjs`**：聚焦服务生命周期和阶段机。
-*   **`test-wiki-anchors.mjs` / `test-wiki-entry.mjs`**：聚焦 Wiki 内容生成和校验 [[modules/test-suite]]。
+1.  **用户触发**: 用户调用 `codewiki_generate` 或 `cw compile`。
+2.  **前置检查**:
+    *   `normalizeCwd` 处理 Windows/MSYS 路径差异 [[index.js ~2500]]。
+    *   `isExcluded` 检查排除清单，若命中则报错并返回命中项原文 [[index.js ~2400]]。
+    *   `ensureWikiEntry` 确保入口文件存在 [[index.js ~10]]。
+3.  **Job 创建与持久化**:
+    *   创建 Job 对象，写入 `JOBS_FILE`。
+    *   高并发场景下，共享同一 `jobId`，通过 `flush` 合并状态 [[test-orchestration.mjs ~658]]。
+4.  **阶段机推进 (Tick Loop)**:
+    *   `plan`: 主模型路由。若有 `sessionId` 且 `ctx.llm.stream` 可用，走主模型；否则降级至百炼批量通道 [[test-orchestration.mjs ~316]]。
+    *   `articles`: `prepareArticleTasks` 装配 Prompt。若单文件超预算，升档至 200k；若连 200k 都无法装下，标记为 `oversized` 或拆分为观察批 [[test-batch.mjs ~55-90]]。
+    *   `crosscut`: `packArticles` 处理横切输入，若超预算则拆分为观察任务 map + 合成批 reduce [[test-orchestration.mjs ~448]]。
+    *   `review`: 审校员校对，标记 `PROOFED` [[test-orchestration.mjs ~416]]。
+    *   `index`: 生成 `_index.md`，修复链接路径 [[test-wiki-entry.mjs ~10]]。
+5.  **终态处理**:
+    *   `onSettled` 回调触发 `wakeCompileSession`，静默跳过无 `sessionId` 或 `steer` 抛错场景 [[index.js ~2100]]。
+    *   `commitHintText` 比较编译时间与 git 提交时间，决定是否注入提醒 [[index.js ~2000]]。
+    *   `knownRepos` 登记成功编译的仓库 [[test-orchestration.mjs ~766]]。
+6.  **前端反馈**:
+    *   `client.js` 轮询 `/api/codewiki/jobs`，获取 `tps`, `stageTimings`, `usage` [[client.js ~430]]。
+    *   计算 EWMA 速率估算 ETA，绘制 Sparkline [[client.js ~420-435]]。
 
-**3. 文档与元数据管理**
-静态文档和配置信息集中管理，确保项目元数据的准确性和可追溯性。
-*   **`CHANGELOG.md`**：遵循 Keep a Changelog 风格，记录从 v0.1.0 到 v0.8.5 的完整演进历史 [[modules/documentation]]。
-*   **`CodeWiki.md`**：插件自身的 Wiki 入口，定义代码库结构，供 `codewiki_generate` 编译使用 [[modules/documentation]]。
-*   **`package.json` & `cordis.patch.yml`**：声明依赖、引擎要求及插件挂载配置 [[modules/configuration-and-metadata]]。
+## Connections
 
-## Architectural Patterns
+*   本模块与 [[core-application]] 紧密相关，后者提供底层工具函数。
+*   本模块与 [[test-suite]] 共享测试基础设施和 Mock 逻辑。
+*   本模块与 [[configuration-and-metadata]] 通过 `package.json` 和 `cordis.patch.yml` 进行元数据交换。
+*   本模块与 [[runtime-artifacts]] 通过日志文件交互，用于调试和分析。
 
-**1. 提交-异步推进模式 (Submit-Async-Push)**
-用户调用 `codewiki_generate` 后立即返回 Job ID，后台服务通过 `tick()` 循环自动推进阶段机，无需子代理干预。
-*   **阶段机流程**：`plan` → `articles` → `crosscut` → `review` → `index` → `done` [[modules/core-application]]。
-*   **持久化恢复**：Job 状态持久化到 `JOBS_FILE`，宿主重启后可自动重跑至终态 [[modules/test-suite]]。
+## Known Issues
 
-**2. 并发控制与资源隔离**
-通过硬编码的并发上限和分布式锁，确保多实例运行时的安全性。
-*   **并发上限**：`CONCURRENCY_HARD_CAP` 设为 8，`maxConcurrency` 硬顶为 8（原描述“2”有误，源码中 maxConcurrency 默认值即 CONCURRENCY_HARD_CAP=8，且 Config 描述为 1–8，硬顶 8。注：源码中 `maxConcurrency` 配置项默认值为 `CONCURRENCY_HARD_CAP`，且描述为“编译请求并发上限（1–8），硬顶 8”。文中提到“2（子代理）”是旧版或误解，源码中并未限制子代理为 2，而是编译请求池为 8。修正归属：这是编译请求池的并发控制）。
-*   **文件锁**：使用 `JOBS_LOCK_FILE` 防止多实例冲突，锁有过期机制（60s）[[modules/core-application]]。
-
-**3. 面板轮询与实时反馈**
-前端通过定时轮询后端 API 获取最新状态，提供实时的进度和日志反馈。
-*   **轮询端点**：客户端定期 GET `/api/codewiki/jobs` 和 `/api/codewiki/repos` [[modules/core-application]]。
-*   **进度查询工具**：`codewiki_progress` 工具支持按 cwd/jobId 过滤，显示百分比和明细 [[modules/test-suite]]。
+1.  **`wakeCompileSession` 静默失败**: 如果 `sessionId` 缺失、会话不在注册表或 `steer` 抛错，函数静默跳过，不抛出异常。这是设计使然，避免阻塞主流程 [[index.js ~2100]]。
+2.  **`commitHintText` 的时间戳派生**: 依赖 `git log` 和 `jobs.json` 的时间戳，而非持久化状态。如果 `git log` 为空或读 `jobs` 失败，则不提醒 [[index.js ~2000]]。
+3.  **`excludedItem` 的路径归一化**: 使用 `samePath` 进行归一化，确保跨平台兼容性。子目录场景下，父目录的排除项也会命中 [[index.js ~2400]]。
+4.  **大文件分割的幂等性**: `prepareArticleTasks` 在分割时，如果单文件占满分则落回硬限制大档，确保行为一致性。合成任务的重建依赖于持久化的 `splitFor` 和 `composePlan` 元数据 [[test-orchestration.mjs ~478]]。
+5.  **主模型路由降级**: 若 `ctx.llm.stream` 不可用（严格语义未 inject 抛错）或输出非法 JSON，自动降级回百炼批量通道。无 `sessionId` 时跳过主模型，直接走批量 [[test-orchestration.mjs ~316]]。
+6.  **Registry 异常防御**: `workspaceRegistry.list()` 抛错时，Jobs/Repos 端点降级为不过滤，保证 API 可用性，而非 500 错误 [[test-orchestration.mjs ~826]]。

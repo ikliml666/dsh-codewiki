@@ -1330,19 +1330,23 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // 主模型规划：直接继承发起会话当前对话的模型——优先取会话已路由的 requestHeader
-  // config（{provider, model}），未路由过则退回 agent.options（创建时的路由），
-  // 与 compaction 的 latest ?? agentTarget 同序。经宿主 llm 服务单轮流收集。
+  // 主模型规划：直接继承发起会话当前对话的模型。路由与主线 compaction 的
+  // latest ?? agentTarget 同序：会话已路由的 requestHeader config 优先，未路由
+  // 退回 agent.options（创建时的路由）。经宿主 llm 服务单轮流收集。
   // 返回模型输出文本；不可用（无 agent/无 llm/无路由/请求失败）返回 null 走批量回退。
   async function runMainModelPlan(job, prompt) {
     try {
       if (!job.sessionId || !agentsRef || typeof agentsRef.get !== 'function') return null
       let agent
       try { agent = agentsRef.get(job.sessionId) } catch { return null }
-      const routed = agent?.session?.requestHeader?.()?.config
-      const provider = routed?.provider || agent?.options?.provider || ''
-      const model = routed?.model || agent?.options?.model || ''
-      if (!provider || !model) return null
+      const latest = agent?.session?.requestHeader?.()?.config
+      const target = latest?.provider && latest?.model
+        ? { provider: latest.provider, model: latest.model }
+        : agent?.options?.provider && agent?.options?.model
+          ? { provider: agent.options.provider, model: agent.options.model }
+          : undefined
+      if (!target) return null
+      const { provider, model } = target
       const llm = llmRef
       if (!llm || typeof llm.stream !== 'function') {
         note(job, '主模型规划不可用（llm 服务未注入），降级百炼批量规划')
