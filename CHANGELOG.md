@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.5 — 2026-10-18
+
+### 适配 DSH 0.2.1-rc.2：wake/plan source 形态 + engines.dsh 声明
+
+- 背景：宿主升级 0.2.0-rc.2 → 0.2.1-rc.2（hostProtocolVersion 4，asar 内 dsh commit 59e68c58）。
+- source 形态（1e6fbe5，随本版一并测试收口）：index.js 两处 createUserMessage 的 source 从 `{kind:'plugin',plugin:'codewiki'}` 改为 `{kind:'plugin:codewiki'}`（wakeCompileSession 的 agent.steer 与 runMainModelPlan 的 llm.stream messages）。asar 核实：user/message 校验仅要求 source.kind 非空字符串（dsh agent-loop.js:1205），PLUGIN_RECORD_TYPE 正则只管插件记录事件类型名，不约束 source.kind；`plugin:codewiki` 两边皆合法。
+- 补 `"engines": {"dsh": ">=0.2.0-rc.0"}`（package.json）：0.2.1-rc.1 起第三方插件兼容性优先按 engines.dsh 判定（dsh-app-boot plugin-compatibility.js：engines.dsh 为 semver 范围、includePrerelease:true、声明后单独决定兼容性并忽略 dsh-* peerDependencies；未声明沿用旧规则）。实测 `0.2.1-rc.2` 与 `0.2.0-rc.2` 均满足该范围。
+- 测试：test-orchestration.mjs:343、:494 断言改新形态 `source?.kind === 'plugin:codewiki'`；test-batch/orchestration/wiki-entry/cwd-paths 全 EXIT=0；test-wiki-anchors 36 败为 .codewiki 行号锚过期，由本次 codewiki_generate 重编译刷新。
+- 宿主面实测存活（本会话即 0.2.1-rc.2 宿主）：cw/codewiki_generate/codewiki_update/codewiki_progress 4 工具注册生效；/api/codewiki/jobs、/repos 200（webServer exact + loopback guard + workspaceRegistry 生效）；【CodeWiki 维护】systemPrompt.section 注入正常。浏览器半侧面板待用户目验。
+- 版本 0.8.5。
+
 ## 0.8.4 — 2026-10-15
 
 ### 文章阶段超预算分割：观察批 map + 合成请求 reduce（避开 32k 三倍价，用户需求）

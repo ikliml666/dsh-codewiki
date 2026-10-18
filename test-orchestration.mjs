@@ -340,7 +340,7 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   const t1 = String(steered[0]?.content?.[0]?.text ?? '')
   check(t1.includes('CodeWiki 编译完成·请提交改动') && t1.includes('job-w1'), '完成消息含标题与任务 id')
   check(t1.includes('.codewiki') && t1.includes('docs(wiki)'), '完成消息含提交动作指引')
-  check(steered[0]?.source?.kind === 'plugin' && steered[0]?.source?.plugin === 'codewiki', 'source 标记 plugin/codewiki')
+  check(steered[0]?.source?.kind === 'plugin:codewiki', 'source 标记 plugin:codewiki (v4)')
   wakeCompileSession({ ...doneJob, error: '百炼凭证失效' }, 'failed', fakeAgents)
   const t2 = String(steered[1]?.content?.[0]?.text ?? '')
   check(t2.includes('CodeWiki 编译失败') && t2.includes('百炼凭证失效'), 'failed 消息含失败原因')
@@ -491,7 +491,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(e2eSteers.length === 1 && e2eSteers[0].id === 'sess-e2e', '编译终态实时唤醒发起会话（exec.agent.id → steer）')
     const wakeText = String(e2eSteers[0]?.m?.content?.[0]?.text ?? '')
     check(wakeText.includes('CodeWiki 编译完成·请提交改动') && wakeText.includes(r1.jobId), '唤醒消息为完成文案且含任务 id')
-    check(e2eSteers[0]?.m?.source?.kind === 'plugin' && e2eSteers[0]?.m?.source?.plugin === 'codewiki', '唤醒消息 source=plugin/codewiki')
+    check(e2eSteers[0]?.m?.source?.kind === 'plugin:codewiki', '唤醒消息 source=plugin:codewiki (v4)')
     const w = job.wikiPath
     check(fs.existsSync(path.join(w, 'modules', 'core.md')), 'modules/core.md 落盘')
     check(fs.existsSync(path.join(w, 'modules', 'util.md')), 'modules/util.md 落盘')
