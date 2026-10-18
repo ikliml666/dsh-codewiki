@@ -3,7 +3,7 @@ title: cw-binary-source-lost
 type: learning
 source_files:
   - index.js
-tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
+tags: [vendor, rust, cw-cli, path-separator, windows, lesson, fork]
 ---
 
 ## Overview
@@ -16,10 +16,10 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson]
 
 以下函数负责在插件层拦截 Windows 反斜杠污染，确保 `_index.md` 链接与 stale 任务路径跨平台安全：
 
-- **`normalizeArticlePath(p)`** (`index.js:139`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
-- **`parseStatus(stdout)`** (`index.js:153`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
-- **`normalizeIndexLinks(cwd)`** (`index.js:143`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
-- **`ensureWikiEntry(cwd, language)`** (`index.js:186`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
+- **`normalizeArticlePath(p)`** (`index.js:126`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
+- **`parseStatus(stdout)`** (`index.js:137`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
+- **`normalizeIndexLinks(cwd)`** (`index.js:119`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
+- **`ensureWikiEntry(cwd, language)`** (`index.js:143`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
 - **`tickIndex(job)`** (`index.js:1459`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
 
 ### 编排服务与编译流水线

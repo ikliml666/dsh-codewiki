@@ -11,84 +11,122 @@ tags: [wiki-generation, job-service, bailian-endpoint, pipeline, observability]
 
 `wiki-generation-flow` 描述了 CodeWiki 插件从触发编译到最终生成完整文档仓库的端到端自动化流程。该概念核心在于 `index.js` 模块中的 `createJobService` 所驱动的阶段机（Stage Machine），它将复杂的文档生成任务分解为规划、文章生成、横切合成、审校和索引五个主要阶段，全部模型环节走百炼普通入口（chat/completions，后台并发池，任务输入压在 ≤32k token 低价档）。整个流程由后台 Tick 循环异步推进，前端通过 `client.js` 提供的 API 进行状态轮询和可视化监控。
 
-## Involved Modules
+## Key Components
 
-1.  **`core-logic`**: 流程的核心引擎。负责定义 `codewiki_generate` 工具、管理 `JobService` 实例、执行阶段转换逻辑（Tick Handlers）、调用百炼 API 以及协调 Rust CLI `cw`。
-2.  **`client-interface`**: 用户交互层。提供侧边栏面板 (`CodewikiPanel`) 和设置表单 (`CodewikiCard`)，通过轮询后端 API 展示进度、控制任务并同步配置。
-3.  **`documentation-and-config`**: 元数据与入口层。定义了 `CodeWiki.md` 的生成目标、插件配置结构以及变更日志历史，确保输出符合 `<repo>/.codewiki/` 约定。
+### 1. Job Service & Stage Machine (`index.js`)
+负责管理编译任务的整个生命周期，包括创建、状态推进、结果结算和持久化。
 
-## Flow
+*   **`createJobService(config, onSettled)`** (行 785-1234): 工厂函数，返回包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法的对象。内部维护 `jobs` 数组、`batchRuns`/`batchResults`/`batchAborters` 映射表以及锁机制。
+*   **`tick()`** (行 1236-1293): 主循环逻辑。每 `TICK_MS` (默认 10s) 执行一次。负责获取锁、同步取消标志、遍历活跃 Job 并调用对应的 `STAGE_HANDLER`。处理孤儿接管（Orphan Takeover）和脏标记合并（Dirty Merge）。
+*   **`STAGE_HANDLER`** (行 1225-1234): 阶段处理器映射表，将阶段名映射到具体的处理函数：
+    *   `plan`: `tickPlan` (行 985-1017)
+    *   `articles`: `tickArticles` (行 1019-1106)
+    *   `crosscut`: `tickCrosscut` (行 1108-1176)
+    *   `compose`: `tickCompose` (行 1178-1190)
+    *   `review`: `tickReview` (行 1203-1223)
+    *   `index`: `tickIndex` (行 1225-1234)
+*   **`settleJob(job)`** (行 863-903): 阶段收割统一入口。检查 `batchResults` 是否有结果；若执行器丢失（宿主重启），则根据持久化的 `job.tasks` 中的 `batchPrompt` 快照自动重跑当前阶段。
+*   **`startBatchChatRun(job, prepared)`** (行 923-963): 启动后台并发池执行批量请求。使用 `runRealtimeTasks` 打百炼普通入口，结果存入 `batchResults`，更新 `batchProgress` 和 TPS 采样。
+*   **`submitBatchFor(job, prepared)`** (行 965-983): 阶段提交入口。计算用量，设置 `batchRef` 和 `tasks` 快照，调用 `startBatchChatRun`。
+*   **`localReview(job)`** (行 1192-1201): 本地核对。检查 frontmatter 必填字段及 source_files 存在性。
 
-### 1. 触发与初始化 (Trigger & Init)
-*   **入口**: 用户调用 `codewiki_generate` 工具或自动调度器 (`autoScan`) 触发。
-*   **状态检查**: `core-logic` 执行 `cw status` 判断仓库状态（missing/uncompiled/clean/stale）。
-*   **Job 创建**:
-    *   若存在活跃任务，返回现有 Job ID。
-    *   否则，创建新 Job，解析凭证（`resolveBatchApiKey`），初始状态设为 `plan` 或 `articles`，并持久化至 `JOBS_FILE`。
+### 2. Token Budgeting & Source Collection (`index.js`)
+负责将源码内容装入 LLM 请求，严格控制 Token 预算以优化成本。
 
-### 2. 阶段机推进 (Pipeline Execution)
-后台 `tick()` 循环每 10 秒（`TICK_MS`）检查所有活跃 Job 的状态并推进：
+*   **`estimateTokens(text)`** (行 168-179): 粗略估算 Token 数。CJK 字符 ≈ 1 token，其余 ≈ 3.5 字符/token。
+*   **`collectSources(cwd, files, budget)`** (行 263-290): 同步收集源文件。按 `BATCH_TOKEN_BUDGET` (28k) 装填，超出则跳过或升档至 `BATCH_TOKEN_HARD_LIMIT` (200k)。返回 `{ text, skipped, oversized }`。
+*   **`prepareArticleTasks(tasks, { cwd, language })`** (行 353-422): 装配文章任务。处理分割逻辑：若单请求预算不足，拆分为多个观察批（_split/ 任务），后续再合成。
+*   **`packArticles(articles, budget)`** (行 428-442): 横切输入装配。将多篇模块文章打包，超预算时截断头部。
 
-*   **Phase 1: Plan (规划)**
-    *   扫描源码文件 (`scanRepoFiles`)，应用黑名单。
-    *   提交本地规划任务，解析 JSON 计划，确定模块分组。
-    *   进入 `articles` 阶段。
+### 3. Prompt Templates (`index.js`)
+定义各阶段的系统提示词，确保模型输出格式一致。
 
-*   **Phase 2: Articles (文章生成)**
-    *   根据计划收集源文件内容 (`collectSources`)。
-    *   **Token 预算检查**: 估算 Token 数，单文件超过 `BATCH_TOKEN_HARD_LIMIT` (200k) 装不进大档时转入超大兜底。
-    *   **阶段提交**: `submitBatchFor` 启动 `startBatchChatRun` 后台并发池，打百炼普通入口（`dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`）。
-    *   **超大兜底**: 装不进 200k 大档的单文件任务，使用 `runRealtimeTasks` 并发池原样内联该文件继续执行。
-    *   **落盘**: 结果解析后写入 `.codewiki/modules/`。
-    *   进入 `crosscut` 阶段。
+*   **`batchPlannerPrompt(fileLines)`** (行 468-484): 规划 prompt，要求输出 JSON 模块分组。
+*   **`batchArticlePrompt(...)`** (行 295-317): 文章生成 prompt，包含 `articleFormatSection`。
+*   **`batchArchitecturePrompt(...)`** (行 452-455): 架构总览 prompt。
+*   **`batchProofreadPrompt(...)`** (行 507-526): 校对 prompt，要求核对源码一致性。
+*   **`articleFormatSection()`** (行 448-466): 文章格式规范，强制要求 frontmatter 和特定章节结构。
 
-*   **Phase 3: Crosscut (横切合成)**
-    *   读取已生成的模块文章。
-    *   打包文本 (`packArticles`)，若超预算则截断。
-    *   提交横切任务（架构 `_architecture.md`、模式 `_patterns.md`、概念等）。
-    *   同样走后台并发池执行。
-    *   落盘至 `.codewiki/` 根目录。
-    *   进入 `review` 阶段。
+### 4. Web Server & API (`index.js`)
+提供后端 API 供前端面板查询和控制。
 
-*   **Phase 4: Review (审校)**
-    *   本地核对文件一致性。
-    *   提交校对任务 (`batchProofreadPrompt`)，修正错误。
-    *   落盘更新后的文章。
-    *   进入 `index` 阶段。
+*   **`installWebServer(ctx, service, extra)`** (行 1580-1732): 注册回环地址 API 端点。
+    *   `GET /api/codewiki/jobs`: 返回所有 Job 摘要 (`jobSummary`)，支持工作区过滤。
+    *   `POST /api/codewiki/control`: 处理 `cancel`, `refresh`, `compile` 动作。
+    *   `GET /api/codewiki/repos`: 返回已编译仓库的状态总览，含自动调度信息。
 
-*   **Phase 5: Index (索引与入口)**
-    *   执行 `cw index` 重建索引。
-    *   执行 `cw meta update` 更新元数据。
-    *   若缺失，调用 `ensureWikiEntry` 自动生成 `CodeWiki.md`。
-    *   Job 状态标记为 `done`。
+### 5. Frontend Panel (`client.js`)
+浏览器侧 React 组件，负责 UI 渲染和数据交互。
 
-### 3. 前端监控与控制 (Frontend Monitoring)
-*   **轮询**: `client-interface` 中的 `CodewikiPanel` 每 2000ms 调用 `GET /api/codewiki/jobs`。
-*   **渲染**: 解析 Job 数据，计算总进度权重 (`STAGE_WEIGHTS`)，渲染六阶段步骤条、吞吐量徽标和用量信息。
-*   **控制**: 用户可通过 UI 发起取消 (`apiPost(CONTROL_PATH, { action: 'cancel' })`) 或刷新操作。
+*   **`CodewikiPanel`** (行 882-1098): 主面板组件。包含“总览”、“任务”、“设置”三个标签页。
+    *   **轮询逻辑**: `React.useEffect` 中每 `POLL_MS` (2000ms) 调用 `apiGet(JOBS_PATH)`。
+    *   **状态解析**: 计算整体进度 (`overallPct`)，基于 `STAGE_WEIGHTS`。
+    *   **渲染**: 步骤条 (`stageBar`)、吞吐量徽标 (`throughputBadge`)、任务列表、错误提示。
+*   **`ReposTab`** (行 760-880): 总览标签页组件。展示仓库列表、排除状态、自动调度器状态。
+*   **`CodewikiCard`** (行 331-520): 设置表单组件。读写 `configForms`，支持保存/放弃更改。
+*   **`apiGet` / `apiPost`** (行 331-348): 封装 Fetch 请求，处理 JSON 响应和错误。
 
-### 4. 异常与恢复 (Resilience)
-*   **宿主重启重跑**: 请求随连接生死，无服务端持久批次。执行器丢失时按 `job.tasks` 持久化的 `batchPrompt` 快照自动重跑当前阶段（幂等：文章重写覆盖）。
-*   **孤儿接管**: 若某 Job 长时间无心跳（>5分钟），其他实例可接管其任务。
-*   **并发冲突**: 多实例提交同一仓库时，通过磁盘合并 (`mergeFromDisk`) 避免任务丢失。
+## Architecture
 
-## Implementation Map
+```text
+┌─────────────────────┐       ┌──────────────────────┐       ┌─────────────────────┐
+│  Trigger (Tool/     │       │  Core Logic           │       │  Persistence        │
+│  AutoScan)          │──────▶│  createJobService     │──────▶│  JOBS_FILE          │
+│                     │       │  - tick()             │       │  REPOS_FILE         │
+│  codewiki_generate  │       │  - STAGE_HANDLER      │       │  Lock File          │
+│  codewiki_update    │       │  - submitBatchFor     │       └─────────────────────┘
+│                     │       │  - settleJob          │                 │
+└─────────────────────┘       │  - runMainModelPlan   │       ┌─────────────────────┐
+                              └──────────────────────┘       │  Bailian Endpoint   │
+                              │                             │  (dashscope)        │
+                              │  startBatchChatRun          │  chat/completions   │
+                              ▼                             └─────────────────────┘
+┌─────────────────────┐       ┌──────────────────────┐
+│  Frontend Panel     │◀──────│  Web Server API     │
+│  (client.js)        │       │  installWebServer   │
+│  CodewikiPanel      │       │  - GET /jobs        │
+│  ReposTab           │       │  - POST /control    │
+│  CodewikiCard       │       └──────────────────────┘
+└─────────────────────┘
+```
 
-| 功能组件 | 实现位置 | 说明 |
-| :--- | :--- | :--- |
-| **Job Service 工厂** | `index.js:926-1491` | `createJobService` 函数，包含所有阶段处理器和 Tick 循环逻辑。 |
-| **Tick 主循环** | `index.js:1493-1602` | `tick()` 方法，驱动阶段机状态转换。 |
-| **阶段处理器** | `index.js:1185-1491` | `tickPlan`(1179), `tickArticles`(1210), `tickCrosscut`(1295), `tickCompose`(1361), `tickReview`(1410), `tickIndex`(1453)。 |
-| **阶段执行器** | `index.js:1124-1163` | `startBatchChatRun`，后台并发池打百炼普通入口，结果进 `batchResults` 等收割。 |
-| **阶段提交** | `index.js:1165-1181` | `submitBatchFor`（阶段提交入口）。 |
-| **阶段结算** | `index.js:1054-1122` | `settleJob`，收割 batchResults；宿主重启按 batchPrompt 快照重跑。 |
-| **并发池执行** | `index.js:294-325` | `runRealtimeTasks`，唯一执行器，全部阶段请求走百炼普通入口。 |
-| **凭证解析** | `index.js:411-431` | `resolveBatchApiKey`，支持显式配置和宿主凭据库。 |
-| **面板后端 API** | `index.js:1968-2140` | `installWebServer`，注册 `/api/codewiki/jobs` 等端点。 |
-| **前端面板组件** | `client.js:882-1098` | `CodewikiPanel` React 组件，负责 UI 渲染和轮询。 |
-| **API 封装** | `client.js:331-348` | `apiGet` 和 `apiPost` 辅助函数，用于前后端通信。 |
-| **轮询间隔常量** | `client.js:22` | `POLL_MS = 2000`，定义前端刷新频率。 |
-| **阶段权重定义** | `client.js:684` | `STAGE_WEIGHTS` 对象，定义各阶段在总进度中的占比。 |
-| **只读查进度工具** | `index.js:1849-1966` | `progressToolDefinition`，`codewiki_progress` 工具：按 cwd/jobId 过滤 + taskList 完成百分比。 |
+## Data Flow
 
-行号基线：cb32fdb（0.8.1，新增排除项返回后；单值=函数/常量起始行，区间=函数体跨度）；后续大改动请重新核对。
+1.  **Submission**:
+    *   User calls `codewiki_generate`.
+    *   `generateToolDefinition.execute` checks `cw status`.
+    *   If valid, creates a new Job in `createJobService.submit`.
+    *   Job is persisted to `JOBS_FILE` with initial stage (`plan` or `articles`).
+
+2.  **Processing (Tick Loop)**:
+    *   `tick()` acquires lock and iterates active Jobs.
+    *   For each stage (e.g., `plan`), the corresponding handler (e.g., `tickPlan`) is called.
+    *   Handler prepares tasks (prompts + sources).
+    *   `submitBatchFor` starts `startBatchChatRun`.
+    *   `runRealtimeTasks` executes requests against Bailian API concurrently.
+    *   Results are stored in `batchResults`.
+
+3.  **Settlement**:
+    *   Next `tick()`, `settleJob` retrieves results from `batchResults`.
+    *   Results are tallied (`tally`) and written to disk if valid.
+    *   Job stage advances to the next phase.
+    *   If execution fails (e.g., host restart), `settleJob` detects missing results and retries using saved `batchPrompt` snapshots.
+
+4.  **Completion**:
+    *   Final stage `index` runs `cw index` and `cw meta update`.
+    *   Ensures `CodeWiki.md` entry exists.
+    *   Job marked as `done`.
+    *   Session wake-up message sent via `wakeCompileSession`.
+
+## Connections
+
+*   Relies on [[cw-cli-wrapper]] for local repository status checks and index management.
+*   Integrates with [[credential-resolver]] for secure API key retrieval.
+*   Provides data to [[panel-ui]] for real-time visualization.
+
+## Known Issues
+
+*   **Token Estimation**: `estimateTokens` is approximate; actual usage may vary slightly, potentially causing minor overages in strict tiers.
+*   **Host Restart Recovery**: While automatic retry exists, it relies on the persistence of `batchPrompt` in the job file. If the file is corrupted or manually edited, recovery may fail.
+*   **Concurrency Limits**: Hard cap of 8 concurrent requests per instance. High load may lead to queuing delays.
+*   **Large Files**: Files exceeding 200k tokens are dropped or handled via fallback mechanisms that may not preserve full context.

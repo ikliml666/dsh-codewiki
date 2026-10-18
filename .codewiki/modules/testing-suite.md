@@ -5,13 +5,12 @@ source_files:
   - test-batch.mjs
   - test-cwd-paths.mjs
   - test-orchestration.mjs
-  - test-wiki-entry.mjs
 tags: [测试, 批量处理, 编排, 路径处理]
 ---
 
 ## Overview
 
-`testing-suite` 是 CodeWiki 项目的核心验证层，由四个独立的 ESM 模块组成。它覆盖了从底层原子函数（Token 估算、源码装填）到高层服务化编排（阶段机、断点续查、并发控制）的全链路测试。该套件旨在确保在 Node.js ≥20 环境下，百炼普通入口编译流水线、工作目录路径规范化、以及 Wiki 入口生成的正确性。
+`testing-suite` 是 CodeWiki 项目的核心验证层，由三个主要的 ESM 模块组成。它覆盖了从底层原子函数（Token 估算、源码装填）到高层服务化编排（阶段机、断点续查、并发控制）的全链路测试。该套件旨在确保在 Node.js ≥20 环境下，百炼普通入口编译流水线、工作目录路径规范化、以及 Wiki 入口生成的正确性。
 
 ## Key Components
 
@@ -21,14 +20,14 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `estimateTokens` | 22-28 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
-| `collectSources` | 29-43 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
-| `prepareArticleTasks` | 44-73 | 任务装配。验证：prompt 含 mission/language/源码/旧文上下文、超大文件拆分（28k vs 200k）、oversized 转超大兜底。 |
-| `runRealtimeTasks` | 74-152 | 后台并发池（唯一执行器）。验证：并发执行、失败记账进 notes、keepInMemory 结果返回、失败不落盘。 |
-| `localPlan` | 153-165 | 本地规划兜底。验证：按顶层目录分组（src/root/docs）。 |
-| `packArticles` | 166-178 | 横切输入装填。验证：预算内整篇、超预算截断头部并标注、frontmatter 保留。 |
-| `scanRepoFiles` | 179-199 | 仓库勘探黑名单。验证：跳过 node_modules/.git/二进制/超大/空文件。 |
-| `resolveBatchApiKey` | 200-227 | 凭证解析链。验证：显式配置优先 > 宿主凭据库 > null 回退。 |
+| `estimateTokens` | 18-23 | CJK 与 ASCII 粗算 Token 数。验证：CJK 每字 1 token，ASCII ceil(字符数/3.5)。 |
+| `collectSources` | 26-42 | 源码装填与 Token 预算检查。验证：内联源码带标题、缺失文件标注、oversized 标志、skipped 列表。 |
+| `prepareArticleTasks` | 45-97 | 任务装配。验证：prompt 含 mission/language/源码/旧文上下文、超大文件拆分（28k vs 200k）、oversized 转超大兜底。 |
+| `runRealtimeTasks` | 100-175 | 后台并发池（唯一执行器）。验证：并发执行、失败记账进 notes、keepInMemory 结果返回、失败不落盘。 |
+| `localPlan` | 178-188 | 本地规划兜底。验证：按顶层目录分组（src/root/docs）。 |
+| `packArticles` | 191-203 | 横切输入装填。验证：预算内整篇、超预算截断头部并标注、frontmatter 保留。 |
+| `scanRepoFiles` | 206-224 | 仓库勘探黑名单。验证：跳过 node_modules/.git/二进制/超大/空文件。 |
+| `resolveBatchApiKey` | 231-262 | 凭证解析链。验证：显式配置优先 > 宿主凭据库 > null 回退。 |
 
 ### `test-cwd-paths.mjs`
 **文件**: `test-cwd-paths.mjs`
@@ -36,9 +35,9 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `cw.execute` (MSYS) | 30-46 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
-| `cw.execute` (Windows) | 47-58 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
-| `cw.execute` (Invalid) | 61-71 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
+| `cw.execute` (MSYS) | 46-58 | 验证 MSYS 路径（如 `/e/x`）归一化后能正确执行 `cw path`。 |
+| `cw.execute` (Windows) | 61-74 | 验证 Windows 路径（如 `E:/x`）下 `cw status` 返回真实三态而非 "No wiki found"。 |
+| `cw.execute` (Invalid) | 77-86 | 验证不存在的路径干净报错（`cwd 不存在`）。 |
 
 ### `test-orchestration.mjs`
 **文件**: `test-orchestration.mjs`
@@ -46,13 +45,13 @@ tags: [测试, 批量处理, 编排, 路径处理]
 
 | 组件/函数 | 行号区间 | 描述 |
 | :--- | :--- | :--- |
-| `makeCtx` | 34-97 | 构造宿主上下文 Mock。支持 inject 两种风格、credentials 模拟、workspaceRegistry 异常模拟。 |
-| `makeMockAgent` | 82-97 | 构造 Agent Mock。捕获 systemPrompt section 注册。 |
-| `makeFixtureRepo` | 98-111 | 创建 Git 仓库 Fixture。 |
-| `makeBatchMock` | 112-165 | Mock 百炼模型 API。按 custom_id 分发 plan/article/arch/patterns/concept/proof 应答。 |
-| `waitJob` | 166-195 | 轮询 JOBS_FILE 等待 Job 终态。 |
-| `fakeReq` / `fakeRes` | 181-194 | HTTP 请求/响应 Fake 对象构造器。 |
-| `apply` (System Prompt) | 195-225 | 验证 `.codewiki` 存在且根有 `CodeWiki.md` 时才注入提醒，否则为空。 |
+| `makeCtx` | 36-99 | 构造宿主上下文 Mock。支持 inject 两种风格、credentials 模拟、workspaceRegistry 异常模拟。 |
+| `makeMockAgent` | 102-116 | 构造 Agent Mock。捕获 systemPrompt section 注册。 |
+| `makeFixtureRepo` | 119-132 | 创建 Git 仓库 Fixture。 |
+| `makeBatchMock` | 135-188 | Mock 百炼模型 API。按 custom_id 分发 plan/article/arch/patterns/concept/proof 应答。 |
+| `waitJob` | 191-212 | 轮询 JOBS_FILE 等待 Job 终态。 |
+| `fakeReq` / `fakeRes` | 215-230 | HTTP 请求/响应 Fake 对象构造器。 |
+| `apply` (System Prompt) | 233-263 | 验证 `.codewiki` 存在且根有 `CodeWiki.md` 时才注入提醒，否则为空。 |
 | `codewiki_generate` (Full) | 353-384 | 全量编译验证：提交即返回、服务推进阶段机、终态 done、文章落盘、校对回写。 |
 | `codewiki_generate` (Big Wiki) | 385-414 | 大 Wiki 横切拆分：观察任务 map + 合成批 reduce，避免单次 prompt 超限。 |
 | `codewiki_generate` (Stale) | 448-470 | Stale 逐篇更新：仅更新声明了变更文件的关联文章。 |
@@ -70,14 +69,6 @@ tags: [测试, 批量处理, 编排, 路径处理]
 | `Strict Cordis` | 915-938 | 严格 cordis 语义：未 inject 服务属性访问即抛。 |
 | `Temp Cleanup` | 939-965 | Temp 残留清理：启动时移除 Temp 目录终态任务，保留活动与工作区任务。 |
 
-### `test-wiki-entry.mjs`
-**文件**: `test-wiki-entry.mjs`
-**用途**: `ensureWikiEntry` 入口自动生成单元测试。
-
-| 组件/函数 | 行号区间 | 描述 |
-| :--- | :--- | :--- |
-| `ensureWikiEntry` | 20-76 | 验证：缺失生成中文/英文入口、已有不覆盖、空 cwd 安全返回 false、幂等性。 |
-
 ## Architecture
 
 ```text
@@ -94,14 +85,14 @@ tags: [测试, 批量处理, 编排, 路径处理]
 │ • parseRes   │              │ • waitJob    │                │
 │ • collectSrc │              │ • apply      │                │
 │ • submitSett │              │   (StageMch) │                │
-└──────┬───────┘              └──────┬───────┘                │
-       │                            │                         ▼
-       ▼                            ▼               ┌─────────────────┐
-┌──────────────────────────────────────────────────┤  Shared Infra   │
-│                   Shared Infrastructure           ├─────────────────┤
-│  • globalThis.fetch (Mocked for API calls)       │  • fs/os/path   │
-│  • fs/os/path (Node Standard Lib)                │  • DSH_JOBS_... │
-│  • DSH_CODEWIKI_JOBS_FILE (Shared State)         └─────────────────┘
+└──────┬───────┘              └──────┬───────┘                ▼
+       │                            │               ┌─────────────────┐
+       ▼                            ▼               │  Shared Infra   │
+┌──────────────────────────────────────────────────┤ ├─────────────────┤
+│                   Shared Infrastructure           │  • fs/os/path     │
+│  • globalThis.fetch (Mocked for API calls)        │  • DSH_JOBS_... │
+│  • fs/os/path (Node Standard Lib)                 └─────────────────┘
+│  • DSH_CODEWIKI_JOBS_FILE (Shared State)          │
 └──────────────────────────────────────────────────┘
 ```
 
