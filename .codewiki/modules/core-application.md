@@ -1,7 +1,9 @@
 ---
 title: core-application
 type: module
-source_files: []
+source_files:
+  - index.js
+  - client.js
 tags: [CodeWiki, CLI, Pipeline, React, DeepSeek Harness]
 ---
 

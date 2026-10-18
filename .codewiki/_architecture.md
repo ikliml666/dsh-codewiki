@@ -1,191 +1,206 @@
 ---
-title: architecture
+title: system-architecture-overview
 type: architecture
 source_files: []
-tags: [architecture, system-design, flow, dependencies]
+tags: [architecture, overview, codewiki, dsh-plugin]
 ---
 
 ## Overview
 
-CodeWiki 是一个基于 Node.js 和 DeepSeek Harness (Cordis) 插件系统的自动化文档生成与管理系统。其核心目标是通过“零子代理”的批量流水线模式，对代码仓库进行全量扫描、规划、文章撰写、横切总结、校对及索引构建。系统采用宿主常驻服务（JobService）驱动异步任务，通过 Web API 向浏览器端侧边栏面板提供实时状态反馈。
+`dsh-codewiki` 是一个基于 DeepSeek Harness (DSH) 的插件系统，旨在为代码仓库提供自动化的 Wiki 编译、维护与文档生成能力。该系统采用“提交-异步推进”的架构模式，通过后台常驻服务（JobService）驱动阶段机，利用阿里云百炼（DashScope）API 进行大模型推理，最终在 `.codewiki/` 目录下生成结构化的 Markdown 文档。
 
-本架构文档旨在为未来 Agent 提供系统级视角，涵盖总框图、数据流向、依赖关系及各模块职责。
+系统核心由后端宿主逻辑 (`index.js`)、前端交互面板 (`client.js`)、自动化测试套件及静态配置元数据组成。它支持全量编译、增量更新、横切文章合成及行号锚点校验，并通过 Web API 暴露实时状态供 UI 轮询。
 
 ## System Overview
 
-系统由四个主要逻辑域组成：核心应用层（Host）、客户端交互层（Client）、运维与制品管理层（Ops），以及测试验证层（Test）。
-
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                        CodeWiki System Architecture                   │
-├──────────────────────┬──────────────────────────────┬─────────────────┤
-│   Host / Plugin Core │   Browser Client             │   Ops & Artifacts │
-│   (index.js)         │   (client.js)                │                 │
-│                      │                              │ • .gitignore    │
-│  ┌────────────────┐  │  ┌────────────────────────┐  │ • .probe3.txt   │
-│  │  JobService    │◄─┼──│  CodewikiPanel         │  │ • .orch-test-out│
-│  │  (Tick Loop)   │  │  │  (Polling UI)          │  │                 │
-│  │                │  │  │                        │  │                 │
-│  │  Stage Machine │  │  │  ReposTab              │  │                 │
-│  │  Plan/Article/ │  │  │  CodewikiCard          │  │                 │
-│  │  Crosscut/     │  │  │                        │  │                 │
-│  │  Review/Index  │  │  │  Polls:                │  │                 │
-│  └────────────────┘  │  │  - Jobs Status         │  │                 │
-│         ▲            │  │  - Repo State          │  │                 │
-│         │            │  └────────────────────────┘  │                 │
-│         ▼            │                              │                 │
-│  ┌────────────────┐  │                              │                 │
-│  │  Inference     │  │                              │                 │
-│  │  Layer         │  │                              │                 │
-│  │  (Bailian API) │  │                              │                 │
-│  └────────────────┘  │                              │                 │
-├──────────────────────┴──────────────────────────────┴─────────────────┤
-│                        External Dependencies                          │
-│  • DashScope API (Plain Endpoint)                                    │
-│  • CW CLI (Rust Binary for Index/Meta)                               │
-│  • File System (Persistence, Locking)                                │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-**核心职责说明：**
-1.  **Host Core**: 管理编译生命周期，执行阶段机状态转换，协调 LLM 推理与本地文件操作。
-2.  **Browser Client**: 提供可视化界面，轮询后端状态，允许用户干预（取消、配置修改）。
-3.  **Ops & Artifacts**: 定义版本控制边界，记录运行时探针状态及异常日志，确保环境可诊断性。
-
-## Data Flow
-
-数据流描述了从用户触发到最终 Wiki 落盘的完整路径，包括控制流和数据流。
-
-```text
-[User/Automation] 
-       │
-       ▼ POST /api/codewiki/control or Tool Call
-[codewiki_generate Tool]
-       │
-       ├──► Normalize CWD & Resolve Credentials
-       ├──► Run `cw status` (Check Repo State)
-       └──► Submit Job to JobService (Persist to Disk)
-               │
-               ▼ (Async Tick Loop, e.g., every 10s)
-        [JobService Tick]
-               │
-               ├──► Acquire Distributed Lock
-               ├──► Orphan Takeover Check
-               │
-               ▼ (Stage Handlers)
-        [Plan Stage] 
-               │ Scan Repo Files → Local Plan JSON
-               ▼
-        [Articles Stage]
-               │ Collect Sources → Batch Request (DashScope)
-               ▼ (Result Write-back)
-        [Crosscut Stage]
-               │ Synthesize Architecture/Patterns (Split if oversized)
-               ▼
-        [Review Stage]
-               │ Local Validation + Batch Proofreading
-               ▼
-        [Index Stage]
-               │ Run `cw index` & `meta update`
-               ▼
-        [Done/Cancelled]
-               │
-               ├───────────────────────────────────────────────┐
-               │                                               │
-               ▼                                               ▼
-        [File System Updates]                       [Web API Response]
-        (.codewiki/*.md)                            GET /api/codewiki/jobs
-               │                                   (JSON Summary)
-               ▼                                   │
-        [Wiki Entry Generated]                    ▼
-        (CodeWiki.md)                     [Browser Client Refresh]
-                                        (UI Update: Progress/Logs)
-```
-
-**关键数据点：**
-*   **Job State**: 持久化在磁盘 JSON 文件中，包含 stage, articles, usage, notes 等。
-*   **Stage Requests**: 包含源文件内联文本、Prompt 模板及 Token 预算信息。
-*   **API Keys**: 通过凭据库解析，不存储在 Job 状态中（脱敏处理）。
-
-## Dependency Graph
-
-展示了模块间的静态依赖方向。箭头表示“依赖于”或“调用”。
+系统整体分为三层：客户端层、宿主服务层和外部依赖层。
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Dependency Direction                        │
-├─────────────────────────────────────────────────────────────────────┤
+│                      Client Layer (Browser)                         │
 │                                                                     │
-│   @deepseek-ai/schemastery                                          │
-│           ▲                                                         │
-│           │                                                         │
-│   core-application (index.js)                                       │
-│           │                                                         │
-│           ├──► client.js (Browser UI)                               │
-│           │                                                         │
-│           ├──► test-batch.mjs (Unit Tests)                         │
-│           │                                                         │
-│           ├──► test-orchestration.mjs (Integration Tests)           │
-│           │                                                         │
-│           └──► test-wiki-*.mjs (Validation Tests)                   │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌────────────────┐  │
+│  │ CodewikiPanel    │   │ ReposTab         │   │ CodewikiCard   │  │
+│  │ (Jobs/Overview)  │   │ (Workspace List) │   │ (Settings Form)│  │
+│  └────────┬─────────┘   └────────┬─────────┘   └────────┬───────┘  │
+│           │                     │                       │          │
+│           └─────────────────────┴───────────────────────┤          │
+│                                                         ▼          │
+│                                             Polling / POST APIs  │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ HTTP (Loopback Only)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Host / Plugin Core (Node.js)                       │
 │                                                                     │
-│   git-and-ops-artifacts                                             │
-│           ▲                                                         │
-│           │ (Consumes Runtime Artifacts)                            │
-│           │                                                         │
-│   Test Suite & Core Application                                     │
-│           │                                                         │
-│           ▼                                                         │
-│   External Services:                                                │
-│   • DashScope API (Inference)                                       │
-│   • CW CLI (Local Execution)                                        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                   apply(ctx, config)                          │  │
+│  │  ├── createJobService()  (Tick Loop, Persistence)            │  │
+│  │  ├── installWebServer()  (/api/codewiki/jobs, control)       │  │
+│  │  ├── registerTools()     (cw, codewiki_generate, progress)   │  │
+│  │  └── installUpdateReminder() (System Prompt Injection)       │  │
+│  └───────────────────────────────────────────────────────────────┘  │
 │                                                                     │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                 Job Service (Stage Machine)                   │  │
+│  │                                                               │  │
+│  │  plan ► articles ► crosscut ► review ► index ► done           │  │
+│  │      │        │           │           │           │           │  │
+│  │      ▼        ▼           ▼           ▼           ▼           │  │
+│  │  scanRepo  collectSrc  synthesize  validate  cw index/meta    │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                 Shared Utilities & Config                     │  │
+│  │  • estimateTokens / collectSources / packArticles             │  │
+│  │  • resolveBatchApiKey / runRealtimeTasks                      │  │
+│  │  • Config (schemastery) / cordis.patch.yml                    │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ API Calls / CLI Execution
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                  External Dependencies                              │
+│                                                                     │
+│  ┌─────────────────────┐   ┌──────────────────────┐                │
+│  │ DashScope API       │   │ Local CW Binary      │                │
+│  │ (chat/completions)  │   │ (cli wrapper)        │                │
+│  │ • Planning          │   │ • status             │                │
+│  │ • Article Gen       │   │ • index              │                │
+│  │ • Crosscut Review   │   │ • meta update        │                │
+│  └─────────────────────┘   └──────────────────────┘                │
+│                                                                     │
+│  ┌─────────────────────┐                                           │
+│  │ File System         │                                           │
+│  │ • .codewiki/        │                                           │
+│  │ • jobs.json (State) │                                           │
+│  │ • CodeWiki.md       │                                           │
+│  └─────────────────────┘                                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**连接规则：**
-1.  `core-application` 是核心枢纽，依赖 `schemastery` 进行配置验证。
-2.  `test-suite` 直接依赖 `core-application` 的内部函数进行单元测试和集成测试。
-3.  `git-and-ops-artifacts` 不产生代码依赖，而是消费运行时产生的文件（`.log`, `.txt`），用于运维监控。
-4.  所有模块均间接依赖外部基础设施（文件系统、网络 API）。
+## Data Flow
+
+数据流主要包含控制流（Job 状态变更）、内容流（源码到 Wiki 的转换）和反馈流（UI 状态同步）。
+
+```text
+[User/AI Agent] 
+       │
+       ▼ (Execute Tool)
+[codewiki_generate] ──► [parseStatus] (Check Repo State)
+       │
+       ├─► [submit(job)] ──► Write to JOBS_FILE (Persistence)
+       │                     Start Tick Loop
+       │
+       ▼
+[JobService.tick()] (Polling Loop)
+       │
+       ├──► Stage: PLAN
+       │      ├── scanRepoFiles (Filter Blacklist)
+       │      ├── localPlan / MainModelPlan
+       │      └── Submit LLM Request (chat/completions)
+       │
+       ├──► Stage: ARTICLES
+       │      ├── collectSources (Token Budget Check)
+       │      ├── prepareArticleTasks (Split if Oversized)
+       │      ├── runRealtimeTasks (Concurrent Pool)
+       │      └── Apply Task Result (Write .md files)
+       │
+       ├──► Stage: CROSSCUT
+       │      ├── Synthesize Architecture/Patterns
+       │      └── Handle Large Context (Map-Reduce Split)
+       │
+       ├──► Stage: REVIEW
+       │      ├── Validate Frontmatter & Anchors
+       │      └── LLM Correction
+       │
+       ├──► Stage: INDEX
+       │      ├── Run `cw index` & `meta update`
+       │      └── Ensure CodeWiki.md Entry
+       │
+       ▼
+[Job Status Update] ──► Wake Compile Session (Steer Message)
+       │
+       ▼
+[Client Polling] ◄── GET /api/codewiki/jobs
+       │
+       ▼
+[UI Refresh] (Progress Bars, Logs, Spreads)
+```
+
+## Dependency Graph
+
+模块间的依赖关系呈现为以 `core-application` 为核心，向上依赖配置与文档，向下依赖运行时产物与测试验证的结构。
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                   Configuration & Metadata                  │
+│  (package.json, cordis.patch.yml, .gitignore)               │
+│  Defines engines, dependencies (@deepseek-ai/schemastery),  │
+│  and DSH plugin registration hooks.                         │
+└──────────────┬──────────────────────────────────────────────┘
+               │ Imports / Hooks
+               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Documentation                             │
+│  (CHANGELOG.md, CodeWiki.md, README.md)                     │
+│  Static assets. CodeWiki.md serves as the bootstrap entry   │
+│  for the wiki compilation process.                          │
+└──────────────┬──────────────────────────────────────────────┘
+               │ Referenced by Compiler
+               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Core Application                          │
+│  (index.js, client.js)                                      │
+│  Contains JobService, Stage Handlers, Web Server,           │
+│  and Browser UI components.                                 │
+│                                                             │
+│  Dependencies:                                              │
+│  - @deepseek-ai/schemastery (Config Validation)             │
+│  - node:fs, path, child_process (File/Process Ops)          │
+│  - DashScope API (External LLM)                             │
+│  - cw Binary (External CLI)                                 │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ├──► Runtime Artifacts (Logs, Probes, Watchers)
+               │   (.probe3.txt, .tmp-test-*.log, watcher2.log)
+               │
+               └──► Test Suite (Validation & Mocking)
+                   (test-batch.mjs, test-orchestration.mjs, etc.)
+                   Verifies core logic, orchestration flow,
+                   and wiki anchor integrity.
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Module Roles
 
 ### 1. Core Application (`modules/core-application.md`)
-*   **角色**: 系统大脑。
-*   **职责**:
-    *   实现 `JobService`，负责任务的提交、状态机推进（Plan -> Articles -> Crosscut -> Review -> Index）及持久化。
-    *   提供 Web API 端点 (`/api/codewiki/jobs`, `/control`)。
-    *   封装 `cw` CLI 调用，处理路径规范化及状态解析。
-    *   管理 LLM 请求的后台并发池、Token 预算装填及结果处理（统一走百炼普通入口，无专用批量端点）。
-    *   注册 Cordis 工具 (`cw`, `codewiki_generate`, `codewiki_progress`)。
+**职责**：系统的业务逻辑中枢。
+*   **Host Side (`index.js`)**：实现 `createJobService`，管理 Job 的生命周期（提交、取消、列表）。包含完整的阶段机处理器（`tickPlan`, `tickArticles`, `tickCrosscut`, `tickReview`, `tickIndex`），负责调用 LLM API 和文件 I/O。提供 Web API 端点供前端查询。
+*   **Client Side (`client.js`)**：React 组件库，提供侧边栏面板（CodewikiPanel）、仓库总览（ReposTab）和设置卡片（CodewikiCard）。通过轮询 API 展示进度、吞吐量和日志。
 
-### 2. Browser Client (`modules/core-application.md` - `client.js`)
-*   **角色**: 用户交互界面。
-*   **职责**:
-    *   渲染侧边栏面板，展示任务进度、吞吐量徽标、错误日志。
-    *   轮询后端 API 获取最新 Job 状态。
-    *   提供设置卡片，允许用户修改配置（如启用/禁用、并发数、模型选择）。
-    *   支持任务取消操作。
+### 2. Configuration and Metadata (`modules/configuration-and-metadata.md`)
+**职责**：定义插件的静态结构和加载行为。
+*   **`package.json`**：声明 Node.js >=20 和 DSH >=0.2.0-rc.0 的环境要求，以及 `@deepseek-ai/schemastery` 依赖。
+*   **`cordis.patch.yml`**：定义 DSH 插件注册信息（ID: `codewiki`），指定入口文件和默认配置项（如 `binaryPath`, `defaultProvider`, `maxConcurrency`）。
+*   **`.gitignore`**：排除构建产物和临时日志。
 
-### 3. Git & Ops Artifacts (`modules/git-and-ops-artifacts.md`)
-*   **角色**: 运维边界与诊断层。
-*   **职责**:
-    *   通过 `.gitignore` 排除敏感数据、构建产物及日志，保持仓库清洁。
-    *   记录探针状态 (`.probe3.txt`) 和编排测试异常 (`.orch-test-out.txt`)，用于环境稳定性诊断。
-    *   定义二进制备份策略 (`bin/*.bak-*`)。
+### 3. Documentation (`modules/documentation.md`)
+**职责**：提供人类可读的项目信息和自举文档。
+*   **`CodeWiki.md`**：插件自身的 Wiki 入口，被编译器识别并生成为结构化文章。
+*   **`CHANGELOG.md`**：记录版本演进，特别是关于 Token 预算策略、批量通道切换和面板 UI 的变更。
 
-### 4. Test Suite (`modules/test-suite.md`)
-*   **角色**: 质量保障层。
-*   **职责**:
-    *   `test-batch`: 验证底层纯函数逻辑（Token 估算、源码收集、凭证解析）。
-    *   `test-orchestration`: 验证端到端服务化流程（提交、阶段推进、持久化恢复、孤儿接管）。
-    *   `test-cwd-paths`: 验证跨平台路径兼容性（Windows/MSYS）。
-    *   `test-wiki-*`: 验证 Wiki 内容完整性（行号锚点、入口文件生成）。
+### 4. Runtime Artifacts (`modules/runtime-artifacts.md`)
+**职责**：记录系统运行时的状态、日志和探针信息。
+*   **Logs**：`.tmp-test-batch.log` 记录底层 AI 调用细节；`.tmp-test-orchestration.log` 记录高层工作流；`watcher2.log` 记录长任务心跳。
+*   **Probes**：`.probe3.txt` 用于快速检测模块存活状态。
+*   **Validation Logs**：`.tmp-test-wiki-anchors.log` 和 `.tmp-test-wiki-entry.log` 存储生成的 Wiki 文件的校验结果。
 
-### 5. Documentation & Config (`modules/documentation-and-config.md`)
-*   **角色**: 元数据与配置层。
-*   **职责**:
-    *   定义插件元数据 (`package.json`) 及挂载补丁 (`cordis.patch.yml`)。
-    *   维护变更日志 (`CHANGELOG.md`) 和用户文档 (`README.md`)。
-    *   管理插件自身的 Wiki 入口 (`CodeWiki.md`)。
+### 5. Test Suite (`modules/test-suite.md`)
+**职责**：确保系统正确性的自动化测试集合。
+*   **`test-batch.mjs`**：单元测试，验证 `estimateTokens`, `collectSources`, `runRealtimeTasks` 等核心函数。
+*   **`test-orchestration.mjs`**：集成测试，模拟宿主上下文，验证 Job 从提交到终态的全流程，包括持久化恢复和并发控制。
+*   **`test-wiki-anchors.mjs`**：静态校验，验证生成的 Markdown 文件中源码引用行号的准确性。
+*   **`test-cwd-paths.mjs`**：路径兼容性测试，验证 Windows/MSYS 环境下的 CWD 处理。
