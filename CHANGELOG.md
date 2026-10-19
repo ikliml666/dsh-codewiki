@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.7 — 2026-10-19
+
+### 修复：wiki 文章行号系统性幻觉（用户报告：build.rs 锚点偏移）
+
+- 现象：Wxxy-CampusLogin 产物把 38 行的 `tauri-app/src-tauri/build.rs` 各锚点写偏（fn main 4→3、conf_path 12→17、总行数 38→39 等），同一错误经 4 次 stale 重写原样固化。诊断三层：① collectSources 内联源码无行号标注，弱模型（qwen3.7-flash）自己数行——首尾可数对、中段必错、尾换行多算；② 校对 prompt「上源码逐个核对」但未指明行号依据，拦不住；③ stale 重写沿用旧文行号，错误延续。
+- 修复 ①：新增 `numberLines()`（index.js:343），collectSources 内联的每行源码加 grep 风格「N| 」前缀，模型引用行号有据可依。尾换行只去一个（多去会挤掉真实空行）；CRLF 行尾 `\r` 剥离（校对比对噪音）。token 预算经 estimateTokens 自动计入，装填逻辑不变。
+- 修复 ②：校对 prompt 核对项改为「行号以源码『行号| 』前缀为准，禁止自行数行」；articleFormatSection 共享条款同步（405/708 两个调用方都有前缀源码或前缀观察输入）。
+- 修复 ③：batchArticlePrompt / batchArticleComposePrompt 的 prevArticle 注入段加「旧文行号可能已过期，一律不得沿用」；观察员 prompt 的行号产出条款同样绑定前缀。
+- 测试：test-batch.mjs 新增 numberLines 断言（单/双尾换行、CRLF、空文件）+ collectSources 前缀断言（59→64 项）；用真实 build.rs 逐行比对 38/38 行 0 mismatch、6 个用户锚点全部命中——源码层前缀正确性已证实。
+- 重编译验证（job-mvesr9e4-7，修复后的流水线跑本仓库）：观察/合成/校对链看到带前缀源码后仍产生新锚点错误（重写文章新增 client.js 锚点错位：NS 实为 17 写成 20、STAGE_WEIGHTS 实为 684 写成 468），且未修正沿用的旧 index.js 锚点——test-wiki-anchors 121 过/37 败 → 168 过/44 败。结论：prompt 层对 qwen3.7-flash 不充分，行号正确性需机械校验兜底（后续方向）。
+- 版本 0.8.7。
+
 ## 0.8.6 — 2026-10-18
 
 ### 修复：规划阶段没有真正继承当前对话模型（用户需求）

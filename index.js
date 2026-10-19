@@ -337,6 +337,13 @@ function readJsonFile(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
 }
 
+// 源码行号前缀：每行加「N| 」grep 风格标注，让模型引用行号时以前缀为准而不是自己数行
+// （弱模型自己数行首尾常对、中段系统性错位）。尾部至多去一个换行——多去会把真实空行
+// 挤掉导致总行数偏小；split('\n') 后空文件得到 ['']，输出「1| 」可接受。
+export function numberLines(content) {
+  return content.replace(/\r?\n$/, '').split('\n').map((line, i) => `${i + 1}| ${line.replace(/\r$/, '')}`).join('\n')
+}
+
 // 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
 // 返回 { text, skipped, oversized }：skipped 是预算装不下的文件清单，oversized=true 表示
 // 连第一个文件都装不下（text 原样带这一个文件，任务整体转超大兜底通道）。
@@ -351,7 +358,7 @@ export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
     try { content = fs.readFileSync(abs, 'utf8') } catch { /* 缺文件在文内标注 */ }
     const body = content === null
       ? `### ${rel}\n\n（文件不存在或读取失败）\n`
-      : `### ${rel}\n\n\`\`\`\n${content}\n\`\`\`\n`
+      : `### ${rel}\n\n\`\`\`\n${numberLines(content)}\n\`\`\`\n`
     const size = estimateTokens(body)
     if (used + size > budget) {
       if (first) return { text: body, skipped: [], oversized: true }
@@ -377,14 +384,14 @@ function batchArticlePrompt({ language, mission, sourcesText, prevArticle }) {
     '',
     `任务：${mission}`,
     '',
-    '以下是你需要的全部源码（路径相对仓库根）：',
+    '以下是你需要的全部源码（路径相对仓库根；每行以「行号| 」前缀标注行号，引用行号一律以前缀为准）：',
     '',
     sourcesText,
   ]
   if (prevArticle) {
     parts.push(
       '',
-      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags）：',
+      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags；其中引用的行号可能已过期，一律不得沿用，行号必须按源码「行号| 」前缀重新标注）：',
       '',
       prevArticle,
     )
@@ -520,7 +527,7 @@ function articleFormatSection() {
     '## Known Issues',
     '```',
     '- Key Components：列出该模块全部公开函数/类/常量及其行号与用途；每个 struct/model 的全部字段（含时间戳、自动生成字段）；全部方法（含属性方法、__str__、save() 等）',
-    '- 行号必须实读源码验证，禁止猜测；行号区间覆盖完整函数/代码块，不得截断',
+    '- 行号以源码「行号| 」前缀为准（如 12| let conf_path = ... 即第 12 行），禁止自行数行或猜测；行号区间覆盖完整函数/代码块，不得截断',
     '- source_files 必须列出你为写本文读过的每一个文件（含测试文件），路径相对仓库根，POSIX 风格',
     '- 功能被禁用/注释时写明具体位置（哪个文件哪一行），不许只写 "disabled"',
     '- Architecture：组件 ≥3 或流程非平凡时，画 UTF-8 box-drawing 框图（┌ ┐ └ ┘ ─ │ ► ◄ ▼）放进 ```text 围栏，≤20 行，框内标注组件名与文件/类，箭头标注关系',
@@ -659,12 +666,12 @@ function batchArticleObservePrompt(language, moduleName, sourcesText, batchIndex
     '',
     `任务：模块「${moduleName}」的源码量大，已按文件分成 ${batchTotal} 批（本批为第 ${batchIndex + 1} 批）。`,
     '通读下文本批源码，输出紧凑而完整的技术观察（markdown），供后续不看源码直接写整篇模块文章。必含：',
-    '1. 本批每个文件的职责与关键实现（保留全部函数/类/导出名、重要常量与默认值、关键行号）；',
+    '1. 本批每个文件的职责与关键实现（保留全部函数/类/导出名、重要常量与默认值、关键行号——行号以源码「行号| 」前缀为准，禁止自行数行）；',
     '2. 文件间调用关系与数据流（谁调用谁、入参/返回值形状）；',
     '3. 错误处理、边界条件与非显然行为；',
     '4. 本批文件清单（POSIX 相对路径）。',
     '',
-    '要求：宁全勿简——被你省略的细节合成阶段将永远缺失；但禁止贴大段源码，引用「文件:行号」即可。',
+    '要求：宁全勿简——被你省略的细节合成阶段将永远缺失；但禁止贴大段源码，引用「文件:行号」（行号以源码「行号| 」前缀为准）即可。',
     '只输出观察正文——禁止 frontmatter、禁止用代码围栏整体包裹。',
     '',
     sourcesText,
@@ -686,7 +693,7 @@ function batchArticleComposePrompt({ language, mission, moduleName, observations
   if (prevArticle) {
     parts.push(
       '',
-      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags）：',
+      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags；其中引用的行号可能已过期，一律不得沿用，行号必须按源码「行号| 」前缀重新标注）：',
       '',
       prevArticle,
     )
@@ -712,7 +719,7 @@ function batchProofreadPrompt({ language, articleText, sourcesText }) {
     '任务：核对下文 wiki 文章与源码的一致性，输出修正后的完整文章。',
     '核对项：',
     '1. frontmatter 必有 title/type/source_files/tags，source_files 与正文实际引用一致',
-    '2. 抽查文中全部函数/类名与行号（上源码逐个核对）：名字错改名字、行号错改行号、归属错改归属',
+    '2. 抽查文中全部函数/类名与行号（上源码逐个核对；行号以源码「行号| 」前缀为准，禁止自行数行）：名字错改名字、行号错改行号、归属错改归属',
     '3. 重大源码文件被引用但未列入 source_files 的，补进 frontmatter',
     '4. 与源码不符的描述段落直接改写',
     '',

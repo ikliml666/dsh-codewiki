@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  collectSources, estimateTokens,
+  collectSources, estimateTokens, numberLines,
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, resolveBatchApiKey,
 } from './index.js'
@@ -32,14 +32,22 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-test-'))
 fs.writeFileSync(path.join(tmpRoot, 'a.ts'), 'export const A = 1\n')
 fs.writeFileSync(path.join(tmpRoot, 'b.ts'), 'export const B = 2\n')
 const cs = collectSources(tmpRoot, ['a.ts', 'missing.ts', 'b.ts'])
-check(cs.text.includes('### a.ts') && cs.text.includes('export const A = 1'), '内容内联带相对路径标题')
+check(cs.text.includes('### a.ts') && cs.text.includes('1| export const A = 1'), '内容内联带相对路径标题与行号前缀')
 check(cs.text.includes('missing.ts') && cs.text.includes('文件不存在'), '缺失文件在文内标注')
 check(cs.skipped.length === 0 && cs.oversized === false, '预算充足时无跳过')
+check(!/\n39\| \n/.test(cs.text) && !cs.text.includes('| \n```\n'), '尾换行只去一个：无 39| 空行、围栏前无空行')
 const tiny = collectSources(tmpRoot, ['a.ts', 'b.ts'], 10)
 check(tiny.oversized === true && tiny.text.includes('export const A = 1'), '首文件即超预算 → oversized（原文返回转超大兜底）')
-const firstBlock = '### a.ts\n\n```\nexport const A = 1\n```\n\n'
+const firstBlock = '### a.ts\n\n```\n1| export const A = 1\n```\n\n'
 const small = collectSources(tmpRoot, ['a.ts', 'b.ts'], estimateTokens(firstBlock) + 1)
 check(small.oversized === false && small.skipped.includes('b.ts'), '预算装不下第二文件 → skipped')
+
+// ---------- 2b. numberLines：行号前缀与尾换行 ----------
+section('numberLines：前缀标注与尾换行处理')
+check(numberLines('a\nb\n').endsWith('2| b'), '单尾换行：末行 2| b，无多余空行')
+check(numberLines('a\n\n').endsWith('2| '), '双尾换行：第二个空行是真实一行（2| 保留）')
+check(numberLines('a\r\nb\r\n').endsWith('2| b'), 'CRLF：前缀正确、行尾 \\r 已剥离（末行）')
+check(numberLines('').trim() === '1|', '空文件输出 1|（可接受）')
 
 // ---------- 3. prepareArticleTasks ----------
 section('prepareArticleTasks：prompt 装配与 oversized 拆分')
