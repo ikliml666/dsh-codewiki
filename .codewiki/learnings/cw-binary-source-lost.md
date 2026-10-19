@@ -16,17 +16,17 @@ tags: [vendor, rust, cw-cli, path-separator, windows, lesson, fork]
 
 以下函数负责在插件层拦截 Windows 反斜杠污染，确保 `_index.md` 链接与 stale 任务路径跨平台安全：
 
-- **`normalizeArticlePath(p)`** (`index.js:126`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
-- **`parseStatus(stdout)`** (`index.js:137`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
-- **`normalizeIndexLinks(cwd)`** (`index.js:119`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
-- **`ensureWikiEntry(cwd, language)`** (`index.js:143`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
-- **`tickIndex(job)`** (`index.js:1459`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
+- **`normalizeArticlePath(p)`** (`index.js:139`): 接收任意路径字符串，将 `\` 替换为 `/`。用于 `parseStatus` 清洗 stale/changed 文件列表。注释说明：cw 0.5.0.2 起 Rust 层已用 `rel_path_string` 输出 `/` 分隔路径，本层作为纵深防御（旧二进制或上游原版在 Windows 仍输出 `\`）。
+- **`parseStatus(stdout)`** (`index.js:153`): 解析 `cw status` 输出。识别三态（`missing`, `uncompiled`, `clean`）及 `stale` 态。在 `stale` 态下，遍历匹配行 `^\s+[M!]\s+(.+)$`，分别调用 `normalizeArticlePath` 清洗 `changedFiles` 和 `staleArticles`。
+- **`normalizeIndexLinks(cwd)`** (`index.js:143`): 读取 `.codewiki/_index.md`，正则替换 `[[link|` 头部的 `\` 为 `/`。幂等设计（无改动返回 `false`），静默跳过不存在文件。由 `tickIndex` 在 `cw index` 成功后调用。
+- **`ensureWikiEntry(cwd, language)`** (`index.js:186`): 编译收尾阶段辅助函数。若仓库根缺失 `CodeWiki.md` 入口则自动生成（已有入口不覆盖）。由 `tickIndex` 调用。
+- **`tickIndex(job)`** (`index.js:1798`): 编译收尾阶段。执行 `cw index` 和 `cw meta update` 后，若成功则调用 `normalizeIndexLinks` 并记录 note。同时调用 `ensureWikiEntry` 生成入口文件。
 
 ### 编排服务与编译流水线
 
-- **`createJobService(config)`** (`index.js:926`): 工厂函数，创建任务调度器。包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法。内部维护 `jobs` 数组、锁机制 (`acquireTickLock`)、阶段执行器 (`startBatchChatRun`/`settleJob`) 及 TPS 采样。
-- **`generateToolDefinition(cfg, svc)`** (`index.js:1621`): 定义 `codewiki_generate` 工具。执行逻辑包括：`cw status` 判态 → 幂等检查 → scope 修正 → 提交后台 job。
-- **`cwToolDefinition(cfg)`** (`index.js:638`): 定义 `cw` CLI 薄封装工具。提供 `init`, `status`, `index`, `meta`, `path`, `projects`, `setup`, `uninstall` 子命令。
+- **`createJobService(config)`** (`index.js:1131`): 工厂函数，创建任务调度器。包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法。内部维护 `jobs` 数组、锁机制 (`acquireTickLock`)、阶段执行器 (`startBatchChatRun`/`settleJob`) 及 TPS 采样。
+- **`generateToolDefinition(cfg, svc)`** (`index.js:1960`): 定义 `codewiki_generate` 工具。执行逻辑包括：`cw status` 判态 → 幂等检查 → scope 修正 → 提交后台 job。
+- **`cwToolDefinition(cfg)`** (`index.js:835`): 定义 `cw` CLI 薄封装工具。提供 `init`, `status`, `index`, `meta`, `path`, `projects`, `setup`, `uninstall` 子命令。
 - **`resolveBinary(cfg)`** (`index.js:80`): 解析 `cw` 可执行文件路径。优先级：`cfg.binaryPath` > PATH 探测 (`where`/`which`) > 插件自带 `bin/cw(.exe)`。注释强调：PATH 优先，避免捆绑二进制落后于源码时出现分叉。
 
 ### 配置项 (Config)

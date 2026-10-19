@@ -4,12 +4,19 @@ type: module
 source_files:
   - package.json
   - cordis.patch.yml
+  - index.js
+  - client.js
+  - test/test-batch.mjs
+  - test/test-cwd-paths.mjs
+  - test/test-orchestration.mjs
+  - test/test-wiki-anchors.mjs
+  - test/test-wiki-entry.mjs
 tags: [patterns, architecture, testing, error-handling, concurrency]
 ---
 
 ## Overview
 
-`dsh-codewiki` 模块是一个基于 Cordis 插件系统的 CodeWiki 编译与管理工具。它通过标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。核心架构分为后端编排、前端面板及全链路测试套件。关键模式包括：提交-异步推进的状态机、多层 Token 预算与降级策略、跨平台路径规范化、以及防御性的并发控制与孤儿任务接管机制。
+`dsh-codewiki` 模块是一个基于 Cordis 插件系统的 CodeWiki 编译与管理工具。它通过标准化的模式确保了代码的可维护性、测试的可靠性以及跨平台兼容性。核心架构分为后端编排（`index.js`）、前端面板（`client.js`）及全链路测试套件。关键模式包括：提交-异步推进的状态机、多层 Token 预算与降级策略、跨平台路径规范化、以及防御性的并发控制与孤儿任务接管机制。
 
 ## Key Components
 

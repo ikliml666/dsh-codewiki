@@ -20,7 +20,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 位于仓库根目录，JSON 格式配置文件。
 
 - **行 1**: `name`: `"@local/dsh-codewiki"`。项目唯一标识符。
-- **行 2**: `version`: `"0.8.7"`。当前语义化版本号。
+- **行 2**: `version`: `"0.8.8"`。当前语义化版本号。
 - **行 3**: `description`: 描述 CLI (`cw`)、全仓库 Wiki 编译管线（纯 Bailian 端点，零子代理）及侧边栏面板功能。
 - **行 4**: `private: true`
     - 标记为私有包，防止意外发布到 npm 公共注册表。
