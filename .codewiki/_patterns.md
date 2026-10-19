@@ -16,7 +16,7 @@ tags: [patterns, architecture, testing, error-handling, concurrency]
 ### 后端核心 (`index.js`)
 
 **常量与配置**
-*   `CONCURRENCY_HARD_CAP = 8`: 编译请求并发上限硬顶 [[index.js]]。
+*   `CONCURRENCY_HARD_CAP = 2`: 写文章子代理并发上限硬顶，由配置项 `maxConcurrency` 控制，最大值为 2 [[cordis.patch.yml]]。
 *   `ACTIVE_STAGES`: 活跃阶段列表 `['plan', 'articles', 'crosscut', 'compose', 'review', 'index']` [[index.js]]。
 *   `STAGE_WEIGHTS`: 总进度权重映射 (`plan: 0.05`, `articles: 0.6`, `crosscut: 0.1`, `compose: 0.05`, `review: 0.15`, `index: 0.05`) [[index.js ~450]]。
 
@@ -48,7 +48,7 @@ tags: [patterns, architecture, testing, error-handling, concurrency]
 
 **组件**
 *   **`CodewikiCard`**: 设置卡片，依赖 `ctx.configForms.get(NS)` 读写配置 [[client.js ~250]]。
-    *   `save()`: 校验 `maxConcurrency` (1-8) 和 `batchThinkingBudget` (0-32768)，使用乐观锁 `snapshot.revision` 防止冲突 [[client.js ~290-315]]。
+    *   `save()`: 校验 `maxConcurrency` (1-2) 和 `batchThinkingBudget` (0-32768)，使用乐观锁 `snapshot.revision` 防止冲突 [[client.js ~290-315]]。
 *   **`CodewikiPanel`**: 侧边栏面板，每 2s 轮询 `/api/codewiki/jobs` [[client.js ~430]]。
     *   `ReposTab`: 轮询 `/api/codewiki/repos`，展示仓库状态，支持手动触发编译或排除路径 [[client.js ~380-410]]。
     *   `jobCard`: 渲染单个 Job 详情，包含阶段条、进度条、吞吐徽标、用量信息、活动日志 [[client.js ~460-520]]。
