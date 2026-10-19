@@ -5,10 +5,10 @@
 ### 修复：行号锚点确定性自动修正（第四层兜底，接 0.8.7）
 
 - 背景：0.8.7 的三层修复（源码行号前缀 + prompt 条款 + stale 禁沿用）证实对弱模型（qwen3.7-flash）不充分——重编译后仍出现新幻觉锚点（client.js NS 实 17 写 20、STAGE_WEIGHTS 实 684 写 468）与未刷新的旧锚点（index.js prepareArticleTasks 441-497 因 +9 偏移过期）。用户选定「确定性自动修正」方案。
-- 实现：新增 `fixAnchors(content, cwd)`（index.js，numberLines 旁）——文章落盘前把「file:NN(-MM)」锚点对照 source_files 源码做机械校正，语义与 test-wiki-anchors.mjs 一致：锚点起点行应包含同行反引号符号（或其末段）；不包含时在源文件全文找符号——恰好一处 → 修正；多处 → 取唯一的声明形态行（`^[ \t]*(?:export )?(?:async )?(?:function|class) SYMBOL` 或 `(?:const|let) SYMBOL =`，缩进容忍；`const gamma = beta()` 这类「别的符号的声明」不算）；仍歧义/找不到 → 不动并记 unresolved。区间锚点起点对齐符号行、区间尾越界钳到文件尾（修正起点是净改善）。文件解析：source_files 精确路径 → basename 唯一匹配 → 歧义不碰；source_files 之外的引用一律不动。CRLF 文章行尾保真。readSourceFiles 拆出 `parseSourceFiles(fm)` 共用。
+- 实现：新增 `fixAnchors(content, cwd)`（index.js，numberLines 旁）——文章落盘前把「file:NN(-MM)」锚点对照 source_files 源码做机械校正，语义与 test-wiki-anchors.mjs 一致：锚点起点行应包含同行反引号符号（或其末段）；不包含时在源文件全文找符号——恰好一处 → 修正；多处 → 取唯一的声明形态行（`^[ \t]*(?:export )?(?:async )?(?:function|class) SYMBOL` 或 `(?:const|let) SYMBOL =`，缩进容忍；`const gamma = beta()` 这类「别的符号的声明」不算）；点分符号（如 `Config.articleLanguage`）歧义时退试首段——首段才是可声明的部分；仍歧义/找不到 → 不动并记 unresolved。区间锚点起点对齐符号行、区间尾越界钳到文件尾（修正起点是净改善）。文件解析：source_files 精确路径 → basename 唯一匹配 → 歧义不碰；source_files 之外的引用一律不动。CRLF 文章行尾保真。readSourceFiles 拆出 `parseSourceFiles(fm)` 共用。
 - 集成：两个写盘出口统一过修正——`applyTaskResult`（普通文章直写，源码根取 `task.cwd`）与 `writeValidated`（keepInMemory 落盘闸门——校对/合成/横切结果，取 `job.cwd`）。修正与存疑均记 notes（「自动修正 N 处行号锚点」/「行号锚点存疑（未改）」）。full/stale 文章任务构建与 submitBatchFor 持久化快照补 `cwd` 字段。
 - 测试：test-batch.mjs 新增 fixAnchors 13 项断言（唯一修正/已正确不动/未找到/多声明歧义/声明形态命中/区间对齐与钳制/basename 唯一与歧义/清单外不碰/CRLF 保真/无 frontmatter 原样），64→77 全过。
-- 真实验证：对本仓库真实文章 documentation-and-config.md 跑 fixAnchors——8 处修正全部命中真实行号（Config 37、prepareArticleTasks 538-594、updateToolDefinition 2113、progressToolDefinition 2184-2280，grep 实证），含 0.8.7 遗留的 3 个 client.js 幻觉锚点（NS 20→17、ACTIVE_STAGES 29→25、STAGE_WEIGHTS 468→684）；4 处复合引用行（反引号为「SYMBOL = value」形态，提不出纯标识符）保守未改。
+- 真实验证：对本仓库真实文章 documentation-and-config.md 跑 fixAnchors——8 处修正全部命中真实行号（Config 37、prepareArticleTasks 538-594、updateToolDefinition 2113、progressToolDefinition 2184-2280，grep 实证），含 0.8.7 遗留的 3 个 client.js 幻觉锚点（NS 20→17、ACTIVE_STAGES 29→25、STAGE_WEIGHTS 468→684）；4 处复合引用行（反引号为「SYMBOL = value」形态，提不出纯标识符）保守未改。job-mveup23z-a 重编译后对全量文章机械运行 fixAnchors：锚点校验 165 过/46 败 → 186 过/21 败（净修 21 处，cw-binary-source-lost.md 8 处全修）；剩余失败均为预期保守行为——点分符号/复合引用的校验语义局限（锚点实际正确）、真歧义、source_files 清单外锚点。注：编译服务是长驻进程，本次编译时内存仍为旧版代码，fixAnchors 未在服务写盘时生效，产物由会话侧机械运行补正；服务重启后下次编译自动生效。
 - 版本 0.8.8。
 
 ## 0.8.7 — 2026-10-19

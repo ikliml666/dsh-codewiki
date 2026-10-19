@@ -404,7 +404,10 @@ export function fixAnchors(content, cwd) {
       if (src[start - 1] && syms.some((s) => hasSym(src[start - 1], s))) return whole // 已正确
       let R = null
       let ambiguous = false
-      for (const s of syms) {
+      for (const s0 of syms) {
+        // 点分符号（如 Config.articleLanguage）歧义时退试首段——首段才是可声明的部分
+        const cands = s0.includes('.') ? [s0, s0.split('.')[0]] : [s0]
+        for (const s of cands) {
         const hits = []
         src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
         if (hits.length === 1) { R = hits[0]; break }
@@ -415,8 +418,10 @@ export function fixAnchors(content, cwd) {
           const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
           const defs = hits.filter((n) => defRe.test(src[n - 1]))
           if (defs.length === 1) { R = defs[0]; break }
-          ambiguous = true // 试下一个符号
+          ambiguous = true // 试下一个候选
         }
+        }
+        if (R !== null) break
       }
       if (R === null) {
         unresolved.push(`${at} ${ambiguous ? '符号歧义' : '符号未找到'}未改`)
