@@ -279,7 +279,10 @@ function applyTaskResult(task, content, notes) {
   if (task.keepInMemory) return { name: task.name, ok: true, stopReason: 'completed', content }
   try {
     fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
-    fs.writeFileSync(task.articlePath, content, 'utf8')
+    const fx = fixAnchors(content, task.cwd ?? null)
+    if (fx.fixed > 0) notes.push(`文章 ${task.name} 自动修正 ${fx.fixed} 处行号锚点`)
+    if (fx.unresolved.length) notes.push(`文章 ${task.name} 行号锚点存疑（未改）：${fx.unresolved.slice(0, 3).join('；')}${fx.unresolved.length > 3 ? ' 等' : ''}`)
+    fs.writeFileSync(task.articlePath, fx.text, 'utf8')
     return { name: task.name, ok: true, stopReason: 'completed' }
   } catch (err) {
     notes.push(`文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
@@ -342,6 +345,93 @@ function readJsonFile(p) {
 // 挤掉导致总行数偏小；split('\n') 后空文件得到 ['']，输出「1| 」可接受。
 export function numberLines(content) {
   return content.replace(/\r?\n$/, '').split('\n').map((line, i) => `${i + 1}| ${line.replace(/\r$/, '')}`).join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// 行号锚点自动修正（第四层兜底）：文章落盘前把「file:NN(-MM)」锚点对照源码确定性校正。
+// 语义与 test-wiki-anchors.mjs 的符号绑定一致：锚点起点行应包含该行反引号内符号（或其
+// 末段）；不包含时在源文件全文找符号出现行——恰好一处 → 修正；多处 → 取唯一的行首声明
+// 形态（function/class/const/let），仍歧义则不动；找不到 → 不动。全部修正只改行号数字，
+// 绝不动文章其他内容；source_files 之外的文件引用一律不碰。符号提取规则复制自
+// test-wiki-anchors.mjs symbolsOnLine（两处同源，改一处须同步另一处）。
+export function fixAnchors(content, cwd) {
+  const unresolved = []
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fmMatch || !cwd) return { text: content, fixed: 0, unresolved }
+  const srcs = parseSourceFiles(fmMatch[1])
+  if (!srcs.length) return { text: content, fixed: 0, unresolved }
+  const resolveFile = (f) => {
+    if (srcs.includes(f)) return f
+    const cands = srcs.filter((r) => r.split('/').pop() === f)
+    return cands.length === 1 ? cands[0] : null
+  }
+  const cache = new Map()
+  const loadSource = (rel) => {
+    if (!cache.has(rel)) {
+      try {
+        cache.set(rel, fs.readFileSync(path.join(cwd, rel), 'utf8').replace(/\r?\n$/, '').split(/\r?\n/))
+      } catch { cache.set(rel, null) }
+    }
+    return cache.get(rel)
+  }
+  const symbolsOnLine = (line) => {
+    const out = []
+    for (const m of line.matchAll(/`([^`\n]+)`/g)) {
+      const sym = m[1].trim().replace(/\(.*\)$/, '').trim()
+      if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(sym)) continue
+      if (sym.length < 3 || sym.split('.').pop().length < 3) continue
+      out.push(sym)
+    }
+    return out
+  }
+  const hasSym = (srcLine, s) => srcLine.includes(s) || srcLine.includes(s.split('.').pop())
+  const bodyStart = fmMatch[0].split(/\r?\n/).length // 正文首行（1-based 行号 ≤ bodyStart 是 frontmatter）
+  const crlf = /\r\n/.test(content)
+  const lines = content.split(/\r?\n/)
+  let fixed = 0
+  const anchorRe = /([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g
+  const text = lines.map((line, idx) => {
+    if (idx + 1 <= bodyStart) return line
+    const syms = symbolsOnLine(line)
+    if (!syms.length) return line
+    return line.replace(anchorRe, (whole, f, n1, n2) => {
+      const rel = resolveFile(f)
+      if (!rel) return whole
+      const src = loadSource(rel)
+      if (!src) return whole
+      const start = Number(n1)
+      const at = `${rel}:${start}${n2 ? `-${n2}` : ''}`
+      if (src[start - 1] && syms.some((s) => hasSym(src[start - 1], s))) return whole // 已正确
+      let R = null
+      let ambiguous = false
+      for (const s of syms) {
+        const hits = []
+        src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
+        if (hits.length === 1) { R = hits[0]; break }
+        if (hits.length > 1) {
+          // 声明形态：符号是本行声明的目标（const gamma = beta() 这种「别的符号的声明」不算——
+          // function/class 直接跟符号；const/let 要求符号后跟 =，排除赋值右侧引用）
+          const tail = s.split('.').pop().replace(/[$]/g, '\\$')
+          const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
+          const defs = hits.filter((n) => defRe.test(src[n - 1]))
+          if (defs.length === 1) { R = defs[0]; break }
+          ambiguous = true // 试下一个符号
+        }
+      }
+      if (R === null) {
+        unresolved.push(`${at} ${ambiguous ? '符号歧义' : '符号未找到'}未改`)
+        return whole
+      }
+      if (n2) {
+        const end2 = Number(n2)
+        fixed += 1
+        return `${f}:${R}-${Math.min(R + (end2 - start), src.length)}` // 区间尾越界钳到文件尾（修正起点是净改善）
+      }
+      fixed += 1
+      return `${f}:${R}`
+    })
+  }).join(crlf ? '\r\n' : '\n') // 混合行尾按整文主风格规范化
+  return { text, fixed, unresolved }
 }
 
 // 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
@@ -833,23 +923,26 @@ function parsePlan(text) {
 }
 
 // 读文章 frontmatter 的 source_files（缩进列表或行内数组），供 stale 流程取文件清单。
+// 从 frontmatter 文本解析 source_files 清单（inline [a,b] 与 block - a 两式），返回相对路径数组
+function parseSourceFiles(fm) {
+  const inline = fm.match(/^source_files:\s*\[([^\]]*)\]/m)
+  if (inline) {
+    return inline[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+  }
+  const block = fm.match(/^source_files:\s*$(?:\r?\n((?:[ \t]+-[^\r\n]*\r?\n?)+))/m)
+  if (block) {
+    return block[1].split(/\r?\n/)
+      .map((l) => l.trim().replace(/^-\s*/, '').replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean)
+  }
+  return []
+}
+
 function readSourceFiles(articlePath) {
   try {
     const raw = fs.readFileSync(articlePath, 'utf8')
     const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-    if (!m) return []
-    const fm = m[1]
-    const inline = fm.match(/^source_files:\s*\[([^\]]*)\]/m)
-    if (inline) {
-      return inline[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
-    }
-    const block = fm.match(/^source_files:\s*$(?:\r?\n((?:[ \t]+-[^\r\n]*\r?\n?)+))/m)
-    if (block) {
-      return block[1].split(/\r?\n/)
-        .map((l) => l.trim().replace(/^-\s*/, '').replace(/^['"]|['"]$/g, ''))
-        .filter(Boolean)
-    }
-    return []
+    return m ? parseSourceFiles(m[1]) : []
   } catch {
     return []
   }
@@ -1191,7 +1284,10 @@ function createJobService(config, onSettled) {
     }
     try {
       fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
-      fs.writeFileSync(task.articlePath, content, 'utf8')
+      const fx = fixAnchors(content, job.cwd)
+      if (fx.fixed > 0) note(job, `${task.name}：自动修正 ${fx.fixed} 处行号锚点`)
+      if (fx.unresolved.length) note(job, `${task.name}：行号锚点存疑（未改）—— ${fx.unresolved.slice(0, 3).join('；')}${fx.unresolved.length > 3 ? ' 等' : ''}`)
+      fs.writeFileSync(task.articlePath, fx.text, 'utf8')
       return { name: task.name, ok: true, stopReason: 'completed' }
     } catch (err) {
       note(job, `文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
@@ -1279,6 +1375,7 @@ function createJobService(config, onSettled) {
     job.batchSubmittedAt = new Date().toISOString() // 面板执行时长计时起点，收割时清空
     job.tasks = prepared.map((t) => ({
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
+      cwd: t.cwd, // 锚点自动修正的源码根（writeValidated 用 job.cwd，普通文章直写用 t.cwd）
       batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
       // 分割观察任务（#obs）的合成重建元数据：splitFor 指向所属文章 name，
       // composePlan 携带 mission/articlePath/prevArticlePath——收割时从持久化快照重建合成任务
@@ -1472,6 +1569,7 @@ function createJobService(config, onSettled) {
           name: `modules/${slug}.md`,
           mission: `为模块「${mod.name}」撰写文章 modules/${slug}.md${mod.summary ? `：${mod.summary}` : ''}`,
           sources: mod.files,
+          cwd: job.cwd,
           articlePath: path.join(job.wikiPath, 'modules', `${slug}.md`),
           prevArticlePath: path.join(job.wikiPath, 'modules', `${slug}.md`), // 已有旧文则作上下文
         }
@@ -1960,6 +2058,7 @@ function generateToolDefinition(cfg, svc) {
             name: articleRel,
             mission: `更新过期文章 ${articleRel}：以当前代码为准重写其内容，保留章节结构与 title/type/tags`,
             sources: sourceFiles,
+            cwd,
             articlePath,
             prevArticlePath: articlePath,
           }

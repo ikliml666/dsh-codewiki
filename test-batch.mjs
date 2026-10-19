@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  collectSources, estimateTokens, numberLines,
+  collectSources, estimateTokens, fixAnchors, numberLines,
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, resolveBatchApiKey,
 } from './index.js'
@@ -248,6 +248,50 @@ const viaArray = await resolveBatchApiKey(
 check(viaArray?.key === 'sk-cred-1' && viaArray.source === 'credentials(file)', 'inject 返回数组形态同样可用')
 check((await resolveBatchApiKey({ inject: async () => ({ credentials: { resolve: async () => undefined } }) }, {})) === null, '凭据库无该条目返回 null')
 check((await resolveBatchApiKey({ inject: async () => { throw new Error('no service') } }, {})) === null, 'inject 抛错（服务缺失）返回 null')
+
+// ---- fixAnchors：行号锚点确定性修正 ----
+console.log('\n== fixAnchors ==')
+const faRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-fa-'))
+fs.mkdirSync(path.join(faRoot, 'src'), { recursive: true })
+fs.writeFileSync(path.join(faRoot, 'a.js'), [
+  'const alpha = 1',
+  'function beta() { return alpha }',
+  'const gamma = beta()',
+  '',
+  'function delta() { return gamma }',
+].join('\n'))
+fs.writeFileSync(path.join(faRoot, 'src', 'b.js'), 'export function omega() {\n  return 42\n}\n')
+fs.writeFileSync(path.join(faRoot, 'dup2.js'), 'function helper() { return 1 }\nfunction helper() { return 2 }\n')
+const faFm = '---\ntitle: t\ntype: module\ntags: []\nsource_files: [a.js, src/b.js, dup2.js]\n---\n\n'
+const fa = (body) => faFm + body
+{
+  const r = fixAnchors(fa('见 `delta` (`a.js:1`)。'), faRoot)
+  check(r.fixed === 1 && r.text.includes('`a.js:5`'), '错行号唯一符号 → 修正')
+  check(fixAnchors(fa('见 `beta` (`a.js:3`)。'), faRoot).fixed === 0, '起点行含符号（含调用出现）→ 视为已正确不动')
+  check(fixAnchors(fa('见 `nope` (`a.js:9`)。'), faRoot).fixed === 0 && fixAnchors(fa('见 `nope` (`a.js:9`)。'), faRoot).unresolved.length === 1, '符号未找到 → 不动并记 unresolved')
+  const amb = fixAnchors(fa('见 `helper` (`dup2.js:99`)。'), faRoot)
+  check(amb.fixed === 0 && amb.unresolved.length === 1 && amb.unresolved[0].includes('歧义'), '多个声明目标 → 歧义不动')
+  const def = fixAnchors(fa('见 `beta` (`a.js:1`)。'), faRoot)
+  check(def.fixed === 1 && def.text.includes('`a.js:2`'), '多处出现但恰一处声明形态 → 取声明行')
+  const rg = fixAnchors(fa('`delta`（`a.js:1-3`）整体。'), faRoot)
+  check(rg.fixed === 1 && rg.text.includes('`a.js:5-5`'), '区间锚点 → 起点对齐符号、尾部钳到文件尾（delta 在文件末行）')
+  const clamp = fixAnchors(fa('`gamma`（`a.js:1-99`）钳制。'), faRoot)
+  check(clamp.fixed === 1 && clamp.text.includes('`a.js:3-5`'), '区间修正尾越界 → 钳到文件尾')
+  const bb = fixAnchors(fa('见 `omega` (`b.js:1`)。'), faRoot)
+  check(bb.fixed === 0, 'basename 多段路径匹配（src/b.js 唯一）→ 不动因已正确')
+  const bbFix = fixAnchors(fa('见 `omega` (`b.js:9`)。'), faRoot)
+  check(bbFix.fixed === 1 && bbFix.text.includes('`b.js:1`'), 'basename 唯一解析 → 修正并保留原文写法')
+  check(fixAnchors(fa('见 `x` (`c.js:1`)。'), faRoot).fixed === 0, '不在 source_files 清单 → 不碰')
+  const crlfArt = faFm.replace('\n', '\r\n').replace(/\n/g, '\r\n') + '见 `delta` (`a.js:1`)。'
+  check(fixAnchors(crlfArt, faRoot).text.includes('\r\n'), 'CRLF 文章行尾保真')
+  check(fixAnchors('无 frontmatter 的 `delta` (`a.js:1`)。', faRoot).fixed === 0, '无 frontmatter → 原样')
+  fs.writeFileSync(path.join(faRoot, 'dup.js'), 'x')
+  fs.mkdirSync(path.join(faRoot, 'sub'), { recursive: true })
+  fs.writeFileSync(path.join(faRoot, 'sub', 'dup.js'), 'y')
+  const amb2 = fixAnchors('---\nsource_files: [dup.js, sub/dup.js]\n---\n\n见 `y` (`dup.js:1`)。', faRoot)
+  check(amb2.fixed === 0, 'basename 歧义（根与子目录同名）→ 不碰')
+  fs.rmSync(faRoot, { recursive: true, force: true })
+}
 
 console.log(`\n${failures.length ? 'FAIL' : 'ALL PASS'}：${passed} 通过，${failures.length} 失败`)
 if (failures.length) {
