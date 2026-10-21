@@ -330,8 +330,9 @@ const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 // 单个请求的输入 token 预算：qwen3.7-flash 输入 ≤32k 档单价最低（约 $0.03/M），
 // 留 ~4k 余量吸收估算误差与消息骨架开销。
 const BATCH_TOKEN_BUDGET = 28000
-// 32k–256k 输入档（3 倍价）的装填上限：超预算任务升到该档继续装填
-//（百炼按请求实际输入自动分档计价），只有单文件连该档都装不下才转超大兜底/跳过校对。
+// 会话通道任务文件的装填上限（0.9.0 起不再「升到该档提交」）：超预算文章/校对任务
+// 按该上限把源码内联进任务文件，交发起会话模型派子智能体读；连该上限都装不下时
+// 只内联首个超限文件（collectSources 的 oversized 语义），其余跳过并在任务文件里标注。
 const BATCH_TOKEN_HARD_LIMIT = 200000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
