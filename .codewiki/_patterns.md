@@ -24,10 +24,10 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 
 | 函数名 | 行号范围 | 用途 |
 | :--- | :--- | :--- |
-| `apply(ctx, config)` | ~2570 | 插件入口，注册工具、服务及 HTTP 端点 [[index.js]]。 |
-| `commitHintText(cwd, jobs)` | ~2498 | 检查最近一次成功编译的 `finishedAt` 是否晚于 `.codewiki/` 和 `CodeWiki.md` 的最后 git 提交时间。若是，返回「【CodeWiki 编译完成·请提交改动】」 [[index.js]]。 |
-| `wakeCompileSession(job, outcome, agents?)` | ~2119 | 编译终态时，向发起会话发送消息，提醒其提交改动或查看失败原因 [[index.js]]。 |
-| `progressView(job)` | ~2184 | 将 Job 状态转换为面板展示的进度视图，计算六阶段加权进度百分比 [[index.js]]。 |
+| `apply(ctx, config)` | ~2712 | 插件入口，注册工具、服务及 HTTP 端点 [[index.js]]。 |
+| `commitHintText(cwd, jobs)` | ~2640 | 检查最近一次成功编译的 `finishedAt` 是否晚于 `.codewiki/` 和 `CodeWiki.md` 的最后 git 提交时间。若是，返回「【CodeWiki 编译完成·请提交改动】」 [[index.js]]。 |
+| `wakeCompileSession(job, outcome, agents?)` | ~1146 | 编译终态时，向发起会话发送消息，提醒其提交改动或查看失败原因 [[index.js]]。 |
+| `progressView(job)` | ~2326 | 将 Job 状态转换为面板展示的进度视图，计算六阶段加权进度百分比 [[index.js]]。 |
 | `renderProgress(job)` | ~2239 | 格式化输出进度信息：`stage=xx NN% + ✓/✗/· 任务明细 + 错误 + 最近 3 条 notes` [[index.js]]。 |
 | `progressToolDefinition()` | ~2190 | 定义 `codewiki_progress` 工具，支持 `cwd` 和 `jobId` 过滤 [[index.js]]。 |
 | `excludedItem(cwd, list)` | ~224 | 遍历 `excludePaths`，使用 `samePath` 进行归一化匹配，返回命中的条目或 `null` [[index.js]]。 |

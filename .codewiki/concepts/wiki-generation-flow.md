@@ -16,41 +16,41 @@ tags: [wiki-generation, job-service, bailian-endpoint, pipeline, observability]
 ### 1. Job Service & Stage Machine (`index.js`)
 负责管理编译任务的整个生命周期，包括创建、状态推进、结果结算和持久化。
 
-*   **`createJobService(config, onSettled)`** (行 1131-1953): 工厂函数，返回包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法的对象。内部维护 `jobs` 数组、`batchRuns`/`batchResults`/`batchAborters` 映射表以及锁机制。
-*   **`tick()`** (行 1832-1875): 主循环逻辑。每 `TICK_MS` (默认 10s) 执行一次。负责获取锁、同步取消标志、遍历活跃 Job 并调用对应的 `STAGE_HANDLER`。处理孤儿接管（Orphan Takeover）和脏标记合并（Dirty Merge）。
-*   **`STAGE_HANDLER`** (行 1823-1830): 阶段处理器映射表，将阶段名映射到具体的处理函数：
-    *   `plan`: `tickPlan` (行 1397-1440)
-    *   `articles`: `tickArticles` (行 1497-1616)
-    *   `crosscut`: `tickCrosscut` (行 1640-1703)
-    *   `compose`: `tickCompose` (行 1706-1718)
-    *   `review`: `tickReview` (行 1755-1796)
-    *   `index`: `tickIndex` (行 1798-1821)
-*   **`settleJob(job)`** (行 1259-1280): 阶段收割统一入口。检查 `batchResults` 是否有结果；若执行器丢失（宿主重启），则根据持久化的 `job.tasks` 中的 `batchPrompt` 快照自动重跑当前阶段。
-*   **`startBatchChatRun(job, prepared)`** (行 1332-1371): 启动后台并发池执行批量请求。使用 `runRealtimeTasks` 打百炼普通入口，结果存入 `batchResults`，更新 `batchProgress` 和 TPS 采样。
-*   **`submitBatchFor(job, prepared)`** (行 1373-1393): 阶段提交入口。计算用量，设置 `batchRef` 和 `tasks` 快照，调用 `startBatchChatRun`。
-*   **`localReview(job)`** (行 1733-1753): 本地核对。检查 frontmatter 必填字段及 source_files 存在性。
+*   **`createJobService(config, onSettled)`** (行 1159-2096): 工厂函数，返回包含 `submit`, `cancel`, `list`, `findActive`, `start`, `stop` 方法的对象。内部维护 `jobs` 数组、`batchRuns`/`batchResults`/`batchAborters` 映射表以及锁机制。
+*   **`tick()`** (行 1974-2018): 主循环逻辑。每 `TICK_MS` (默认 10s) 执行一次。负责获取锁、同步取消标志、遍历活跃 Job 并调用对应的 `STAGE_HANDLER`。处理孤儿接管（Orphan Takeover）和脏标记合并（Dirty Merge）。
+*   **`STAGE_HANDLER`** (行 1965-1972): 阶段处理器映射表，将阶段名映射到具体的处理函数：
+    *   `plan`: `tickPlan` (行 1526-1569)
+    *   `articles`: `tickArticles` (行 1626-1736)
+    *   `crosscut`: `tickCrosscut` (行 1760-1823)
+    *   `compose`: `tickCompose` (行 1826-1838)
+    *   `review`: `tickReview` (行 1875-1938)
+    *   `index`: `tickIndex` (行 1940-1963)
+*   **`settleJob(job)`** (行 1287-1308): 阶段收割统一入口。检查 `batchResults` 是否有结果；若执行器丢失（宿主重启），则根据持久化的 `job.tasks` 中的 `batchPrompt` 快照自动重跑当前阶段。
+*   **`startBatchChatRun(job, prepared)`** (行 1360-1399): 启动后台并发池执行批量请求。使用 `runRealtimeTasks` 打百炼普通入口，结果存入 `batchResults`，更新 `batchProgress` 和 TPS 采样。
+*   **`submitBatchFor(job, prepared)`** (行 1401-1421): 阶段提交入口。计算用量，设置 `batchRef` 和 `tasks` 快照，调用 `startBatchChatRun`。
+*   **`localReview(job)`** (行 1853-1873): 本地核对。检查 frontmatter 必填字段及 source_files 存在性。
 
 ### 2. Token Budgeting & Source Collection (`index.js`)
 负责将源码内容装入 LLM 请求，严格控制 Token 预算以优化成本。
 
 *   **`estimateTokens(text)`** (行 245-253): 粗略估算 Token 数。CJK 字符 ≈ 1 token，其余 ≈ 3.5 字符/token。
 *   **`collectSources(cwd, files, budget)`** (行 445-472): 同步收集源文件。按 `BATCH_TOKEN_BUDGET` (28k) 装填，超出则跳过或升档至 `BATCH_TOKEN_HARD_LIMIT` (200k)。返回 `{ text, skipped, oversized }`。
-*   **`prepareArticleTasks(tasks, { cwd, language })`** (行 543-598): 装配文章任务。处理分割逻辑：若单请求预算不足，拆分为多个观察批（_split/ 任务），后续再合成。
-*   **`packArticles(articles, budget)`** (行 676-695): 横切输入装配。将多篇模块文章打包，超预算时截断头部。
+*   **`prepareArticleTasks(tasks, { cwd, language })`** (行 545-603): 装配文章任务。处理分割逻辑：若单请求预算不足，拆分为多个观察批（_split/ 任务），后续再合成。
+*   **`packArticles(articles, budget)`** (行 681-700): 横切输入装配。将多篇模块文章打包，超预算时截断头部。
 
 ### 3. Prompt Templates (`index.js`)
 定义各阶段的系统提示词，确保模型输出格式一致。
 
-*   **`batchPlannerPrompt(fileLines)`** (行 637-656): 规划 prompt，要求输出 JSON 模块分组。
+*   **`batchPlannerPrompt(fileLines)`** (行 642-661): 规划 prompt，要求输出 JSON 模块分组。
 *   **`batchArticlePrompt(...)`** (行 476-503): 文章生成 prompt，包含 `articleFormatSection`。
-*   **`batchArchitecturePrompt(...)`** (行 711-717): 架构总览 prompt。
-*   **`batchProofreadPrompt(...)`** (行 810-829): 校对 prompt，要求核对源码一致性。
-*   **`articleFormatSection()`** (行 604-633): 文章格式规范，强制要求 frontmatter 和特定章节结构。
+*   **`batchArchitecturePrompt(...)`** (行 716-722): 架构总览 prompt。
+*   **`batchProofreadPrompt(...)`** (行 815-834): 校对 prompt，要求核对源码一致性。
+*   **`articleFormatSection()`** (行 609-638): 文章格式规范，强制要求 frontmatter 和特定章节结构。
 
 ### 4. Web Server & API (`index.js`)
 提供后端 API 供前端面板查询和控制。
 
-*   **`installWebServer(ctx, service, extra)`** (行 2308-2482): 注册回环地址 API 端点。
+*   **`installWebServer(ctx, service, extra)`** (行 2451-2625): 注册回环地址 API 端点。
     *   `GET /api/codewiki/jobs`: 返回所有 Job 摘要 (`jobSummary`)，支持工作区过滤。
     *   `POST /api/codewiki/control`: 处理 `cancel`, `refresh`, `compile` 动作。
     *   `GET /api/codewiki/repos`: 返回已编译仓库的状态总览，含自动调度信息。
