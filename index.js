@@ -441,7 +441,7 @@ export function fixAnchors(content, cwd) {
 
 // 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
 // 返回 { text, skipped, oversized }：skipped 是预算装不下的文件清单，oversized=true 表示
-// 连第一个文件都装不下（text 原样带这一个文件，任务整体转超大兜底通道）。
+// 连第一个文件都装不下（text 原样带这一个文件，任务整体转会话通道）。
 export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
   const parts = []
   const skipped = []
@@ -534,15 +534,17 @@ export async function resolveBatchApiKey(hostCtx, cfg) {
 
 // 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
 // 分配 customId。
-// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时不再升 200k 大档吃 3 倍价，
-// 而是按文件装填拆成多个 ≤28k 观察批（_split/ 任务，keepInMemory），收割后拼观察包
-// 提交一个合成请求写完整文章。单文件连观察批预算都装不下（collectSources oversized）
-// 才升大档重装；连大档都装不下才转超大兜底通道。full/stale 两条流都在本层生效。
-// 返回 { prepared, oversized }：prepared 含普通任务与 _split/ 观察任务，
-// 观察任务带 splitFor（所属文章 name）与 composePlan（重建合成任务所需，仅内存轮使用）。
+// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时按文件装填拆成多个 ≤28k
+// 观察批（_split/ 任务，keepInMemory），收割后拼观察包提交一个合成请求写完整文章。
+// 存在单文件连观察批预算都装不下、或分不出多批（单文件占全部体积）时，整任务转「会话通道」
+// ——超预算文章交发起会话模型派子智能体完成（0.9.0 起，不再升 200k 大档吃 3 倍价、
+// 也不再同模型同步兜底）。≤28k 单请求与多批观察仍走百炼批量。full/stale 两条流都在本层生效。
+// 返回 { prepared, sessionTasks }：prepared 含普通任务与 _split/ 观察任务，
+// 观察任务带 splitFor（所属文章 name）与 composePlan（重建合成任务所需）；
+// sessionTasks 带 batchPrompt（200k 大档装填，派发时写入任务文件供子智能体读取）。
 export function prepareArticleTasks(tasks, { cwd, language }) {
   const prepared = []
-  const oversized = []
+  const sessionTasks = []
   for (const t of tasks) {
     let { text, oversized: tooBig, skipped: overflowFiles } = collectSources(cwd, t.sources)
     if (tooBig) {
@@ -551,14 +553,16 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
     const prevArticle = t.prevArticlePath
       ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
       : ''
+    let forceSession = false
     // 分割判定：prompt 估算超单请求预算，或 28k 装填有文件被跳过（collectSources 只装得下
     // 前缀，余下文件本会被「不得涉及」静默甩掉——截图场景）。两者都说明该模块一请求写不完。
     if (!tooBig && (overflowFiles.length > 0 || estimateTokens(batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })) > BATCH_TOKEN_BUDGET)) {
       // 总量超单请求预算：按 28k 逐文件装填分批，产出观察任务组
       const batches = []
+      let hasOversizeSingle = false
       for (const rel of t.sources) {
         const one = collectSources(cwd, [rel])
-        if (one.oversized) continue // 单文件连观察预算都超：不参与分批，走下方大档重装兜底
+        if (one.oversized) { hasOversizeSingle = true; break } // 单文件连观察预算都超：整任务转会话通道
         const last = batches[batches.length - 1]
         if (last && estimateTokens(last.text + '\n' + one.text) <= BATCH_TOKEN_BUDGET) {
           last.text += '\n' + one.text
@@ -567,7 +571,7 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
           batches.push({ text: one.text, files: [rel] })
         }
       }
-      if (batches.length > 1) {
+      if (!hasOversizeSingle && batches.length > 1) {
         const base = `split${prepared.length}`
         batches.forEach((b, i) => {
           prepared.push({
@@ -585,16 +589,17 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
         })
         continue
       }
-      // 分不出多批（单文件占了全部体积）：落回大档装填，照旧提交（升档按 3 倍价），维持旧行为
+      // 单文件超观察预算 / 分不出多批（单文件占全部体积）：转会话通道，按 200k 大档装填
       ;({ text, skipped: overflowFiles } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
+      forceSession = true
     }
     t.batchPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })
     delete t.splitFor; delete t.composePlan // 复用任务对象时清残留分割字段
-    if (tooBig) { oversized.push(t); continue }
+    if (tooBig || forceSession) { sessionTasks.push(t); continue }
     t.customId = t.customId ?? `t${prepared.length}`
     prepared.push(t)
   }
-  return { prepared, oversized }
+  return { prepared, sessionTasks }
 }
 
 // ---------------------------------------------------------------------------
@@ -966,14 +971,37 @@ async function wikiPathFor(cwd, binary, signal) {
 //   full   = plan → articles → crosscut →（超预算拆分时 compose）→ review → index
 //   stale  = articles（任务在提交时预构建）→ review → index
 // 全部模型调用都是单轮文本生成，统一走百炼普通入口（chat/completions）后台并发池；单文件超
-// 32k 预算先升 200k 大档重装继续，仍装不下才跳过该任务（bailianChat）。规划/横切/校对结果
+// 32k 预算先升 200k 大档重装继续，仍装不下则该任务转会话通道（见下）。规划/横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
+// 会话通道（0.9.0）：超批量预算的文章不升 200k 大档吃 3 倍价、也不同模型同步兜底，而是把
+// 完整写作指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
 // ---------------------------------------------------------------------------
 
 // 测试可设 DSH_CODEWIKI_JOBS_FILE 隔离到独立路径——默认路径与真实宿主实例共享，
 // 宿主周期 flush 会用其内存副本整写同一文件，测试期间互相洗掉对方的内存字段（tps 采样 flaky 的根因）
 const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
 const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
+// 会话通道（0.9.0）：超批量预算的文章交发起会话模型派子智能体完成。
+// 超时默认 30 分钟（等子智能体产出，比批量请求长得多），可用
+// DSH_CODEWIKI_SESSION_TIMEOUT_MS 覆盖；任务文件与 job 记录同目录，宿主重启后仍可收割。
+const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_CODEWIKI_SESSION_TIMEOUT_MS) || 30 * 60 * 1000)
+const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')
+
+// 会话通道任务收割判定（纯函数，测试直接断言三态）：
+// 'timeout' 派发后超时未产出（按失败处理，不降级百炼）；'harvest' 目标文件已产出，
+// 且 mtime ≥ 派发时间、以 frontmatter 开头（子智能体写完整了）；'wait' 尚未产出
+// （无文件/文件旧未更新/正在写一半）。
+export function classifySessionTask(task, nowMs = Date.now()) {
+  if (nowMs - Date.parse(task.dispatchedAt) > SESSION_TASK_TIMEOUT_MS) return 'timeout'
+  let st, content
+  try {
+    st = fs.statSync(task.articlePath)
+    content = fs.readFileSync(task.articlePath, 'utf8')
+  } catch { return 'wait' }
+  if (st.mtimeMs < Date.parse(task.dispatchedAt)) return 'wait'
+  if (!content.trimStart().startsWith('---')) return 'wait'
+  return 'harvest'
+}
 // 孤儿接管阈值：另一实例的 job 停更超过该时长视为宿主重启遗留，本实例接管推进
 const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)
 const MAX_JOBS_KEPT = 30
@@ -1392,6 +1420,107 @@ function createJobService(config, onSettled) {
     touch(job)
   }
 
+  // ---- 会话通道：超预算文章交发起会话模型派子智能体完成（0.9.0） ----
+  // 把完整写作指令写入任务文件，steer 一条短消息给发起会话；会话模型调用子智能体
+  // （delegate/subagent）读任务文件、把文章直接写到 articlePath。本服务每 tick 轮询目标
+  // 文件收割（frontmatter 校验 + 行号锚点校正后入账），超时（默认 30 分钟）按失败处理
+  // ——不降级回百炼。派发快照随 job 持久化（sessionTasks），宿主重启接管后重发一次 steer。
+  function dispatchSessionTasks(job, tasks) {
+    let agent = null
+    try { agent = job.sessionId && agentsRef?.get ? agentsRef.get(job.sessionId) : null } catch { /* 会话已关 */ }
+    if (!agent || typeof agent.steer !== 'function') {
+      fail(job, `${tasks.length} 个任务超批量预算需走会话通道（会话模型→子智能体），但发起会话不可用（面板/自动调度提交或会话已关闭）——请从会话内重新提交编译`)
+      return null
+    }
+    const dispatchedAt = new Date().toISOString()
+    const snapshots = []
+    try {
+      fs.mkdirSync(SESSION_TASK_DIR, { recursive: true })
+      for (const t of tasks) {
+        const safe = String(t.name).replace(/[^\w.-]+/g, '_')
+        const promptFile = path.join(SESSION_TASK_DIR, `${job.id}--${safe}.prompt.txt`)
+        fs.writeFileSync(promptFile, t.batchPrompt, 'utf8')
+        fs.mkdirSync(path.dirname(t.articlePath), { recursive: true })
+        snapshots.push({ name: t.name, articlePath: t.articlePath, promptFile, dispatchedAt })
+      }
+    } catch (err) {
+      fail(job, `会话通道任务文件写入失败 —— ${String(err?.message ?? err)}`)
+      return null
+    }
+    const minutes = Math.round(SESSION_TASK_TIMEOUT_MS / 60000)
+    const lines = snapshots.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
+    // 校对的会话通道任务（review 阶段）：任务文件本身就是校对指令，输出覆写原文章
+    const text = job.stage === 'review'
+      ? [
+          `【CodeWiki 超预算校对任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇文章的校对超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`,
+          ...lines,
+          '',
+          '子智能体要求：任务文件是完整校对指令（含旧文章全文与全部源码，源码以「行号| 」前缀标注）；读出校对后的完整文章（以 --- frontmatter 开头）后用文件工具直接覆写对应目标路径（UTF-8）。编译服务会轮询目标文件收割，超时未产出按失败处理。',
+        ].join('\n')
+      : [
+          `【CodeWiki 超预算文章任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇模块文章超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`,
+          ...lines,
+          '',
+          '子智能体要求：任务文件是完整写作指令（含全部源码与文章格式要求，源码以「行号| 」前缀标注）；文件较大时用 read 的 offset/limit 分段读取。读出完整文章（以 --- frontmatter 开头）后用文件工具直接写入对应目标路径（UTF-8，覆盖旧文），无需另写标记文件。编译服务会轮询目标文件收割，超时未产出按失败处理。',
+        ].join('\n')
+    try {
+      agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
+    } catch (err) {
+      fail(job, `会话通道 steer 失败 —— ${String(err?.message ?? err)}`)
+      return null
+    }
+    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体），等待产出（超时 ${minutes} 分钟）`)
+    return snapshots
+  }
+
+  // 会话通道收割：'harvest' 的按 writeValidated 闸门落盘入账，'timeout' 记失败，
+  // 'wait' 留待下轮。返回 true = 全部终态（阶段可推进）。
+  function progressSessionTasks(job) {
+    const results = []
+    const left = []
+    for (const t of job.sessionTasks) {
+      const verdict = classifySessionTask(t)
+      if (verdict === 'timeout') {
+        results.push({ name: t.name, ok: false, stopReason: 'timeout' })
+        note(job, `${t.name}：会话通道超时（${Math.round(SESSION_TASK_TIMEOUT_MS / 60000)} 分钟未见产出），该篇按失败处理`)
+      } else if (verdict === 'harvest') {
+        results.push(writeValidated(job, t, fs.readFileSync(t.articlePath, 'utf8')))
+      } else {
+        left.push(t)
+      }
+    }
+    const before = job.sessionTasks
+    job.sessionTasks = left
+    // 校对阶段（review）的结果覆盖同名文章条目：校对失败不推翻已写成功的原文
+    if (results.length) tally(job, results, before, { replace: job.stage === 'review' })
+    return left.length === 0
+  }
+
+  // 宿主重启接管后重发一次 steer（旧进程的 steer 可能随会话丢失）；不重置 dispatchedAt，
+  // 超时计时保持原起点；子智能体重写同一文件，幂等。
+  function resendSessionSteer(job) {
+    let agent = null
+    try { agent = job.sessionId && agentsRef?.get ? agentsRef.get(job.sessionId) : null } catch { /* 会话已关 */ }
+    if (!agent || typeof agent.steer !== 'function') {
+      note(job, '会话通道任务接管后重发 steer 失败（发起会话不可用），等待超时按失败处理')
+      return
+    }
+    const lines = job.sessionTasks.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
+    const proofread = job.stage === 'review'
+    const text = [
+      `【CodeWiki 超预算${proofread ? '校对' : '文章'}任务·重新派发】（宿主重启接管任务 ${job.id}，此前未产出）请调用子智能体（delegate/subagent）逐篇完成：`,
+      ...lines,
+      '',
+      proofread
+        ? '子智能体要求：读取任务文件（完整校对指令，含旧文章全文与全部源码），写出校对后的完整文章（以 --- frontmatter 开头）后覆写对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
+        : '子智能体要求：读取任务文件（完整写作指令，含源码与格式要求），写出完整文章（以 --- frontmatter 开头）后直接写入对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。',
+    ].join('\n')
+    try {
+      agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
+      note(job, '会话通道任务已重新派发（宿主重启接管）')
+    } catch { /* 重发失败等超时 */ }
+  }
+
   // ---- 阶段处理：每 tick 每 job 推进一步 ----
 
   async function tickPlan(job) {
@@ -1554,65 +1683,56 @@ function createJobService(config, onSettled) {
             return
           }
         }
-        setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
+        // 观察全部失败：若有会话通道任务在途，等它收割后再统一收尾；否则照旧推进（不因观察失败 fail 整个 job）
+        if (!job.sessionTasks?.length) {
+          setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
+          return
+        }
+      } else {
+        tally(job, results, tasks)
+      }
+    } else if (!job.sessionTasks?.length) {
+      // 组装文章任务并提交：stale 用预构建任务；full 用 job.plan；resume 不经此处（batchRef 已设）
+      let tasks
+      if (job.kind === 'stale') tasks = job.tasks
+      else {
+        const plan = job.plan
+        if (!plan?.modules?.length) { fail(job, '规划没有可用模块'); return }
+        tasks = plan.modules.map((mod) => {
+          const slug = slugify(mod.name)
+          return {
+            name: `modules/${slug}.md`,
+            mission: `为模块「${mod.name}」撰写文章 modules/${slug}.md${mod.summary ? `：${mod.summary}` : ''}`,
+            sources: mod.files,
+            cwd: job.cwd,
+            articlePath: path.join(job.wikiPath, 'modules', `${slug}.md`),
+            prevArticlePath: path.join(job.wikiPath, 'modules', `${slug}.md`), // 已有旧文则作上下文
+          }
+        })
+      }
+      const { prepared, sessionTasks } = prepareArticleTasks(tasks, { cwd: job.cwd, language: job.language })
+      if (sessionTasks.length) {
+        const snap = dispatchSessionTasks(job, sessionTasks)
+        if (!snap) return // 会话不可用/写文件失败：fail 已记账
+        job.sessionTasks = snap
+      }
+      if (prepared.length) {
+        try {
+          await submitBatchFor(job, prepared)
+        } catch (err) {
+          fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
+        }
         return
       }
-      tally(job, results, tasks)
-      if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
-      setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
-      return
+      if (!job.sessionTasks?.length) { fail(job, '没有可写的文章任务'); return }
     }
-    // 组装文章任务并提交：stale 用预构建任务；full 用 job.plan；resume 不经此处（batchRef 已设）
-    let tasks
-    if (job.kind === 'stale') tasks = job.tasks
-    else {
-      const plan = job.plan
-      if (!plan?.modules?.length) { fail(job, '规划没有可用模块'); return }
-      tasks = plan.modules.map((mod) => {
-        const slug = slugify(mod.name)
-        return {
-          name: `modules/${slug}.md`,
-          mission: `为模块「${mod.name}」撰写文章 modules/${slug}.md${mod.summary ? `：${mod.summary}` : ''}`,
-          sources: mod.files,
-          cwd: job.cwd,
-          articlePath: path.join(job.wikiPath, 'modules', `${slug}.md`),
-          prevArticlePath: path.join(job.wikiPath, 'modules', `${slug}.md`), // 已有旧文则作上下文
-        }
-      })
+    // 会话通道收割：全部终态才推进（超时/失败已在 progressSessionTasks 记账）
+    if (job.sessionTasks?.length) {
+      if (!progressSessionTasks(job)) return
+      job.sessionTasks = null
     }
-    const { prepared, oversized } = prepareArticleTasks(tasks, { cwd: job.cwd, language: job.language })
-    if (oversized.length) {
-      const c = liveConfig(config)
-      note(job, `${oversized.length} 个任务连 ${BATCH_TOKEN_HARD_LIMIT} token 大档都装不下，转超大兜底（同模型同步调用）`)
-      oversized.forEach((t, i) => { t.customId = `rt${i}` })
-      addUsage(job, { inputTok: oversized.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0), requests: oversized.length, realtime: true })
-      const rt = await runRealtimeTasks(oversized, {
-        apiKey: await apiKeyOf(job),
-        model: c.batchModel,
-        thinkingBudget: c.batchThinkingBudget,
-        concurrency: c.maxConcurrency,
-        notes: job.notes,
-        onTaskDone: (s) => {
-          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
-          addUsage(job, { outputTok: s.outputTokens ?? 0 })
-        },
-      })
-      tally(job, [...rt.values()], oversized)
-    }
-    if (prepared.length) {
-      try {
-        await submitBatchFor(job, prepared)
-      } catch (err) {
-        fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
-      }
-      return
-    }
-    if (oversized.length) {
-      if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
-      setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
-    } else {
-      fail(job, '没有可写的文章任务')
-    }
+    if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
+    setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
   }
 
   // 横切合成任务（单批直出与拆分合成共用）：输入 pack = 模块文章全文或模块观察拼接
@@ -1759,40 +1879,62 @@ function createJobService(config, onSettled) {
       tally(job, results, job.tasks, { replace: true })
       job.batchRef = null
       job.tasks = []
-      setStage(job, 'index')
-      return
-    }
-    localReview(job)
-    const tasks = []
-    let i = 0
-    for (const a of job.articles) {
-      if (!a.ok || !a.path || a.skipProofread) continue
-      let articleText = null
-      try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
-      const articleTokens = estimateTokens(articleText)
-      let srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
-      if (srcs.oversized) {
-        srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_HARD_LIMIT - articleTokens)
+      if (!job.sessionTasks?.length) { setStage(job, 'index'); return }
+      // 校对批次已收割，会话通道的校对任务仍在途：落到下方收割
+    } else if (!job.sessionTasks?.length) {
+      localReview(job)
+      const tasks = []
+      const sessionTasks = []
+      let i = 0
+      for (const a of job.articles) {
+        if (!a.ok || !a.path || a.skipProofread) continue
+        let articleText = null
+        try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
+        const articleTokens = estimateTokens(articleText)
+        let srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
+        if (srcs.oversized) {
+          srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_HARD_LIMIT - articleTokens)
+        }
+        if (srcs.oversized) {
+          // 连 200k 大档都装不下：转会话通道，由发起会话模型调用子智能体校对并覆写文章
+          sessionTasks.push({
+            name: a.name, articlePath: a.path,
+            batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
+          })
+          note(job, `${a.name}：源码超批量预算，校对转会话通道`)
+          continue
+        }
+        tasks.push({
+          customId: `proof${i++}`, name: a.name, keepInMemory: true, articlePath: a.path,
+          batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
+        })
       }
-      if (srcs.oversized) {
-        note(job, `${a.name}：首个源文件连大档预算都装不下，跳过校对批次`)
-        continue
+      if (sessionTasks.length) {
+        const snap = dispatchSessionTasks(job, sessionTasks)
+        if (!snap) return // 发起会话不可用，已标失败
+        job.sessionTasks = snap
       }
-      tasks.push({
-        customId: `proof${i++}`, name: a.name, keepInMemory: true, articlePath: a.path,
-        batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
-      })
+      if (tasks.length) {
+        try {
+          await submitBatchFor(job, tasks)
+          note(job, `校对批次已提交：${tasks.length} 篇${job.sessionTasks?.length ? `；另 ${job.sessionTasks.length} 篇走会话通道` : ''}`)
+        } catch (err) {
+          note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)
+          job.batchRef = null
+          job.tasks = []
+        }
+        if (job.batchRef) return
+      } else if (!job.sessionTasks?.length) {
+        setStage(job, 'index')
+        return
+      }
     }
-    if (!tasks.length) { setStage(job, 'index'); return }
-    try {
-      await submitBatchFor(job, tasks)
-      note(job, `校对批次已提交：${tasks.length} 篇`)
-    } catch (err) {
-      note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)
-      job.batchRef = null
-      job.tasks = []
-      setStage(job, 'index')
+    // 会话通道校对收割：全部终态才进 index
+    if (job.sessionTasks?.length) {
+      if (!progressSessionTasks(job)) return
+      job.sessionTasks = null
     }
+    setStage(job, 'index')
   }
 
   async function tickIndex(job) {
@@ -1845,6 +1987,7 @@ function createJobService(config, onSettled) {
           note(job, `原实例 ${job.owner} 停更 ${Math.round(idleMs / 60000)} 分钟，本实例接管推进`)
           job.owner = instanceId
           touch(job)
+          if (job.sessionTasks?.length) resendSessionSteer(job) // 在途会话通道任务：旧进程的 steer 可能已丢
         }
         if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {

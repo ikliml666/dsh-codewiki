@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0 — 2026-10-21
+
+### 功能：超 32k 文章转「会话通道」（用户需求：超过 32k 的文章通过消息传给会话模型，由会话模型调用子智能体完成）
+
+- 背景：0.8.x 对超批量预算文章有两条昂贵/不可靠路径——单文件超 28k 先升 200k 大档（32k–256k 档按 3 倍价）、连大档都装不下走 `runRealtimeTasks` 同模型同步兜底（长请求阻塞 tick、失败面大）；校对阶段另有「连 200k 大档都装不下就跳过校对」的静默降级。用户要求统一改为：超 32k 的文章通过消息传给发起会话的会话模型，由它调用子智能体完成。触发范围与失败语义经用户确认：升大档、超大兜底、校对跳过三条路径全改走会话通道；发起会话不可用（面板/自动调度提交、会话已关）直接整体失败；会话通道任务超时未产出按失败处理，不降级百炼。
+- 实现 ①（index.js `prepareArticleTasks`）：返回值 `{ prepared, oversized }` → `{ prepared, sessionTasks }`。28k 装得下照旧进 prepared；分割判定（prompt 超预算或有文件被 skip）里逐文件检测——单文件连观察批预算都装不下（`hasOversizeSingle`）或分不出多批时不再落回大档提交，而是按 200k 大档装填出 `batchPrompt` 后进 `sessionTasks`；连 200k 都装不下（`tooBig`）同样进 `sessionTasks`。多文件可拆的情形仍走观察→合成批，行为不变。
+- 实现 ②（新常量/纯函数）：`SESSION_TASK_TIMEOUT_MS`（默认 30 分钟，`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调，下限 5 分钟）、`SESSION_TASK_DIR`（`os.tmpdir()/dsh-codewiki-session-tasks/`，与 JOBS_FILE 同目录）；导出纯函数 `classifySessionTask(task, nowMs)` 三态——`timeout`（派发超过时限，超时判定优先）、`harvest`（目标文件 mtime ≥ 派发时间且以 frontmatter 开头）、`wait`（未产出/旧文未更新/写一半）。
+- 实现 ③（`createJobService` 新增三函数）：`dispatchSessionTasks`——校验 `job.sessionId` 与 `agentsRef.get` 的 steer 可用性（不可用直接 `fail` 明示「请从会话内重新提交编译」），逐任务把 batchPrompt 写任务文件、建文章目录、记快照 `{name, articlePath, promptFile, dispatchedAt}` 存入 `job.sessionTasks`（随 job 持久化），再 `agent.steer(createUserMessage)` 一条短消息（含任务文件路径与目标文章路径、子智能体写作要求）；`progressSessionTasks`——每 tick 对等待中的任务分类：timeout 记 `{ok:false, stopReason:'timeout'}` 并 note，harvest 读文件经 `writeValidated` 闸门（frontmatter 校验 + fixAnchors 校正）落盘入账，wait 留待下轮；`resendSessionSteer`——宿主重启接管（tick 的 owner 接管分支）后重发一次 steer，不重置 dispatchedAt，幂等。
+- 实现 ④（`tickArticles` 重构）：batchRef 分支收割后不再直接 setStage，落到统一收尾（等会话通道收割完再推进）；`!job.sessionTasks?.length` 时才组装任务——`prepareArticleTasks` 出的 sessionTasks 先 dispatch（失败已记账则 return），prepared 非空则照旧 `submitBatchFor`；统一收尾：`progressSessionTasks` 未终态 return，终态后 `job.sessionTasks = null`，`writtenCount===0` fail（原文案不变），否则 `setStage(crosscut/review)`。观察批全部失败且无在途会话任务时保持旧行为（直接推进）。
+- 实现 ⑤（`tickReview` 校对阶段同样接入）：原先「首个源文件连 200k 大档预算都装不下 → 跳过校对批次」改为转会话通道——`batchProofreadPrompt` 装填后进 `sessionTasks`（`job.stage === 'review'` 时 dispatch 文案为「超预算校对任务」、任务文件即校对指令、收割结果按 `replace` 覆盖同名文章条目，校对失败不推翻已写成功的原文）。校对批与会话任务可并行：batchRef 分支收割后若仍有在途会话任务则继续收割，未终态 return；无在校任务才进 index。`resendSessionSteer` 文案按阶段区分。`runRealtimeTasks` 函数本身保留（`startBatchChatRun` 仍是批量执行器，校对/横切/合成照旧）。
+- 删除：`tickArticles` 里的超大兜底段（`runRealtimeTasks` 同步调用 + `rt*` customId + 转超大兜底 note）。`runRealtimeTasks` 函数本身保留（`startBatchChatRun` 仍是批量执行器，校对/横切/合成照旧）。
+- 测试（test-batch.mjs）：`prep.oversized` → `prep.sessionTasks`；300KB 单文件断言进 sessionTasks（prompt 内联完整源码）、800KB 断言进 sessionTasks；多文件 4×90KB 断言仍拆观察批；新增 `classifySessionTask` 6 项断言（超时优先于已产出、harvest、无 frontmatter wait、旧文未更新 wait）。64→82 项全过；test-orchestration / test-cwd-paths / test-wiki-entry 全过。
+- 文档：README.md 工具表、CodeWiki.md（Overview / Key Components / Architecture / Known Issues）同步；版本 0.9.0。
+
 ## 0.8.8 — 2026-10-19
 
 ### 修复：行号锚点确定性自动修正（第四层兜底，接 0.8.7）
