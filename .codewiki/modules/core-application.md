@@ -16,7 +16,7 @@ tags: [CodeWiki, CLI, Pipeline, React, DeepSeek Harness]
 ### index.js (Host Side Logic)
 
 **常量与配置**
-- `Config`: 行 34-56，使用 `@deepseek-ai/schemastery` 定义的插件配置对象，包含 `enabled`, `binaryPath`, `batchModel`, `maxConcurrency`, `excludePaths` 等字段。
+- `Config`: 行 37-56，使用 `@deepseek-ai/schemastery` 定义的插件配置对象，包含 `enabled`, `binaryPath`, `batchModel`, `maxConcurrency`, `excludePaths` 等字段。
 - `liveConfig()`: 行 68-92，解析配置对象，应用默认值并验证范围（如并发上限硬顶为 8）。
 - `CONCURRENCY_HARD_CAP`: 行 21，编译请求并发上限，值为 8。
 - `BATCH_TOKEN_BUDGET`: 行 207，单请求输入 token 预算，28000。
