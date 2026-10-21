@@ -1,11 +1,11 @@
 // test-batch.mjs — 编译执行链自检：纯函数（源码装填/token 估算/任务装配/本地规划/
-// 横切装填/仓库勘探）+ mock fetch（普通端点/并发池/取消/超大兜底）
+// 横切装填/仓库勘探/会话通道收割）+ mock fetch（百炼普通端点/并发池/取消/失败记账）
 // 跑法：node test-batch.mjs（Node ≥20，全局 fetch/FormData/Blob）
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  collectSources, estimateTokens, fixAnchors, numberLines,
+  collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, resolveBatchApiKey,
 } from './index.js'
@@ -63,7 +63,7 @@ const plainTasks = ['t0', 't1', 't2'].map((_id, i) => ({
   articlePath: path.join(outDir, `m${i}.md`),
 }))
 const prep = prepareArticleTasks(plainTasks, { cwd: workRoot, language: '中文' })
-check(prep.prepared.length === 3 && prep.oversized.length === 0, '普通任务全部进 prepared')
+check(prep.prepared.length === 3 && prep.sessionTasks.length === 0, '普通任务全部进 prepared（无会话通道任务）')
 check(prep.prepared[0].customId === 't0' && prep.prepared[2].customId === 't2', 'customId 按序分配')
 check(prep.prepared[0].batchPrompt.includes('任务t0') && prep.prepared[0].batchPrompt.includes('中文'), 'prompt 含 mission 与语言')
 check(prep.prepared[0].batchPrompt.includes('export const S = 3'), 'prompt 内联源码')
@@ -74,10 +74,10 @@ fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
 const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
 check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
 const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 1 && bigPrep.oversized.length === 0, '单文件超 28k 预算 → 升大档（200k）重装继续（分不出多批不拆分）')
-check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档任务 prompt 内联完整源码')
+check(bigPrep.prepared.length === 0 && bigPrep.sessionTasks.length === 1, '单文件超 28k 预算且分不出多批 → 会话通道（不再升大档）')
+check(bigPrep.sessionTasks[0].batchPrompt.includes('xxx') && bigPrep.sessionTasks[0].batchPrompt.length > 300 * 1024, '会话通道任务 prompt 按 200k 大档装填、内联完整源码')
 const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
-check(hugePrep.prepared.length === 0 && hugePrep.oversized.length === 1, '单文件连 200k 大档都装不下 → oversized（转超大兜底）')
+check(hugePrep.prepared.length === 0 && hugePrep.sessionTasks.length === 1, '单文件连 200k 大档都装不下 → 会话通道（超大兜底已删除）')
 
 // 3b. prepareArticleTasks：多文件超预算 → 观察→合成分割
 section('prepareArticleTasks：多文件超预算 → 观察批分割')
@@ -89,7 +89,7 @@ const splitPrep = prepareArticleTasks([{
   sources: ['part0.ts', 'part1.ts', 'part2.ts', 'part3.ts'],
   articlePath: path.join(outDir, 'splitme.md'),
 }], { cwd: workRoot, language: '中文' })
-check(splitPrep.oversized.length === 0, '分割任务不进 oversized')
+check(splitPrep.sessionTasks.length === 0, '分割任务不进会话通道（仍走观察批）')
 const obsTasks = splitPrep.prepared.filter((t) => t.name.endsWith('#obs0') || t.name.includes('#obs'))
 check(obsTasks.length >= 2, `多文件超预算拆出 ≥2 个观察批（实际 ${obsTasks.length}）`)
 check(obsTasks.every((t) => t.keepInMemory === true), '观察任务 keepInMemory（不直接落盘）')
@@ -99,6 +99,24 @@ check(obsTasks.every((t) => t.composePlan?.articlePath === path.join(outDir, 'sp
 check(obsTasks.some((t) => t.batchPrompt.includes('第 1 批')) && obsTasks.some((t, i) => t.batchPrompt.includes(`第 ${i + 1} 批`)), '观察 prompt 标注批次序号')
 const plainStill = prepareArticleTasks([{ name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') }], { cwd: workRoot, language: '中文' })
 check(plainStill.prepared.length === 1 && !plainStill.prepared[0].name.includes('#obs'), '预算内普通任务不分割')
+
+// ---------- 3c. 会话通道任务收割判定 ----------
+section('classifySessionTask：会话通道收割三态')
+const sessDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-sess-'))
+const sessFile = path.join(sessDir, 'mod.md')
+const staleIso = new Date(Date.now() - 31 * 60 * 1000).toISOString()
+const freshIso = new Date(Date.now() - 60 * 1000).toISOString()
+check(classifySessionTask({ articlePath: sessFile, dispatchedAt: staleIso }) === 'timeout', '超过 30 分钟未见产出 → timeout')
+fs.writeFileSync(sessFile, '---\ntitle: t\n---\n正文')
+check(classifySessionTask({ articlePath: sessFile, dispatchedAt: staleIso }) === 'timeout', '超时判定优先：即使文章已产出也按 timeout（不收割）')
+check(classifySessionTask({ articlePath: sessFile, dispatchedAt: freshIso }) === 'harvest', '派发后产出且以 frontmatter 开头 → harvest')
+fs.writeFileSync(sessFile, '正在思考…')
+check(classifySessionTask({ articlePath: sessFile, dispatchedAt: freshIso }) === 'wait', '产出中（无 frontmatter，写一半）→ wait')
+fs.writeFileSync(sessFile, '---\ntitle: t\n---\n正文')
+const old = new Date(Date.now() - 10 * 60 * 1000)
+fs.utimesSync(sessFile, old, old)
+check(classifySessionTask({ articlePath: sessFile, dispatchedAt: new Date().toISOString() }) === 'wait', '目标文件早于派发时间（旧文未更新）→ wait')
+fs.rmSync(sessDir, { recursive: true, force: true })
 
 // ---------- 4. runRealtimeTasks：普通端点并发池 ----------
 section('runRealtimeTasks：百炼普通端点与请求体')
