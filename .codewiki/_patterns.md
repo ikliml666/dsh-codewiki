@@ -89,7 +89,7 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 | `instanceId` | `index.js:1200` | `svc-<ts36>-<rand6>`，job 归属标记 |
 | `dirty` / `dirtyIds` | `index.js:1203` / `index.js:1206` | 脏标记 + 本实例改过的 job id |
 | `persist()` | `index.js:1207` | 只标脏，不写盘 |
-| Temp 残留清理 | `index.js:1210-1221` | 启动即移除 cwd 在系统临时目录的终态任务，并**立即** `saveJobs` |
+| Temp 残留清理 | `index.js:1219-1230` | 启动即移除 cwd 在系统临时目录的终态任务，并**立即** `saveJobs` |
 | `mergeFromDisk()` | `index.js:1224-1245` | 磁盘吸收：新增 job 并入；同 id 且磁盘更新且本实例没动过才覆盖 |
 | `flush()` | `index.js:1246-1249` | 脏才写：`mergeFromDisk` → 清标记 → `saveJobs` |
 | `note()` / `touch()` | `index.js:1250-1253` / `index.js:1256-1258` | notes 上限 50 条；touch 是状态变更唯一入口（必标脏） |
@@ -129,7 +129,7 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 
 | 名称 | 行号 | 用途 |
 | :--- | :--- | :--- |
-| `NS` / `KEY` | `client.js:17` / `client.js:18` | 配置命名空间与面板 key（必须与 `sidebar.panellist` 的 id 一致） |
+| `NS` / `KEY` | `client.js:18` / `client.js:18` | 配置命名空间与面板 key（必须与 `sidebar.panellist` 的 id 一致） |
 | `JOBS_PATH` / `CONTROL_PATH` | `client.js:19` / `client.js:20` | 后端端点常量 |
 | `PANEL_ORDER` | `client.js:21` | 面板排序 52（排在 hindsight 的 50 之后） |
 | `POLL_MS` / `REPOS_POLL_MS` | `client.js:22` / `client.js:25` | 2s 拉任务、10s 拉仓库总览 |
@@ -144,7 +144,7 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 | `usageLine(job)` | `client.js:808` | 用量行（输入/输出 token、请求数、overTier2） |
 | `ReposTab` | `client.js:827-` | 仓库总览页（编译/排除/刷新） |
 | `CodewikiPanel` | `client.js:972-1172` | 面板主体：2s 轮询、本地采样、分组渲染 |
-| 轮询 effect | `client.js:985-1025` | `pull()` + `inFlight` 防重叠 + `alive` 防卸载后 setState |
+| 轮询 effect | `client.js:986-1026` | `pull()` + `inFlight` 防重叠 + `alive` 防卸载后 setState |
 | `sparkRef` / `batchRateRef` | `client.js:980` / `client.js:981` | 面板侧采样：tps 30 点窗口、EWMA 速率 |
 | EWMA 更新 | `client.js:1009` | `rate = prev.rate * 0.6 + inst * 0.4` |
 | `mountedRef` | `client.js:1028-1029` | 卸载后不再 setState |
@@ -194,8 +194,8 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 1. 排除清单先拦：`excludedItem(cwd, excludePaths)` 命中就抛错并附命中项原文（`index.js:2061-2064`）。
 2. `rememberRepo(cwd)` 登记工作区（`index.js:2065`）。
 3. 同 cwd 已有非终态 job → 直接返回 `{job, existed: true}`，天然幂等（`index.js:2066-2067`）。
-4. **占位先行**：先 push 一个 `stage: 'submitting'` 的 job 并 `persist()`（`index.js:2069-2090`）。`resolveBatchApiKey` 最长等 3s，这段时间里的并发提交靠「非终态 stage」挡住重复，而不是靠锁。
-5. 再解析凭证（`index.js:2092-2107`）；失败走 `fail()` 同步抛出，让工具调用立即看到原因。
+4. **占位先行**：先 push 一个 `stage: 'submitting'` 的 job 并 `persist()`（`index.js:2068-2089`）。`resolveBatchApiKey` 最长等 3s，这段时间里的并发提交靠「非终态 stage」挡住重复，而不是靠锁。
+5. 再解析凭证（`index.js:2081-2096`）；失败走 `fail()` 同步抛出，让工具调用立即看到原因。
 6. `setStage(job, kind === 'full' ? 'plan' : 'articles')`（`index.js:2110`）——stale 走预构建任务直达文章阶段。
 7. `persist()` + `flush()` 先落盘，再 `void tick()` 立即推进一步（`index.js:2112-2114`）。
 
@@ -203,9 +203,9 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 
 `tick()`（`index.js:2013`）每轮：
 
-- `ticking` 单飞 + `acquireTickLock()`（`index.js:1108`）——用 `writeFileSync(..., {flag:'wx'})` 排他创建锁文件；残留锁 60s 过期强删重建（`index.js:1114-1118`），`finally` 里 `releaseTickLock()`。
+- `ticking` 单飞 + `acquireTickLock()`（`index.js:1108`）——用 `writeFileSync(..., {flag:'wx'})` 排他创建锁文件；残留锁 60s 过期强删重建（`index.js:1116-1120`），`finally` 里 `releaseTickLock()`。
 - `syncCancelFlags()` 先把别的实例写的取消标记吸进内存（`index.js:2018`）。
-- 逐 job：终态跳过；`owner !== instanceId` 且停更 ≤ `ORPHAN_TAKEOVER_MS` 让别人推（`index.js:2021-2025`），超过就接管并 `resendSessionSteer`（`index.js:2026-2029`）；`submitting` 占位跳过（`index.js:2031`）；`cancelRequested` → 置 cancelled + `abort()` 在飞请求 + 丢弃未收割结果（`index.js:2032-2041`）。
+- 逐 job：终态跳过；`owner !== instanceId` 且停更 ≤ `ORPHAN_TAKEOVER_MS` 让别人推（`index.js:2025-2029`），超过就接管并 `resendSessionSteer`（`index.js:2025-2028`）；`submitting` 占位跳过（`index.js:2031`）；`cancelRequested` → 置 cancelled + `abort()` 在飞请求 + 丢弃未收割结果（`index.js:2032-2041`）。
 - 取 `STAGE_HANDLER` 执行，handler 抛错 → `fail(job, 阶段 … 异常)`（`index.js:2043-2049`）；终态立即 `persist()`；末尾 `flush()`。
 
 ### 3. 装配：四层预算降级
@@ -213,23 +213,23 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 `prepareArticleTasks()`（`index.js:578`）是预算策略的汇聚点：
 
 1. `collectSources(cwd, sources)` 用 28000 装填（`index.js:582`）。
-2. `oversized`（第一个文件都装不下）→ 改按 200000 装填（`index.js:583-585`）。
-3. 未 oversized 但「有文件被跳过」或「prompt 估算超 28k」→ 逐文件装 28k 观察批（`index.js:592-606`）；分得出多批 → 产出 `#obs` 任务，携带 `splitFor` 与 `composePlan`（`index.js:607-623`）。
-4. 单文件连 28k 都装不下、或分不出多批 → `forceSession`，按 200k 装填后进 `sessionTasks`（`index.js:625-631`）。
+2. `oversized`（第一个文件都装不下）→ 改按 200000 装填（`index.js:582-584`）。
+3. 未 oversized 但「有文件被跳过」或「prompt 估算超 28k」→ 逐文件装 28k 观察批（`index.js:576-590`）；分得出多批 → 产出 `#obs` 任务，携带 `splitFor` 与 `composePlan`（`index.js:615-631`）。
+4. 单文件连 28k 都装不下、或分不出多批 → `forceSession`，按 200k 装填后进 `sessionTasks`（`index.js:627-633`）。
 
-收割侧对应 `tickArticles`（`index.js:1665`）：`#obs` 结果按文章聚合，**每篇只重建一条**合成任务（`composedArticles` 去重，`index.js:1684-1689`）；某篇观察全失败则该篇缺席本轮而非整 job 失败（`index.js:1692-1695`）；部分失败基于剩余观察合成（`index.js:1696`）。
+收割侧对应 `tickArticles`（`index.js:1665`）：`#obs` 结果按文章聚合，**每篇只重建一条**合成任务（`composedArticles` 去重，`index.js:1684-1689`）；某篇观察全失败则该篇缺席本轮而非整 job 失败（`index.js:1689-1692`）；部分失败基于剩余观察合成（`index.js:1689`）。
 
-横切同理但更简单：`tickCrosscut`（`index.js:1799`）用**原始总量**判拆分（`index.js:1838`，因为 `packArticles` 只截头部、pack 体积永远装得下，不能作依据）；超预算时每篇模块文章一个 `_obs/` 观察任务，收齐后 `setStage('compose')` 提交合成批（`index.js:1849-1857`、`index.js:1821-1822`）。
+横切同理但更简单：`tickCrosscut`（`index.js:1799`）用**原始总量**判拆分（`index.js:1837`，因为 `packArticles` 只截头部、pack 体积永远装得下，不能作依据）；超预算时每篇模块文章一个 `_obs/` 观察任务，收齐后 `setStage('compose')` 提交合成批（`index.js:1842-1850`、`index.js:1821-1822`）。
 
 ### 4. 执行：后台并发池
 
 `startBatchChatRun()`（`index.js:1395`）把 `runRealtimeTasks`（`index.js:324`）挂到后台：
 - `batchRuns`/`batchResults`/`batchAborters` 三个 Map 分别承担「存活标记」「收割结果」「取消中断」（`index.js:1392-1394`）。
-- 成功 `batchResults.set(job.id, [...rs.values()])`，失败 `set(job.id, null)` 并 `fail`（`index.js:1420-1430`）。
+- 成功 `batchResults.set(job.id, [...rs.values()])`，失败 `set(job.id, null)` 并 `fail`（`index.js:1421-1431`）。
 - `finally` 里删 Map 条目，终态再清 `batchResults`（`index.js:1431-1435`）。
 - `onTaskDone` 每任务上报 `{outputTokens, durationMs}`，进 `tpsSamples`（保留 20 条）并 `addUsage`（`index.js:1412-1418`）。
 
-`settleJob()`（`index.js:1320`）的返回契约：`null` = 还在跑（下轮再看）、数组 = 已收割、执行器丢失 → 有完整 prompt 快照就重跑（`index.js:1332-1338`），否则 `fail` 报「无法重跑」（`index.js:1339`）。
+`settleJob()`（`index.js:1320`）的返回契约：`null` = 还在跑（下轮再看）、数组 = 已收割、执行器丢失 → 有完整 prompt 快照就重跑（`index.js:1328-1334`），否则 `fail` 报「无法重跑」（`index.js:1339`）。
 
 ### 5. 会话通道：超预算外包给会话
 
@@ -243,17 +243,17 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 ### 6. 质量闸门：落盘前四道
 
 1. **frontmatter 闸**：`writeValidated`（`index.js:1346`）与 `applyTaskResult`（`index.js:305`）都要求输出 `trimStart()` 以 `---` 开头，否则不落盘、保留原文件。
-2. **行号锚点校正**：`fixAnchors`（`index.js:390`）在写盘前把正文里 `file:NN(-MM)` 的锚点对照源码核验——该行应含同行反引号内符号（`index.js:410-420`）；不含则全文找，唯一命中即修正、多处命中再试「声明形态」（`index.js:447-454`）、仍歧义/找不到就只记 unresolved 不改（`index.js:459-461`）；区间尾越界钳到文件尾（`index.js:466`）。全部修正只改数字，不动文章其他内容。
-3. **本地核对**：`localReview`（`index.js:1892`）检查 frontmatter 与 `source_files` 是否存在（`index.js:1905-1909`），文件丢失还会把 `writtenCount` 回退（`index.js:1902`）。
-4. **索引收尾**：`tickIndex`（`index.js:1979`）跑 `cw index` + `cw meta update`，任一非零只在 notes 提示「基线可能未刷新」，不推翻任务；`normalizeIndexLinks` 与 `ensureWikiEntry` 各自独立 try/catch（`index.js:1987`、`index.js:1991-1995`）。
+2. **行号锚点校正**：`fixAnchors`（`index.js:390`）在写盘前把正文里 `file:NN(-MM)` 的锚点对照源码核验——该行应含同行反引号内符号（`index.js:390-400`）；不含则全文找，唯一命中即修正、多处命中再试「声明形态」（`index.js:390-397`）、仍歧义/找不到就只记 unresolved 不改（`index.js:390-392`）；区间尾越界钳到文件尾（`index.js:390`）。全部修正只改数字，不动文章其他内容。
+3. **本地核对**：`localReview`（`index.js:1892`）检查 frontmatter 与 `source_files` 是否存在（`index.js:1908-1912`），文件丢失还会把 `writtenCount` 回退（`index.js:1902`）。
+4. **索引收尾**：`tickIndex`（`index.js:1979`）跑 `cw index` + `cw meta update`，任一非零只在 notes 提示「基线可能未刷新」，不推翻任务；`normalizeIndexLinks` 与 `ensureWikiEntry` 各自独立 try/catch（`index.js:1987`、`index.js:1992-1996`）。
 
 ### 7. 前端：轮询 + 本地采样
 
-`CodewikiPanel`（`client.js:972`）不依赖后端推流：2s 拉 `/api/codewiki/jobs`，`inFlight` 保证不重叠（`client.js:989`），`alive` 保证卸载后不 setState（`client.js:986`）。速率与 ETA 由面板自己算：`sparkRef` 保留最近 30 个 tps（`client.js:997-1002`）、`batchRateRef` 用 `0.6/0.4` 的 EWMA 平滑瞬时完成速率（`client.js:1007-1011`）。总进度用 `STAGE_WEIGHTS` 加权：`plan 0.05 / articles 0.6 / crosscut 0.1 / compose 0.05 / review 0.15 / index 0.05`（`client.js:774-784`）。
+`CodewikiPanel`（`client.js:972`）不依赖后端推流：2s 拉 `/api/codewiki/jobs`，`inFlight` 保证不重叠（`client.js:989`），`alive` 保证卸载后不 setState（`client.js:986`）。速率与 ETA 由面板自己算：`sparkRef` 保留最近 30 个 tps（`client.js:998-1003`）、`batchRateRef` 用 `0.6/0.4` 的 EWMA 平滑瞬时完成速率（`client.js:1006-1010`）。总进度用 `STAGE_WEIGHTS` 加权：`plan 0.05 / articles 0.6 / crosscut 0.1 / compose 0.05 / review 0.15 / index 0.05`（`client.js:774-784`）。
 
 ### 8. 收尾提醒：零状态派生
 
-`commitHintText()`（`index.js:2737`）不存「已提醒」状态：取本 cwd 最近一次 `stage==='done' && writtenCount>0` 的 job（`index.js:2743-2745`），和 `git log -1 --format=%ct -- .codewiki CodeWiki.md` 比时间戳（`index.js:2747-2750`），编译更晚才注入提醒；提交后时间戳反超自动静默。60s TTL 缓存因为系统提示每次组装都会求值（`index.js:2739-2740`）。`installUpdateReminder`（`index.js:2775`）的 `text` 回调实时读开关、cwd、入口文件存在性（`index.js:2788-2791`），所以切仓库/关开关/删 wiki 都无需重启。
+`commitHintText()`（`index.js:2737`）不存「已提醒」状态：取本 cwd 最近一次 `stage==='done' && writtenCount>0` 的 job（`index.js:2741-2743`），和 `git log -1 --format=%ct -- .codewiki CodeWiki.md` 比时间戳（`index.js:2752-2755`），编译更晚才注入提醒；提交后时间戳反超自动静默。60s TTL 缓存因为系统提示每次组装都会求值（`index.js:2740-2741`）。`installUpdateReminder`（`index.js:2775`）的 `text` 回调实时读开关、cwd、入口文件存在性（`index.js:2787-2790`），所以切仓库/关开关/删 wiki 都无需重启。
 
 ## Connections
 
@@ -269,9 +269,9 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 
 1. **孤儿接管有 5 分钟空窗**：`ORPHAN_TAKEOVER_MS`（`index.js:1039`）默认 5min，宿主崩溃重启后旧 job 最多空转 5min 才被接管；期间面板进度静止，`codewiki_progress` 也不会报错。
 2. **执行器丢失后的重跑依赖 prompt 快照**：`settleJob`（`index.js:1320`）只有在 `job.tasks` 全部带 `batchPrompt` 时才能重跑（`index.js:1332-1333`），否则整 job `fail`（`index.js:1339`）——重跑会重复计费，注释已明示「幂等：文章重写覆盖」。
-3. **会话通道超时不降级**：`classifySessionTask`（`index.js:1027`）超时直接记失败（`index.js:1522-1524`），设计上不接受「退回百炼 200k 大档」这条更贵的路。发起会话不可用时同理直接 `fail`（`index.js:1470-1473`），面板/自动调度提交的超预算任务只能改从会话内重提。
-4. **`fixAnchors` 的正则边界**：锚点正则 `/([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g`（`index.js:425`）不校验 URL 与时间字符串，正文里出现形如 `foo.js:12` 的普通文本也会被当锚点；只是「找不到符号就原样保留」，可能产生噪声 notes。
-5. **`commitHintText` 依赖 git 与时间戳**：非 git 仓库、`jobs` 读取失败、或 `git log` 为空一律不提醒（`index.js:2759` 的空 catch）；时间戳比较是秒级（`index.js:2749`），同一秒内编译+提交会漏提醒。
-6. **Temp 残留清理只在启动时**：`index.js:1210-1221` 在 `createJobService` 构造时执行一次；运行期新产生的 Temp 终态任务只靠 `workspaceOnly` 在前端隐藏，不落盘清理。
+3. **会话通道超时不降级**：`classifySessionTask`（`index.js:1027`）超时直接记失败（`index.js:1521-1523`），设计上不接受「退回百炼 200k 大档」这条更贵的路。发起会话不可用时同理直接 `fail`（`index.js:1471-1474`），面板/自动调度提交的超预算任务只能改从会话内重提。
+4. **`fixAnchors` 的正则边界**：锚点正则 `/([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g`（`index.js:390`）不校验 URL 与时间字符串，正文里出现形如 `foo.js:12` 的普通文本也会被当锚点；只是「找不到符号就原样保留」，可能产生噪声 notes。
+5. **`commitHintText` 依赖 git 与时间戳**：非 git 仓库、`jobs` 读取失败、或 `git log` 为空一律不提醒（`index.js:2759` 的空 catch）；时间戳比较是秒级（`index.js:2743`），同一秒内编译+提交会漏提醒。
+6. **Temp 残留清理只在启动时**：`index.js:1192-1203` 在 `createJobService` 构造时执行一次；运行期新产生的 Temp 终态任务只靠 `workspaceOnly` 在前端隐藏，不落盘清理。
 7. **面板本地上采样与后端 tps 双轨**：`job.tps`（`index.js:1163`）是后端按 `tpsSamples` 聚合，`sparkRef`（`client.js:980`）是前端按轮询差分；两者窗口不同（20 样本 vs 30 点），面板同一数字在两处可能不一致，属已知设计而非 bug。
-8. **工具注册逐个兜底**：`apply` 里对每个工具单独 `try/catch`（`index.js:2856-2864`），失败只 `console.error`——工具静默不可用，用户只能在日志里发现；这是为避免 cordis 把 apply 回调失败当 fiber FAILED 回滚全部工具（`index.js:2854-2855` 注释）。
+8. **工具注册逐个兜底**：`apply` 里对每个工具单独 `try/catch`（`index.js:2855-2863`），失败只 `console.error`——工具静默不可用，用户只能在日志里发现；这是为避免 cordis 把 apply 回调失败当 fiber FAILED 回滚全部工具（`index.js:2855-2856` 注释）。
