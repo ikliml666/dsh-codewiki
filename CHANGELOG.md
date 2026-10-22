@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.1 — 2026-10-22
+
+### 功能：设置页编译模型改为可选配置文件中的提供商与模型（用户需求：使用本地部署的 9b 模型能胜任工作吗）
+
+- 背景：0.9.0 及之前编译模型的调用链写死百炼兼容端点（`BAILIAN_BASE`），设置页只有一个「模型名」文本输入，模型只能从百炼目录里挑。用户问「本地部署的 9B 模型能不能胜任」，结论是「能，但当时插件没有入口把它接进来」。本次把编译模型的来源改成宿主模型设置（llm 服务）里已注册的 provider + model，本地 OpenAI 兼容端点因此可用。
+- 实现 ①（index.js 新增导出纯函数 `listModelCatalog(llm)`）：枚举 `llm.listProviders()`（兼容 `id`/`provider`、`displayName`/`name` 两种字段写法，跳过空 id），逐个 `llm.listModels(id)` 映射为 `{id,name}`；单个 provider 探测失败（缺凭证/端点不通）不影响其它条目——该条目保留、models 为空、附 `error`。llm 服务未注入时返回 `{ok:false, providers:[]}`，设置页据此降级为手填。
+- 实现 ②（index.js 新端点 `GET /api/codewiki/models`）：回环限定（`guard`），30 秒进程内缓存，返回目录；llm 服务缺失时 200 + `ok:false` 而非 500，让前端有可读原因。
+- 实现 ③（index.js 调用链分流）：`batchProvider` 非空时不再拼百炼 URL，改走宿主 llm 服务（携带 `{provider, model}` 路由），凭证与思考程度交给该 provider 自身配置；为空时完全保持 0.9.0 的百炼直连行为（含 `batchApiKey` 覆盖与 `batchThinkingBudget` 映射 `enable_thinking`）。两条通道共用同一个「拆包 → 校验 frontmatter → 落盘」出口，下游流水线零改动。
+- 实现 ④（client.js 设置页）：`batchModel` 文本框改为两级下拉——provider 下拉（首项「内置百炼通道（默认）」= 空值）+ model 下拉（随所选 provider 的目录刷新，选 provider 时自动带出该 provider 首个模型）。已配置但目录里没有的 provider/model 仍作为选项保留，避免静默丢失配置；目录拉取失败或该 provider 无可枚举模型时回退为文本输入并给出原因。中英文案齐备。
+- 测试（test-batch.mjs）：新增 `listModelCatalog` 6 项断言（跳过空 id、displayName 展示名、listModels 映射、`provider`/`name` 字段兼容、单 provider 失败隔离、llm 未注入降级）与 `/api/codewiki/models` 端点 4 项断言（端点注册、回环 200 + 目录内容、非回环 403）；94 → 98 项全过。test-cwd-paths / test-orchestration / test-wiki-entry 全过。
+- 文档：README 设置段重写（provider/model 两级语义、两条通道的凭证与思考预算归属）；版本 0.9.1。
+
 ## 0.9.0 — 2026-10-21
 
 ### 功能：超 32k 文章转「会话通道」（用户需求：超过 32k 的文章通过消息传给会话模型，由会话模型调用子智能体完成）

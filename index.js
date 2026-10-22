@@ -37,7 +37,8 @@ function normalizeCwd(input) {
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
-  batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（全部模型环节共用）'),
+  batchProvider: z.string().default('').volatile().description('编译模型提供商（DSH 模型设置里的 provider id）；留空=走百炼兼容通道（batchModel 填百炼模型名），非空=走宿主 llm 服务（batchModel 填该 provider 的模型 id）'),
+  batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（全部模型环节共用）：batchProvider 为空时是百炼模型名，非空时是该 provider 的模型 id'),
   batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证'),
   batchThinkingBudget: z.number().default(0).volatile().description('思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('编译请求并发上限（1–8），硬顶 8'),
@@ -59,6 +60,7 @@ function liveConfig(config) {
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
+    batchProvider: String(val(c.batchProvider) ?? '').trim(),
     batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
     batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
     batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
@@ -252,7 +254,32 @@ export function estimateTokens(text) {
   return cjk + Math.ceil((s.length - cjk) / 3.5)
 }
 
-// 同步单轮调用：全部走百炼普通入口（dashscope chat/completions）。零子代理。
+// 宿主 llm 服务通道：走 DSH 模型设置里已注册的 provider/model（含本地 OpenAI 兼容端点，
+// 如 ollama/lmstudio/vllm），凭证由宿主按该 provider 的配置解析——插件不碰密钥。
+// thinkingBudget 在宿主侧是 reasoningEffort（枚举档位）而非 token 数，故本通道不下发思考预算，
+// 沿用该 provider/模型的默认档。失败统一抛错，由并发池按单任务失败记账。
+async function llmChat({ llm, provider, model, prompt, signal }) {
+  const assembler = new BlockAssembler()
+  for await (const chunk of llm.stream({
+    provider,
+    model,
+    messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin:codewiki' } })],
+    temperature: 0,
+    signal,
+  })) {
+    assembler.push(chunk)
+  }
+  const finish = assembler.finish
+  if (finish?.kind === 'error' || finish?.kind === 'aborted') {
+    throw new Error(`llm 通道失败（${finish.kind}，${String(finish.failure?.code ?? 'unknown')}）：${String(finish.failure?.message ?? '')}`)
+  }
+  const content = assembler.blocks().filter((b) => b.type === 'text').map((b) => b.text).join('')
+  if (!content) throw new Error('llm 通道响应缺少 content')
+  return { content, outputTokens: Number(assembler.usage?.outputTokens) || 0 }
+}
+
+// 同步单轮调用：百炼普通入口（dashscope chat/completions）。零子代理。
+// batchProvider 非空时不走这里，改由 llmChat 走宿主 llm 服务。
 async function bailianChat({ apiKey, model, thinkingBudget, prompt, signal }) {
   const body = { model, messages: [{ role: 'user', content: prompt }] }
   body.enable_thinking = thinkingBudget > 0
@@ -294,9 +321,14 @@ function applyTaskResult(task, content, notes) {
 // 全部打百炼普通入口。signal 用于取消时中断在飞请求。
 // onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
 // 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
-export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone, signal }) {
+export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone, signal, llm, provider }) {
   const results = new Map()
   let cursor = 0
+  // 通道选择：provider 非空走宿主 llm 服务（任意已配置 provider，凭证由宿主解析），
+  // 否则保持百炼直连（batchModel 是百炼模型名、batchApiKey/凭证库解析 key）。
+  const chat = provider
+    ? (args) => llmChat({ ...args, llm, provider })
+    : (args) => bailianChat(args)
   const worker = async () => {
     for (;;) {
       if (signal?.aborted) return
@@ -305,7 +337,7 @@ export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, c
       const t = tasks[i]
       try {
         const startedAt = Date.now()
-        const { content, outputTokens } = await bailianChat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt, signal })
+        const { content, outputTokens } = await chat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt, signal })
         if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
       } catch (err) {
@@ -1353,8 +1385,10 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // 阶段执行器：后台并发池打百炼普通入口，结果进 batchResults 由 settleJob 收割，
+  // 阶段执行器：后台并发池，结果进 batchResults 由 settleJob 收割，
   // tick 不被长请求阻塞。batchRuns 是存活性标记，batchAborters 供取消中断在飞请求。
+  // 通道二选一：batchProvider 非空 → 宿主 llm 服务（任意已配置 provider，凭证由宿主解析，
+  // 本地 9B 这类 OpenAI 兼容端点也在内）；为空 → 百炼普通入口（沿用旧配置与凭证链）。
   const batchRuns = new Map()     // jobId → 执行器 Promise
   const batchResults = new Map()  // jobId → results[]（null = 执行器整体失败，已 fail）
   const batchAborters = new Map() // jobId → AbortController
@@ -1363,9 +1397,13 @@ function createJobService(config, onSettled) {
     const ac = new AbortController()
     batchAborters.set(job.id, ac)
     let doneCount = 0
-    const run = apiKeyOf(job)
+    // 凭证只在百炼通道需要；llm 通道由宿主按 provider 解析，不碰插件配置的 key。
+    const creds = c.batchProvider ? Promise.resolve('') : apiKeyOf(job)
+    const run = creds
       .then((apiKey) => runRealtimeTasks(prepared, {
         apiKey,
+        provider: c.batchProvider || undefined,
+        llm: llmRef,
         model: c.batchModel,
         thinkingBudget: c.batchThinkingBudget,
         concurrency: c.maxConcurrency,
@@ -1417,7 +1455,7 @@ function createJobService(config, onSettled) {
     }))
     job.batchProgress = { completed: 0, total: prepared.length }
     startBatchChatRun(job, prepared)
-    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${c.batchModel}，并发 ${c.maxConcurrency}）`)
+    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${c.batchProvider ? `${c.batchProvider}/${c.batchModel}` : c.batchModel}，并发 ${c.maxConcurrency}）`)
     touch(job)
   }
 
@@ -2052,8 +2090,16 @@ function createJobService(config, onSettled) {
     persist()
     let k
     try {
-      k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
-      if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（编译流水线没有子代理回退）')
+      const c = liveConfig(config)
+      if (c.batchProvider) {
+        // 宿主 llm 通道：凭证由宿主按 provider 解析，这里只校验通道可用性与模型名。
+        if (!c.batchModel) throw new Error('编译模型为空——在插件设置选一个提供商下的模型')
+        if (!llmRef || typeof llmRef.stream !== 'function') throw new Error(`编译模型走宿主 llm 服务（provider ${c.batchProvider}），但 llm 服务未注入——请重启宿主后重试`)
+        k = { key: '', source: `llm(${c.batchProvider}/${c.batchModel})` }
+      } else {
+        k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
+        if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（编译流水线没有子代理回退）')
+      }
     } catch (err) {
       fail(job, String(err?.message ?? err))
       flush()
@@ -2449,7 +2495,35 @@ function readBodyJson(req) {
   })
 }
 
-function installWebServer(ctx, service, extra = {}) {
+// 模型目录（设置页级联下拉的数据源）：宿主 llm 服务里已注册的 provider 及其模型。
+// 与宿主模型设置同源，不读插件配置。provider 元数据字段名兼容 id/provider、
+// displayName/name 两种写法（listProviders 返回 adapter 原样对象）。
+// 单个 provider 的 listModels 抛错（缺凭证/端点不通）不影响其它 provider：
+// 该条目保留、models 为空、附 error，设置页据此提示手填。
+export async function listModelCatalog(llm) {
+  if (!llm || typeof llm.listProviders !== 'function') {
+    return { ok: false, error: 'llm 服务未注入，无法枚举模型提供商；可在设置里手填 batchProvider/batchModel', providers: [] }
+  }
+  const providers = []
+  for (const p of llm.listProviders() ?? []) {
+    const id = String(p?.id ?? p?.provider ?? '')
+    if (!id) continue
+    const entry = { id, name: String(p?.displayName ?? p?.name ?? id), models: [] }
+    try {
+      if (typeof llm.listModels === 'function') {
+        entry.models = (await llm.listModels(id) ?? [])
+          .map((m) => ({ id: String(m?.id ?? ''), name: String(m?.name ?? m?.id ?? '') }))
+          .filter((m) => m.id)
+      }
+    } catch (err) {
+      entry.error = String(err?.message ?? err)
+    }
+    providers.push(entry)
+  }
+  return { ok: true, providers }
+}
+
+export function installWebServer(ctx, service, extra = {}) {
   const { config, schedState, compile } = extra
   if (typeof ctx.inject !== 'function') return
   // 宿主工作区注册表（WorkspaceRegistry.list() 同步内存投影）：任务页过滤数据源。
@@ -2587,6 +2661,28 @@ function installWebServer(ctx, service, extra = {}) {
         writeJson(res, 200, reposCache)
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
+        }
+      },
+    })
+    // 模型目录：设置页「编译模型」级联下拉的数据源。与宿主模型设置同源
+    // （llm.listProviders + 各 provider 的 listModels），不读插件自己的配置。
+    // 缺凭证/探测失败的 provider 保留在列表里但 models 为空，附 error 供设置页提示；
+    // llm 服务未注入时整体报错，设置页降级为手填。
+    let modelsCache = null
+    let modelsCacheAt = 0
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/models',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          if (!modelsCache || Date.now() - modelsCacheAt > 30000) {
+            modelsCache = await listModelCatalog(extra.llm ?? llmRef)
+            modelsCacheAt = Date.now()
+          }
+          writeJson(res, 200, modelsCache)
+        } catch (err) {
+          writeJson(res, 500, { ok: false, error: String(err?.message ?? err), providers: [] })
         }
       },
     })

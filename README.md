@@ -23,7 +23,11 @@
 
 ## 设置（插件行 config，命名空间 `codewiki`）
 
-上述设置同样可在 **插件页 → CodeWiki 详情页**（`client.js`，v0.2.0 起）里修改：保存走 `configForms.mutate`（单层 op），与 patch 文件里手改等价、同样热生效。模型下拉来自 `ctx.remote.session.modelCatalog()`；目录不可用时退化为文本输入，仍可填任意 provider/model。
+上述设置同样可在 **插件页 → CodeWiki 详情页**（`client.js`，v0.2.0 起）里修改：保存走 `configForms.mutate`（单层 op），与 patch 文件里手改等价、同样热生效。0.9.1 起「编译模型」是 provider/model 两级下拉：目录来自插件自己的 `/api/codewiki/models`（同源宿主 `llm.listProviders` + 各 provider 的 `listModels`，即模型设置页里已注册的提供商），不读插件配置；目录不可用时退化为文本输入，仍可填任意 provider/model。
+
+- `batchProvider` / `batchModel`：编译模型（规划/写文章/横切/审校全部环节共用）。`batchProvider` 留空 = 走内置百炼兼容通道（`batchModel` 填百炼模型名，旧行为）；非空 = 走宿主 llm 服务，`batchModel` 填该 provider 的模型 id——本地 OpenAI 兼容端点（如本地 9B）只要在模型设置里注册过，就能在这里选到并参与编译。
+- `batchApiKey`：仅内置百炼通道使用（留空自动取模型设置「阿里百炼云」渠道凭证）；走宿主 provider 时凭证由该 provider 自己的配置决定。
+- `batchThinkingBudget`：仅内置百炼通道使用，0=关闭思考（省输出 Token），1~32768=开启思考并限预算；走宿主 provider 时跟随该模型的默认思考程度。
 
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。
