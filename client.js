@@ -1,4 +1,4 @@
-// dsh-codewiki — 客户端半侧（浏览器）v0.4.0
+// dsh-codewiki — 客户端半侧（浏览器）v0.4.1
 // 两个挂载点：
 // 1. 「插件」页 `plugins.item`（id = codewiki，与 profile patch 条目一致）——设置表单；
 // 2. 侧边栏面板 `main` + `sidebar.panellist`（参照 dsh-hindsight-on-demand）——编译任务进度与取消，
@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
     const PANEL_ORDER = 52 // 排在 dsh-hindsight-on-demand（50）之后
     const POLL_MS = 2000
     const REPOS_PATH = '/api/codewiki/repos'
+    const MODELS_PATH = '/api/codewiki/models'
     const REPOS_POLL_MS = 10000
     const ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']
 
@@ -37,12 +38,19 @@ window.__ModuleLoader__.load({
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '编译并发上限',
       maxConcurrencyHint: '1–8；硬顶 8。编译请求（chat/completions）后台并发池的并发数。',
-      secCompile: '编译模型（百炼）',
-      secCompileHint: 'codewiki_generate 的全部模型环节（规划/写文章/横切/校对）都走百炼普通入口（chat/completions），凭证自动取模型设置「阿里百炼云」渠道。',
+      secCompile: '编译模型',
+      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）；选「内置百炼通道」则走百炼普通入口并自动取「阿里百炼云」渠道凭证。',
+      batchProvider: '模型提供商',
+      batchProviderHint: '来自模型设置里已注册的提供商。选「内置百炼通道」= 走百炼直连（旧行为）。',
+      batchProviderBuiltin: '内置百炼通道（默认）',
       batchModel: '编译模型',
-      batchModelHint: '全部模型环节共用（规划/写文章/横切/校对）。默认 qwen3.7-flash。',
+      batchModelHint: '该提供商下的模型 id。目录里没有的模型可直接手填。',
+      batchModelManual: '手填模型 id…',
+      catalogLoading: '正在读取模型目录…',
+      catalogUnavailable: '模型目录不可用（{error}）——可手填提供商与模型 id。',
+      catalogEmptyModels: '该提供商没有可枚举的模型，请手填模型 id。',
       batchThinkingBudget: '思考预算',
-      batchThinkingBudgetHint: '0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。',
+      batchThinkingBudgetHint: '仅百炼通道生效：0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。走宿主提供商时用该模型的默认思考档。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -146,12 +154,19 @@ window.__ModuleLoader__.load({
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Compile concurrency',
       maxConcurrencyHint: '1–8; hard cap 8. Concurrency of the background pool of compile requests (chat/completions).',
-      secCompile: 'Compile model (Bailian)',
-      secCompileHint: 'Every model step of codewiki_generate (plan / articles / crosscut / proofreading) goes through the plain Bailian endpoint (chat/completions); credentials resolve automatically from the "阿里百炼云" provider in model settings.',
+      secCompile: 'Compile model',
+      secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model. Pick any provider configured in model settings (local OpenAI-compatible endpoints included); "Built-in Bailian channel" goes straight to the Bailian endpoint with the "阿里百炼云" credentials.',
+      batchProvider: 'Model provider',
+      batchProviderHint: 'Providers registered in model settings. "Built-in Bailian channel" = the old direct-Bailian behaviour.',
+      batchProviderBuiltin: 'Built-in Bailian channel (default)',
       batchModel: 'Compile model',
-      batchModelHint: 'Shared by every model step (plan / articles / crosscut / proofreading). Default qwen3.7-flash.',
+      batchModelHint: 'Model id under that provider. Ids missing from the catalog can be typed in.',
+      batchModelManual: 'Type a model id…',
+      catalogLoading: 'Reading the model catalog…',
+      catalogUnavailable: 'Model catalog unavailable ({error}) — type the provider and model id instead.',
+      catalogEmptyModels: 'This provider exposes no enumerable models; type the model id.',
       batchThinkingBudget: 'Thinking budget',
-      batchThinkingBudgetHint: '0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output.',
+      batchThinkingBudgetHint: 'Bailian channel only: 0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output. Host providers use that model\'s default reasoning effort.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -253,6 +268,7 @@ window.__ModuleLoader__.load({
       '[data-dscw-grid] { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: center; gap: 10px 16px; }',
       '[data-dscw-grid] > label { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-field] { display: flex; flex-direction: column; gap: 4px; }',
+      '[data-dscw-select] { width: 100%; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
       '[data-dscw-bar] { display: flex; align-items: center; gap: 8px; padding: 10px 0 0; border-top: 0.5px solid var(--dsw-alias-border-l3); }',
       '[data-dscw-notice] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
       '[data-dscw-warn] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); font-size: 12px; line-height: 18px; }',
@@ -394,6 +410,23 @@ window.__ModuleLoader__.load({
           const [draft, setDraft] = React.useState(null)
           const [notice, setNotice] = React.useState(null)
           const [error, setError] = React.useState(null)
+          // 模型目录（宿主 llm 服务的 provider/model，经 /api/codewiki/models 拉取）。
+          // 拉不到时 catalogError 有值，设置页退回「手填」形态，不阻断保存。
+          const [catalog, setCatalog] = React.useState(null)
+          const [catalogError, setCatalogError] = React.useState(null)
+
+          React.useEffect(() => {
+            let alive = true
+            apiGet(MODELS_PATH)
+              .then((data) => {
+                if (!alive) return
+                if (data?.ok === false) { setCatalogError(String(data.error ?? '模型目录不可用')); return }
+                setCatalog(Array.isArray(data?.providers) ? data.providers : [])
+                setCatalogError(null)
+              })
+              .catch((err) => { if (alive) setCatalogError(String(err?.message ?? err)) })
+            return () => { alive = false }
+          }, [])
 
           // 配置快照 + 订阅：宿主值变更（含保存成功后的回收读）才覆盖草稿。
           React.useEffect(() => {
@@ -432,6 +465,13 @@ window.__ModuleLoader__.load({
             return JSON.stringify(draft) !== JSON.stringify(snapshot.value)
           }, [snapshot, draft])
 
+          // 当前选中的提供商条目（目录里没命中时为 null = 手填形态）
+          const selectedProvider = React.useMemo(() => {
+            const id = String(draft?.batchProvider ?? '').trim()
+            if (!id || !Array.isArray(catalog)) return null
+            return catalog.find((p) => p?.id === id) ?? null
+          }, [draft?.batchProvider, catalog])
+
           const save = async () => {
             if (!snapshot?.writable || snapshot.status !== 'ready') return
             const concurrency = Number(draft?.maxConcurrency)
@@ -446,7 +486,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchModel', 'batchThinkingBudget', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchThinkingBudget', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -535,12 +575,62 @@ window.__ModuleLoader__.load({
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secCompile'))),
               el('div', { 'data-dscw-hint': '' }, t('secCompileHint')),
               el('div', { 'data-dscw-grid': '' },
+                el('label', null, t('batchProvider')),
+                el('div', { 'data-dscw-field': '' },
+                  catalogError
+                    ? el(Input, {
+                        value: String(draft.batchProvider ?? ''),
+                        onChange: (e) => setPath('batchProvider', e.target.value),
+                        placeholder: 'aliyun-bailian',
+                      })
+                    : el('select', {
+                        'data-dscw-select': '',
+                        value: String(draft.batchProvider ?? ''),
+                        onChange: (e) => {
+                          const next = e.target.value
+                          setPath('batchProvider', next)
+                          // 换提供商时把模型清空，避免残留上一家的模型 id 被误存
+                          const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === next) : null
+                          const first = entry?.models?.[0]?.id
+                          setPath('batchModel', first ?? (next ? '' : 'qwen3.7-flash'))
+                        },
+                      },
+                      el('option', { value: '' }, t('batchProviderBuiltin')),
+                      (Array.isArray(catalog) ? catalog : []).map((p) => el('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? `${p.name}（${p.id}）` : p.id)),
+                      // 已配置但目录里没有的 provider（例如刚删掉的渠道）：保留选项，避免静默丢失配置
+                      String(draft.batchProvider ?? '').trim() && !(Array.isArray(catalog) ? catalog : []).some((p) => p?.id === draft.batchProvider)
+                        ? el('option', { key: '__custom', value: String(draft.batchProvider) }, String(draft.batchProvider))
+                        : null,
+                    ),
+                  el('div', { 'data-dscw-hint': '' }, catalogError ? t('catalogUnavailable').replace('{error}', catalogError) : t('batchProviderHint')),
+                ),
                 el('label', null, t('batchModel')),
-                el(Input, {
-                  value: String(draft.batchModel ?? ''),
-                  onChange: (e) => setPath('batchModel', e.target.value),
-                  placeholder: 'qwen3.7-flash',
-                }),
+                el('div', { 'data-dscw-field': '' },
+                  (() => {
+                    const id = String(draft.batchProvider ?? '').trim()
+                    const models = selectedProvider?.models
+                    // 有目录且该提供商有模型 → 下拉；否则手填（本地自建模型常不在目录里）
+                    if (!id || !Array.isArray(models) || !models.length) {
+                      return el(Input, {
+                        value: String(draft.batchModel ?? ''),
+                        onChange: (e) => setPath('batchModel', e.target.value),
+                        placeholder: id ? t('batchModelManual') : 'qwen3.7-flash',
+                      })
+                    }
+                    const known = models.some((m) => m.id === String(draft.batchModel ?? ''))
+                    return el('select', {
+                      'data-dscw-select': '',
+                      value: String(draft.batchModel ?? ''),
+                      onChange: (e) => setPath('batchModel', e.target.value),
+                    },
+                      ...(known ? [] : [el('option', { key: '__custom', value: String(draft.batchModel ?? '') }, String(draft.batchModel ?? ''))]),
+                      models.map((m) => el('option', { key: m.id, value: m.id }, m.name && m.name !== m.id ? `${m.name}（${m.id}）` : m.id)),
+                    )
+                  })(),
+                  el('div', { 'data-dscw-hint': '' }, selectedProvider && Array.isArray(selectedProvider.models) && !selectedProvider.models.length
+                    ? t('catalogEmptyModels')
+                    : t('batchModelHint')),
+                ),
                 el('label', null, t('batchThinkingBudget')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {

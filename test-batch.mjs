@@ -7,7 +7,7 @@ import path from 'node:path'
 import {
   collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   prepareArticleTasks, runRealtimeTasks,
-  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey,
+  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey, listModelCatalog, installWebServer,
 } from './index.js'
 
 let passed = 0
@@ -243,6 +243,101 @@ globalThis.fetch = originalFetch
 fs.rmSync(tmpRoot, { recursive: true, force: true })
 fs.rmSync(workRoot, { recursive: true, force: true })
 fs.rmSync(scanRoot, { recursive: true, force: true })
+
+// ---- runRealtimeTasks：宿主 llm 通道（batchProvider 非空时不打百炼）----
+section('runRealtimeTasks：宿主 llm 通道')
+{
+  // 假 llm 服务：记录调用，按 stream 协议吐 block-start/text-delta/usage/finish
+  const llmCalls = []
+  const fakeLlm = {
+    async *stream(opts) {
+      llmCalls.push({ provider: opts.provider, model: opts.model, text: opts.messages?.[0]?.content?.[0]?.text })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: '---\ntitle: L\n---\nllm 通道结果' }
+      yield { type: 'usage', usage: { outputTokens: 77 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }
+  const before = batchCalls.length
+  const llmRes = await runRealtimeTasks(
+    [{ customId: 'l0', name: '_l0', keepInMemory: true, batchPrompt: 'llm 任务' }],
+    { provider: 'local-9b', llm: fakeLlm, model: 'qwen-9b', concurrency: 1, notes: [] },
+  )
+  check(batchCalls.length === before, 'provider 非空时不打百炼 fetch')
+  check(llmCalls.length === 1 && llmCalls[0].provider === 'local-9b' && llmCalls[0].model === 'qwen-9b', '经宿主 llm 服务按所选 provider/model 调用')
+  check(llmCalls[0].text === 'llm 任务', 'prompt 原样进 messages')
+  check(llmRes.get('l0')?.ok === true && llmRes.get('l0').content.includes('llm 通道结果'), 'llm 通道结果入账')
+}
+
+section('runRealtimeTasks：宿主 llm 通道失败记账')
+{
+  const failLlm = {
+    async *stream() {
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'NO_ADAPTER', message: 'provider 未注册' } } }
+    },
+  }
+  const notes = []
+  const res = await runRealtimeTasks(
+    [{ customId: 'f0', name: 'modules/f0.md', articlePath: path.join(outDir, 'f0.md'), batchPrompt: 'x' }],
+    { provider: 'missing', llm: failLlm, model: 'm', concurrency: 1, notes },
+  )
+  check(res.get('f0')?.ok === false, 'finish kind=error → 任务失败')
+  check(notes.some((n) => n.includes('NO_ADAPTER')), `失败原因进 notes（含错误码）`)
+}
+
+// ---- listModelCatalog：设置页级联下拉的数据源 ----
+section('listModelCatalog：宿主 provider/model 目录')
+{
+  const fakeLlm = {
+    listProviders: () => [
+      { id: 'aliyun-bailian', displayName: '阿里百炼云' },
+      { provider: 'local-9b', name: '本地 9B' }, // 兼容 provider/name 写法
+      { id: '', displayName: '无 id 应被跳过' },
+    ],
+    listModels: async (id) => {
+      if (id === 'local-9b') throw new Error('MISSING_CREDENTIAL')
+      return [{ id: 'qwen3.7-flash', name: 'qwen3.7-flash' }, { id: 'qwen3-max', name: 'Qwen3 Max' }]
+    },
+  }
+  const cat = await listModelCatalog(fakeLlm)
+  check(cat.ok === true && cat.providers.length === 2, '跳过无 id 的 provider（2 个有效）')
+  check(cat.providers[0].id === 'aliyun-bailian' && cat.providers[0].name === '阿里百炼云', '取 displayName 作展示名')
+  check(cat.providers[0].models.length === 2 && cat.providers[0].models[1].name === 'Qwen3 Max', 'listModels 结果映射为 {id,name}')
+  check(cat.providers[1].id === 'local-9b' && cat.providers[1].name === '本地 9B', '兼容 provider/name 字段写法')
+  check(cat.providers[1].models.length === 0 && String(cat.providers[1].error).includes('MISSING_CREDENTIAL'), '单个 provider 失败不影响其它，条目保留并附 error')
+  const none = await listModelCatalog(null)
+  check(none.ok === false && none.providers.length === 0, 'llm 未注入 → ok:false 且空目录（设置页降级手填）')
+}
+
+// ---- /api/codewiki/models 端点：handler 真实跑通（模拟 ctx/res）----
+section('GET /api/codewiki/models 端点')
+{
+  const routes = new Map()
+  const fakeCtx = {
+    inject: (deps, cb) => {
+      if (deps.includes('webServer')) cb({ webServer: { register: (r) => routes.set(r.path, r.handler) } })
+    },
+  }
+  const fakeLlmSvc = {
+    listProviders: () => [{ id: 'local-9b', displayName: '本地 9B' }],
+    listModels: async () => [{ id: 'qwen-9b', name: 'Qwen 9B' }],
+  }
+  installWebServer(fakeCtx, { list: () => [], cancel: () => false }, { llm: fakeLlmSvc })
+  const handler = routes.get('/api/codewiki/models')
+  check(typeof handler === 'function', '端点已注册')
+  const res = {
+    code: null, body: null,
+    writeHead(c) { this.code = c },
+    end(b) { this.body = JSON.parse(b) },
+  }
+  await handler({ socket: { remoteAddress: '127.0.0.1' } }, res)
+  check(res.code === 200 && res.body.ok === true, '回环请求 → 200 + ok:true')
+  check(res.body.providers.length === 1 && res.body.providers[0].id === 'local-9b' && res.body.providers[0].models[0].id === 'qwen-9b', '目录内容为宿主 provider/model')
+  // 非回环拒绝
+  const res2 = { code: null, body: null, writeHead(c) { this.code = c }, end(b) { this.body = JSON.parse(b) } }
+  await handler({ socket: { remoteAddress: '10.0.0.5' } }, res2)
+  check(res2.code === 403 && res2.body.error === 'loopback only', '非回环请求被拒（403）')
+}
 
 // ---- resolveBatchApiKey：凭证解析链（显式配置 > 宿主凭据库）----
 console.log('\n== resolveBatchApiKey ==')
