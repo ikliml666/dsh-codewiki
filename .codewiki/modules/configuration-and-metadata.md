@@ -20,7 +20,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 位于仓库根目录，JSON 格式配置文件。
 
 - **行 1**: `name`: `"@local/dsh-codewiki"`。项目唯一标识符。
-- **行 2**: `version`: `"0.9.0"`。当前语义化版本号。
+- **行 2**: `version`: `"0.9.1"`。当前语义化版本号。
 - **行 3**: `description`: 描述 CLI (`cw`)、全仓库 Wiki 编译管线（纯 Bailian 端点，零子代理）及侧边栏面板功能。
 - **行 4**: `private: true`
     - 标记为私有包，防止意外发布到 npm 公共注册表。
@@ -82,6 +82,8 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
     - 忽略编排测试输出文件。
 - **行 9**: `.probe3.txt`
     - 忽略探针测试文件。
+- **行 11-12**: `.dsh-ops/`
+    - 忽略 DSH 运行期产物（面板会话流、工具调用记录），不入库。
 
 ## Architecture
 
@@ -144,7 +146,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 4.  **排除流程**:
     - Git 在提交前扫描工作区，匹配 `.gitignore` 规则。
-    - 若发现 `node_modules/`、`*.log` 或 `bin/*.bak-*` 等文件，直接跳过索引，不纳入版本控制。
+    - 若发现 `node_modules/`、`*.log`、`bin/*.bak-*`、`.orch-test-out.txt`、`.probe3.txt` 或 `.dsh-ops/` 等文件/目录，直接跳过索引，不纳入版本控制。
 
 ## Connections
 
