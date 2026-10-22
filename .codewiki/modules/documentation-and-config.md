@@ -151,7 +151,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 - **关键版本**:
   - **0.9.0**: 新增会话通道 `sessionTasks`。`prepareArticleTasks` 返回值由 `{prepared, oversized}` 改为 `{prepared, sessionTasks}`。单文件超预算或连 200k 都装不下时，不再走批量兜底，而是进入 `sessionTasks`。新增常量 `SESSION_TASK_TIMEOUT_MS`（默认 30 分钟）、`SESSION_TASK_DIR`；导出纯函数 `classifySessionTask(task, nowMs)` 返回三态：`timeout`、`harvest`、`wait`。JobService 扩展：新增 `dispatchSessionTasks`、`progressSessionTasks`、`resendSessionSteer`。Tick 重构：`tickArticles` 和 `tickReview` 均接入会话通道收割逻辑。删除旧的超大兜底段。
   - **0.8.8**: 新增 `fixAnchors(content, cwd)` 函数（index.js），用于文章落盘前机械校正 `file:NN(-MM)` 行号锚点。逻辑：对照 `source_files` 源码，锚点起点行应包含同行反引号符号；若歧义则退试首段或声明形态；区间尾越界钳到文件尾。集成点：`applyTaskResult` (index.js) 与 `writeValidated` (index.js) 统一调用修正。数据流：`parseSourceFiles(fm)` 共用解析逻辑；`full/stale` 任务补 `cwd` 字段。
-  - **0.8.7**: 新增 `numberLines()` (index.js:347|)，为 collectSources 内联源码添加 `N| ` 前缀，防止弱模型幻觉数行。Prompt 修正：校对 prompt 明确“以源码『行号| 』前缀为准”。Stale 禁用：旧文行号一律不得沿用。
+  - **0.8.7**: 新增 `numberLines()` (index.js:379|)，为 collectSources 内联源码添加 `N| ` 前缀，防止弱模型幻觉数行。Prompt 修正：校对 prompt 明确“以源码『行号| 』前缀为准”。Stale 禁用：旧文行号一律不得沿用。
   - **0.8.6**: 修复规划阶段主模型路由失效问题。新增模块级 `llmRef`，通过 `ctx.inject(['llm'], ...)` 注入；`runMainModelPlan` 改为读取 `llmRef` 而非直接访问 `hostCtxRef.llm`（后者在未注入时抛错）。路由：优先 `session.requestHeader()?.config`，其次 `agent.options`。
   - **0.8.5**: 适配 DSH 0.2.1-rc.2：`source` 形态从 `{kind:'plugin',plugin:'codewiki'}` 改为 `{kind:'plugin:codewiki'}`。Engines：package.json 增加 `"engines": {"dsh": ">=0.2.0-rc.0"}`。
   - **0.8.4**: 超预算分割：当模块源码超 28k token 时，拆分多个观察批。新 Prompt：`batchArticleObservePrompt` 和 `batchArticleComposePrompt`。状态机：`tickArticles` 处理 `#obs` 批次，分组后提交合成任务 (`composePlan`)。持久化：`submitBatchFor` 补存 `splitFor/composePlan` 元数据。
@@ -161,7 +161,7 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
   - **0.8.0**: 实时唤醒：新增 `wakeCompileSession(job, outcome, agents?)` (index.js)，编译终态通过 `agent.steer()` 向发起会话发送消息。依赖：引入 `@deepseek-ai/dsh-llm` 等宿主包（junction 模式）。Bug 修复：`submitComposeBatch` 同步调用修复 `undefined.then` 错误。
   - **0.7.0**: 新工具：`codewiki_update` (updateToolDefinition, index.js)，固定 scope=auto 的提交制更新。提醒机制：`commitHintText`，基于 git log 时间戳判断是否需要提醒提交改动。
   - **0.6.0**: 删除批量通道：移除百炼专用批量端点，全部走普通入口 `chat/completions`。保留骨架：后台执行器逻辑保留，仅端点变更。UI 清理：client.js 删除批量设置页节。
-  - **0.5.0.6**: 进度工具：新增 `codewiki_progress` (progressToolDefinition, index.js:1815-1911|)，只读查询编译进度。
+  - **0.5.0.6**: 进度工具：新增 `codewiki_progress` (progressToolDefinition, index.js:2156-2252|)，只读查询编译进度。
   - **0.5.0.5**: 批量通道切换：从 Batch File 切换为 Batch Chat (batch.dashscope.aliyuncs.com)。配置：`batchMinTokens` 调整为 30000 以启用批量折扣。
   - **0.5.0.4**: 收尾封死：reminderText 禁止手工流程，强制调用 `codewiki_generate`。
   - **0.5.0.3**: 锚点校验：新增 `test-wiki-anchors.mjs`，三重断言校验行号锚点。

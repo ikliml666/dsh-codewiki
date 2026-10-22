@@ -20,25 +20,25 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 位于仓库根目录，JSON 格式配置文件。
 
 - **行 1**: `name`: `"@local/dsh-codewiki"`。项目唯一标识符。
-- **行 2**: `version`: `"0.9.0"`。当前语义化版本号。
+- **行 2**: `version`: `"0.9.1"`。当前语义化版本号。
 - **行 3**: `description`: 描述 CLI (`cw`)、全仓库 Wiki 编译管线（纯 Bailian 端点，零子代理）及侧边栏面板功能。
 - **行 4**: `private: true`
     - 标记为私有包，防止意外发布到 npm 公共注册表。
 - **行 5**: `type: "module"`
     - 启用 ES Modules (ESM) 支持，所有 `.js` 文件默认视为 ESM。
-- **行 6-9**: `main`, `exports`
+- **行 6-11**: `main`, `exports`
     - `main`: `"index.js"`。入口点。
     - `exports`: 定义子路径导出。
         - `"."`: 映射至 `./index.js`。
         - `"./client"`: 映射至 `./client.js`。
-- **行 10**: `license: "MIT"`
+- **行 12**: `license: "MIT"`
     - 开源许可证类型。
-- **行 11-15**: `engines`
+- **行 13-16**: `engines`
     - `node`: `">=20"`。强制要求 Node.js 版本不低于 20。
     - `dsh`: `">=0.2.0-rc.0"`。强制要求 DeepSeek Harness 版本不低于 0.2.0 的 rc.0 预发布版。
-- **行 16-18**: `dependencies`
+- **行 17-19**: `dependencies`
     - `@deepseek-ai/schemastery`: `"^3.18.4"`。核心运行时依赖，用于 Schema 验证或工具定义。
-- **行 19-27**: `dsh`
+- **行 20-27**: `dsh`
     - 自定义字段，专供 DSH 工具链使用。
     - `client.platform`: `"web"`。指定客户端运行平台为 Web。
     - `bundle.patch`: `"cordis.patch.yml"`。指定打包时使用的 Cordis 补丁定义文件路径。
@@ -46,7 +46,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 ### cordis.patch.yml
 位于仓库根目录，YAML 格式补丁定义文件。由 `dsh bundle` 或 Cordis 加载器读取。
 
-- **行 1-10**: 注释块
+- **行 1-11**: 注释块
     - 说明文件用途：供 bundle 形式安装使用；本地开发应使用 `profiles/web/cordis.patch.yml` 中的 `file:///` 直挂方式。
     - 强调 ID 一致性：ID 必须保持为 `codewiki`。
     - 详细列出 `config` 命名空间下的配置项含义：
@@ -57,14 +57,14 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
         - `maxConcurrency`: 写文章子代理并发上限（硬顶 2）。
         - `articleLanguage`: 文章语言。
         - `updateReminder`: 会话系统提示注入 wiki 维护提醒开关（仅当会话仓库存在 `.codewiki/`；默认开启）。
-- **行 11**: `- insert:`
+- **行 12**: `- insert:`
     - 定义插入操作。
-- **行 12**: `- id: codewiki`
+- **行 13**: `- id: codewiki`
     - 插件 ID。必须全局唯一，此处固定为 `codewiki`。
-- **行 13**: `name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js`
+- **行 14**: `name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js`
     - **关键路径**：指向本地绝对路径的 `index.js`。
     - **注意**：此路径包含空格编码 `%20`，且为 Windows 绝对路径。在生产 Bundle 中，此路径通常会被替换或相对化处理，但在当前源码中保留为绝对路径，表明这可能是一个本地开发调试副本或特定环境配置。在实际分发中，`name` 字段通常应指向资源包内的相对路径或 URL。
-- **行 14**: `config: {}`
+- **行 15**: `config: {}`
     - 初始配置对象为空。实际配置项（如 `defaultProvider` 等）需在用户侧或后续合并过程中注入，或者在此处展开具体值。根据注释，这些配置项属于 `codewiki` 命名空间。
 
 ### .gitignore
@@ -76,12 +76,14 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
     - 忽略 vendor 目录下 CodeWiki 构建的目标输出文件夹。
 - **行 3**: `*.log`
     - 忽略所有日志文件。
-- **行 5-6**: `bin/*.bak-*`
+- **行 6**: `bin/*.bak-*`
     - 忽略 `bin/` 目录下以 `.bak-` 开头的备份文件。注释说明这是 `cw` 二进制的最后产物安全网。
 - **行 8**: `.orch-test-out.txt`
     - 忽略编排测试输出文件。
 - **行 9**: `.probe3.txt`
     - 忽略探针测试文件。
+- **行 12**: `.dsh-ops/`
+    - 忽略 DSH 运行期产物（面板会话流、工具调用记录），不入库。
 
 ## Architecture
 
@@ -144,7 +146,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 4.  **排除流程**:
     - Git 在提交前扫描工作区，匹配 `.gitignore` 规则。
-    - 若发现 `node_modules/`、`*.log` 或 `bin/*.bak-*` 等文件，直接跳过索引，不纳入版本控制。
+    - 若发现 `node_modules/`、`*.log`、`bin/*.bak-*`、`.orch-test-out.txt`、`.probe3.txt` 或 `.dsh-ops/` 等文件/目录，直接跳过索引，不纳入版本控制。
 
 ## Connections
 

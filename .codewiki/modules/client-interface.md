@@ -19,63 +19,64 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ### 常量与配置
 
-- `NS = 'codewiki'` (line 28): 插件命名空间，用于 `configForms` 和 locale 注册。
-- `KEY = 'codewiki'` (line 29): 侧边栏面板 key，需与 `sidebar.panellist` 的 id 一致。
-- `JOBS_PATH = '/api/codewiki/jobs'` (line 30): 任务列表 API 路径。
-- `CONTROL_PATH = '/api/codewiki/control'` (line 31): 控制命令 API 路径（取消、编译等）。
-- `PANEL_ORDER = 52` (line 33): 侧边栏面板排序权重。
-- `POLL_MS = 2000` (line 34): 任务列表轮询间隔（毫秒）。
-- `REPOS_PATH = '/api/codewiki/repos'` (line 36): 仓库状态 API 路径。
-- `REPOS_POLL_MS = 10000` (line 37): 仓库列表轮询间隔（毫秒）。
-- `ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']` (line 38): 活跃阶段列表。
-- `STAGE_WEIGHTS` (line 655): 各阶段在总体进度中的权重：`{ plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }`。
+- `NS = 'codewiki'` (line 17): 插件命名空间，用于 `configForms` 和 locale 注册。
+- `KEY = 'codewiki'` (line 18): 侧边栏面板 key，需与 `sidebar.panellist` 的 id 一致。
+- `JOBS_PATH = '/api/codewiki/jobs'` (line 19): 任务列表 API 路径。
+- `CONTROL_PATH = '/api/codewiki/control'` (line 20): 控制命令 API 路径（取消、编译等）。
+- `PANEL_ORDER = 52` (line 21): 侧边栏面板排序权重。
+- `POLL_MS = 2000` (line 22): 任务列表轮询间隔（毫秒）。
+- `REPOS_PATH = '/api/codewiki/repos'` (line 23): 仓库状态 API 路径。
+- `MODELS_PATH = '/api/codewiki/models'` (line 24): 模型目录 API 路径。
+- `REPOS_POLL_MS = 10000` (line 25): 仓库列表轮询间隔（毫秒）。
+- `ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']` (line 26): 活跃阶段列表。
+- `STAGE_WEIGHTS` (line 774): 各阶段在总体进度中的权重：`{ plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }`。
 
 ### 字典与国际化
 
-- `zh()` (line 40) / `en()` (line 106): 返回中英文字典对象，包含所有 UI 文本键值对。通过 `ctx.locale.register(NS, ...)` 注册。
+- `zh()` (line 28) / `en()` (line 144): 返回中英文字典对象，包含所有 UI 文本键值对。通过 `ctx.locale.register(NS, ...)` 注册。
 
 ### API 函数
 
-- `apiGet(p)` (line 208): 封装 GET 请求，自动解析 JSON，检查 HTTP 状态码。
-- `apiPost(p, data)` (line 214): 封装 POST 请求，发送 JSON body，自动解析响应。
+- `apiGet(p)` (line 347): 封装 GET 请求，自动解析 JSON，检查 HTTP 状态码。
+- `apiPost(p, data)` (line 353): 封装 POST 请求，发送 JSON body，自动解析响应。
 
 ### React 组件
 
-- `CodewikiCard(props)` (line 266): 设置卡片组件。
+- `CodewikiCard(props)` (line 406): 设置卡片组件。
   - 使用 `ctx.configForms.get(NS)` 获取表单实例。
   - 维护 `snapshot`（服务器快照）、`draft`（本地草稿）、`notice`、`error` 状态。
   - `save()`: 验证并发数（1-8）和思考预算（0-32768），调用 `form.mutate` 保存。
   - `discard()`: 重置草稿为最新快照。
   - 包含“运行”、“编译模型”、“调度与排除”三个配置区域。
-- `CodewikiPanel()` (line 836): 侧边栏主面板组件。
+- `CodewikiPanel()` (line 972): 侧边栏主面板组件。
   - 维护 `jobs`（任务列表）、`err`、`busyId`、`tab`（当前标签页）、`copiedPath` 状态。
   - 维护 `sparkRef`（tps 滚动窗口）和 `batchRateRef`（批量完成速率 EWMA）。
   - 轮询 `JOBS_PATH`，更新任务状态及侧边统计数据。
   - 将任务按 `cwd` 分组，区分焦点任务（活动或最新）和历史任务。
   - 渲染三个标签页：Overview (`ReposTab`)、Tasks（任务列表）、Settings (`CodewikiCard`)。
-- `ReposTab()` (line 687): 仓库总览标签页组件。
+- `ReposTab()` (line 827): 仓库总览标签页组件。
   - 轮询 `REPOS_PATH` 获取仓库状态和调度信息。
   - 支持手动触发编译（`compile`）和切换排除状态（`toggleExclude`）。
-- `PanelIcon(props)` (line 1065): 侧边栏托盘图标，SVG 绘制摊开的书本。
-- `Spark({ values, width, height })` (line 590): 吞吐微趋势线 SVG 组件。
-- `stageBar(job)` (line 613): 六阶段步骤条组件，显示各阶段完成状态、耗时及当前阶段实时计时。
-- `throughputBadge(job, sparkOf, rateOf)` (line 641): 吞吐徽标组件，显示 tok/s 或篇/分 + ETA。
-- `usageLine(job)` (line 667): 用量行组件，显示输入/输出 token 数及请求数。
+- `PanelIcon(props)` (line 1174): 侧边栏托盘图标，SVG 绘制摊开的书本。
+- `Spark({ values, width, height })` (line 729): 吞吐微趋势线 SVG 组件。
+- `stageBar(job)` (line 750): 六阶段步骤条组件，显示各阶段完成状态、耗时及当前阶段实时计时。
+- `throughputBadge(job, sparkOf, rateOf)` (line 786): 吞吐徽标组件，显示 tok/s 或篇/分 + ETA。
+- `usageLine(job)` (line 808): 用量行组件，显示输入/输出 token 数及请求数。
 
 ### 辅助函数
 
-- `stageLabel(stage)` (line 702): 根据阶段名获取翻译后的标签。
-- `stateLabel(st)` (line 703): 根据状态获取翻译后的标签。
-- `kindLabelOf(t, kind)` (line 704): 根据类型获取翻译后的标签。
-- `progressBar(done, total)` (line 706): 渲染进度条。
-- `repoName(cwd)` (line 711): 从工作目录路径提取短名称。
-- `fmtMs(ms)` (line 716): 格式化毫秒为 HH:MM:SS 或 MM:SS。
-- `fmtTok(n)` (line 723): 格式化 token 数量（k/M）。
-- `fmtDur(ms)` (line 729): 格式化时长为 min 或 h min。
-- `fmtAgo(iso)` (line 734): 格式化相对时间（如 "5 min ago"）。
-- `overallPct(job)` (line 659): 计算任务总体进度百分比。
-- `stepName(s)` (line 638): 获取步骤名称的翻译。
-- `lastTimedStage(job)` (line 634): 获取最后有计时的阶段。
+- `stageLabel(stage)` (line 694): 根据阶段名获取翻译后的标签。
+- `stateLabel(st)` (line 695): 根据状态获取翻译后的标签。
+- `kindLabelOf(t, kind)` (line 696): 根据类型获取翻译后的标签。
+- `progressBar(done, total)` (line 697): 渲染进度条。
+- `repoName(cwd)` (line 701): 从工作目录路径提取短名称。
+- `fmtMs(ms)` (line 705): 格式化毫秒为 HH:MM:SS 或 MM:SS。
+- `fmtTok(n)` (line 712): 格式化 token 数量（k/M）。
+- `fmtDur(ms)` (line 718): 格式化时长为 min 或 h min。
+- `fmtAgo(iso)` (line 724): 格式化相对时间（如 "5 min ago"）。
+- `overallPct(job)` (line 775): 计算任务总体进度百分比。
+- `stepName(s)` (line 745): 获取步骤名称的翻译。
+- `lastTimedStage(job)` (line 746): 获取最后有计时的阶段。
 
 ## Architecture
 
