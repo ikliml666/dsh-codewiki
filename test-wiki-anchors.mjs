@@ -31,8 +31,10 @@ function check(cond, msg) {
   return cond // 供 `if (!check(...)) continue` 使用：断言失败时跳过该锚点的后续检查
 }
 
-// 行内反引号代码标识符：允许点分（Config.updateReminder）与参数/调用形式
+// 行内反引号代码标识符（带原文下标）：允许点分（Config.updateReminder）与参数/调用形式
 // （parseStatus(stdout)、tickIndex(job)）；拒绝含冒号/斜杠/空格/纯路径等非符号。
+// 带下标是为了把每个锚点绑定到「离它最近」的符号——一句话里常并列引用多个符号，
+// 要求锚点行同时包含全部符号会误判（如「`A` 与 `B`（`index.js:22`）」只该校验 B 或就近者）。
 function symbolsOnLine(line) {
   const out = []
   for (const m of line.matchAll(/`([^`\n]+)`/g)) {
@@ -41,9 +43,22 @@ function symbolsOnLine(line) {
     if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(sym)) continue
     if (sym.length < 3) continue
     if (sym.split('.').pop().length < 3) continue // 排除 CodeWiki.md / _index.md 尾段
-    out.push(sym)
+    out.push({ sym, at: m.index })
   }
   return out
+}
+
+// 取离锚点最近的符号（同距时取锚点左侧的，因为中文行文多为「符号（`file:NN`）」）
+function nearestSymbol(syms, anchorIndex, anchorLen) {
+  if (syms.length === 0) return null
+  const mid = anchorIndex + anchorLen / 2
+  let best = null
+  for (const s of syms) {
+    const d = Math.abs(s.at - mid)
+    const left = s.at < mid
+    if (!best || d < best.d || (d === best.d && left && !best.left)) best = { ...s, d, left }
+  }
+  return best
 }
 
 function walk(dir) {
@@ -83,13 +98,17 @@ for (const file of articles) {
         check(start <= end, `${at} 区间起止有序`)
         check(end <= src.total, `${at} 区间终点在行数范围内`)
       }
-      if (syms.length > 0) {
-        const srcLine = src.lines[start - 1]
+      // 符号绑定只在「本行只有一个锚点」时校验：一行并列多个锚点（表格一行多列、
+      // 一句话串多个文件）时无法可靠判断某符号属于哪个锚点，强行绑定会系统性误判。
+      // 多锚点行的价值由「行号在范围内 + 指向非空行」兜底。
+      // 区间锚点（NNN-MMM）在整个区间内搜符号——语义就是「这段代码」，不是首行。
+      if (syms.length > 0 && anchors.length === 1) {
+        const span = src.lines.slice(start - 1, end !== null ? end : start).join('\n')
         const hit = syms.some((s) => {
-          const tail = s.split('.').pop()
-          return srcLine.includes(s) || srcLine.includes(tail)
+          const tail = s.sym.split('.').pop()
+          return span.includes(s.sym) || span.includes(tail)
         })
-        check(hit, `${at} 符号绑定：${syms.map((s) => `\`${s}\``).join('/')} 应出现在 ${srcName}:${start}`)
+        check(hit, `${at} 符号绑定：${syms.map((s) => `\`${s.sym}\``).join('/')} 应出现在 ${srcName}:${start}${end !== null ? `-${end}` : ''} 区间内`)
       }
     }
   })

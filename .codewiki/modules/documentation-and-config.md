@@ -17,234 +17,210 @@ tags: [metadata, configuration, changelog, documentation, codewiki]
 
 ## Overview
 
-`documentation-and-config` 模块是 `@local/dsh-codewiki` 插件的核心基础设施层，负责管理项目元数据、配置补丁、变更日志以及面向用户的文档体系。该模块通过标准化的文件结构（`package.json`, `cordis.patch.yml`, `README.md`, `CodeWiki.md`, `client.js`, `index.js`）定义了插件的挂载方式、依赖关系和运行行为。
+`documentation-and-config` 模块不是一段可执行逻辑，而是 `@local/dsh-codewiki` 插件的**元数据与配置面**：它由 `package.json`（包身份、导出、宿主扫描标志）、`cordis.patch.yml`（bundle 挂载补丁）、`index.js` 中的 `Config` schema 与 `liveConfig`（配置真源）、`client.js` 中的设置表单与面板（配置的唯一图形入口）、`README.md` / `CodeWiki.md`（面向人的文档）、`CHANGELOG.md`（面向历史的决策记录）、`.gitignore`（运行期产物边界）以及两个自检脚本 `test-batch.mjs` / `test-orchestration.mjs` 共同构成。
 
-当前版本（v0.9.0）实现了**零子代理编译**与**会话通道兜底**：`codewiki_generate`、`codewiki_update`、`codewiki_progress` 与 `cw` 均为纯工具或提交制入口，由宿主常驻 JobService 驱动六个阶段（规划/写文章/横切/合成/审校/索引）全部经阿里云百炼普通入口完成。关键特性包括：
-1. **会话通道机制** (v0.9.0)：解决超 32k 文章在批量推理中的昂贵/不可靠路径。单文件 >28k 且无法分割时进入 `sessionTasks`（会话通道），使用 200k 大档装填完整源码；支持 `classifySessionTask` 三态判定（timeout/harvest/wait）及 `dispatchSessionTasks` 分发收割。
-2. **实时唤醒机制**：编译完成后通过 `wakeCompileSession` 向发起会话发送通知，并注入「请提交改动」提醒。
-3. **主模型优先规划**：规划阶段优先使用发起会话的主模型执行，避开百炼批量排队；失败时降级至百炼批量规划。
-4. **超大源码处理**：当文章阶段源码超预算时，自动拆分为多个观察批 + 合成请求（Map-Reduce 模式），避免 32k token 三倍价。
-5. **行号幻觉修复**：通过 `numberLines()` 函数给源码添加 `N| ` 前缀，解决弱模型自行数行导致的锚点偏移，校对 prompt 强制以前缀为准。
-6. **排除清单增强**：报错信息中返回命中的具体排除条目。
-7. **DSH 适配**：修复 source 形态以匹配宿主校验，LLM 注入修复解决了真实 Cordis 环境下 `hostCtxRef?.llm` 访问抛错问题。
+理解本模块的关键在于：**同一份配置有四种表示形态**——Cordis schema（`index.js:37-51` 的 `Config`）、运行时快照（`index.js:57-76` 的 `liveConfig`）、浏览器草稿（`client.js:410` 的 `draft`）、人工文档（`README.md:24-38`）。四者必须保持一致：schema 每新增一个字段，`liveConfig` 的解包、`client.js:489` 的保存字段清单、以及 README 的设置小节都要同步，否则字段会「能存不能读」或在设置页静默丢失。
+
+当前配置面（v0.9.1）的字段全集共 13 项，全部 `.volatile()`——即改完立即生效（每次 `execute`/`tick` 时经 `liveConfig` 重新解包），不需要重启 dsh。其中与「编译模型」相关的四项（`batchProvider` / `batchModel` / `batchApiKey` / `batchThinkingBudget`）在 0.9.1 从「写死百炼」改为「可指向宿主模型设置里任意 provider/model」，这是本模块最近一次结构性变更：新增了目录发现函数 `listModelCatalog`（`index.js:2503`）与配套端点 `GET /api/codewiki/models`（`index.js:2673-2688`），并把设置页的模型名文本框改成了 provider/model 两级级联下拉（`client.js:578-633`）。
 
 ## Key Components
 
-### `package.json` (根目录)
-- **描述**: 定义插件的元数据、导出路径及宿主识别标志。
-- **关键字段**:
-  - `name`: `@local/dsh-codewiki` (2|)。
-  - `version`: `0.9.0` (3|)。
-  - `exports`: 
-    - `"."`: `./index.js` (9|)。
-    - `"./client"`: `./client.js` (10|)。
-  - `dsh.client.platform`: `"web"` (22|)，驱动宿主扫描器加载 `client.js`。
-  - `dsh.bundle.patch`: `"cordis.patch.yml"` (25|)。
-  - `dependencies`: `{ "@deepseek-ai/schemastery": "^3.18.4" }` (18|)。
-  - `engines`: `{ "node": ">=20", "dsh": ">=0.2.0-rc.0" }` (13-15|)。
+### `package.json`（根目录，28 行）
 
-### `client.js` (根目录)
-- **描述**: 浏览器端（Client）插件入口。注册两个挂载点：`plugins.item`（ID `codewiki`，用于设置表单卡片）和 `sidebar.panellist`/`main`（Key `codewiki`，用于侧边栏编译任务面板）。
-- **关键常量**:
-  - `NS = 'codewiki'` (17|): 配置命名空间/插件 ID。
-  - `KEY = 'codewiki'` (18|): 侧边栏面板 Key。
-  - `JOBS_PATH = '/api/codewiki/jobs'` (19|), `CONTROL_PATH = '/api/codewiki/control'` (20|): API 端点。
-  - `PANEL_ORDER = 52` (21|): 面板在列表中的排序权重。
-  - `POLL_MS = 2000` (22|): 任务轮询间隔。
-  - `REPOS_POLL_MS = 10000` (24|): 仓库总览轮询间隔。
-  - `ACTIVE_STAGES` (25|): 活跃阶段数组 `['plan', 'articles', 'crosscut', 'compose', 'review', 'index']`。
-  - `STAGE_WEIGHTS` (684|): 进度计算权重 `{ plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }`。
-- **核心组件**:
-  - **`CodewikiCard`** (390-598|): 设置卡片组件。
-    - 状态管理：`snapshot` (来自 `form.getSnapshot`) 和 `draft`。使用 `structuredClone` 深拷贝避免引用污染 (409|, 424|)。
-    - 保存逻辑 `save()` (435-462|): 校验 `maxConcurrency` (1-8整数) 和 `batchThinkingBudget` (0-32768整数) (437-446|)。构建差异操作 `ops` 调用 `form.mutate(ops, snapshot.revision)` (456|)，处理乐观更新与冲突检测 (`accepted ? saved : conflict`)。
-  - **`CodewikiPanel`** (882-1082|): 侧边栏主面板。
-    - 数据流：`apiGet(JOBS_PATH)` 每 2s 拉取 (898-935|)。
-    - 采样缓存：`sparkRef` (Map<jobId, tps[]>) 存储最近 30 个 TPS 值用于绘制 Sparkline (908-911|)；`batchRateRef` (Map<jobId, {at, completed, rate}>) 计算 EWMA 平滑后的完成速率 (915-922|)。
-    - 任务分组：按 `cwd` 分组，区分“焦点任务”（活动优先，最新在前）和“历史任务”折叠区 (962-974|)。
-    - 进度计算 `overallPct()` (685-693|): 基于 `STAGE_WEIGHTS` 和当前阶段内 `taskList` 完成比例线性插值，封顶 99%。
-    - 吞吐徽标 `throughputBadge()` (696-716|): 实时通道显示 `tok/s` + Spark；批量通道显示 `篇/min` + ETA。
-  - **`ReposTab`** (737-880|): 总览标签页。
-    - 轮询 `REPOS_PATH` 获取仓库状态 (750|)。
-    - 排除逻辑 `toggleExclude()` (667-785|): 修改 `excludePaths` 配置，成功后调用 `apiPost(CONTROL_PATH, { action: 'refresh' })` 刷新服务端缓存并重新拉取 (778-779|)。
-    - 编译触发 `compile()` (787-795|): 调用 `apiPost(CONTROL_PATH, { action: 'compile', cwd })`。
-- **辅助函数**:
-  - **`apiGet/p`** (331-346|): 封装 fetch，自动解析 JSON，非 2xx 抛出错误。
-  - **`Spark`** (639-651|): SVG 折线图组件，基于传入的数值数组绘制。
-  - **`stageBar`** (660-682|): 六阶段步骤条，显示各阶段耗时及当前运行状态。
-  - **`fmtMs/fmtTok/fmtDur/fmtAgo`** (615-637|): 时间/数字格式化。
+包身份与宿主识别标志，是宿主扫描器与打包器唯一的机器可读入口。
 
-### `index.js` (根目录)
-- **描述**: 插件全部逻辑（单文件，Node ESM）。
-- **关键类/函数**:
-  - **`estimateTokens(text)`** (8|): Token 粗算器。CJK 每字 1 token，ASCII 每 3.5 字符 1 token（向上取整）。空串返回 0；混合字符串分别计算后求和。
-  - **`collectSources(root, files, budget?)`** (8|): 源码装填器。输入根目录、文件列表、可选 token 预算。输出对象 `{ text: string, skipped: string[], oversized: boolean }`。格式：内联源码带相对路径标题 `### a.ts` 和行号前缀 `1| ...`。缺失处理标注“文件不存在”。尾换行清理仅去除最后一个换行。预算控制：首文件即超预算 `oversized=true`；后续文件超预算加入 `skipped` 列表。
-  - **`numberLines(content)`** (8|): 行号注入器。处理 CRLF/LF，保留真实空行作为独立行。为源码添加 `N| ` 前缀，防止弱模型幻觉数行。
-  - **`prepareArticleTasks(tasks, options)`** (9|): 任务装配器。输入原始任务数组、配置 `{ cwd, language }`。输出 `{ prepared: Task[], sessionTasks: Task[] }`。字段分配：为每个 prepared 任务分配 `customId`。Prompt 装配：合并 mission、语言、源码内容、旧文章上下文。超大文件处理：单文件超 28k 但小于 200k 升级为“大档”继续尝试；连 200k 都装不下进入 `sessionTasks` 列表。多文件分割：当多文件总大小超预算时，拆分为多个 `#obs` 后缀的观察任务。观察任务特征：`keepInMemory=true`, `splitFor` 指向主文章, `composePlan` 携带合成信息。
-  - **`runRealtimeTasks(tasks, config)`** (9|): 实时 LLM 执行器。入参：任务数组，配置 `{ apiKey, model, thinkingBudget, concurrency, notes, signal, onTaskDone }`。行为：并发池执行，支持 AbortController 中止。请求体构造：`enable_thinking` 由 `thinkingBudget` 决定 (0=false, >0=true)；`thinking_budget` 仅在 enabled 时作为顶层键传入。消息结构：单条 user 消息承载 prompt。结果处理：磁盘任务写入 `articlePath`；内存任务返回 `content`。失败处理：记录到 `notes`，不中断其他任务，不落盘。回调：`onTaskDone` 上报 `outputTokens` 和 `durationMs`。
-  - **`localPlan(files)`** (9|): 本地兜底规划。输出 `{ modules: [{name, files}], concepts: [] }`。分组逻辑：按顶层目录分组。
-  - **`packArticles(articles, budget)`** (9|): 横切装填器。行为：按 token 预算截断。首篇整篇装入，后续文章只装头部并标注“仅头部”。
-  - **`scanRepoFiles(root)`** (9|): 仓库勘探器。过滤：跳过 `node_modules`, `.git`, 二进制文件, 超大文件 (>300KB), 空文件。输出：`[{ path, bytes }]`。
-  - **`resolveBatchApiKey(inject, config)`** (10|): 凭证解析链。优先级：显式 `batchApiKey` > 宿主凭据库 (`inject` 提供的 credentials service)。容错：`inject` 非函数或抛错返回 `null`。
-  - **`fixAnchors(text, root)`** (10|): 行号锚点修正器。输入含 Markdown 锚点（如 `` `a.js:1` ``）的文章文本、根目录。输出 `{ fixed: number, unresolved: string[], text: string }`。逻辑：基于 `source_files` frontmatter 解析符号所在文件的实际行号。唯一声明目标：修正行号。起点行已含符号：视为正确，不动。符号未找到：记入 `unresolved`，不动。多处声明（歧义）：不动，记入 `unresolved`。区间修正：起点对齐符号，尾部钳制到文件尾。Basename 匹配：支持子目录 basename 唯一匹配。非清单文件：不处理。CRLF 保真：保留原文换行符。无 frontmatter：原样返回。
-  - **`apply(ctx, config)`** (20|): 插件应用入口。注册 `cw`, `codewiki_generate`, `codewiki_update`, `codewiki_progress` 工具。设置系统提示提醒。
-  - **`wakeCompileSession(job, stage, agentsRef)`**: 编译终态唤醒。在 job done/failed 时，通过 `agent.steer` 发送通知消息。
-  - **`commitHintText(cwd, jobs)`**: 提交提醒生成。比较编译完成时间与 .codewiki 最后提交时间，决定是否注入提醒。
-  - **`runMainModelPlan(job, prompt)`** (0.8.3 新增, 0.8.6 修复): 取发起会话 agent → `agent.session.requestHeader()?.config` 拿主模型 → `ctx.llm.stream()`（hostCtxRef 属性 + inject(['llm']) 双取法，兼容 mock ctx 与真实 cordis，0.8.6 修复 hostCtxRef?.llm 抛错导致降级问题）+ `BlockAssembler` 收文本，`createUserMessage` 带 `source:{kind:'plugin:codewiki'}`；temperature 0；AbortController 入 batchAborters（取消编译可中断规划）；usage 按实测 outputTokens + estimateTokens(input) 记账（requests:1, realtime:true）。
-  - **`tickPlan`** (改造): 先主模型规划 → parsePlan 成功入库并 note「规划（主模型）」；主模型不可用（无 sessionId/路由/llm）或未产出可用 JSON → 降级百炼批量规划（原 submitBatchFor 路径与 batchRef 收割逻辑零改动）。
-  - **`batchArticleObservePrompt(language,moduleName,sourcesText,batchIndex,batchTotal)`** (0.8.4 新增): 分批观察 prompt，要求保留全部函数/类/导出名、常量默认值、行号、调用关系、文件清单；禁 frontmatter。
-  - **`batchArticleComposePrompt({language,mission,moduleName,observationsText,prevArticle})`** (0.8.4 新增): 观察包 → 完整文章，沿用观察中的「文件:行号」，汇总 source_files，articleFormatSection() 收尾。
-  - **`prepareArticleTasks`** (0.8.4 改造): 分割判定：collectSources 28k 装填后 prompt 估算 >BATCH_TOKEN_BUDGET **或存在装不下的溢出文件**（overflowFiles，堵静默 skip）→ 逐单文件重新分批，batches.length>1 → 每批一个观察任务 `{customId:'split{n}o{i}', name:'<article>#obs{i}', keepInMemory:true, splitFor, composePlan:{mission,articlePath,prevArticlePath,batchCount,files}}`；单文件占满分不出多批时落回 BATCH_TOKEN_HARD_LIMIT 大档（原行为）。
-  - **`tickArticles`** (0.8.4 改造): results 含 `#obs` → 按 articleName 分组（composedArticles Set 去重，每篇一条合成任务）→ 从持久化任务快照重建合成任务（customId `o\d+$`→`c`）→ submitBatchFor 合成轮 → 下一轮收割写盘；观察全失败该篇缺席并 note；部分失败合成基于剩余观察。
-  - **`submitBatchFor`** (0.8.4 补带): 持久化 job.tasks 补带 `splitFor/composePlan`（宿主重启后收割重建合成所需的元数据，原快照会丢）。
-  - **`excludedItem(cwd, list)`**: 返回命中的排除清单条目原文（0.8.1 新增）；`isExcluded` 改为 `excludedItem(...) !== null` 的布尔包装。
-  - **`installUpdateReminder`**: `agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值（`updateReminder=false` 或会话仓库无 `.codewiki/` 返回空）；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过。
-  - **`runCw` / `parseStatus`**: cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）。
-  - **`createJobService`**: 宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调，下限 250ms）推进阶段机 plan→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`（compose 仅当横切输入超 28k 预算：每篇模块文章一个观察任务并发跑，settle 后以观察 pack 提交合成批；总量装得下则单批直出）；校对按「预算−文章 token」动态装填源码，装不下升大档（200k）重装；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（只剥 apiKey；多实例安全：job 带 owner=创建实例、tick 只推进自家 job，flush 脏标记+mergeFromDisk 磁盘吸收防互相覆盖，tick 进程级 `JOBS_FILE.lock` 串行，cancel 标记每轮 tick 从磁盘跨实例拾取）；submit 占位先行（stage=submitting 挡住凭证窗口内的并发重复提交）；批次未终态保留断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`（0.4.3+ 记 stage/crosscutSplit，resume 按原阶段恢复），下次提交自动续查（resume job）；取消幂等（cancelRequested 跨 tick 存活，取消保留断点可续查）；`writeValidated` 校验 frontmatter 后直接写盘（keepInMemory 任务的唯一写盘点）。
-  - **`cwToolDefinition`**: cw CLI 封装工具（子命令白名单）。
-  - **`generateToolDefinition`**: 纯提交制：normalizeCwd → 凭证解析（无凭证诚实报错，不回退子代理）→ cw status 判态 → 孤儿断点并入（resume）→ 任务预构建（clean 短路 / stale 逐篇直达 articles / 全量走 plan）→ `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用。
-  - **`progressToolDefinition`** (0.5.0.6 新增): 只读查编译进度：可选 cwd/jobId 过滤，返回 jobSummary 同源数据 + taskList 完成百分比，render 输出 stage=xx NN% 与任务明细；与 `codewiki_generate`（提交制）配套，让模型不必空等编译完成。
-  - **`updateToolDefinition`** (0.7.0 新增): 日常维护入口：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「继续下一项、不要等待」；错误消息里的 `codewiki_generate` 字样改写为 `codewiki_update`；参数仅 cwd/language（scope=full/stale 仍走 `codewiki_generate`）；apply() 注册为第四个工具。
-  - **WebServer 端点**: `GET /api/codewiki/jobs`（任务列表，不含 apiKey）与 `POST /api/codewiki/control {action:'cancel',jobId}`，仅回环放行（403）。
+| 行号 | 字段 | 值 | 作用 |
+| --- | --- | --- | --- |
+| 2 | `name` | `@local/dsh-codewiki` | 插件 id 基名；client.js 的 `__ModuleLoader__.load` 用它作模块 id |
+| 3 | `version` | `0.9.1` | 与 `CHANGELOG.md:3` 的版本节同步 |
+| 4 | `description` | 单行描述 | 插件管理页展示用 |
+| 5 | `private` | `true` | 不发布到 npm，只用 file:/// 挂载 |
+| 6 | `type` | `module` | 全仓 ESM：`index.js` 可直接 `import`/`export` |
+| 7 | `main` | `index.js` | 服务端半侧入口 |
+| 8-11 | `exports` | `".": "./index.js"`、`"./client": "./client.js"` | **两个半侧都要显式导出**，缺 `./client` 则浏览器半侧不会被装载 |
+| 12 | `license` | `MIT` | 上游 `mraza007/codewiki` 同为 MIT |
+| 13-16 | `engines` | `node >=20`、`dsh >=0.2.0-rc.0` | 宿主兼容性判定以 `engines.dsh` 为准（0.2.1-rc.1 起优先于 peerDependencies，includePrerelease） |
+| 17-19 | `dependencies` | `@deepseek-ai/schemastery ^3.18.4` | **唯一依赖**，仅 `Config` 用；靠插件本地 junction 解析（见 Known Issues） |
+| 20-27 | `dsh` | `client.platform: "web"`（22）、`bundle.patch: "cordis.patch.yml"`（25） | `dsh.client.platform` 驱动宿主把 `client.js` 送进浏览器；`dsh.bundle.patch` 让 bundle 安装方式找到补丁文件 |
 
-### `cordis.patch.yml` (根目录)
-- **描述**: Bundle 安装方式的 Cordis 补丁文件。定义插件 ID `codewiki`，指向本地 `index.js`，初始配置为空 `{}`。
-- **关键结构**:
-  - `insert` -> `id: codewiki`, `name: file:///.../index.js` (13-14|)。
-  - 注释中列出了配置项说明：`binaryPath`, `defaultProvider`, `defaultModel`, `defaultReasoningEffort`, `maxConcurrency`, `articleLanguage`, `updateReminder` (5-11|)。
+注意 `dsh.client.platform` 是**判定开关而非提示**：宿主按 Loader 条目缓存「非 client 包」结论，所以新增该声明后必须重启 dsh 才会生效。
 
-### `README.md` (根目录)
-- **描述**: 用户级文档，介绍插件功能、工具接口、设置选项及安装方法。
-- **内容**:
-  - 提供 `cw`、`codewiki_generate`、`codewiki_progress` 和 `codewiki_update` 工具的说明。
-  - 列出所有 volatile 设置项（如 `binaryPath`, `maxConcurrency` 等）。
-  - 详细说明 file:/// 直挂的安装步骤和依赖解析（junction）。
-  - **`codewiki_generate` 行为**:
-    - `scope=auto`: 智能判态（无 wiki->全量，有变更->增量，最新->跳过）。
-    - `scope=full`: 强制全量。
-    - 降级策略：规划 agent 失败降级为单 agent 全量；单篇失败不中断；全部失败不刷新基线。
-    - 并发硬顶 2 (README: 写文章并发上限硬顶 2，但 client.js 设置允许 1-8，需确认 index.js 中是否对 articles 阶段有特殊限制，client.js 仅做 UI 校验 1-8)。
+### `cordis.patch.yml`（根目录，15 行）
 
-### `CodeWiki.md` (根目录)
-- **描述**: 插件自身的 CodeWiki 入口文件，遵循 `<repo>/CodeWiki.md` 公约。
-- **状态**: 在 v0.5.0.1 之前需手动维护；v0.5.0.1 起由流水线自动生成或补建。
-- **内容**:
-  - `Overview`: 简述插件核心能力（零子代理、百炼普通入口推理、侧边栏面板）。
-  - `Key Components`: 详细列出 `index.js` 中的类、函数、常量及其行号用途；`client.js` 的组件注册；`vendor/codewiki/` 的上游来源。
-  - `Architecture`: ASCII/UTF-8 框图展示任务流。
-  - `Data Flow`: 配置流、凭证流、任务流、面板流的描述。
-  - `Connections`: 链接上游 `[[codewiki-upstream]]`。
-  - `Known Issues`: 记录热加载限制、junction 依赖、版本探测问题等。
+Bundle 形式安装用的 Cordis 补丁。结构与本地 file:/// 直挂完全同构，唯一区别是文件位置。
 
-### `.gitignore` (根目录)
-- **描述**: Git 忽略规则。
-- **规则**:
-  - `node_modules/` (1|): 标准依赖目录忽略。
-  - `vendor/codewiki/target/` (2|): Rust 构建产物忽略。
-  - `*.log` (3|): 所有日志文件忽略。
-  - `bin/*.bak-*` (6|): cw 二进制备份，安全网机制，防止上游更新或清理后无法恢复已知工作版本，见 CHANGELOG 0.5.0.2。
-  - `.orch-test-out.txt` (8|)。
-  - `.probe3.txt` (9|)。
+- 1-3：头注释，说明本地开发走 `profiles/web/cordis.patch.yml` 的 `file:///` 直挂（URL 空格写 `%20`），两种方式 id 必须都叫 `codewiki`。
+- 4-11：设置项注释清单——`binaryPath`、`defaultProvider`、`defaultModel`、`defaultReasoningEffort`、`maxConcurrency`、`articleLanguage`、`updateReminder`。**这七条是 0.1.x 时代的遗留描述**：`defaultProvider` / `defaultModel` / `defaultReasoningEffort`（6-8 行）已不在 `index.js:37-51` 的 `Config` 里（子代理派发路径在 0.4.0 服务化后删除）；第 9 行「写文章子代理并发上限（硬顶 2）」也已过期——实际硬顶是 `CONCURRENCY_HARD_CAP = 8`（`index.js:22`）。以 `Config` 为准，注释仅作历史参考。
+- 12-15：`insert` → `id: codewiki`（13）、`name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js`（14）、`config: {}`（15）。id 与 `client.js:17` 的 `NS`、`client.js:18` 的 `KEY` 三处必须一致，否则设置表单与面板取不到同一命名空间。
 
-### `CHANGELOG.md` (根目录)
-- **描述**: 详细的版本变更历史，记录了架构重构、性能优化和 bug 修复。
-- **关键版本**:
-  - **0.9.0**: 新增会话通道 `sessionTasks`。`prepareArticleTasks` 返回值由 `{prepared, oversized}` 改为 `{prepared, sessionTasks}`。单文件超预算或连 200k 都装不下时，不再走批量兜底，而是进入 `sessionTasks`。新增常量 `SESSION_TASK_TIMEOUT_MS`（默认 30 分钟）、`SESSION_TASK_DIR`；导出纯函数 `classifySessionTask(task, nowMs)` 返回三态：`timeout`、`harvest`、`wait`。JobService 扩展：新增 `dispatchSessionTasks`、`progressSessionTasks`、`resendSessionSteer`。Tick 重构：`tickArticles` 和 `tickReview` 均接入会话通道收割逻辑。删除旧的超大兜底段。
-  - **0.8.8**: 新增 `fixAnchors(content, cwd)` 函数（index.js），用于文章落盘前机械校正 `file:NN(-MM)` 行号锚点。逻辑：对照 `source_files` 源码，锚点起点行应包含同行反引号符号；若歧义则退试首段或声明形态；区间尾越界钳到文件尾。集成点：`applyTaskResult` (index.js) 与 `writeValidated` (index.js) 统一调用修正。数据流：`parseSourceFiles(fm)` 共用解析逻辑；`full/stale` 任务补 `cwd` 字段。
-  - **0.8.7**: 新增 `numberLines()` (index.js:379|)，为 collectSources 内联源码添加 `N| ` 前缀，防止弱模型幻觉数行。Prompt 修正：校对 prompt 明确“以源码『行号| 』前缀为准”。Stale 禁用：旧文行号一律不得沿用。
-  - **0.8.6**: 修复规划阶段主模型路由失效问题。新增模块级 `llmRef`，通过 `ctx.inject(['llm'], ...)` 注入；`runMainModelPlan` 改为读取 `llmRef` 而非直接访问 `hostCtxRef.llm`（后者在未注入时抛错）。路由：优先 `session.requestHeader()?.config`，其次 `agent.options`。
-  - **0.8.5**: 适配 DSH 0.2.1-rc.2：`source` 形态从 `{kind:'plugin',plugin:'codewiki'}` 改为 `{kind:'plugin:codewiki'}`。Engines：package.json 增加 `"engines": {"dsh": ">=0.2.0-rc.0"}`。
-  - **0.8.4**: 超预算分割：当模块源码超 28k token 时，拆分多个观察批。新 Prompt：`batchArticleObservePrompt` 和 `batchArticleComposePrompt`。状态机：`tickArticles` 处理 `#obs` 批次，分组后提交合成任务 (`composePlan`)。持久化：`submitBatchFor` 补存 `splitFor/composePlan` 元数据。
-  - **0.8.3**: 主模型规划：新增 `runMainModelPlan(job, prompt)` (index.js)，使用发起会话的主模型执行规划，避免百炼批量排队。降级策略：主模型不可用时降级回百炼批量规划。
-  - **0.8.2**: Schema 修复：`progress` 工具输出 schema 中 `type: ['object','null']` 改为 `{ oneOf: [{type:'object'},{type:'null'}] }`，兼容新宿主 JSON Schema 子集限制。防御性编程：工具注册循环增加 per-definition try/catch。
-  - **0.8.1**: 排除项报错：`excludedItem(cwd, list)` 返回命中排除项原文，报错信息中包含具体排除条目。
-  - **0.8.0**: 实时唤醒：新增 `wakeCompileSession(job, outcome, agents?)` (index.js)，编译终态通过 `agent.steer()` 向发起会话发送消息。依赖：引入 `@deepseek-ai/dsh-llm` 等宿主包（junction 模式）。Bug 修复：`submitComposeBatch` 同步调用修复 `undefined.then` 错误。
-  - **0.7.0**: 新工具：`codewiki_update` (updateToolDefinition, index.js)，固定 scope=auto 的提交制更新。提醒机制：`commitHintText`，基于 git log 时间戳判断是否需要提醒提交改动。
-  - **0.6.0**: 删除批量通道：移除百炼专用批量端点，全部走普通入口 `chat/completions`。保留骨架：后台执行器逻辑保留，仅端点变更。UI 清理：client.js 删除批量设置页节。
-  - **0.5.0.6**: 进度工具：新增 `codewiki_progress` (progressToolDefinition, index.js:2156-2252|)，只读查询编译进度。
-  - **0.5.0.5**: 批量通道切换：从 Batch File 切换为 Batch Chat (batch.dashscope.aliyuncs.com)。配置：`batchMinTokens` 调整为 30000 以启用批量折扣。
-  - **0.5.0.4**: 收尾封死：reminderText 禁止手工流程，强制调用 `codewiki_generate`。
-  - **0.5.0.3**: 锚点校验：新增 `test-wiki-anchors.mjs`，三重断言校验行号锚点。
-  - **0.5.0.2**: Rust 层修复：vendor/codewiki 重构，修复 Windows 反斜杠路径问题。
-  - **0.5.0.1**: 自动补建入口：流水线自动检查并生成 `CodeWiki.md`。路径规范化：`normalizeArticlePath` / `normalizeIndexLinks` 处理 Windows 路径。
-  - **0.5.0**: 面板改版：六阶段步骤条、双通道吞吐徽标、用量统计、加权总进度条。
-  - **0.4.11.2**: 阈值放宽：`batchMinTokens` 上限提升至 99,999,999。
-  - **0.4.11.1**: 孤儿任务接管：`owner !== instanceId` 且停更 >5min 的任务由本实例接管。
-  - **0.4.11**: 进度透出：`jobSummary` 新增 `taskList` 和 `batchProgress`。
-  - **0.4.10**: 端点加固：workspaceRegistry 异常降级、诊断 try/catch、环境变量隔离 repos 文件。
-  - **0.4.9**: 工作区过滤：任务页/总览页仅显示属于已添加 dsh 工作区的任务。
-  - **0.4.8**: 仓库发现：knownRepos 清单、一键排除按钮、refresh 动作。
-  - **0.4.7**: 排除清单与自动更新：excludePaths、autoUpdate 开关、三标签页面板。
-  - **0.4.6**: 面板收敛：焦点卡片、历史折叠、Temp 残留清理。
-  - **0.4.5**: 混合通道：`batchMinTokens` 阈值决定实时/批量。
-  - **0.4.4**: 面板完善：滚动、分组、实时 tps、设置移入面板。
-  - **0.4.3**: 审查修复：取消标记跨实例丢失（service 注入）、生命周期、多实例写盘安全（lock/mergeFromDisk）、断点保真。
-  - **0.4.2**: 超大任务升档：单文件超 28k 升 200k 大档继续批量。
-  - **0.4.1**: 横切 Map-Reduce：超预算横切拆分为观察+合成。
-  - **0.4.0**: 服务化全批量：JobService 常驻、零子代理、32k 分块并行。
-  - **0.3.2**: 异步化：`batchAsync` 模式，提交即返回，后台链收尾。
-  - **0.3.1**: 凭证自动获取：`resolveBatchApiKey` 从凭据库解析。
-  - **0.3.0**: 批量推理接入：写文章环节走百炼 Batch File，并发上限放宽至 8。
-  - **0.2.8**: 活动行 Label：加 `[<model>]` 前缀。
-  - **0.2.7**: 插件未装载修复：`agents` 服务正确 inject。
-  - **0.2.6**: 思考程度设置：`defaultReasoningEffort` 支持。
-  - **0.2.5**: 提醒注入：`installUpdateReminder` 系统提示 section。
-  - **0.2.4**: 路由丢弃修复：stale/auto 逐篇及全量模块 task 补传 route。
-  - **0.2.3**: 路径缺陷修复：MSYS 路径归一化、binaryPath 探测顺序。
-  - **0.2.2**: 审查修复：scope=full 短路、cw status 非零退出、signal 响应等。
-  - **0.2.1**: 子代理接线断裂：subagents 注入修复。
-  - **0.2.0**: 插件页设置 UI：client.js 实现设置卡片。
-  - **0.1.1**: 移除技能：纯工具面，默认模型指向阿里百炼。
-  - **0.1.0**: 首次发布：cw 封装、codewiki_generate 编排、skill 注册。
+### `index.js` 的 `Config` 与 `liveConfig`
+
+```js
+export const Config = z.object({ ... })   // index.js:37-51
+```
+
+13 个字段逐项（全部 `.volatile()`）：
+
+| 行号 | 字段 | 类型/默认 | 语义 |
+| --- | --- | --- | --- |
+| 38 | `enabled` | boolean / `true` | 停用后工具立即报错 |
+| 39 | `binaryPath` | string / `''` | cw 可执行路径；留空优先 PATH 里的 `cw`，再退插件自带 `bin/cw(.exe)`（探测顺序见 `index.js:82-102`） |
+| 40 | `batchProvider` | string / `''` | 编译模型提供商（宿主模型设置里的 provider id）；**空 = 走内置百炼兼容通道**，非空 = 走宿主 `llm.stream()` |
+| 41 | `batchModel` | string / `'qwen3.7-flash'` | 编译模型（规划/写文章/横切/审校/合成全部环节共用）；`batchProvider` 为空时是百炼模型名，非空时是该 provider 的模型 id |
+| 42 | `batchApiKey` | string / `''` | 百炼 API Key 覆盖值（存量字段，设置页已不再渲染）；留空自动取模型设置「阿里百炼云」渠道凭证 |
+| 43 | `batchThinkingBudget` | number / `0` | 0 = 关思考；1~32768 = 开启并限预算。**仅百炼通道生效**，宿主 provider 通道用该 provider 自己的 `reasoningEffort` |
+| 44 | `maxConcurrency` | number / `8` | 编译请求并发上限 1–8，`liveConfig` 里 clamp 到 `CONCURRENCY_HARD_CAP`（`index.js:22`） |
+| 45 | `articleLanguage` | string / `'中文'` | wiki 文章书写语言 |
+| 46 | `updateReminder` | boolean / `true` | 会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 `CodeWiki.md`） |
+| 47 | `excludePaths` | string / `''` | 排除清单：换行/分号/逗号分隔的绝对路径，命中即拒绝编译（schema 见 `index.js:47`，判定函数 `index.js:226-238`） |
+| 48 | `autoUpdate` | boolean / `false` | 自动更新：定时扫描历史工作区并提交 scope=auto 增量编译（调度器 `index.js:2824-2846`） |
+| 49 | `autoUpdateMin` | number / `30` | 自动更新扫描间隔（分钟），`liveConfig` 里下限 5 |
+| 50 | `workspaceOnly` | boolean / `true` | 任务页/总览页只显示属于已添加 dsh 工作区的任务 |
+
+`liveConfig(config)`（`index.js:57-76`）是配置的唯一解包口径，任何执行路径都必须先过它：
+
+- 59-69：`maxConcurrency` 经 `Number()` 后 clamp——非有限或 `< 1` 落回硬顶 8，否则 `Math.min(n, 8)`。
+- 64：`batchModel` 空字符串回落到 `'qwen3.7-flash'`。
+- 66：`batchThinkingBudget` 双向 clamp 到 `[0, 32768]`，非法值归 0。
+- 70：`articleLanguage` 空值回落 `'中文'`。
+- 73：`autoUpdateMin` 下限 5（`Math.max(5, ...)`）。
+- 74：`workspaceOnly` 只在显式 `=== false` 时关闭（默认开）。
+- 注意：`batchApiKey` 由 `liveConfig` 解出后**不落盘**——job 记录里剥掉，`apiKeyOf`（`index.js:1310-1317`）内存缓存优先、进程重启后重新解析。
+
+`val(x)`（`index.js:53-55`）处理 schemastery 的 `Value` 包装：带 `.get()` 的取 `.get()`，否则原样返回，这使 `liveConfig` 对 mock ctx 与真实宿主都成立。
+
+### `client.js` 设置表单：`CodewikiCard`（`client.js:406-688`）
+
+插件页 CodeWiki 详情页的完整表单，是配置的唯一图形入口。
+
+- **数据来源**：`form = ctx.configForms.get(NS)`（`client.js:371` 取 form，`client.js:409` 首次 getSnapshot），`form.getSnapshot()` 拿快照（含 `value`、`revision`、`status`、`writable`），`form.mutate(ops, revision)` 写回。
+- **模型目录**（`client.js:413-429`）：挂载即 `apiGet(MODELS_PATH)`（`/api/codewiki/models`，`client.js:24`）；`data.ok === false` 时记 `catalogError` 并降级为手填（423 行），请求失败同样只记错不阻断（427 行）。
+- **快照订阅**（`client.js:432-449`）：`pull()` 里只有 `snap.revision !== lastRevision` 才用 `structuredClone`（442 行）覆盖草稿——避免每轮订阅回调把用户正在编辑的内容冲掉。
+- **摘要视图**（`client.js:452`）：`props.view === 'summary'` 直接返回一行简介，插件列表项用。
+- **`setPath`**（`client.js:454-461`）：单字段写入，同样 `structuredClone` 后改，保持不可变更新。
+- **`dirty`**（`client.js:463-466`）：用 `JSON.stringify(draft) !== JSON.stringify(snapshot.value)` 做深比较，决定保存/撤销按钮可用性。
+- **`selectedProvider`**（`client.js:469-473`）：从目录里按 `draft.batchProvider` 查条目，未命中即 null（手填形态）。
+- **`save()`**（`client.js:475-502`）：
+  - 477-481：`maxConcurrency` 必须是 1–8 的整数，否则 `invalidConcurrency`；
+  - 482-486：`batchThinkingBudget` 必须是 0–32768 的整数，否则 `invalidBatchThinking`；
+  - 488-493：**逐字段**比较 `['enabled','binaryPath','maxConcurrency','articleLanguage','updateReminder','workspaceOnly','batchApiKey','batchProvider','batchModel','batchThinkingBudget','excludePaths','autoUpdate','autoUpdateMin']`，只为变化的字段生成 `{op:'set', path:[key], value}`——**新增 Config 字段必须加进这个数组**，否则设置页改不动它；
+  - 496-498：`form.mutate(ops, snapshot.revision)`，`accepted` 为假即 revision 冲突（他人改过），提示 `conflict`。
+- **`discard()`**（`client.js:504-508`）：回填快照值并清空提示。
+- **渲染布局**：
+  - 517-571「运行」节：`enabled`（Switch，520-528）、`updateReminder`（529-537）、`workspaceOnly`（538-546）、`maxConcurrency`（547-555）、`articleLanguage`（556-561）、`binaryPath`（562-570）。
+  - 574-644「编译模型」节：`batchProvider` 下拉（578-606，首项 `batchProviderBuiltin` 为空值 = 内置百炼通道，598；目录里没有但已配置的 provider 保留一个 `__custom` 选项防止静默丢失，601-603）；`batchModel`（607-633，有目录且有模型 → 下拉，否则 Input 手填；切换 provider 时把 model 自动带成该 provider 首个模型或清空，589-596）；`batchThinkingBudget`（634-642）。
+  - 646-678「调度与排除」节：`autoUpdate`（649-657）、`autoUpdateMin`（658-666）、`excludePaths` 多行 textarea（667-676）。
+  - 680-686 保存条：撤销 / 保存 / 错误红字或「已保存」标签。
+
+### `client.js` 面板：`CodewikiPanel` / `ReposTab` / `PanelIcon`
+
+- `CodewikiPanel`（`client.js:972-1172`）：三标签页 `overview` / `tasks` / `settings`（`client.js:1134-1141`）。轮询 `apiGet(JOBS_PATH)`（`/api/codewiki/jobs`）每 `POLL_MS = 2000`（`client.js:22`）一次，`inFlight` 守卫防重叠（`client.js:989`）；`sparkRef`（`client.js:980`）存每个 job 最近 30 个 tps 采样画微趋势线，`batchRateRef`（`client.js:981`）用 `rate = prev*0.6 + inst*0.4` 的 EWMA 算批量完成速率（`client.js:1009`）。取消走 `apiPost(CONTROL_PATH, {action:'cancel', jobId})`（`client.js:1033`）。`settings` 标签页内嵌 `el(CodewikiCard)`（`client.js:1143`）——**同一组件两处挂载**（插件页 + 面板）。
+- `ReposTab`（`client.js:827-970`）：轮询 `/api/codewiki/repos`（`client.js:840`），间隔 `REPOS_POLL_MS = 10000`（`client.js:25`）。`toggleExclude`（`client.js:857-875`）把仓库路径并入/移出 `excludePaths` 配置（同样是 `form.mutate` 单层 op，866 行），成功后 `apiPost(CONTROL_PATH, {action:'refresh'})` 让服务端 30s 缓存失效（868 行）；`compile`（`client.js:877-885`）发 `{action:'compile', cwd}`。调度卡展示 `autoUpdate`/`autoUpdateMin`、上次扫描时间、下次扫描倒计时与扫描统计（`client.js:892-919`）。
+- `PanelIcon`（`client.js:1174-1185`）：16×16 内联 SVG（摊开的书），侧边栏入口图标。
+- 常量与注册：`NS`/`KEY`（17/18）、`JOBS_PATH`（19）、`CONTROL_PATH`（20）、`PANEL_ORDER = 52`（21）、`POLL_MS`（22）、`REPOS_PATH`（23）、`MODELS_PATH`（24）、`REPOS_POLL_MS`（25）、`ACTIVE_STAGES`（26）；`inject: ['slots','locale','configForms']`（365）；`plugins.item` 注册（374-381，`order: 30`）；`main` + `sidebar.panellist` 双 slot（391-397，`id` 必须等于 `main` 的 `key`）；中英词典 `zh()`（28）/`en()`（144）；样式表注入（261-341）；格式化与绘图工具 `fmtMs`（705）、`fmtTok`（712）、`fmtDur`（718）、`fmtAgo`（724）、`Spark`（729）、`stepName`（745）、`lastTimedStage`（746）、`stageBar`（750）、`overallPct`（775，权重表 `STAGE_WEIGHTS` 在 774）、`throughputBadge`（786）、`usageLine`（808）。
+
+### `README.md`（根目录，65 行）
+
+面向使用者的文档，结构固定：
+
+- 1-3：标题 + 一句话定位（上游 Rust CLI `cw` + `<repo>/.codewiki/` 随仓库提交）。
+- 5-13：工具表——`cw`（9）、`codewiki_generate`（10）、`codewiki_update`（11）、`codewiki_progress`（12）、CodeWiki 设置页（13）。
+- 15-22：codewiki_generate 关键行为（scope=auto 三态、provider/model 成对传入、失败降级策略、scope=full 强制全量）。注意第 20 行「写文章并发上限硬顶 2」与第 21 行「经注入的 subagents 服务派发」均已过期：0.4.0 起零子代理、硬顶 8（`index.js:22`）。
+- 24-38：设置小节。26 行说明设置也可在插件页详情页改、0.9.1 起「编译模型」是两级下拉且目录来自 `/api/codewiki/models`；28-30 行是 `batchProvider` / `batchModel` / `batchApiKey` / `batchThinkingBudget` 的通道归属规则；32-37 行是 `binaryPath`、`defaultProvider` / `defaultModel`（wiki 档 `aliyun-bailian` / `qwen3.8-flash`）、`defaultReasoningEffort`、`maxConcurrency`、`articleLanguage`、`updateReminder`——**其中三项 `default*` 已不在 Config 里**，同属历史残留；38 行「所有设置 volatile，改完即生效」仍准确。
+- 40-55：安装（本地 file:/// 直挂五步，含 profile patch 片段 47-52、junction 依赖 54、重启生效说明 55）。
+- 57-65：开发（vendor / bin / client.js 目录说明 59-63；验证命令 65：`node --check index.js client.js` 与 `node test-orchestration.mjs`）。
+
+### `CodeWiki.md`（根目录，63 行）
+
+本项目自身的 wiki 入口（遵循 `<repo>/CodeWiki.md` 公约），由 `ensureWikiEntry`（`index.js:188-221`）在缺失时补建（中文文案 194-205、英文文案 207-218），已存在则永不覆盖（191 行 `existsSync` 早退）。内容结构：Overview（7）、Key Components（9-27，逐条列出 index.js 的函数族与 client.js 的组件）、Architecture（29-45 的 text 围栏框图）、Data Flow（47-49 四流）、Connections（51-54 两条 backlink）、Known Issues（56-63 六条）。
+
+### `CHANGELOG.md`（根目录，487 行）
+
+按版本倒序的决策史，是「为什么这样写」的第一信息源。最近三节：
+
+- 0.9.1（3-13）：设置页编译模型改为可选配置文件中的 provider/model。四项实现分别对应 `listModelCatalog`（8 行）、`/api/codewiki/models`（9 行）、调用链分流 `llmChat` vs `bailianChat`（10 行）、设置页两级下拉（11 行）。
+- 0.9.0（15-27）：超 32k 文章转会话通道——`prepareArticleTasks` 返回值由 `{prepared, oversized}` 改为 `{prepared, sessionTasks}`（20 行），新增 `SESSION_TASK_TIMEOUT_MS` / `SESSION_TASK_DIR` / `classifySessionTask`（21 行），`dispatchSessionTasks` / `progressSessionTasks` / `resendSessionSteer` 三函数（22 行）。
+- 0.8.8（29-38）：行号锚点确定性自动修正 `fixAnchors`（34 行），集成点在 `applyTaskResult` 与 `writeValidated`（35 行）。
+
+其余版本（40-486 行，0.8.7 → 0.1.0）涵盖 numberLines 行号前缀（45）、主模型规划修复（58-59）、超预算观察批 map-reduce（82-84）、schema `type` 数组导致四工具全消失（105-107）、服务化全批量（351）等。
+
+### `.gitignore`（根目录，12 行）
+
+运行期产物与构建产物的边界：
+
+- 1 `node_modules/`；2 `vendor/codewiki/target/`（Rust 构建产物）；3 `*.log`；6 `bin/*.bak-*`（cw 二进制备份，上游更新失败后的恢复安全网，见 CHANGELOG 0.5.0.2）；8 `.orch-test-out.txt`；9 `.probe3.txt`；12 `.dsh-ops/`（DSH 运行期产物：面板会话流、工具调用记录）。
+
+**注意 `.codewiki/` 不在忽略列表**——wiki 必须随仓库提交，这是「活 wiki」可共享的前提。
+
+### 自检脚本
+
+`test-batch.mjs`（纯函数与单端点，不启动服务）：
+
+- 分区：`estimateTokens`（22-27）、`collectSources`（29-43）、`numberLines`（45-50）、`prepareArticleTasks`（52-81）、多文件超预算观察批分割（83-101）、`classifySessionTask` 三态（103-119）、`runRealtimeTasks` 百炼通道（121-147）、思考参数与 tps 采样（149-159）、外部 signal 中止（161-171）、并发池失败记账（173-198）、`localPlan`（200-211）、`packArticles`（213-224）、`scanRepoFiles`（226-245）、宿主 llm 通道（247-286）、`listModelCatalog`（288-310）、`GET /api/codewiki/models` 端点（312-340）、`resolveBatchApiKey`（342-363）、`fixAnchors`（365-413）。
+- 骨架：`check(cond, msg)`（15）累加 `passed` / `failures`，收尾 `process.exit(failures ? 1 : 0)`。
+
+`test-orchestration.mjs`（1152 行，编排冒烟，mock ctx + 真实 cw CLI）：
+
+- 脚手架：`check`（23）、`JOBS_FILE` 环境隔离（28）、`makeCtx`（34）、`makeMockAgent`（83）、`makeFixtureRepo`（99）、`makeBatchMock`（113）、`fakeReq` / `fakeRes`（186 / 196）。
+- 场景块与起始行：系统提示提醒（201）、注册（232）、cw 工具（245）、`codewiki_update` + `commitHintText`（252）、`wakeCompileSession`（331）、主模型规划（359）、全量编译阶段机（510）、横切精准拆分（542）、文章观察→合成分割（572）、全程普通端点（606）、stale 逐篇更新（639）、`codewiki_progress`（662）、重启按 prompt 快照重跑（698）、并发提交占位与 flush 合并（755）、面板端点与取消（794）、排除清单 / repos / compile（848）、knownRepos 与 refresh（903）、工作区过滤（943）、注册表异常降级（990）、输出 schema 校验（1020）、孤儿任务接管（1060）、无凭证诚实报错（1094）、严格 cordis 语义（1106）、Temp 残留清理（1130）。
 
 ## Architecture
 
 ```text
-[模型调用] 
-    │
-    ▼
-[codewiki_generate Tool] (index.js)
-    │ normalizeCwd → cw status → JobService.submit
-    ▼
-[JobService] (index.js:920|)
-    │ tick (10s) → plan → articles → crosscut → compose → review → index
-    │           └─ Bailian Plain Endpoint (后台并发池，超大任务升 200k 大档装填)
-    ▼
-[Cw CLI Wrapper] (runCw / parseStatus)
-    │ cw index + cw meta update
-    ▼
-[Wiki Output] (<repo>/.codewiki/)
-    │
-    ├──► [Side Panel] (client.js)
-    │     2s poll GET /api/codewiki/jobs
-    │     Display: Stage, Progress, Usage, Notes
-    │
-    └──► [Config Forms] (client.js)
-          Hot-reload via configForms.mutate
+┌─────────────────────── 配置的四层表示 ───────────────────────┐
+│ package.json:20-27   dsh.client.platform / dsh.bundle.patch   │
+│        │（宿主扫描）                                          │
+│        ▼                                                      │
+│ cordis.patch.yml:12-15  insert: id=codewiki → index.js         │
+│        │                                                      │
+│        ▼                                                      │
+│ index.js:37  Config (z.object, 13 字段, 全 volatile)           │
+│        │                                                      │
+│        ├──► index.js:57  liveConfig()  ← 每次 execute/tick 解包│
+│        │        │  clamp: concurrency≤8, thinking 0~32768     │
+│        │        ▼                                             │
+│        │   runCw / 批量通道 / installWebServer（消费端）        │
+│        │                                                      │
+│        └──► client.js:371 configForms.get('codewiki')         │
+│                 │ getSnapshot / mutate(ops, revision)         │
+│                 ▼                                             │
+│            CodewikiCard:406 设置表单（插件页 + 面板两处挂载）   │
+│                 │ 字段白名单 client.js:489                     │
+│                 ▼                                             │
+│            README.md:24-38 人工文档（须与 Config 同步）         │
+└───────────────────────────────────────────────────────────────┘
+
+  client.js:19/20/23/24 ──HTTP(仅回环)──► index.js:2526 installWebServer
+      /api/codewiki/jobs     GET  → service.list()（workspaceOnly 过滤）
+      /api/codewiki/repos    GET  → cw status 现算 + 30s 缓存 + scheduler
+      /api/codewiki/models   GET  → listModelCatalog(llmRef)（30s 缓存）
+      /api/codewiki/control  POST → cancel / refresh / compile
 ```
 
 ## Data Flow
 
-1. **配置流**: `profiles/web/cordis.patch.yml` 或 `package.json` 定义初始挂载 → Cordis 注入 `apply(ctx, config)` → `liveConfig` 在每次执行时解包 volatile 设置项。
-2. **凭证流**: 显式 `batchApiKey`（存量字段，设置页不再渲染）> 宿主凭据库 `resolve('ALIYUN_BAILIAN_API_KEY')` (来自模型设置“阿里百炼云”渠道)。取不到凭证诚实报错，不回退子代理。
-3. **任务流**: 
-   - `execute` 预构建任务（含 token 预算分块）。
-   - `JobService.submit` 立即返回 `{submitted, jobId, stage}`。
-   - 后台 `tick` 推进阶段机：规划 → 写文章 → 横切 → 合成（可选）→ 审校 → 索引。
-   - 批次未终态保留断点 (`os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`)，跨会话续查。
-   - 成功文章落盘，校对结果回写，最终调用 `cw index` + `cw meta update`。
-4. **面板流**: 浏览器端 `CodewikiPanel` 每 2 秒轮询 `GET /api/codewiki/jobs`，渲染任务进度、吞吐量、用量统计和错误信息。
+1. **配置流**：`cordis.patch.yml:12-15` 或 profile patch 的 `config: {}` → Cordis 注入 `apply(ctx, config)`（`index.js:2809`）→ 每次执行前 `liveConfig(config)`（`index.js:57`）解包 volatile 值 → 落到 `resolveBinary`（82）、`resolveBatchApiKey`（546）、`installWebServer`（2526）等消费点。因为每次调用都重新解包，改配置无需重启。
+2. **设置页写入流**：`CodewikiCard` 挂载 → 拉 `/api/codewiki/models` 得 provider 目录（`client.js:420`）→ 用户编辑 `draft` → `dirty` 深比较 → `save()` 生成单层 `{op:'set'}` 数组（`client.js:488-493`）→ `form.mutate(ops, revision)` CAS 写入 → 宿主持久化 + 热生效 → `pull()` 收到新 `revision` 回填草稿（`client.js:440-444`）。
+3. **模型目录发现流**：`GET /api/codewiki/models`（`index.js:2673`）→ 30s 进程内缓存（2679）→ `listModelCatalog(llmRef)`（`index.js:2503`）→ `llm.listProviders()` 逐 provider `llm.listModels(id)` → 单 provider 失败只附 `error` 不拖累整份目录 → `{ok:true, providers:[{id,name,models:[{id,name}]}]}`。`llm` 未注入时返回 `{ok:false}`，设置页据此降级为手填。
+4. **文档补建流**：编译收尾 → `ensureWikiEntry(job.cwd, language)`（`index.js:188`）→ `CodeWiki.md` 不存在则按语言写模板（194-218），存在则原样保留。
+5. **提醒注入流**：`installUpdateReminder`（`index.js:2775`）在 `agent/created`（2806）与存量 `agents.list()`（2800-2804）上为每个 agent 注册系统提示 section `codewiki:update-reminder`（`index.js:2784-2794`）；`text` 回调每次组装时求值——`updateReminder === false`、会话 cwd 缺失、或仓库根无 `CodeWiki.md` 时返回空串（2788-2790）；否则拼 `reminderText(cwd)`（2764-2773）与 `commitHintText(cwd)`（2737-2762）的结果。`commitHintText` 比较「最近一次成功编译的 `finishedAt`」与 `git log -1 --format=%ct -- .codewiki CodeWiki.md`（2747）的时间戳，产物未入库才注入提交提醒；60s TTL 缓存（2736 / 2740 / 2760），提交后时间戳反超自动静默。
 
 ## Connections
 
-- [[codewiki-upstream]] — 上游 `mraza007/codewiki` (MIT)，提供 Rust CLI `cw`，布局约定 `<repo>/.codewiki/`。
-- [[dsh-harness]] — DeepSeek Harness 宿主，提供 Cordis 插件系统、子代理服务、凭据库、模型目录等基础设施。
-- [[bailian-inference]] — 阿里云百炼 OpenAI 兼容接口（普通入口），提供 Token 生成，支持 `qwen3.7-flash` 等模型。
+- [[codewiki-upstream]] — 上游 `mraza007/codewiki`（MIT），提供 Rust CLI `cw` 与 `<repo>/.codewiki/` 布局约定；`vendor/codewiki/` 为其去 `.git` 的本地 fork。
+- [[plugin-orchestration]] — `createJobService`（`index.js:1192`）驱动的六阶段状态机，本文的配置项（并发、模型通道、思考预算、语言、排除清单、自动更新）全部在那一侧消费。
+- [[web-panel]] — `client.js` 面板与端点的消费方（`CodewikiPanel` / `ReposTab`）。
+- [[bailian-inference]] — `batchProvider` 留空时的默认推理通道（百炼 OpenAI 兼容 `chat/completions`）。
+- [[dsh-harness]] — 宿主：Cordis 插件系统、`configForms`、`webServer`、`workspaceRegistry`、`llm` 服务与 `systemPrompt` section 机制。
 
 ## Known Issues
 
-1. **插件注册不热加载**: 修改 `index.js` 或 `profile patch` 后需重启 dsh。`client.js` 因被判定为“非 client 包”（按 Loader 条目缓存），新增 `dsh.client` 声明后也需重启才能进入浏览器。
-2. **Junction 依赖**: `@deepseek-ai/schemastery` 依赖本地 junction (`node_modules/@deepseek-ai/schemastery` → `/e/software/deepseek-harness/vendor/schemastery`)，换机器需重建。
-3. **上游版本探测**: 上游 `cw` 无 `--version` 命令；`cw path` 在未 init 仓库退回插件侧 fallback (`<cwd>/.codewiki`)。
-4. **路径兼容**: 上游 stale 文章路径输出反斜杠 (`modules\app.md`)，插件消费侧已归一化为 `/`。
-5. **批次窗口历史遗留**: 0.5.x 批量通道的 24h 断点语义已随 0.6.0 删除；现断点文件仅记录阶段机位置（stage/crosscutSplit），重跑走普通入口同步请求。
+1. **插件注册不热加载**：改 `index.js` 或 profile patch 后必须重启 dsh（配置值本身热读）。`client.js` 同理——宿主「非 client 包」判定按 Loader 条目缓存，`package.json:21-23` 的 `dsh.client` 声明新增后也需重启才会把 `client.js` 送进浏览器。
+2. **Junction 依赖**：`@deepseek-ai/schemastery`（`package.json:18`，仅供 `Config` 用）靠插件本地 junction → `/e/software/deepseek-harness/vendor/schemastery`；换机器需重建。
+3. **文档与配置存在历史漂移**：`defaultProvider` / `defaultModel` / `defaultReasoningEffort`（`cordis.patch.yml:6-8`、`README.md:33-34`）已不在 `index.js:37-51` 的 `Config` 中；`cordis.patch.yml:9` 与 `README.md:20` 的「并发硬顶 2」与 `CONCURRENCY_HARD_CAP = 8`（`index.js:22`）矛盾；`README.md:21` 描述的「子代理派发」在 0.4.0 服务化后已废弃。以 `Config` 与 `client.js:489` 的字段白名单为准。
+4. **新增 Config 字段要改四处**：`index.js:37-51`（schema）、`index.js:57-76`（`liveConfig` 解包）、`client.js:489`（保存字段白名单）、`README.md:24-38`（人工文档）。漏掉 `client.js:489` 的表现是「面板/设置页改不动，但配置文件手改有效」。
+5. **上游 `cw` 无 `--version`**；`cw path` 在未 init 的仓库退回插件侧 fallback（`<cwd>/.codewiki`，见 `wikiPathFor`，`index.js:994` 起）。
+6. **路径形态差异**：上游 stale 文章路径输出反斜杠（`modules\app.md`），插件消费侧已由 `normalizeArticlePath`（`index.js:141`）/ `normalizeIndexLinks`（`index.js:145`）归一为 `/`。
+7. **断点语义收敛**：断点文件仅记录阶段机位置（`stage` / `crosscutSplit`），重跑走普通入口同步请求；0.5.x 批量的 24h 窗口语义已随 0.6.0 删除。
+8. **会话通道依赖发起会话**：`job.sessionId` 为空（面板提交 / 自动调度）时，超预算文章与校对任务直接整体失败并明示原因，不退超大兜底、不静默跳过校对；超时默认 30 分钟（`index.js:1020`，`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调）。
+9. **维护提醒依赖 `CodeWiki.md` 与 git**：`reminderText` 在仓库根无 `CodeWiki.md` 时整段不出现（`index.js:2790`），所以入口文件被误删等于关掉整个维护提醒；`commitHintText` 在非 git 仓库或 `git log` 失败时一律不提醒（`index.js:2759` 的 catch）。
