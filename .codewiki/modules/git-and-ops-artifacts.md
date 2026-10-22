@@ -8,7 +8,7 @@ tags: [version-control, logging, probes, error-handling]
 ---
 
 ## Overview
-本模块定义了代码仓库的运维边界与运行时产物管理规范。核心职责包括：通过 `.gitignore` 排除构建依赖、二进制备份及日志文件，防止敏感或大型数据污染版本库；同时记录内部探针状态（`.probe3.txt`）。注意：编排测试输出文件 `.orch-test-out.txt` 在当前 `.gitignore` 中已不再被显式忽略，需关注其潜在的版本控制影响。
+本模块定义了代码仓库的运维边界与运行时产物管理规范。核心职责包括：通过 `.gitignore` 排除构建依赖、二进制备份及日志文件，防止敏感或大型数据污染版本库；同时记录内部探针状态（`.probe3.txt`）。注意：编排测试输出文件 `.orch-test-out.txt` 和探针状态文件 `.probe3.txt` 在当前 `.gitignore` 中均被显式忽略，需关注其潜在的版本控制影响。
 
 ## Key Components
 ### 1. Git Ignore Rules (`.gitignore`)
@@ -16,12 +16,12 @@ tags: [version-control, logging, probes, error-handling]
 - **行 1**: `node_modules/` - 忽略 Node.js 依赖包目录，避免将庞大的第三方库提交至版本库。
 - **行 2**: `vendor/codewiki/target/` - 忽略特定 vendor 下的构建目标目录，通常包含编译后的中间产物。
 - **行 3**: `*.log` - 忽略所有扩展名为 `.log` 的文件，涵盖运行时产生的各类日志，防止磁盘空间浪费及敏感信息泄露。
-- **行 6-7**: `bin/*.bak-*` - 注释说明：用于 cw 二进制备份，作为丢失源码时的安全网。此类二进制备份文件被明确排除在版本控制之外。
-- **行 8**: `.orch-test-out.txt` - 忽略编排测试输出文件。*注：根据最新源码，该行存在，但在提供的源码片段中第8行为空行，第9行为 `.orch-test-out.txt`。依据源码前缀重新标注：*
-    - **行 9**: `.orch-test-out.txt` - 忽略编排测试输出文件。
+- **行 5-6**: `bin/*.bak-*` - 注释说明：用于 cw 二进制备份，作为丢失源码时的安全网。此类二进制备份文件被明确排除在版本控制之外。
+- **行 8**: `.orch-test-out.txt` - 忽略编排测试输出文件。
+- **行 9**: `.probe3.txt` - 忽略内部探针状态文件。
 - **行 10**: 空行，用于分隔不同组的忽略规则。
-- **行 12-13**: 注释说明 DSH 运行期产物。
-- **行 14**: `.dsh-ops/` - 忽略 DSH 运行期产物目录，包括面板会话流、工具调用记录等，这些动态生成的数据不入库。
+- **行 11-12**: 注释说明 DSH 运行期产物。
+- **行 12**: `.dsh-ops/` - 忽略 DSH 运行期产物目录，包括面板会话流、工具调用记录等，这些动态生成的数据不入库。
 
 ### 2. Internal Probe State (`.probe3.txt`)
 - **文件**: `.probe3.txt`
@@ -38,6 +38,7 @@ tags: [version-control, logging, probes, error-handling]
 │ • *.log              │       │                         │
 │ • bin/*.bak-*        │       │                         │
 │ • .orch-test-out.txt │       │                         │
+│ • .probe3.txt        │       │                         │
 │ • .dsh-ops/          │       │                         │
 └──────────────────────┘       └─────────────────────────┘
            ▲                               ▲

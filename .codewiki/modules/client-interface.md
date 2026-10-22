@@ -26,6 +26,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 - `PANEL_ORDER = 52` (line 21): 侧边栏面板排序权重。
 - `POLL_MS = 2000` (line 22): 任务列表轮询间隔（毫秒）。
 - `REPOS_PATH = '/api/codewiki/repos'` (line 23): 仓库状态 API 路径。
+- `MODELS_PATH = '/api/codewiki/models'` (line 24): 模型目录 API 路径。
 - `REPOS_POLL_MS = 10000` (line 25): 仓库列表轮询间隔（毫秒）。
 - `ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']` (line 26): 活跃阶段列表。
 - `STAGE_WEIGHTS` (line 774): 各阶段在总体进度中的权重：`{ plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }`。
