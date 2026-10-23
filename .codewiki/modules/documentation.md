@@ -17,7 +17,7 @@ tags: [documentation, changelog, wiki, static-assets, compile-manager, job-store
 位于仓库根目录，记录所有版本变更。格式遵循 Keep a Changelog 风格，按版本号倒序排列。最新稳定版为 **v0.8.8**。
 
 - **v0.8.8 (2026-10-20)**：新增 `fixAnchors(content, cwd)` [index.js]。文章落盘前机械校正 `file:NN(-MM)` 锚点。逻辑：对照 `source_files`，起点行需含反引号符号；唯一匹配则修正，多声明取形态行，歧义/未找到则不动并记 `notes`。集成于 `applyTaskResult` 与 `writeValidated` 两个写盘出口。
-- **v0.8.7 (2026-10-19)**：新增 `numberLines()` [index.js:367]。为 `collectSources` 内联源码添加 `N| ` 前缀，解决弱模型自行数行导致的偏移。剥离 CRLF `\r`。测试证实对 qwen3.7-flash 仍不充分，需兜底修正。
+- **v0.8.7 (2026-10-19)**：新增 `numberLines()` [index.js:381]。为 `collectSources` 内联源码添加 `N| ` 前缀，解决弱模型自行数行导致的偏移。剥离 CRLF `\r`。测试证实对 qwen3.7-flash 仍不充分，需兜底修正。
 - **v0.8.6 (2026-10-18)**：修复规划阶段主模型继承失败。引入模块级 `llmRef`，通过 `ctx.inject(['llm'])` 注入。路由解析改为优先 `session.requestHeader()?.config`。
 - **v0.8.5 (2026-10-18)**：适配 DSH 0.2.1-rc.2 宿主协议。`source.kind` 改为 `'plugin:codewiki'`。补全 `engines.dsh` 声明。
 - **v0.8.4 (2026-10-15)**：文章阶段超预算分割。新增 `batchArticleObservePrompt` 与 `batchArticleComposePrompt`。当源码超 28k token 或存在溢出文件时，拆分为多个观察任务 (`#obs{i}`) 和合成任务 (`c`)。`tickArticles` 实现两段状态机收割。
