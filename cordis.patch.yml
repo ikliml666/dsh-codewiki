@@ -3,10 +3,11 @@
 # file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
 # 设置项（config 命名空间 = codewiki）：
 #   binaryPath:      cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 bin/cw.exe
-#   defaultProvider: 子代理默认 provider（与 defaultModel 成对生效；默认 aliyun-bailian）
-#   defaultModel:    子代理默认 model（默认 qwen3.8-flash，即路由插件 wiki 档）
-#   defaultReasoningEffort: 子代理默认思考程度（adapter 自有值如 off/low/high/max；留空跟随模型默认）
-#   maxConcurrency:  写文章子代理并发上限（硬顶 2）
+#   batchProvider:   编译模型提供商（必须是模型设置里已注册的 provider；默认 workbuddy，留空=提交失败）
+#   batchModel:      编译模型 id（默认 hy3，免费 192k 上下文）
+#   batchReasoningEffort: 思考程度档位（取值来自模型目录 reasoning.efforts；留空=模型默认档）
+#   maxConcurrency:  编译请求并发上限（1–8，默认 2）
+#   serialProjects:  单项目串行（默认开；同一时刻只推进一个仓库的编译任务，其余排队）
 #   articleLanguage: 文章语言（默认中文）
 #   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）
 - insert:

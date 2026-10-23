@@ -1,8 +1,8 @@
 // test-orchestration.mjs — dsh-codewiki 服务化编排冒烟：
-// mock 百炼普通入口（chat/completions，按 prompt 特征应答）+ 真实 cw CLI + 真实服务 tick，
+// mock 宿主 llm 服务（llm.stream 按 prompt 特征应答，插件零直连）+ 真实 cw CLI + 真实服务 tick，
 // 验证 codewiki_generate 提交制 + 服务阶段机（plan→articles→crosscut→review→index）、
-// stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、无凭证诚实报错、
-// 编译终态 steer 实时唤醒发起会话（0.8.0）。
+// stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、编译模型缺失诚实报错、
+// 单项目串行排队（0.10.0）、编译终态 steer 实时唤醒发起会话（0.8.0）。
 // 运行：node test-orchestration.mjs
 import fs from 'node:fs'
 import os from 'node:os'
@@ -29,24 +29,24 @@ const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE
 const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
   `---\ntitle: ${title}\ntype: ${type}\nsource_files:\n  - ${source}\ntags: []\n---\n\n# ${title}\n\n${marker} article.\n`
 
-// mock 宿主上下文：按 inject 依赖路由；webServer/credentials/tools/agents 全部可捕获。
+// 测试配置基线：0.10.1 起编译模型必须显式指向模型设置里的 provider/model
+// （插件已无自带直连通道与任何密钥，provider 留空即提交失败）。
+const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra })
+
+// mock 宿主上下文：按 inject 依赖路由；webServer/tools/agents/llm 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
-function makeCtx({ apiKey = 'sk-cred-test', agents = [], slowCreds = false, workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {}) {
+// 0.10.1：插件不再解析任何凭证（无自带直连通道），llm 服务是唯一模型通道——
+// 默认注入转发到 activeLlm 的 llmProxy，块内 makeBatchMock() 换掉 activeLlm 即可。
+function makeCtx({ agents = [], workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {}) {
   const registered = new Map()
   const endpoints = []
   const listeners = []
   const disposers = []
   const services = {
     webServer: { register(def) { endpoints.push(def) } },
-    credentials: {
-      resolve: async (ref) => {
-        if (slowCreds) await new Promise((r) => setTimeout(r, 50)) // 拉长 submit 的凭证窗口，测并发占位
-        return ref === 'ALIYUN_BAILIAN_API_KEY' && apiKey ? { value: apiKey, source: 'file' } : undefined
-      },
-    },
     agents: agentGet ? { list: () => agents, get: agentGet } : { list: () => agents },
     tools: { register(def) { registered.set(def.name, def); return () => {} } },
-    ...(llm ? { llm } : {}),
+    llm: llm ?? llmProxy,
   }
   if (workspaces !== null) {
     services.workspaceRegistry = { list: () => workspaces.map((p) => ({ path: p })) }
@@ -108,14 +108,27 @@ function makeFixtureRepo() {
   return dir
 }
 
-// mock 百炼普通入口（0.6.0 起唯一通道）：全部环节都是单轮 chat/completions 后台并发池。
+// 0.10.1 起唯一通道是宿主 llm 服务（模型设置里已注册的 provider/model），插件不再直连任何端点。
+// activeLlm 是「当前生效的假 llm」：makeCtx 注册的 llmProxy 恒转发给它，因此每个测试块
+// 只需 makeBatchMock() 一处接线，不必给每个 apply 的 ctx 补 llm。
+let activeLlm = null
+const llmProxy = {
+  async *stream(opts) {
+    if (!activeLlm) throw new Error('测试未接线：先 makeBatchMock() 再提交任务')
+    yield* activeLlm.stream(opts)
+  },
+  listModels: (...a) => (activeLlm ? activeLlm.listModels(...a) : []),
+  resolveModel: (...a) => (activeLlm ? activeLlm.resolveModel(...a) : null),
+}
+const promptOf = (opts) => String(opts?.messages?.[0]?.content?.[0]?.text ?? '')
+
+// mock 宿主 llm 服务：全部环节都是单轮 chat 后台并发池。
 // 按 prompt 首行特征分发应答（与真实 prompt 模板的区分句一一对应）。
-function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, bigSources = false } = {}) {
-  const originalFetch = globalThis.fetch
-  const fetchCalls = []
-  const json = (obj) => new Response(JSON.stringify(obj), { status: 200 })
+function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, bigSources = false, planReply = null } = {}) {
+  const llmCalls = []
   const answerFor = (prompt) => {
     if (prompt.includes('你是代码结构勘探员')) {
+      if (planReply !== null) return planReply
       return JSON.stringify({
         project: 'fixture',
         modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: bigSources ? [`src/${mn}.py`, `src/${mn}2.py`] : [`src/${mn}.py`] })),
@@ -142,28 +155,36 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
     }
     return '---\ntitle: unknown\n---\nunknown task'
   }
-  globalThis.fetch = async (url, init = {}) => {
-    const u = String(url)
-    const body = init.body ? JSON.parse(init.body) : {}
-    const prompt = String(body?.messages?.[0]?.content ?? '')
-    fetchCalls.push({ url: u, prompt })
-    if (!u.includes('/chat/completions')) return new Response('{}', { status: 404 })
-    if (stall) {
-      // 服务端不返回：挂起直到客户端断开（signal abort）
-      return new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(new Error('client aborted')), { once: true })
-        init.signal?.addEventListener('abort', () => {}, { once: true })
-      })
-    }
-    let content = answerFor(prompt)
-    if (bigArticle && prompt.includes('你是 CodeWiki 文章作者')) content += `\n\n${'长'.repeat(30000)}`
-    return json({ choices: [{ message: { content } }], usage: { output_tokens: 128 } })
+  // 假 llm 服务的 stream：把 answerFor 的结果按宿主 block 协议吐出来
+  const llm = {
+    async *stream(opts) {
+      const prompt = promptOf(opts)
+      llmCalls.push({ provider: opts.provider, model: opts.model, reasoningEffort: opts.reasoningEffort, prompt, signal: opts.signal })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      if (stall) {
+        // 端点不返回：挂起直到客户端 abort（取消语义）
+        await new Promise((_resolve, reject) => {
+          if (opts.signal?.aborted) return reject(new Error('client aborted'))
+          opts.signal?.addEventListener('abort', () => reject(new Error('client aborted')), { once: true })
+        })
+        return
+      }
+      let content = answerFor(prompt)
+      if (bigArticle && prompt.includes('你是 CodeWiki 文章作者')) content += `\n\n${'长'.repeat(70000)}`
+      yield { type: 'text-delta', index: 0, text: content }
+      yield { type: 'usage', usage: { outputTokens: 128 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
   }
+  const prevLlm = activeLlm
+  activeLlm = llm
   return {
-    fetchCalls,
-    batchPrompts: () => fetchCalls.filter((c) => c.url.includes('/chat/completions')).map((c) => c.prompt),
-    realtimePrompts: () => fetchCalls.filter((c) => c.url.includes('/chat/completions')).map((c) => c.prompt),
-    restore: () => { globalThis.fetch = originalFetch },
+    llm,
+    llmCalls,
+    batchPrompts: () => llmCalls.map((c) => c.prompt),
+    realtimePrompts: () => llmCalls.map((c) => c.prompt),
+    // 恢复上一个生效的假 llm（块间嵌套时用）
+    restore: () => { activeLlm = prevLlm },
   }
 }
 
@@ -233,7 +254,7 @@ console.log('== 注册 ==')
 const mainRepo = makeFixtureRepo()
 const e2eSteers = [] // 编译终态 steer 唤醒捕获（sess-e2e 专属）
 const main = makeCtx({ agentGet: (id) => (id === 'sess-e2e' ? { steer: (m) => e2eSteers.push({ id, m }) } : undefined) })
-const mainConfig = {}
+const mainConfig = batchCfg()
 apply(main.ctx, mainConfig)
 check(name === 'dsh-codewiki', `插件名 ${name}`)
 check(main.registered.get('cw') && main.registered.get('codewiki_generate'), 'cw 与 codewiki_generate 两个工具均已注册')
@@ -341,9 +362,9 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   check(t1.includes('CodeWiki 编译完成·请提交改动') && t1.includes('job-w1'), '完成消息含标题与任务 id')
   check(t1.includes('.codewiki') && t1.includes('docs(wiki)'), '完成消息含提交动作指引')
   check(steered[0]?.source?.kind === 'plugin:codewiki', 'source 标记 plugin:codewiki (v4)')
-  wakeCompileSession({ ...doneJob, error: '百炼凭证失效' }, 'failed', fakeAgents)
+  wakeCompileSession({ ...doneJob, error: '编译模型不可用' }, 'failed', fakeAgents)
   const t2 = String(steered[1]?.content?.[0]?.text ?? '')
-  check(t2.includes('CodeWiki 编译失败') && t2.includes('百炼凭证失效'), 'failed 消息含失败原因')
+  check(t2.includes('CodeWiki 编译失败') && t2.includes('编译模型不可用'), 'failed 消息含失败原因')
   wakeCompileSession({ ...doneJob, sessionId: null }, 'done', fakeAgents)
   wakeCompileSession(doneJob, 'done', { get: () => undefined }) // 冷会话：注册表查不到
   check(steered.length === 2, '无 sessionId / 冷会话 → 不唤醒')
@@ -355,39 +376,12 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   check(steered.length === 2, '缺省 agents（宿主未注入或无 get）→ 静默')
 }
 
-// ============================ 主模型规划（ctx.llm.stream，避开 32k 三倍价） ============================
-console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.stream） ==')
+// ============================ 规划阶段（0.10.0：全流程插件内，不再委托主模型） ============================
+console.log('== 规划走插件内批量池（按设置里的编译模型，不跟会话主模型） ==')
 {
-  // fake 主模型路由：ctx.llm.stream 按 provider/model 分发，勘探员 prompt 回规划 JSON
-  const llmCalls = []
-  const fakeLlm = {
-    stream(options) {
-      llmCalls.push(options)
-      const self = this
-      async function* gen() {
-        const text = String(options.messages?.[0]?.content?.[0]?.text ?? '')
-        if (text.includes('你是代码结构勘探员')) {
-          yield { type: 'block-start', index: 0, blockType: 'text' }
-          yield { type: 'text-delta', index: 0, text: '```json\n' }
-          yield { type: 'text-delta', index: 0, text: JSON.stringify({
-            project: 'fixture-mm',
-            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
-            concepts: [],
-          }) }
-          yield { type: 'text-delta', index: 0, text: '\n```' }
-          yield { type: 'block-end', index: 0, block: { type: 'text', text: '```json\n' + JSON.stringify({
-            project: 'fixture-mm',
-            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
-            concepts: [],
-          }) + '\n```' } }
-        }
-        yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 55 } }
-        yield { type: 'finish', reason: { kind: 'stop' } }
-      }
-      return gen.call(self)
-    },
-  }
-  // 场景 1：agent 带路由 → 规划走主模型，百炼零规划请求
+  // 0.10.1：唯一通道是宿主 llm 服务。此块的意图不再是「不碰 ctx.llm」，
+  // 而是「不沿用发起会话的主模型身份」——请求必须按配置的 provider/model 发出。
+  // 场景 1：agent 带会话路由 deepseek-official/main-model-x → 仍按 workbuddy/hy3 调用 llm
   const mmRepo = makeFixtureRepo()
   const mock = makeBatchMock()
   const mmCtx = makeCtx({
@@ -395,109 +389,60 @@ console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.str
       steer: () => {},
       session: { requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'main-model-x' } }) },
     } : undefined),
-    llm: fakeLlm,
   })
-  apply(mmCtx.ctx, {})
+  apply(mmCtx.ctx, batchCfg())
   const mmGen = mmCtx.registered.get('codewiki_generate')
   try {
     const r = await mmGen.execute({ cwd: mmRepo }, { agent: { id: 'sess-mm' } })
-    check(r.submitted === true, '主模型规划：提交即返回')
+    check(r.submitted === true, '带会话路由：提交即返回')
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
-    check(llmCalls.length === 1, `ctx.llm.stream 恰被调 1 次（实际 ${llmCalls.length}）`)
-    check(llmCalls[0]?.provider === 'deepseek-official' && llmCalls[0]?.model === 'main-model-x', '路由取自发起会话 requestHeader config')
-    check(llmCalls[0]?.messages?.[0]?.content?.[0]?.text?.includes('你是代码结构勘探员'), '规划 prompt 原文进主模型消息')
-    check(!mock.batchPrompts().some((p) => p.includes('勘探员')), '百炼端点零规划请求（不走批量通道）')
-    check(mock.batchPrompts().some((p) => p.includes('你是 CodeWiki 文章作者')), '文章阶段仍走百炼批量')
-    check(job?.stage === 'done', `主模型规划任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(job?.plan?.project === 'fixture-mm' && job?.plan?.modules?.length === 1, '主模型 JSON 计划被解析入库（含剥围栏）')
-    check((job?.notes ?? []).some((n) => n.includes('规划走主模型')), 'notes 记录主模型决策')
-    check((job?.notes ?? []).some((n) => n.includes('规划（主模型）：1 个模块')), 'notes 记录主模型规划结果')
-    check(job?.usage?.outputTok >= 55, `输出 token 实测入账（实际 ${job?.usage?.outputTok}）`)
-    check(!(job?.usage?.overTier2), '主模型规划不计超档（overTier2=0）')
+    check(mock.llmCalls.length > 0 && mock.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'),
+      `全部请求按设置的编译模型发出（${mock.llmCalls.length} 次，provider/model 全为 workbuddy/hy3）`)
+    check(!mock.llmCalls.some((c) => c.provider === 'deepseek-official' || c.model === 'main-model-x'),
+      '不沿用会话主模型身份（零 deepseek-official/main-model-x 调用）')
+    check(mock.llmCalls.some((c) => c.prompt.includes('你是代码结构勘探员')), '规划请求走插件内批量池')
+    check(job?.stage === 'done', `任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(job?.plan?.project === 'fixture' && job?.plan?.modules?.length === 2, '规划 JSON 解析入库（2 个模块）')
+    check((job?.notes ?? []).some((n) => n.includes('规划：2 个模块')), 'notes 记录规划结果')
+    check((job?.notes ?? []).some((n) => n.includes('阶段已启动')), 'notes 记录批量阶段启动与模型/并发')
   } finally {
     mock.restore()
     fs.rmSync(mmRepo, { recursive: true, force: true })
   }
 
-  // 场景 1b：真实 cordis 严格语义（ctx.llm 属性访问即抛）+ 会话未路由 → 路由退 agent.options
+  // 场景 2：规划应答不是合法 JSON → 降级本地按顶层目录分组，任务照常完成
   {
-    const strictRepo = makeFixtureRepo()
-    const mockS = makeBatchMock()
-    llmCalls.length = 0
-    const sCtx = makeCtx({
-      agentGet: (id) => (id === 'sess-strict' ? {
-        steer: () => {},
-        session: { requestHeader: () => undefined },
-        options: { provider: 'deepseek-official', model: 'conv-model-y' },
-      } : undefined),
-      llm: fakeLlm,
-    })
-    // 0.8.5 真宿主故障点：未 inject 的服务属性访问直接抛（旧实现据此全程降级百炼）
-    Object.defineProperty(sCtx.ctx, 'llm', {
-      get() { throw new Error('cannot get property "llm" without inject') },
-    })
-    apply(sCtx.ctx, {})
-    const sGen = sCtx.registered.get('codewiki_generate')
+    const fbRepo = makeFixtureRepo()
+    const mock2 = makeBatchMock({ planReply: '抱歉我不会' })
+    const fbCtx = makeCtx({})
+    apply(fbCtx.ctx, batchCfg())
+    const fbGen = fbCtx.registered.get('codewiki_generate')
     try {
-      const r = await sGen.execute({ cwd: strictRepo }, { agent: { id: 'sess-strict' } })
+      const r = await fbGen.execute({ cwd: fbRepo }, { agent: 'test-agent' })
       const job = await waitJob(r.cwd)
-      check(llmCalls.length === 1, `严格语义下仍走主模型（stream 调用 ${llmCalls.length}）`)
-      check(llmCalls[0]?.model === 'conv-model-y', '未路由时继承 agent.options 的对话模型')
-      check(!(job?.notes ?? []).some((n) => n.includes('主模型规划异常')), 'notes 无「主模型规划异常」')
-      check(job?.plan?.project === 'fixture-mm', '严格语义下主模型计划入库')
+      check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+      check((job?.notes ?? []).some((n) => n.includes('批量规划未产出可用 JSON')), 'notes 记录本地分组降级')
+      check(Array.isArray(job?.plan?.modules) && job.plan.modules.length >= 1, '本地分组计划入库')
+      check(mock2.llmCalls.every((c) => c.provider === 'workbuddy'), '降级路径同样按设置的编译模型发出')
     } finally {
-      mockS.restore()
-      fs.rmSync(strictRepo, { recursive: true, force: true })
+      mock2.restore()
+      fs.rmSync(fbRepo, { recursive: true, force: true })
     }
   }
 
-  // 场景 2：主模型输出不是合法 JSON → 降级百炼批量规划，任务照常完成
-  const badLlm = {
-    stream() {
-      return (async function* () {
-        yield { type: 'block-start', index: 0, blockType: 'text' }
-        yield { type: 'text-delta', index: 0, text: '抱歉我不会' }
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: '抱歉我不会' } }
-        yield { type: 'finish', reason: { kind: 'stop' } }
-      })()
-    },
-  }
-  const fbRepo = makeFixtureRepo()
-  const mock2 = makeBatchMock()
-  const fbCtx = makeCtx({
-    agentGet: (id) => (id === 'sess-mm' ? {
-      steer: () => {},
-      session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) },
-    } : undefined),
-    llm: badLlm,
-  })
-  apply(fbCtx.ctx, {})
-  const fbGen = fbCtx.registered.get('codewiki_generate')
-  try {
-    const r = await fbGen.execute({ cwd: fbRepo }, { agent: { id: 'sess-mm' } })
-    const job = await waitJob(r.cwd)
-    check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(mock2.batchPrompts().some((p) => p.includes('勘探员')), '降级后规划请求走百炼端点')
-    check((job?.notes ?? []).some((n) => n.includes('主模型规划未产出可用 JSON')), 'notes 记录降级决策')
-  } finally {
-    mock2.restore()
-    fs.rmSync(fbRepo, { recursive: true, force: true })
-  }
-
-  // 场景 3：无 sessionId（面板提交）→ 直接走批量路径，不碰 ctx.llm
+  // 场景 3：无 sessionId（面板提交）→ 同一条批量路径
   const panelRepo = makeFixtureRepo()
   const mock3 = makeBatchMock()
-  llmCalls.length = 0
-  const pCtx = makeCtx({ llm: fakeLlm })
-  apply(pCtx.ctx, {})
+  const pCtx = makeCtx({})
+  apply(pCtx.ctx, batchCfg())
   const pGen = pCtx.registered.get('codewiki_generate')
   try {
     const r = await pGen.execute({ cwd: panelRepo }, { agent: 'test-agent' })
     const job = await waitJob(r.cwd)
     check(job?.stage === 'done', `面板提交任务终态 done（实际 ${job?.stage}）`)
-    check(llmCalls.length === 0, '无发起会话 → 不碰 ctx.llm')
-    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走百炼批量（现状不变）')
+    check(mock3.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'), '面板提交按设置的编译模型发出')
+    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走批量池')
   } finally {
     mock3.restore()
     fs.rmSync(panelRepo, { recursive: true, force: true })
@@ -517,7 +462,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(r1.stage === 'plan', `初始 stage=plan（实际 ${r1.stage}）`)
     check(r1.writtenCount === undefined, '返回值不含 writtenCount（编译交服务，不再就地等待）')
     const job = await waitJob(r1.cwd)
-    check(mock.batchPrompts().some((p) => p.includes('勘探员')), '规划请求已走百炼普通端点')
+    check(mock.batchPrompts().some((p) => p.includes('勘探员')), '规划请求已走宿主 llm 通道')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式+概念）`)
     check(e2eSteers.length === 1 && e2eSteers[0].id === 'sess-e2e', '编译终态实时唤醒发起会话（exec.agent.id → steer）')
@@ -560,7 +505,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '大 wiki 校对批次照常回写（动态预算）')
     check((job.notes ?? []).some((n) => n.includes('观察任务并发执行')), 'notes 记录拆分决策')
-    check((job.notes ?? []).some((n) => n.includes('3 倍价')), '单篇 30k 超大档触发 3 倍价明示')
+    check((job.notes ?? []).some((n) => n.includes('超单请求预算')), '单请求输入超预算时 notes 明示按大档装填')
     check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
   } finally {
     mock.restore()
@@ -572,10 +517,10 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
 {
   const splitRepo = makeFixtureRepo()
-  // 每模块两个 90KB 源文件：28k 装填必 skipped → 触发观察批分割
+  // 每模块两个 210KB 源文件：单请求 110k 预算必装不下 → 触发观察批分割
   for (const mn of ['core', 'util']) {
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(90 * 1024))
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(90 * 1024))
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(210 * 1024))
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(210 * 1024))
   }
   execFileSync('git', ['add', '-A'], { cwd: splitRepo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
@@ -595,15 +540,64 @@ console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + �
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'modules/core.md 经合成落盘')
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'util.md')), 'modules/util.md 经合成落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '分割文章照常进校对回写')
-    check(!(job.notes ?? []).some((n) => n.includes('3 倍价')), '文章阶段零请求超 32k 档（无 3 倍价明示）')
+    check(!(job.notes ?? []).some((n) => n.includes('超单请求预算')), '文章阶段观察批全部装进单请求预算（无超档明示）')
   } finally {
     mock.restore()
     fs.rmSync(splitRepo, { recursive: true, force: true })
   }
 }
 
-// ============================ 阶段实时阈值（混合通道全实时） ============================
-console.log('== 全程走百炼普通端点：各阶段请求都打 chat/completions，零专用批量端点 ==')
+// ============================ 单项目串行（0.10.0） ============================
+console.log('== 单项目串行：已有项目在跑时新提交进 queued，前一个收尾后自动轮到 ==')
+{
+  const repoA = makeFixtureRepo()
+  const repoB = makeFixtureRepo()
+  const mockStall = makeBatchMock({ stall: true }) // A 的请求挂起不返回，A 长时间占住推进权
+  try {
+    const ra = await gen.execute({ cwd: repoA }, { agent: 'test-agent' })
+    check(ra.submitted === true, '项目 A 提交即返回')
+    // 等 A 真正离开 submitting 进入 plan（首个批量请求已挂起）
+    let jobA = null
+    for (let i = 0; i < 40; i += 1) {
+      jobA = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === ra.jobId)
+      if (jobA?.stage === 'plan') break
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    check(jobA?.stage === 'plan', `A 进入 plan 占住推进权（实际 ${jobA?.stage}）`)
+    const rb = await gen.execute({ cwd: repoB }, { agent: 'test-agent' })
+    check(rb.submitted === true, '项目 B 提交即返回')
+    const jobB0 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === rb.jobId)
+    check(jobB0?.stage === 'queued', `B 进 queued 排队（实际 ${jobB0?.stage}）`)
+    check((jobB0?.notes ?? []).some((n) => n.includes('单项目串行')), 'B 的 notes 说明单项目串行排队')
+    check(jobB0?.pendingStage === 'plan', `B 预置 pendingStage=plan（实际 ${jobB0?.pendingStage}）`)
+    // 排队期间 B 不发任何请求：A 之外的批量请求数不增长
+    const before = mockStall.batchPrompts().length
+    await new Promise((r) => setTimeout(r, 900))
+    check(mockStall.batchPrompts().length === before, `B 排队期间零请求（${before} → ${mockStall.batchPrompts().length}）`)
+    // 取消 A → B 自动轮到并跑完
+    const ctlEp = main.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const resC = fakeRes()
+    await ctlEp.handler(fakeReq({ action: 'cancel', jobId: ra.jobId }), resC)
+    check(resC.code === 200, '取消 A 被接受')
+    mockStall.restore()
+    const mock2 = makeBatchMock()
+    try {
+      const jobB = await waitJob(repoB, { timeout: 45000 })
+      check(jobB?.stage === 'done', `A 收尾后 B 自动轮到并跑完（实际 ${jobB?.stage}，error ${jobB?.error ?? '-'}）`)
+      check((jobB?.notes ?? []).some((n) => n.includes('排队结束，开始编译')), 'B 的 notes 记录排队结束')
+      const jobA2 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === ra.jobId)
+      check(jobA2?.stage === 'cancelled', `A 终态 cancelled（实际 ${jobA2?.stage}）`)
+    } finally {
+      mock2.restore()
+    }
+  } finally {
+    fs.rmSync(repoA, { recursive: true, force: true })
+    fs.rmSync(repoB, { recursive: true, force: true })
+  }
+}
+
+// ============================ 唯一通道：宿主 llm 服务 ============================
+console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 provider/model，插件零直连 ==')
 {
   const smallRepo = makeFixtureRepo()
   const mock = makeBatchMock()
@@ -614,9 +608,10 @@ console.log('== 全程走百炼普通端点：各阶段请求都打 chat/complet
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇`)
-    check(mock.fetchCalls.length > 0 && mock.fetchCalls.every((c) => String(c.url) === 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'),
-      '所有请求都打普通端点（零专用批量端点）')
-    check(mock.realtimePrompts().length > 0, 'chat/completions 已调用')
+    check(mock.llmCalls.length > 0 && mock.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'),
+      '所有请求都经设置里的编译模型（workbuddy/hy3）')
+    check(mock.llmCalls.every((c) => c.reasoningEffort === undefined), '未配置思考程度 → 不下发 reasoningEffort（用模型默认档）')
+    check(mock.realtimePrompts().length > 0, 'llm.stream 已调用')
     const jobsEp = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     const resJobs = fakeRes()
     jobsEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resJobs)
@@ -714,7 +709,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
   }] }), 'utf8')
   try {
     const wx = makeCtx({})
-    apply(wx.ctx, {})
+    apply(wx.ctx, batchCfg())
     const job = await waitJob(repoA)
     check(job?.stage === 'done', `任务重启后重跑至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(mock.batchPrompts().some((p) => p.includes('modules/core.md')), '重跑请求走普通端点')
@@ -740,7 +735,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
   }] }), 'utf8')
   try {
     const wx = makeCtx({})
-    apply(wx.ctx, {})
+    apply(wx.ctx, batchCfg())
     const job = await waitJob(repoB)
     check(job?.stage === 'done', `旧格式任务重启后重跑至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(mockB.batchPrompts().some((p) => p.includes('勘探员')), 'local 旧任务重跑走普通端点')
@@ -752,7 +747,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
 }
 
 // ============================ 并发提交占位 + 多实例合并 ============================
-console.log('== 并发提交占位（凭证窗口）与 flush 磁盘合并 ==')
+console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并 ==')
 {
   // 预置「另一实例」的 job：flush 合并后不得丢失
   const externalJob = {
@@ -766,15 +761,16 @@ console.log('== 并发提交占位（凭证窗口）与 flush 磁盘合并 ==')
   fs.writeFileSync(path.join(concRepo, 'app.py'), 'print(1)\n', 'utf8')
   const gitc = (...a) => execFileSync('git', a, { cwd: concRepo })
   gitc('init'); gitc('add', '.'); gitc('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'init')
-  const cc = makeCtx({ slowCreds: true })
-  apply(cc.ctx, {})
+  const cc = makeCtx({})
+  apply(cc.ctx, batchCfg({ serialProjects: false })) // 本块只验证提交占位与 flush 合并，不掺串行
   const gen2 = cc.registered.get('codewiki_generate')
-  // 提交在占位窗口后走真实 submitBatchFor——mock 掉模型 API，让它快速失败即可
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'mock off' } }), { status: 500 })
-  // 先串行走一次（cw init 建好 wiki 基线，提交因 mock 500 快速失败），
+  // 模型通道全部失败：本块不关心编译质量，只验证提交占位窗口不产生两个 job
+  const mock = makeBatchMock()
+  const failLlm = { async *stream() { yield { type: 'finish', reason: { kind: 'error', failure: { code: 'MOCK_OFF', message: 'mock off' } } } } }
+  activeLlm = failLlm
+  // 先串行走一次（cw init 建好 wiki 基线，提交因模型通道失败快速失败），
   // 避免并发对撞在 cw init 的 TOCTOU 上——本块只验证 submit 占位窗口
-  try { await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }) } catch { /* mock 500 预期失败 */ }
+  try { await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }) } catch { /* mock 失败预期 */ }
   try {
     const [ra, rb] = await Promise.all([
       gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
@@ -785,7 +781,7 @@ console.log('== 并发提交占位（凭证窗口）与 flush 磁盘合并 ==')
     const after = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
     check((after.jobs ?? []).some((j) => j.id === 'job-external-1'), 'flush 合并后另一实例的 job 不丢失')
   } finally {
-    globalThis.fetch = originalFetch
+    mock.restore()
     try { fs.rmSync(concRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch { /* Windows 句柄延迟释放：留 tmp 自清 */ }
   }
 }
@@ -808,7 +804,7 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
     jobsEp.handler(fakeReq(), resJobs)
     const jobsPayload = JSON.parse(resJobs.out)
     check(Array.isArray(jobsPayload.jobs) && jobsPayload.jobs.some((j) => j.id === r4.jobId), 'jobs 列表包含活动任务')
-    check(jobsPayload.jobs.every((j) => !('apiKey' in j)), 'jobs 列表不泄漏 apiKey')
+    check(jobsPayload.jobs.every((j) => !('apiKey' in j)), 'jobs 列表无 apiKey 字段（插件不存密钥）')
     // 0.4.11：阶段中间进度与逐任务明细透出（stall 挂起：进度在、完成数为 0）
     await new Promise((r) => setTimeout(r, 900)) // 等一拍 tick：submitBatchFor 落盘 batchProgress
     const resProg = fakeRes()
@@ -947,7 +943,7 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
   const mock = makeBatchMock()
   // 注册 workspaceRegistry：只有 wsRepo 是已添加工作区（宿主 WorkspaceRegistry 同构）
   const wx = makeCtx({ workspaces: [wsRepo] })
-  const cfg2 = {}
+  const cfg2 = batchCfg()
   try {
     apply(wx.ctx, cfg2)
     const gen2 = wx.registered.get('codewiki_generate')
@@ -992,7 +988,7 @@ console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不
   const outsideRepo = makeFixtureRepo()
   const mock = makeBatchMock()
   const wx = makeCtx({ brokenRegistry: true })
-  const cfg2 = {}
+  const cfg2 = batchCfg()
   try {
     apply(wx.ctx, cfg2)
     const gen2 = wx.registered.get('codewiki_generate')
@@ -1039,7 +1035,7 @@ console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null
   const repo = makeFixtureRepo()
   const mock = makeBatchMock()
   const wx = makeCtx({})
-  const cfg2 = {}
+  const cfg2 = batchCfg()
   try {
     apply(wx.ctx, cfg2)
     const def = wx.registered.get('codewiki_generate')
@@ -1073,7 +1069,7 @@ console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时�
     mkForeign('job-orphan-fresh', freshAt),
   ] }), 'utf8')
   const wx = makeCtx({})
-  const cfg2 = {}
+  const cfg2 = batchCfg()
   apply(wx.ctx, cfg2)
   // 等 2 个 tick：接管（陈旧）在下一轮 tick 生效；新鲜的继续让路
   await new Promise((r) => setTimeout(r, 800))
@@ -1090,16 +1086,19 @@ console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时�
   try { fs.unlinkSync(JOBS_FILE) } catch { /* 测试清理 */ }
 }
 
-// ============================ 无凭证诚实报错 ============================
-console.log('== 无凭证：诚实报错（没有子代理回退） ==')
+// ============================ 编译模型缺失诚实报错（0.10.1） ============================
+console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理、不静默跑空 ==')
 {
-  const noCredRepo = makeFixtureRepo()
-  const noCred = makeCtx({ apiKey: '' })
-  apply(noCred.ctx, {})
+  const noCfgRepo = makeFixtureRepo()
+  const noCfg = makeCtx({})
+  apply(noCfg.ctx, { batchProvider: '', batchModel: '' })
   let err = null
-  try { await noCred.registered.get('codewiki_generate').execute({ cwd: noCredRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
-  check(err && String(err.message).includes('未找到百炼 API Key'), `执行报错指向凭证（实际 ${err?.message?.slice(0, 40)}…）`)
-  fs.rmSync(noCredRepo, { recursive: true, force: true })
+  try { await noCfg.registered.get('codewiki_generate').execute({ cwd: noCfgRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  check(err && String(err.message).includes('编译模型提供商为空'), `provider 留空 → 报错指向设置项（实际 ${err?.message?.slice(0, 40)}…）`)
+  // 失败必须落成 job 的 failed 态（可观测，而不是凭空消失）
+  const failedJob = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.cwd === noCfgRepo)
+  check(failedJob?.stage === 'failed' && String(failedJob?.error ?? '').includes('编译模型'), `失败留痕在 job（stage=${failedJob?.stage}）`)
+  fs.rmSync(noCfgRepo, { recursive: true, force: true })
 }
 
 // ============================ 严格 cordis 语义 ============================
@@ -1136,7 +1135,7 @@ console.log('== 服务启动清理：Temp 目录终态任务自动移除，活�
     { id: 'job-ws-done', cwd: 'E:/some/real/workspace', kind: 'full', scope: 'auto', stage: 'done', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso, writtenCount: 2 },
   ] }), 'utf8')
   const cc = makeCtx()
-  apply(cc.ctx, {})
+  apply(cc.ctx, batchCfg())
   await new Promise((r) => setTimeout(r, 1200)) // 等 tick flush 落盘
   const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
   const ids = (data.jobs ?? []).map((j) => j.id)

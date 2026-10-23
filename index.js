@@ -2,8 +2,8 @@
 // 提供两个工具：
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
 //   codewiki_generate — 服务化编译：判态后把编译任务提交给宿主常驻服务（侧边栏 CodeWiki 面板可见），
-//                       服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进，全部环节走百炼普通入口
-//                       （chat/completions，任务输入压在 ≤32k token 低价档），零子代理。
+//                       服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进，全部环节在插件内完成
+//                       （默认模型 workbuddy/hy3，192k 上下文，单请求输入预算 110k），零子代理。
 //   codewiki_progress — 只读查编译进度：提交后随时查 stage/百分比/篇数/失败原因，立即返回不等待。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -20,6 +20,11 @@ export const name = PLUGIN_NAME
 const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', 'setup', 'uninstall']
 // 编译请求（同步 chat/completions）并发上限
 const CONCURRENCY_HARD_CAP = 8
+// 默认并发：hy3 免费且 192k 上下文，2 路并发足够且不触发上游限流
+const DEFAULT_CONCURRENCY = 2
+// 默认编译模型：workbuddy/hy3（免费、192k 上下文，宿主 llm 服务通道）
+const DEFAULT_BATCH_PROVIDER = 'workbuddy'
+const DEFAULT_BATCH_MODEL = 'hy3'
 
 // Windows/Git-Bash 兼容：MSYS 盘符路径（/e/...）Node 的 fs 不认，归一化为 E:/...。
 // 仅 win32 转换——POSIX 上 /e/... 可能是真实绝对路径，原样保留；识别不了的写法也原样交给 existsSync 报错。
@@ -37,12 +42,12 @@ function normalizeCwd(input) {
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
-  batchProvider: z.string().default('').volatile().description('编译模型提供商（DSH 模型设置里的 provider id）；留空=走百炼兼容通道（batchModel 填百炼模型名），非空=走宿主 llm 服务（batchModel 填该 provider 的模型 id）'),
-  batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（全部模型环节共用）：batchProvider 为空时是百炼模型名，非空时是该 provider 的模型 id'),
-  batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证'),
-  batchThinkingBudget: z.number().default(0).volatile().description('思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
-  sessionTier: z.string().default('').volatile().description('会话通道档位 id（dsh-subagent-auto-router 里的档位，如 codeiwiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
-  maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('编译请求并发上限（1–8），硬顶 8'),
+  batchProvider: z.string().default(DEFAULT_BATCH_PROVIDER).volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
+  batchModel: z.string().default(DEFAULT_BATCH_MODEL).volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id'),
+  batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
+  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅超 192k 兜底时使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
+  maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('编译请求并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
+  serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
@@ -62,13 +67,13 @@ function liveConfig(config) {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
     batchProvider: String(val(c.batchProvider) ?? '').trim(),
-    batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
-    batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
-    batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
+    batchModel: String(val(c.batchModel) ?? '').trim() || DEFAULT_BATCH_MODEL,
+    batchReasoningEffort: String(val(c.batchReasoningEffort) ?? '').trim(),
     sessionTier: String(val(c.sessionTier) ?? '').trim(),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
-      : CONCURRENCY_HARD_CAP,
+      : DEFAULT_CONCURRENCY,
+    serialProjects: val(c.serialProjects) !== false,
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
@@ -244,8 +249,7 @@ function isExcluded(cwd, list) {
 // ---------------------------------------------------------------------------
 
 // 粗算 token 数：CJK 字符 ≈ 1 token/字，其余（ASCII 代码为主）≈ 3.5 字符/token。
-// 只为把单请求输入压进 qwen3.7-flash ≤32k 输入低价档（约 $0.03/M；
-// 32k-256k 档 $0.10/M 贵 3 倍多），不需要精确分词器。
+// 只为把单请求输入装进模型上下文（hy3 默认 192k，见 BATCH_TOKEN_BUDGET），不需要精确分词器。
 export function estimateTokens(text) {
   const s = String(text ?? '')
   let cjk = 0
@@ -256,15 +260,18 @@ export function estimateTokens(text) {
   return cjk + Math.ceil((s.length - cjk) / 3.5)
 }
 
-// 宿主 llm 服务通道：走 DSH 模型设置里已注册的 provider/model（含本地 OpenAI 兼容端点，
-// 如 ollama/lmstudio/vllm），凭证由宿主按该 provider 的配置解析——插件不碰密钥。
-// thinkingBudget 在宿主侧是 reasoningEffort（枚举档位）而非 token 数，故本通道不下发思考预算，
-// 沿用该 provider/模型的默认档。失败统一抛错，由并发池按单任务失败记账。
-async function llmChat({ llm, provider, model, prompt, signal }) {
+// 宿主 llm 服务通道：唯一通道。走 DSH 模型设置里已注册的 provider/model（含本地 OpenAI
+// 兼容端点，如 ollama/lmstudio/vllm），凭证由宿主按该 provider 的配置解析——插件不碰密钥、
+// 不再自带任何直连通道（0.10.1 起删除内置百炼兼容入口）。
+// reasoningEffort 是宿主 llm 的枚举档位（off/low/medium/high/xhigh/max），由模型目录
+// （resolveModel().reasoning.efforts）给出可选值；留空=用该模型默认档。
+// 失败统一抛错，由并发池按单任务失败记账。
+async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal }) {
   const assembler = new BlockAssembler()
   for await (const chunk of llm.stream({
     provider,
     model,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin:codewiki' } })],
     temperature: 0,
     signal,
@@ -278,28 +285,6 @@ async function llmChat({ llm, provider, model, prompt, signal }) {
   const content = assembler.blocks().filter((b) => b.type === 'text').map((b) => b.text).join('')
   if (!content) throw new Error('llm 通道响应缺少 content')
   return { content, outputTokens: Number(assembler.usage?.outputTokens) || 0 }
-}
-
-// 同步单轮调用：百炼普通入口（dashscope chat/completions）。零子代理。
-// batchProvider 非空时不走这里，改由 llmChat 走宿主 llm 服务。
-async function bailianChat({ apiKey, model, thinkingBudget, prompt, signal }) {
-  const body = { model, messages: [{ role: 'user', content: prompt }] }
-  body.enable_thinking = thinkingBudget > 0
-  if (thinkingBudget > 0) body.thinking_budget = thinkingBudget
-  const text = await fetch(`${BAILIAN_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  }).then(async (res) => {
-    const text = await res.text()
-    if (!res.ok) throw new Error(`百炼 chat/completions 失败（HTTP ${res.status}）：${text.slice(0, 300)}`)
-    return text
-  })
-  const j = JSON.parse(text)
-  const content = j?.choices?.[0]?.message?.content
-  if (typeof content !== 'string') throw new Error('实时调用响应缺少 content')
-  return { content, outputTokens: Number(j?.usage?.output_tokens) || 0 }
 }
 
 // 任务结果统一出口：keepInMemory 任务（规划/校对）把 content 带回内存由服务侧消费，
@@ -319,18 +304,14 @@ function applyTaskResult(task, content, notes) {
   }
 }
 
-// 并发池：唯一执行器。按 maxConcurrency 同时在飞的同步请求逐个消费任务队列，
-// 全部打百炼普通入口。signal 用于取消时中断在飞请求。
+// 并发池：唯一执行器。按 maxConcurrency 同时在飞地消费任务队列，全部走宿主 llm 服务
+// （唯一的模型通道，凭证由宿主按 provider 解析）。signal 用于取消时中断在飞请求。
 // onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
 // 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
-export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, concurrency, notes, onTaskDone, signal, llm, provider }) {
+export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider }) {
   const results = new Map()
   let cursor = 0
-  // 通道选择：provider 非空走宿主 llm 服务（任意已配置 provider，凭证由宿主解析），
-  // 否则保持百炼直连（batchModel 是百炼模型名、batchApiKey/凭证库解析 key）。
-  const chat = provider
-    ? (args) => llmChat({ ...args, llm, provider })
-    : (args) => bailianChat(args)
+  const chat = (args) => llmChat({ ...args, llm, provider, reasoningEffort })
   const worker = async () => {
     for (;;) {
       if (signal?.aborted) return
@@ -339,7 +320,7 @@ export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, c
       const t = tasks[i]
       try {
         const startedAt = Date.now()
-        const { content, outputTokens } = await chat({ apiKey, model, thinkingBudget, prompt: t.batchPrompt, signal })
+        const { content, outputTokens } = await chat({ model, prompt: t.batchPrompt, signal })
         if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
       } catch (err) {
@@ -353,21 +334,22 @@ export async function runRealtimeTasks(tasks, { apiKey, model, thinkingBudget, c
 }
 
 // ---------------------------------------------------------------------------
-// 模型执行（阿里云百炼 OpenAI 兼容接口，普通入口 dashscope.aliyuncs.com）
-// 全部环节（规划/写文章/横切/校对）都是单轮文本生成，统一走这条通道：任务内联
-// 输入 → 同步 chat/completions 后台并发池执行（进度/取消由服务记账）。
-// 输入按 token 预算装填，压在 qwen3.7-flash ≤32k 输入低价档；
-// 装不下的单文件升 200k 大档装填。请求随连接生死，宿主重启按 prompt 快照重跑。
+// 模型执行（唯一通道：宿主 llm 服务）
+// 全部环节（规划/写文章/横切/校对）都是单轮文本生成，统一走同一个后台并发池，
+// 模型/提供商/思考档位全部取自插件设置里选中的「模型设置」条目，
+// 凭证由宿主按该 provider 解析——插件不再有任何自带直连通道。
+// 输入按 token 预算（BATCH_TOKEN_BUDGET，默认 110k）装填；装不下的单文件升
+// BATCH_TOKEN_HARD_LIMIT 大档。请求随连接生死，宿主重启按 prompt 快照重跑。
 // ---------------------------------------------------------------------------
 
-const BAILIAN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-// 单个请求的输入 token 预算：qwen3.7-flash 输入 ≤32k 档单价最低（约 $0.03/M），
-// 留 ~4k 余量吸收估算误差与消息骨架开销。
-const BATCH_TOKEN_BUDGET = 28000
-// 会话通道任务文件的装填上限（0.9.0 起不再「升到该档提交」）：超预算文章/校对任务
-// 按该上限把源码内联进任务文件，交发起会话模型派子智能体读；连该上限都装不下时
-// 只内联首个超限文件（collectSources 的 oversized 语义），其余跳过并在任务文件里标注。
-const BATCH_TOKEN_HARD_LIMIT = 200000
+// 单个请求的输入 token 预算：默认模型 hy3 上下文 192k、单请求输出上限 64k，
+// 输入侧留 128k；再扣输出与估算误差余量，取 110k。
+const BATCH_TOKEN_BUDGET = 110000
+// 超预算兜底装填上限：单文件/单任务装不进 110k 时按该大档再装一次；
+// 仍装不下才落到会话通道（最后的兜底，见 dispatchSessionTasks）。
+// 上限由 hy3 的真实窗口反推：contextWindow 192k 是输入+输出共享的，单请求输出上限
+// maxTokens 64k，故输入必须 ≤128k（旧值 150k 输入 + 64k 输出 = 214k，已越界）。
+const BATCH_TOKEN_HARD_LIMIT = 128000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -476,7 +458,7 @@ export function fixAnchors(content, cwd) {
 
 // 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
 // 返回 { text, skipped, oversized }：skipped 是预算装不下的文件清单，oversized=true 表示
-// 连第一个文件都装不下（text 原样带这一个文件，任务整体转会话通道）。
+// 连第一个文件都装不下（text 原样带这一个文件，任务整体转超预算兜底）。
 export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
   const parts = []
   const skipped = []
@@ -537,46 +519,15 @@ function batchArticlePrompt({ language, mission, sourcesText, prevArticle }) {
   return parts.join('\n')
 }
 
-/** apply 时捕获的宿主上下文，批量路径经它向宿主凭据库取模型渠道凭证 */
-let hostCtxRef = null
-
-/**
- * 百炼凭证解析链：显式 batchApiKey 优先；留空经宿主凭据库（credentials 服务）
- * 解析 ALIYUN_BAILIAN_API_KEY——即模型设置「阿里百炼云」渠道的 apiKeyEnv，
- * 与模型适配器同一份凭证（继承 env > 凭据库 > .env）。取不到返回 null。
- */
-export async function resolveBatchApiKey(hostCtx, cfg) {
-  const explicit = String(cfg?.batchApiKey ?? '').trim()
-  if (explicit) return { key: explicit, source: 'config' }
-  if (!hostCtx || typeof hostCtx.inject !== 'function') return null
-  const svc = await Promise.race([
-    (async () => {
-      try {
-        const sub = await hostCtx.inject(['credentials'])
-        const got = Array.isArray(sub) ? sub[0] : sub?.credentials ?? sub
-        return got && typeof got.resolve === 'function' ? got : null
-      } catch { return null }
-    })(),
-    sleep(3000).then(() => null),
-  ])
-  if (!svc) return null
-  try {
-    const resolved = await svc.resolve('ALIYUN_BAILIAN_API_KEY')
-    if (resolved?.value) return { key: resolved.value, source: `credentials(${resolved.source ?? 'unknown'})` }
-  } catch { /* 凭据库解析失败按无凭证处理，走回退 */ }
-  return null
-}
-
 // 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
 // 分配 customId。
-// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时按文件装填拆成多个 ≤28k
+// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时按文件装填拆成多个小
 // 观察批（_split/ 任务，keepInMemory），收割后拼观察包提交一个合成请求写完整文章。
-// 存在单文件连观察批预算都装不下、或分不出多批（单文件占全部体积）时，整任务转「会话通道」
-// ——超预算文章交发起会话模型派子智能体完成（0.9.0 起，不再升 200k 大档吃 3 倍价、
-// 也不再同模型同步兜底）。≤28k 单请求与多批观察仍走百炼批量。full/stale 两条流都在本层生效。
+// 存在单文件连观察批预算都装不下时，该任务转「兜底通道」——极少数超大单文件交给
+// 发起会话派子智能体读（正常流程全在插件内，见 dispatchSessionTasks）。
 // 返回 { prepared, sessionTasks }：prepared 含普通任务与 _split/ 观察任务，
 // 观察任务带 splitFor（所属文章 name）与 composePlan（重建合成任务所需）；
-// sessionTasks 带 batchPrompt（200k 大档装填，派发时写入任务文件供子智能体读取）。
+// sessionTasks 带 batchPrompt（大档装填，派发时写入任务文件供子智能体读取）。
 export function prepareArticleTasks(tasks, { cwd, language }) {
   const prepared = []
   const sessionTasks = []
@@ -589,15 +540,17 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
       ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
       : ''
     let forceSession = false
-    // 分割判定：prompt 估算超单请求预算，或 28k 装填有文件被跳过（collectSources 只装得下
+    // 分割判定：prompt 估算超单请求预算，或装填有文件被跳过（collectSources 只装得下
     // 前缀，余下文件本会被「不得涉及」静默甩掉——截图场景）。两者都说明该模块一请求写不完。
     if (!tooBig && (overflowFiles.length > 0 || estimateTokens(batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })) > BATCH_TOKEN_BUDGET)) {
-      // 总量超单请求预算：按 28k 逐文件装填分批，产出观察任务组
+      // 总量超单请求预算：按单请求预算逐文件装填分批，产出观察任务组。
+      // 单文件上限用 BATCH_TOKEN_HARD_LIMIT（hy3 192k 能装下的大档）——只有单文件
+      // 连大档都装不下才算「装不下」，才转兜底通道。
       const batches = []
       let hasOversizeSingle = false
       for (const rel of t.sources) {
-        const one = collectSources(cwd, [rel])
-        if (one.oversized) { hasOversizeSingle = true; break } // 单文件连观察预算都超：整任务转会话通道
+        const one = collectSources(cwd, [rel], BATCH_TOKEN_HARD_LIMIT)
+        if (one.oversized) { hasOversizeSingle = true; break } // 单文件连大档都超：整任务转兜底通道
         const last = batches[batches.length - 1]
         if (last && estimateTokens(last.text + '\n' + one.text) <= BATCH_TOKEN_BUDGET) {
           last.text += '\n' + one.text
@@ -624,7 +577,7 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
         })
         continue
       }
-      // 单文件超观察预算 / 分不出多批（单文件占全部体积）：转会话通道，按 200k 大档装填
+      // 单文件超观察预算 / 分不出多批（单文件占全部体积）：转兜底通道，按大档装填
       ;({ text, skipped: overflowFiles } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
       forceSession = true
     }
@@ -1005,11 +958,12 @@ async function wikiPathFor(cwd, binary, signal) {
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
 //   full   = plan → articles → crosscut →（超预算拆分时 compose）→ review → index
 //   stale  = articles（任务在提交时预构建）→ review → index
-// 全部模型调用都是单轮文本生成，统一走百炼普通入口（chat/completions）后台并发池；单文件超
-// 32k 预算先升 200k 大档重装继续，仍装不下则该任务转会话通道（见下）。规划/横切/校对结果
+// 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 workbuddy/hy3）；单文件超
+// 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。规划/横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
-// 会话通道（0.9.0）：超批量预算的文章不升 200k 大档吃 3 倍价、也不同模型同步兜底，而是把
-// 完整写作指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
+// 兜底通道：只有单个源文件大到连 BATCH_TOKEN_HARD_LIMIT 都装不下时才启用——把完整写作
+// 指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
+// 正常情况（单文件 ≤128k）全程在插件内完成，不惊动发起会话。
 // ---------------------------------------------------------------------------
 
 // 测试可设 DSH_CODEWIKI_JOBS_FILE 隔离到独立路径——默认路径与真实宿主实例共享，
@@ -1023,7 +977,7 @@ const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_C
 const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')
 
 // 会话通道任务收割判定（纯函数，测试直接断言三态）：
-// 'timeout' 派发后超时未产出（按失败处理，不降级百炼）；'harvest' 目标文件已产出，
+// 'timeout' 派发后超时未产出（按失败处理，不降级到插件内通道）；'harvest' 目标文件已产出，
 // 且 mtime ≥ 派发时间、以 frontmatter 开头（子智能体写完整了）；'wait' 尚未产出
 // （无文件/文件旧未更新/正在写一半）。
 export function classifySessionTask(task, nowMs = Date.now()) {
@@ -1150,8 +1104,9 @@ function acquireTickLock() {
 function releaseTickLock() { try { fs.unlinkSync(JOBS_LOCK_FILE) } catch { /* 已被清理 */ } }
 
 function saveJobs(jobs) {
-  // 只留最近 30 个；apiKey 不落盘（重启后按需重解析），cancelRequested 必须落盘（取消标记靠它跨 tick 存活）
-  const kept = jobs.slice(-MAX_JOBS_KEPT).map(({ apiKey, ...rest }) => rest)
+  // 只留最近 30 个；cancelRequested 必须落盘（取消标记靠它跨 tick 存活）。
+  // 0.10.1 起插件不存任何密钥，job 里也不再出现 apiKey 字段。
+  const kept = jobs.slice(-MAX_JOBS_KEPT)
   try { fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: kept }, null, 2), 'utf8') } catch { /* tmp 不可写则放弃持久化 */ }
 }
 
@@ -1199,7 +1154,7 @@ function jobSummary(job) {
 let agentsRef = null
 
 // llm 服务引用：cordis 严格语义下直接访问 ctx.llm 会抛「cannot get property "llm"
-// without inject」（0.8.5 前的 typeof 守卫拦不住），规划阶段因此全程降级百炼。
+// without inject」（0.8.5 前的 typeof 守卫拦不住）。插件内全部模型环节都靠它，
 // 与 agentsRef 同款：apply 时经 ctx.inject(['llm']) 在注入时取服务。
 let llmRef = null
 
@@ -1333,16 +1288,6 @@ function createJobService(config, onSettled) {
     if (!fromSubmit) onSettled?.(job, 'failed') // sessionId 守卫在 wakeCompileSession 内
   }
 
-  // 凭证：内存缓存优先；不落盘，重启后重解析（凭证库可能已就绪/已更换）
-  async function apiKeyOf(job) {
-    if (job.apiKey) return job.apiKey
-    const k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
-    if (!k) throw new Error(`未找到百炼凭证（原解析来源 ${job.credentialSource ?? '未知'}），任务无法继续——可在插件设置填 batchApiKey 后重新提交`)
-    job.apiKey = k.key
-    job.credentialSource = k.source
-    return k.key
-  }
-
   // 阶段收割统一入口：返回 null = 阶段还在跑，下轮 tick 再看。
   async function settleJob(job) {
     // 执行器（后台并发池）：结果进 batchResults 等收割；null = 执行器整体失败（已 fail）
@@ -1414,8 +1359,8 @@ function createJobService(config, onSettled) {
 
   // 阶段执行器：后台并发池，结果进 batchResults 由 settleJob 收割，
   // tick 不被长请求阻塞。batchRuns 是存活性标记，batchAborters 供取消中断在飞请求。
-  // 通道二选一：batchProvider 非空 → 宿主 llm 服务（任意已配置 provider，凭证由宿主解析，
-  // 本地 9B 这类 OpenAI 兼容端点也在内）；为空 → 百炼普通入口（沿用旧配置与凭证链）。
+  // 唯一通道：宿主 llm 服务（模型设置里已注册的 provider/model，含本地 OpenAI 兼容端点），
+  // 凭证由宿主按该 provider 解析，插件不碰密钥。
   const batchRuns = new Map()     // jobId → 执行器 Promise
   const batchResults = new Map()  // jobId → results[]（null = 执行器整体失败，已 fail）
   const batchAborters = new Map() // jobId → AbortController
@@ -1424,15 +1369,12 @@ function createJobService(config, onSettled) {
     const ac = new AbortController()
     batchAborters.set(job.id, ac)
     let doneCount = 0
-    // 凭证只在百炼通道需要；llm 通道由宿主按 provider 解析，不碰插件配置的 key。
-    const creds = c.batchProvider ? Promise.resolve('') : apiKeyOf(job)
-    const run = creds
-      .then((apiKey) => runRealtimeTasks(prepared, {
-        apiKey,
-        provider: c.batchProvider || undefined,
+    const run = Promise.resolve()
+      .then(() => runRealtimeTasks(prepared, {
+        provider: c.batchProvider,
         llm: llmRef,
         model: c.batchModel,
-        thinkingBudget: c.batchThinkingBudget,
+        reasoningEffort: c.batchReasoningEffort || undefined,
         concurrency: c.maxConcurrency,
         notes: job.notes,
         signal: ac.signal,
@@ -1466,10 +1408,10 @@ function createJobService(config, onSettled) {
 
   function submitBatchFor(job, prepared) {
     const c = liveConfig(config)
-    // 请求实际输入超 32k 档的按 3 倍价计费，提交前明示
+    // 请求实际输入超单请求预算（BATCH_TOKEN_BUDGET）的走兜底装填，提交前明示
     const tier2 = prepared.filter((t) => estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET).length
     addUsage(job, { inputTok: prepared.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0), requests: prepared.length, realtime: true, overTier2: tier2 })
-    if (tier2) note(job, `${tier2} 个请求输入超 32k 档，按 3 倍价计费`)
+    if (tier2) note(job, `${tier2} 个请求输入超单请求预算（${Math.round(BATCH_TOKEN_BUDGET / 1000)}k），按大档装填`)
     job.batchRef = { batchId: `stage-${job.id}` } // 无服务端批次 id，仅标记「阶段在途」
     job.batchSubmittedAt = new Date().toISOString() // 面板执行时长计时起点，收割时清空
     job.tasks = prepared.map((t) => ({
@@ -1482,7 +1424,7 @@ function createJobService(config, onSettled) {
     }))
     job.batchProgress = { completed: 0, total: prepared.length }
     startBatchChatRun(job, prepared)
-    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${c.batchProvider ? `${c.batchProvider}/${c.batchModel}` : c.batchModel}，并发 ${c.maxConcurrency}）`)
+    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${c.batchProvider}/${c.batchModel}，并发 ${c.maxConcurrency}）`)
     touch(job)
   }
 
@@ -1490,7 +1432,8 @@ function createJobService(config, onSettled) {
   // 把完整写作指令写入任务文件，steer 一条短消息给发起会话；会话模型调用子智能体
   // （delegate/subagent）读任务文件、把文章直接写到 articlePath。本服务每 tick 轮询目标
   // 文件收割（frontmatter 校验 + 行号锚点校正后入账），超时（默认 30 分钟）按失败处理
-  // ——不降级回百炼。派发快照随 job 持久化（sessionTasks），宿主重启接管后重发一次 steer。
+  // ——不降级到插件内通道回写（避免半成品覆盖）。派发快照随 job 持久化（sessionTasks），
+  // 宿主重启接管后重发一次 steer。
   function dispatchSessionTasks(job, tasks) {
     let agent = null
     try { agent = job.sessionId && agentsRef?.get ? agentsRef.get(job.sessionId) : null } catch { /* 会话已关 */ }
@@ -1590,19 +1533,6 @@ function createJobService(config, onSettled) {
     if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
     const fileLines = files.map((f) => `- ${f.path}（${f.bytes}B）`).join('\n')
     const prompt = batchPlannerPrompt(fileLines)
-    // 主模型规划：发起会话 agent 可用且能解析其当前路由时走 ctx.llm（无 32k 低价档
-    // 限制，避免整份文件清单超档按 3 倍价；主模型也不占百炼并发池）。失败降级百炼批量。
-    const main = await runMainModelPlan(job, prompt)
-    if (main !== null) {
-      const plan = parsePlan(main)
-      if (plan) {
-        job.plan = plan
-        note(job, `规划（主模型）：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
-        setStage(job, 'articles')
-        return
-      }
-      note(job, '主模型规划未产出可用 JSON，降级百炼批量规划')
-    }
     const planTask = {
       customId: 'plan', name: '_plan', keepInMemory: true,
       batchPrompt: prompt,
@@ -1614,60 +1544,8 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // 主模型规划：直接继承发起会话当前对话的模型。路由与主线 compaction 的
-  // latest ?? agentTarget 同序：会话已路由的 requestHeader config 优先，未路由
-  // 退回 agent.options（创建时的路由）。经宿主 llm 服务单轮流收集。
-  // 返回模型输出文本；不可用（无 agent/无 llm/无路由/请求失败）返回 null 走批量回退。
-  async function runMainModelPlan(job, prompt) {
-    try {
-      if (!job.sessionId || !agentsRef || typeof agentsRef.get !== 'function') return null
-      let agent
-      try { agent = agentsRef.get(job.sessionId) } catch { return null }
-      const latest = agent?.session?.requestHeader?.()?.config
-      const target = latest?.provider && latest?.model
-        ? { provider: latest.provider, model: latest.model }
-        : agent?.options?.provider && agent?.options?.model
-          ? { provider: agent.options.provider, model: agent.options.model }
-          : undefined
-      if (!target) return null
-      const { provider, model } = target
-      const llm = llmRef
-      if (!llm || typeof llm.stream !== 'function') {
-        note(job, '主模型规划不可用（llm 服务未注入），降级百炼批量规划')
-        return null
-      }
-      const ac = new AbortController()
-      batchAborters.set(job.id, ac) // 取消编译 = 中断规划请求
-      try {
-        note(job, `规划走主模型（${model}），避开 32k 低价档限制`)
-        addUsage(job, { inputTok: estimateTokens(prompt), requests: 1, realtime: true })
-        const assembler = new BlockAssembler()
-        for await (const chunk of llm.stream({
-          provider,
-          model,
-          messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin:codewiki' } })],
-          temperature: 0,
-          signal: ac.signal,
-        })) {
-          assembler.push(chunk)
-        }
-        const finish = assembler.finish
-        if (finish.kind === 'error' || finish.kind === 'aborted') {
-          note(job, `主模型规划流终止（${finish.kind}）—— ${String(finish.failure?.message ?? '')}`)
-          return null
-        }
-        if (assembler.usage) addUsage(job, { outputTok: assembler.usage.outputTokens ?? 0 })
-        const text = assembler.blocks().filter((b) => b.type === 'text').map((b) => b.text).join('')
-        return text || null
-      } finally {
-        batchAborters.delete(job.id)
-        touch(job)
-      }
-    } catch (err) {
-      note(job, `主模型规划异常 —— ${String(err?.message ?? err)}`)
-      return null
-    }
-  }
+  // 主模型规划已移除（0.10.0）：全部模型环节统一由插件内并发池执行（默认 workbuddy/hy3
+  // 192k 上下文，规划输入远小于上下文），不再委托发起会话的主模型，路由/凭证完全由插件配置决定。
 
   async function tickArticles(job) {
     if (job.batchRef) {
@@ -1942,7 +1820,7 @@ function createJobService(config, onSettled) {
           srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_HARD_LIMIT - articleTokens)
         }
         if (srcs.oversized) {
-          // 连 200k 大档都装不下：转会话通道，由发起会话模型调用子智能体校对并覆写文章
+          // 连硬上限大档都装不下：转会话通道兜底，由发起会话模型调用子智能体校对并覆写文章
           sessionTasks.push({
             name: a.name, articlePath: a.path,
             batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
@@ -2023,6 +1901,15 @@ function createJobService(config, onSettled) {
     ticking = true
     try {
       syncCancelFlags()
+      // 单项目串行闸门（serialProjects，默认开）：同一时刻只推进一个仓库的编译任务。
+      // 已经在推进的项目优先（不打断），没有在跑的才轮到最早排队（queued）的那个；
+      // 其余排队项目本轮不推进，等前一个到终态后自然轮到。取消仍不受闸门限制。
+      let activeId = null
+      if (liveConfig(config).serialProjects) {
+        const busy = jobs.find((j) => !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued')
+        const queued = busy ? null : jobs.find((j) => j.stage === 'queued')
+        activeId = (busy ?? queued)?.id ?? null
+      }
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
         if (job.owner && job.owner !== instanceId) {
@@ -2047,6 +1934,18 @@ function createJobService(config, onSettled) {
           touch(job)
           continue
         }
+        // 排队中的项目：只有轮到它（activeId）时才进入真正的首个阶段
+        if (job.stage === 'queued') {
+          if (activeId !== job.id) continue
+          const next = job.pendingStage ?? (job.kind === 'full' ? 'plan' : 'articles')
+          job.pendingStage = null
+          note(job, `排队结束，开始编译（${next}）`)
+          setStage(job, next)
+          if (job.kind === 'stale') job.tasks = job.pendingTasks ?? job.tasks ?? []
+          job.pendingTasks = null
+        }
+        // 串行闸门：非当前推进项目本轮跳过（不推进、不失败，等轮次）
+        if (activeId && job.id !== activeId) continue
         const handler = STAGE_HANDLER[job.stage]
         if (!handler) { fail(job, `未知阶段 ${job.stage}`); continue }
         try {
@@ -2072,7 +1971,7 @@ function createJobService(config, onSettled) {
     rememberRepo(cwd)
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
-    // 占位先行：resolveBatchApiKey 最长等 3s，期间的并发提交靠非终态 stage 挡重复
+    // 占位先行：先落一条 submitting 占位，期间的并发提交靠非终态 stage 挡重复
     const job = {
       id: `job-${Date.now().toString(36)}-${(seq++).toString(36)}`,
       cwd, wikiPath, scope, language, kind,
@@ -2095,27 +1994,35 @@ function createJobService(config, onSettled) {
     }
     jobs.push(job)
     persist()
-    let k
+    // 唯一的模型通道校验：编译模型必须来自模型设置里已注册的 provider/model，
+    // 凭证由宿主按该 provider 解析（插件不再有任何自带直连通道与 key）。
     try {
       const c = liveConfig(config)
-      if (c.batchProvider) {
-        // 宿主 llm 通道：凭证由宿主按 provider 解析，这里只校验通道可用性与模型名。
-        if (!c.batchModel) throw new Error('编译模型为空——在插件设置选一个提供商下的模型')
-        if (!llmRef || typeof llmRef.stream !== 'function') throw new Error(`编译模型走宿主 llm 服务（provider ${c.batchProvider}），但 llm 服务未注入——请重启宿主后重试`)
-        k = { key: '', source: `llm(${c.batchProvider}/${c.batchModel})` }
-      } else {
-        k = await resolveBatchApiKey(hostCtxRef, liveConfig(config))
-        if (!k) throw new Error('未找到百炼 API Key——在模型设置确认「阿里百炼云」渠道凭证，或在插件设置填 batchApiKey（编译流水线没有子代理回退）')
-      }
+      if (!c.batchProvider) throw new Error('编译模型提供商为空——在插件设置「编译模型」里选一个模型设置中已注册的提供商')
+      if (!c.batchModel) throw new Error('编译模型为空——在插件设置选一个提供商下的模型')
+      if (!llmRef || typeof llmRef.stream !== 'function') throw new Error(`编译模型走宿主 llm 服务（provider ${c.batchProvider}），但 llm 服务未注入——请重启宿主后重试`)
     } catch (err) {
       fail(job, String(err?.message ?? err))
       flush()
       throw err
     }
-    job.credentialSource = k.source
-    job.apiKey = k.key
-    setStage(job, kind === 'full' ? 'plan' : 'articles')
-    if (kind === 'stale') job.tasks = prebuiltTasks ?? []
+    job.credentialSource = `llm(${liveConfig(config).batchProvider}/${liveConfig(config).batchModel})`
+    // 单项目串行（serialProjects，默认开）：已有别的项目在推进（非 queued 的非终态任务，
+    // 且不是刚提交的自己）时，本任务进 queued 排队，等前一个到终态后由 tick 自动轮到。
+    // plan/articles 与 stale 的预置任务先寄存在 pending*，轮到时再落地（排队期间不占机器）。
+    const c1 = liveConfig(config)
+    const busyOther = c1.serialProjects
+      ? jobs.find((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
+      : null
+    if (busyOther) {
+      job.pendingStage = kind === 'full' ? 'plan' : 'articles'
+      job.pendingTasks = kind === 'stale' ? (prebuiltTasks ?? []) : null
+      note(job, `已有项目在编译（${path.basename(busyOther.cwd)}），本任务排队等待（单项目串行）`)
+      setStage(job, 'queued')
+    } else {
+      setStage(job, kind === 'full' ? 'plan' : 'articles')
+      if (kind === 'stale') job.tasks = prebuiltTasks ?? []
+    }
     persist()
     flush() // 先落盘再推进：tick 中途崩溃也能从文件恢复
     void tick() // 立即推进一步，不等首个 tick 间隔
@@ -2158,10 +2065,11 @@ function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节走阿里云百炼普通入口（chat/completions，输入按 ≤32k token 低价档分块装填）。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 workbuddy/hy3，免费 192k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
       '进度：调用即提交后请继续手头工作，不要等待或反复轮询；需要进度时用 codewiki_progress 工具（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
-      '凭证自动取模型设置「阿里百炼云」渠道（或插件设置 batchApiKey），取不到时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
+      '单项目串行（默认开）：同一时刻只推进一个仓库的编译任务，后提交的项目进 queued 排队，前一个收尾后自动轮到（进度里 stage=queued 即排队）。',
+      '凭证由模型设置里该 provider（默认 workbuddy）的配置解析，插件不保存也不传递任何密钥；provider/model 留空或该模型不可用时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -2296,7 +2204,7 @@ function generateToolDefinition(cfg, svc) {
       }
 
       const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
-      notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部走百炼普通入口）`)
+      notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部在插件内完成）`)
       result.jobId = job.id
       result.stage = job.stage
       result.submitted = true
@@ -2530,6 +2438,33 @@ export async function listModelCatalog(llm) {
   return { ok: true, providers }
 }
 
+// 单个 provider/model 的「思考程度」档位（设置页下拉的数据源）：走宿主 llm 的
+// resolveModel，它返回 adapter 声明的 reasoning.efforts 与 defaultEffort ——
+// listModels 不带这两项，所以对齐思考程度必须单独解析。
+// 失败（模型不在目录/探测失败）返回 ok:false + efforts:[]，设置页降级为手填或隐藏。
+export async function resolveModelEfforts(llm, provider, model) {
+  if (!llm || typeof llm.resolveModel !== 'function') {
+    return { ok: false, error: 'llm 服务未注入或缺少 resolveModel，无法读取思考档位', efforts: [], defaultEffort: null }
+  }
+  try {
+    const info = await llm.resolveModel(provider, model)
+    const efforts = (info?.reasoning?.efforts ?? []).map((e) => ({
+      id: String(e?.id ?? ''),
+      name: String(e?.name ?? e?.id ?? ''),
+      description: e?.description ? String(e.description) : '',
+    })).filter((e) => e.id)
+    return {
+      ok: true,
+      provider, model,
+      efforts,
+      defaultEffort: info?.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : null,
+      context: Number(info?.context?.tokens ?? info?.context ?? 0) || null,
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err), efforts: [], defaultEffort: null }
+  }
+}
+
 export function installWebServer(ctx, service, extra = {}) {
   const { config, schedState, compile } = extra
   if (typeof ctx.inject !== 'function') return
@@ -2693,6 +2628,30 @@ export function installWebServer(ctx, service, extra = {}) {
         }
       },
     })
+    // 思考程度档位：设置页选中 provider/model 后二次拉取，下拉项直接来自模型目录
+    // （resolveModel 的 reasoning.efforts + defaultEffort），不再手填裸字符串。
+    const effortsCache = new Map()
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/model-efforts',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const url = new URL(req.url ?? '', 'http://localhost')
+          const provider = String(url.searchParams.get('provider') ?? '').trim()
+          const model = String(url.searchParams.get('model') ?? '').trim()
+          if (!provider || !model) { writeJson(res, 400, { ok: false, error: '缺少 provider/model 查询参数', efforts: [] }); return }
+          const key = `${provider}\u0000${model}`
+          const hit = effortsCache.get(key)
+          if (hit && Date.now() - hit.at < 60000) { writeJson(res, 200, hit.value); return }
+          const value = await resolveModelEfforts(extra.llm ?? llmRef, provider, model)
+          effortsCache.set(key, { at: Date.now(), value })
+          writeJson(res, 200, value)
+        } catch (err) {
+          writeJson(res, 500, { ok: false, error: String(err?.message ?? err), efforts: [] })
+        }
+      },
+    })
     ws.register({
       kind: 'exact',
       path: '/api/codewiki/control',
@@ -2814,7 +2773,6 @@ function installUpdateReminder(ctx, config) {
 }
 
 export function apply(ctx, config) {
-  hostCtxRef = ctx
   if (typeof ctx.inject === 'function') ctx.inject(['agents'], (rc) => { agentsRef = rc?.agents ?? rc })
   if (typeof ctx.inject === 'function') ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })
   const service = createJobService(config, wakeCompileSession)
