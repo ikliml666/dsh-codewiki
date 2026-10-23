@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.3 — 2026-10-23
+
+### 修复：单文件 110k–128k 的文章被误判「装不下」而白送会话通道
+
+- 背景：0.10.0 把 `BATCH_TOKEN_BUDGET` 提到 110k、0.10.2 把 `BATCH_TOKEN_HARD_LIMIT` 收到 128k 后，实际编译一次 stale 更新时**15–16 篇全部转会话通道**，与「全流程回插件内、会话通道只在超 128k 时兜底」的设计相反。实测复现：这些文章的单文件装填本身只有 44k–108k token，远在 128k 大档之内。
+- 根因（`index.js:562` 附近的古老分支）：`prepareArticleTasks` 在「总量超 110k」后按文件切批，随后只有 `batches.length > 1` 才走观察批分割，`batches.length === 1`（单文件占满全部体积、分不出多批）直接落到函数末尾的 `forceSession = true`。而 `batches.length === 1` 恰恰是「一个源文件在 110k–128k 之间」的常见情形——不是装不下，只是超过主预算。
+- 修法（index.js）：在观察批分支前插入「大档单请求」出口——`!hasOversizeSingle && batches.length === 1` 时，用 `BATCH_TOKEN_HARD_LIMIT` 装填重建整条 prompt，`estimateTokens(bigPrompt) <= BATCH_TOKEN_HARD_LIMIT` 就作为普通 prepared 任务在插件内一次写完（清掉 `splitFor`/`composePlan` 残留、照常分配 customId）；只有整条 prompt 仍超 128k 才继续落到 `forceSession`。这样「超 110k」不再等于「转会话通道」，判定口径统一为「装不进 128k 大档才是装不下」。
+- 效果（本仓库 15 篇 Stale 文章实测）：修复前 15 篇全部 `sessionTasks`，修复后 `prepared=21（含 7 个观察批）、sessionTasks=0`——一次 stale 更新零子智能体。
+- 测试（test-batch.mjs）：原「单文件超 110k 且分不出多批 → 会话通道」断言按新语义改写为「→ 插件内大档单请求」，并新增「不拆观察批」断言；`huge.ts`（800KB）那条保留，措辞改为「连 128k 大档都装不下 → 会话通道（唯一兜底）」。109 项全过。
+- 版本 0.10.2 → 0.10.3。
+
 ## 0.10.2 — 2026-10-23
 
 ### 修复：大档装填上限 150k 越界（150k 输入 + 64k 输出 > hy3 的 192k 窗口）

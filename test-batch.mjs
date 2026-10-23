@@ -74,11 +74,13 @@ fs.mkdirSync(outDir, { recursive: true })
 fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
 const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
 check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
+// 单文件超 110k 预算但在 128k 大档内：0.10.2 起不再误转会话通道，直接用大档单请求插件内写完
 const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 0 && bigPrep.sessionTasks.length === 1, '单文件超 110k 预算且分不出多批 → 会话通道（不再升大档）')
-check(bigPrep.sessionTasks[0].batchPrompt.includes('xxx') && bigPrep.sessionTasks[0].batchPrompt.length > 300 * 1024, '会话通道任务 prompt 按 128k 大档装填、内联完整源码')
+check(bigPrep.prepared.length === 1 && bigPrep.sessionTasks.length === 0, '单文件超 110k 但装得进 128k 大档 → 插件内大档单请求（不转会话通道）')
+check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档单请求 prompt 内联完整源码（未被截断）')
+check(!bigPrep.prepared[0].name.includes('#obs'), '大档单请求不拆观察批（单文件分不出多批）')
 const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
-check(hugePrep.prepared.length === 0 && hugePrep.sessionTasks.length === 1, '单文件连 128k 大档都装不下 → 会话通道（超大兜底已删除）')
+check(hugePrep.prepared.length === 0 && hugePrep.sessionTasks.length === 1, '单文件连 128k 大档都装不下 → 会话通道（唯一兜底）')
 check(estimateTokens(hugePrep.sessionTasks[0].batchPrompt) > 128000, '连大档都装不下时 prompt 仍按原始全长装填（交会话模型自行处理）')
 
 // 3b. prepareArticleTasks：多文件超预算 → 观察→合成分割
