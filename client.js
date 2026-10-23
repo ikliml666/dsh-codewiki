@@ -43,10 +43,10 @@ window.__ModuleLoader__.load({
       serialProjects: '单项目串行',
       serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。',
       secCompile: '编译模型',
-      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）；选「内置百炼通道」则走百炼普通入口并自动取「阿里百炼云」渠道凭证。',
+      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）。',
       batchProvider: '模型提供商',
-      batchProviderHint: '来自模型设置里已注册的提供商。默认 workbuddy（免费 hy3，192k 上下文）。选「内置百炼通道」= 走百炼直连（旧行为）。',
-      batchProviderBuiltin: '内置百炼通道',
+      batchProviderHint: '来自模型设置里已注册的提供商。默认 workbuddy（免费 hy3，192k 上下文）。插件没有自带直连通道，模型与凭证都取自模型设置里选中的这一份。',
+      batchProviderMissing: '目录不可用，请手填 provider id',
       batchModel: '编译模型',
       batchModelHint: '该提供商下的模型 id。目录里没有的模型可直接手填。',
       batchModelManual: '手填模型 id…',
@@ -59,8 +59,6 @@ window.__ModuleLoader__.load({
       batchReasoningEffortLoading: '正在读取该模型的思考档位…',
       batchReasoningEffortNone: '该模型未声明可选思考档位，只能用默认档。',
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
-      batchThinkingBudget: '思考预算（百炼通道）',
-      batchThinkingBudgetHint: '仅百炼直连通道生效：0=关思考；1–32768=开思考并限预算。走宿主提供商时用上面的「思考程度」档位。',
       sessionTier: '兜底档位',
       sessionTierHint: '仅超大单文件（连 150k 都装不下）转会话通道兜底时才用：派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id）。留空=自动选路。',
       articleLanguage: '文章语言',
@@ -171,10 +169,10 @@ window.__ModuleLoader__.load({
       serialProjects: 'One project at a time',
       serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects.',
       secCompile: 'Compile model',
-      secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model and runs entirely inside the plugin — the initiating session model is no longer delegated to. Pick any provider configured in model settings (local OpenAI-compatible endpoints included); "Built-in Bailian channel" goes straight to the Bailian endpoint with the "阿里百炼云" credentials.',
+      secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model and runs entirely inside the plugin — the initiating session model is no longer delegated to. Pick any provider configured in model settings (local OpenAI-compatible endpoints included). The plugin has no built-in channel of its own: model and credentials both come from the selected entry.',
       batchProvider: 'Model provider',
-      batchProviderHint: 'Providers registered in model settings. Default workbuddy (free hy3, 192k context). "Built-in Bailian channel" = the old direct-Bailian behaviour.',
-      batchProviderBuiltin: 'Built-in Bailian channel',
+      batchProviderHint: 'Providers registered in model settings. Default workbuddy (free hy3, 192k context). The plugin has no built-in direct channel — model and credentials are taken from the selected entry here.',
+      batchProviderMissing: 'Catalog unavailable — type the provider id',
       batchModel: 'Compile model',
       batchModelHint: 'Model id under that provider. Ids missing from the catalog can be typed in.',
       batchModelManual: 'Type a model id…',
@@ -187,8 +185,6 @@ window.__ModuleLoader__.load({
       batchReasoningEffortLoading: 'Reading this model\'s reasoning efforts…',
       batchReasoningEffortNone: 'This model declares no selectable efforts; only the default applies.',
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
-      batchThinkingBudget: 'Thinking budget (Bailian)',
-      batchThinkingBudgetHint: 'Direct-Bailian channel only: 0 = thinking off; 1–32768 = thinking on with a budget. Host providers use the "Reasoning effort" selection above.',
       sessionTier: 'Fallback tier',
       sessionTierHint: 'Used only for the rare oversized single file (beyond 150k) that falls back to the session channel: which subagent tier (id from dsh-subagent-auto-router) receives it. Empty = automatic routing.',
       articleLanguage: 'Article language',
@@ -537,14 +533,9 @@ window.__ModuleLoader__.load({
               setError(t('invalidConcurrency'))
               return
             }
-            const thinking = Number(draft?.batchThinkingBudget)
-            if (Number.isFinite(thinking) && (thinking < 0 || thinking > 32768 || !Number.isInteger(thinking))) {
-              setError(t('invalidBatchThinking'))
-              return
-            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'batchThinkingBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -637,7 +628,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            // 编译模型（百炼普通入口）
+            // 编译模型（唯一通道：模型设置里已注册的 provider/model）
             el('section', { 'data-dscw-field': '' },
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secCompile'))),
               el('div', { 'data-dscw-hint': '' }, t('secCompileHint')),
@@ -648,7 +639,7 @@ window.__ModuleLoader__.load({
                     ? el(Input, {
                         value: String(draft.batchProvider ?? ''),
                         onChange: (e) => setPath('batchProvider', e.target.value),
-                        placeholder: 'aliyun-bailian',
+                        placeholder: 'workbuddy',
                       })
                     : el('select', {
                         'data-dscw-select': '',
@@ -660,9 +651,9 @@ window.__ModuleLoader__.load({
                           const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === next) : null
                           const first = entry?.models?.[0]?.id
                           setPath('batchModel', first ?? '')
+                          setPath('batchReasoningEffort', '') // 换模型后旧档位可能不存在
                         },
                       },
-                      el('option', { value: '' }, t('batchProviderBuiltin')),
                       (Array.isArray(catalog) ? catalog : []).map((p) => el('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? `${p.name}（${p.id}）` : p.id)),
                       // 已配置但目录里没有的 provider（例如刚删掉的渠道）：保留选项，避免静默丢失配置
                       String(draft.batchProvider ?? '').trim() && !(Array.isArray(catalog) ? catalog : []).some((p) => p?.id === draft.batchProvider)
@@ -704,9 +695,9 @@ window.__ModuleLoader__.load({
                     const provider = String(draft.batchProvider ?? '').trim()
                     const model = String(draft.batchModel ?? '').trim()
                     const current = String(draft.batchReasoningEffort ?? '')
-                    // 百炼直连通道没有 reasoning 档位（用下面的思考预算），这里只处理宿主 provider
+                    // 没有 provider 时无法读档位：给出提示（提交时会被拦下）
                     if (!provider) {
-                      return el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint'))
+                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone'))
                     }
                     if (effortsState.loading && !effortsState.efforts.length) {
                       return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
@@ -744,15 +735,6 @@ window.__ModuleLoader__.load({
                       el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortHint')),
                     )
                   })(),
-                ),
-                el('label', null, t('batchThinkingBudget')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    value: String(draft.batchThinkingBudget ?? 0),
-                    onChange: (e) => setPath('batchThinkingBudget', Number(e.target.value)),
-                    placeholder: '0',
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint')),
                 ),
                 el('label', null, t('sessionTier')),
                 el('div', { 'data-dscw-field': '' },

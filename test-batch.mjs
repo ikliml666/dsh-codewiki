@@ -1,6 +1,6 @@
 // test-batch.mjs — 编译执行链自检：纯函数（源码装填/token 估算/任务装配/本地规划/
-// 横切装填/仓库勘探/会话通道收割）+ mock fetch（百炼普通端点/并发池/取消/失败记账）
-// 跑法：node test-batch.mjs（Node ≥20，全局 fetch/FormData/Blob）
+// 横切装填/仓库勘探/会话通道收割）+ mock 宿主 llm 服务（并发池/取消/失败记账/思考档位下发）
+// 跑法：node test-batch.mjs（Node ≥20）
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -8,7 +8,7 @@ import {
   collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   buildSessionSteerText,
   prepareArticleTasks, runRealtimeTasks,
-  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey, listModelCatalog, resolveModelEfforts, installWebServer,
+  localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
 } from './index.js'
 
 let passed = 0
@@ -137,84 +137,91 @@ check(steerResend.includes('重新派发') && steerResend.includes('tier: "codei
 const steerNoTierResend = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'articles' }, snapshots: steerSnaps, tier: '', resend: true })
 check(!steerNoTierResend.includes('tier:'), '重发且未填档位 → 不提档位')
 
-// ---------- 4. runRealtimeTasks：普通端点并发池 ----------
-section('runRealtimeTasks：百炼普通端点与请求体')
-const originalFetch = globalThis.fetch
-let batchCalls = []
-let handler = null // 可切换的 fetch 处理器（url, init）=> Response-like
-globalThis.fetch = async (url, init = {}) => {
-  const rec = { url: String(url), body: init.body ? JSON.parse(init.body) : null, signal: init.signal }
-  batchCalls.push(rec)
-  return handler(rec, init)
+// ---------- 4. runRealtimeTasks：宿主 llm 通道（0.10.1 起唯一通道） ----------
+section('runRealtimeTasks：宿主 llm 通道与请求体')
+let llmCalls = []
+// fake llm 服务：按 stream 协议吐块；reply 可为字符串、函数（拿到 opts 返回文本）或 Error
+function makeLlm(reply) {
+  return {
+    async *stream(opts) {
+      llmCalls.push(opts)
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      const r = typeof reply === 'function' ? reply(opts) : reply
+      if (r instanceof Error) {
+        yield { type: 'finish', reason: { kind: 'error', failure: { code: 'MOCK_FAIL', message: r.message } } }
+        return
+      }
+      yield { type: 'text-delta', index: 0, text: r }
+      yield { type: 'usage', usage: { outputTokens: 64 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }
 }
+const promptOf = (opts) => String(opts?.messages?.[0]?.content?.[0]?.text ?? '')
 const kmTasks = [
   { customId: 'b0', name: 'modules/b0.md', articlePath: path.join(outDir, 'b0.md'), batchPrompt: '批量任务A' },
   { customId: 'b1', name: '_mem', keepInMemory: true, batchPrompt: '批量任务B' },
 ]
-handler = () => mockJson({ choices: [{ message: { content: '---\ntitle: B\n---\n批量结果' } }], usage: { output_tokens: 64 } })
 const batchNotes = []
 const batchRes = await runRealtimeTasks(kmTasks, {
-  apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, concurrency: 2,
-  notes: batchNotes,
+  provider: 'workbuddy', llm: makeLlm('---\ntitle: B\n---\n批量结果'),
+  model: 'hy3', reasoningEffort: 'high', concurrency: 2, notes: batchNotes,
 })
-check(batchCalls.length === 2, '每任务一个同步请求（2 任务 2 请求）')
-check(batchCalls.every((c) => c.url === 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'), '请求打百炼普通端点（dashscope.aliyuncs.com）')
-check(batchCalls[0].body.model === 'qwen3.7-flash' && batchCalls[0].body.enable_thinking === false, 'body 顶层 model + enable_thinking:false（budget=0）')
-check(!('thinking_budget' in batchCalls[0].body), 'budget=0 不带 thinking_budget 键')
-check(batchCalls[0].body.messages.length === 1 && batchCalls[0].body.messages[0].content === '批量任务A', '单条 user 消息承载 prompt')
+check(llmCalls.length === 2, '每任务一次流式调用（2 任务 2 次）')
+check(llmCalls.every((o) => o.provider === 'workbuddy' && o.model === 'hy3'), '按所选 provider/model 路由')
+check(llmCalls.every((o) => o.reasoningEffort === 'high'), '思考程度档位原样下发')
+check(llmCalls[0].temperature === 0, 'temperature 固定 0')
+check(llmCalls.some((o) => promptOf(o) === '批量任务A'), '单条 user 消息承载 prompt')
 check(batchRes.size === 2 && batchRes.get('b0').ok && fs.readFileSync(path.join(outDir, 'b0.md'), 'utf8').includes('批量结果'), '磁盘任务落盘成功')
 check(batchRes.get('b1').ok && batchRes.get('b1').content.includes('批量结果'), 'keepInMemory 结果带 content')
 
-section('runRealtimeTasks：思考参数与 tps 采样')
-batchCalls = []
-const tpsDone = []
-handler = () => mockJson({ choices: [{ message: { content: 'ok' } }], usage: { output_tokens: 128 } })
-await runRealtimeTasks(
-  [{ customId: 'x', name: '_x', keepInMemory: true, batchPrompt: 'P' }],
-  { apiKey: 'sk', model: 'm', thinkingBudget: 1024, concurrency: 1, notes: [], onTaskDone: (s) => tpsDone.push(s) },
-)
-check(batchCalls[0].body.enable_thinking === true && batchCalls[0].body.thinking_budget === 1024, 'budget=1024 → enable_thinking:true + thinking_budget:1024（body 顶层）')
-check(!JSON.stringify(batchCalls[0].body.messages).includes('thinking'), '思考参数不进 messages')
-check(tpsDone.length === 1 && tpsDone[0].outputTokens === 128 && tpsDone[0].durationMs >= 0, 'onTaskDone 上报 outputTokens/durationMs')
+section('runRealtimeTasks：tps 采样与取消信号')
+{
+  llmCalls = []
+  const tpsDone = []
+  await runRealtimeTasks(
+    [{ customId: 'x', name: '_x', keepInMemory: true, batchPrompt: 'P' }],
+    { provider: 'workbuddy', llm: makeLlm('ok'), model: 'hy3', concurrency: 1, notes: [], onTaskDone: (s) => tpsDone.push(s) },
+  )
+  check(tpsDone.length === 1 && tpsDone[0].outputTokens === 64 && tpsDone[0].durationMs >= 0, 'onTaskDone 上报 outputTokens/durationMs')
+  check(!('reasoningEffort' in llmCalls[0]), '未配置思考程度 → 不下发 reasoningEffort（用模型默认档）')
+}
 
 section('runRealtimeTasks：外部 signal 中止')
-batchCalls = []
-const abortAc = new AbortController()
-handler = () => mockJson({ choices: [{ message: { content: 'late' } }] })
-const abortPromise = runRealtimeTasks(
-  ['a0', 'a1', 'a2'].map((id, i) => ({ customId: id, name: `modules/a${i}.md`, articlePath: path.join(outDir, `a${i}.md`), batchPrompt: `任务${i}` })),
-  { apiKey: 'sk', model: 'm', thinkingBudget: 0, concurrency: 1, notes: [], signal: abortAc.signal },
-)
-abortAc.abort()
-const abortedRes = await abortPromise
-check(abortedRes.size < 3, `中止后不再消费剩余任务（结果 ${abortedRes.size}/3）`)
+{
+  const abortAc = new AbortController()
+  // 已 abort 的 signal：池子一开始就不消费任务
+  abortAc.abort()
+  const abortedRes = await runRealtimeTasks(
+    ['a0', 'a1', 'a2'].map((id, i) => ({ customId: id, name: `modules/a${i}.md`, articlePath: path.join(outDir, `a${i}.md`), batchPrompt: `任务${i}` })),
+    { provider: 'workbuddy', llm: makeLlm('late'), model: 'hy3', concurrency: 1, notes: [], signal: abortAc.signal },
+  )
+  check(abortedRes.size < 3, `中止后不再消费剩余任务（结果 ${abortedRes.size}/3）`)
+}
 
 // ---------- 5. runRealtimeTasks：失败记账 ----------
 section('runRealtimeTasks：并发池 + 失败记账')
-globalThis.fetch = async (url, init = {}) => {
-  const u = String(url)
-  if (u.endsWith('/chat/completions')) {
-    const body = JSON.parse(init.body)
-    if (body.model !== 'qwen3.7-flash') throw new Error('model 透传缺失')
-    const prompt = body.messages[0].content
-    if (prompt.includes('boom')) throw new Error('simulated network error')
-    return mockJson({ choices: [{ message: { content: prompt.includes('km') ? '内存结果' : '---\ntitle: R\n---\n实时结果' } }] })
-  }
-  throw new Error(`mock fetch 未路由：${u}`)
+{
+  const rtNotes = []
+  const rtDisk = path.join(outDir, 'rt.md')
+  const rtTasks = [
+    { customId: 'rt0', name: 'modules/rt.md', articlePath: rtDisk, batchPrompt: '写文章' },
+    { customId: 'rt1', name: '_mem', keepInMemory: true, batchPrompt: 'km 任务' },
+    { customId: 'rt2', name: 'modules/boom.md', articlePath: path.join(outDir, 'boom.md'), batchPrompt: 'boom 任务' },
+  ]
+  const rt = await runRealtimeTasks(rtTasks, {
+    provider: 'workbuddy',
+    llm: makeLlm((opts) => promptOf(opts).includes('boom')
+      ? new Error('simulated network error')
+      : (promptOf(opts).includes('km') ? '内存结果' : '---\ntitle: R\n---\n实时结果')),
+    model: 'hy3', concurrency: 2, notes: rtNotes,
+  })
+  check(rt.size === 3, '返回 3 条结果（Map）')
+  check(rt.get('rt0').ok && fs.readFileSync(rtDisk, 'utf8').includes('实时结果'), '磁盘任务落盘成功')
+  check(rt.get('rt1').ok && rt.get('rt1').content === '内存结果', 'keepInMemory 结果带 content')
+  check(rt.get('rt2').ok === false && rtNotes.some((n) => n.includes('simulated network error')), '失败记账进 notes，不中断其他任务')
+  check(!fs.existsSync(path.join(outDir, 'boom.md')), '失败任务不落盘')
 }
-const rtNotes = []
-const rtDisk = path.join(outDir, 'rt.md')
-const rtTasks = [
-  { customId: 'rt0', name: 'modules/rt.md', articlePath: rtDisk, batchPrompt: '写文章' },
-  { customId: 'rt1', name: '_mem', keepInMemory: true, batchPrompt: 'km 任务' },
-  { customId: 'rt2', name: 'modules/boom.md', articlePath: path.join(outDir, 'boom.md'), batchPrompt: 'boom 任务' },
-]
-const rt = await runRealtimeTasks(rtTasks, { apiKey: 'sk-test', model: 'qwen3.7-flash', thinkingBudget: 0, concurrency: 2, notes: rtNotes })
-check(rt.size === 3, '返回 3 条结果（Map）')
-check(rt.get('rt0').ok && fs.readFileSync(rtDisk, 'utf8').includes('实时结果'), '磁盘任务落盘成功')
-check(rt.get('rt1').ok && rt.get('rt1').content === '内存结果', 'keepInMemory 结果带 content')
-check(rt.get('rt2').ok === false && rtNotes.some((n) => n.includes('simulated network error')), '失败记账进 notes，不中断其他任务')
-check(!fs.existsSync(path.join(outDir, 'boom.md')), '失败任务不落盘')
 
 // ---------- 6. 本地规划兜底 ----------
 section('localPlan：顶层目录分组')
@@ -258,36 +265,11 @@ const scanned = scanRepoFiles(scanRoot)
 check(scanned.length === 1 && scanned[0].path === 'src/good.ts', '只收有效源码（跳过 node_modules/.git/二进制/超大/空文件）')
 check(scanned[0].bytes === 'export const G = 1\n'.length, 'bytes 为文件大小')
 
-globalThis.fetch = originalFetch
 fs.rmSync(tmpRoot, { recursive: true, force: true })
 fs.rmSync(workRoot, { recursive: true, force: true })
 fs.rmSync(scanRoot, { recursive: true, force: true })
 
-// ---- runRealtimeTasks：宿主 llm 通道（batchProvider 非空时不打百炼）----
-section('runRealtimeTasks：宿主 llm 通道')
-{
-  // 假 llm 服务：记录调用，按 stream 协议吐 block-start/text-delta/usage/finish
-  const llmCalls = []
-  const fakeLlm = {
-    async *stream(opts) {
-      llmCalls.push({ provider: opts.provider, model: opts.model, text: opts.messages?.[0]?.content?.[0]?.text })
-      yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: '---\ntitle: L\n---\nllm 通道结果' }
-      yield { type: 'usage', usage: { outputTokens: 77 } }
-      yield { type: 'finish', reason: { kind: 'stop' } }
-    },
-  }
-  const before = batchCalls.length
-  const llmRes = await runRealtimeTasks(
-    [{ customId: 'l0', name: '_l0', keepInMemory: true, batchPrompt: 'llm 任务' }],
-    { provider: 'local-9b', llm: fakeLlm, model: 'qwen-9b', concurrency: 1, notes: [] },
-  )
-  check(batchCalls.length === before, 'provider 非空时不打百炼 fetch')
-  check(llmCalls.length === 1 && llmCalls[0].provider === 'local-9b' && llmCalls[0].model === 'qwen-9b', '经宿主 llm 服务按所选 provider/model 调用')
-  check(llmCalls[0].text === 'llm 任务', 'prompt 原样进 messages')
-  check(llmRes.get('l0')?.ok === true && llmRes.get('l0').content.includes('llm 通道结果'), 'llm 通道结果入账')
-}
-
+// ---- runRealtimeTasks：失败通道的错误码透传 ----
 section('runRealtimeTasks：宿主 llm 通道失败记账')
 {
   const failLlm = {
@@ -412,28 +394,10 @@ section('resolveModelEfforts / GET /api/codewiki/model-efforts')
   check(res403b.code === 403, '非回环请求被拒（403）')
 }
 
-// ---- resolveBatchApiKey：凭证解析链（显式配置 > 宿主凭据库）----
-console.log('\n== resolveBatchApiKey ==')
-const credSvc = {
-  resolve: async (ref) => ref === 'ALIYUN_BAILIAN_API_KEY'
-    ? { value: 'sk-cred-1', source: 'file' }
-    : undefined,
-}
-check((await resolveBatchApiKey(null, { batchApiKey: 'sk-explicit' })).key === 'sk-explicit', '显式 batchApiKey 最优先（source=config）')
-check((await resolveBatchApiKey(null, {})) === null, '无宿主上下文返回 null')
-check((await resolveBatchApiKey({}, {})) === null, 'inject 不是函数返回 null')
-const viaCred = await resolveBatchApiKey(
-  { inject: async (deps) => deps.includes('credentials') ? { credentials: credSvc } : undefined },
-  {},
-)
-check(viaCred?.key === 'sk-cred-1' && viaCred.source === 'credentials(file)', '经宿主凭据库取到模型渠道凭证并记录来源')
-const viaArray = await resolveBatchApiKey(
-  { inject: async () => [credSvc] },
-  {},
-)
-check(viaArray?.key === 'sk-cred-1' && viaArray.source === 'credentials(file)', 'inject 返回数组形态同样可用')
-check((await resolveBatchApiKey({ inject: async () => ({ credentials: { resolve: async () => undefined } }) }, {})) === null, '凭据库无该条目返回 null')
-check((await resolveBatchApiKey({ inject: async () => { throw new Error('no service') } }, {})) === null, 'inject 抛错（服务缺失）返回 null')
+// ---- 0.10.1：内置百炼直连通道的整体移除（不再导出凭证解析链）----
+console.log('\n== 0.10.1 删除内置百炼直连通道 ==')
+const mod = await import('./index.js')
+check(mod.resolveBatchApiKey === undefined, '不再导出 resolveBatchApiKey（插件不碰任何密钥）')
 
 // ---- fixAnchors：行号锚点确定性修正 ----
 console.log('\n== fixAnchors ==')

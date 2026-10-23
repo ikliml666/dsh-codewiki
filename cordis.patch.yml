@@ -3,7 +3,7 @@
 # file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
 # 设置项（config 命名空间 = codewiki）：
 #   binaryPath:      cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 bin/cw.exe
-#   batchProvider:   编译模型提供商（默认 workbuddy；留空=走内置百炼兼容通道）
+#   batchProvider:   编译模型提供商（必须是模型设置里已注册的 provider；默认 workbuddy，留空=提交失败）
 #   batchModel:      编译模型 id（默认 hy3，免费 192k 上下文）
 #   batchReasoningEffort: 思考程度档位（取值来自模型目录 reasoning.efforts；留空=模型默认档）
 #   maxConcurrency:  编译请求并发上限（1–8，默认 2）

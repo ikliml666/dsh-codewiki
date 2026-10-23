@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.1 — 2026-10-23
+
+### 变更：删除内置百炼直连通道，插件只走模型设置里的编译模型
+
+- 背景（用户需求）："删除批量通道，全面放弃批量通道，全部改用模型配置中的数据"（经确认，范围为内置百炼直连通道 `bailianChat`）。0.10.0 之后仍保留一条"provider 留空即回落到插件自带百炼兼容通道"的老路，凭证靠 `batchApiKey` 或模型设置「阿里百炼云」渠道注入——这条路径与本插件"不改动密钥、配置全在模型设置里"的定位冲突，且默认模型早已是 `workbuddy/hy3`，实际无消费者。
+- 实现 ①（index.js 删除直连）：移除 `bailianChat()`（原 index.js:295-313）与 `BAILIAN_BASE` 常量；`llmChat` 头注释改为「唯一通道」。`runRealtimeTasks` 签名去掉 `apiKey`/`thinkingBudget`，改为 `(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider })`，内部固定 `chat = (args) => llmChat({ ...args, llm, provider, reasoningEffort })`。
+- 实现 ②（index.js 删除凭证解析链）：删除 `hostCtxRef`、导出函数 `resolveBatchApiKey`（原 index.js:524-552，含 credentials 注入与 3s Promise.race）、内部 `apiKeyOf(job)`；`apply()` 里 `hostCtxRef = ctx` 一并删除。`startBatchChatRun` 去掉 creds 分支，直接以 `provider: c.batchProvider` + `llm: llmRef` 起跑；note 文案恒为 `${batchProvider}/${batchModel}`。
+- 实现 ③（提交前置校验硬化）：`submit()` 改为强制三项——`batchProvider` 非空、`batchModel` 非空、`llm.stream` 可用，任一缺失即抛错并落 job `failed`（错误文案指向设置项，不静默跑空、不降级子代理）。`job.credentialSource` 恒为 `llm(<provider>/<model>)`；`job.apiKey` 字段彻底移除，`saveJobs` 不再做 apiKey 剥离（`{ apiKey, ...rest }` 的 map 删除）。
+- 实现 ④（Config/liveConfig）：删除 `batchApiKey`、`batchThinkingBudget` 两字段及其 `[0,32768]` 钳制；`batchProvider` 描述改为「必须是 DSH 模型设置里已注册的 provider id……留空将无法提交任务」。
+- 实现 ⑤（client.js 设置页）：删掉 `batchThinkingBudget`/`batchThinkingBudgetHint`/`batchProviderBuiltin`/`invalidBatchThinking` 四组词条（中英）、整段「思考预算」输入、provider 下拉的空值项（不再有"内置百炼通道"可选）；provider 手填 placeholder `aliyun-bailian` → `workbuddy`；切换 provider 时清空 `batchReasoningEffort`；无 provider 时的思考档位提示改走 `batchReasoningEffortNone`。保存键白名单 16 → 14 项。
+- 实现 ⑥（文档）：README 把 `batchProvider`/`batchModel` 两条合并为「0.10.1 起为唯一通道」并注明删除直连、`batchProvider` 留空即提交失败，删掉 `batchApiKey`/`batchThinkingBudget` 两条；`cordis.patch.yml` 注释同步。`codewiki_generate` 工具描述末条改为「凭证由模型设置里该 provider（默认 workbuddy）的配置解析，插件不保存也不传递任何密钥」。
+- 测试：test-batch.mjs 的「凭证解析链」7 断言整块替换为「不再导出 `resolveBatchApiKey`」的反向断言，并新增 `makeLlm`/`promptOf` 夹具按 `llm.stream` 协议应答，覆盖 provider/model/reasoningEffort 原样下发、temperature=0、未配思考档位时不下发 `reasoningEffort`、取消与失败记账，107 项全过。test-orchestration.mjs 把 `makeBatchMock` 从 fetch mock（打 `dashscope.aliyuncs.com`）整体改为假 `llm` 服务（`activeLlm` 转发、`llmCalls` 记录、支持 stall/bigArticle/bigSources/planReply），所有 `apply(ctx, {})` 改为 `batchCfg()`；「阶段实时阈值」块改名为「唯一通道：宿主 llm 服务」并断言零直连；「无凭证诚实报错」块改为「编译模型/provider 缺失」块并追加 job `failed` 留痕断言；编排冒烟全过。test-cwd-paths / test-wiki-entry 全过。
+- 版本 0.10.0 → 0.10.1。
+
 ## 0.10.0 — 2026-10-23
 
 ### 功能：全面改用免费 hy3 主模型，全流程回到插件内，单项目串行，设置页思考程度从模型目录读取
