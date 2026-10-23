@@ -59,8 +59,20 @@ window.__ModuleLoader__.load({
       batchReasoningEffortLoading: '正在读取该模型的思考档位…',
       batchReasoningEffortNone: '该模型未声明可选思考档位，只能用默认档。',
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
+      secBig: '大档模型（超长输入）',
+      secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。留空提供商 = 关闭大档，退回会话通道兜底。',
+      bigProvider: '大档提供商',
+      bigProviderOff: '（未启用大档）',
+      bigProviderHint: '来自模型设置里已注册的提供商。默认火山方舟（volces-ark）。留空则关闭大档通道。',
+      bigModel: '大档模型',
+      bigModelHint: '该提供商下的模型 id。默认 glm-5.3-flash（512k 上下文）。',
+      bigReasoningEffort: '大档思考程度',
+      bigReasoningEffortHint: '档位取自模型目录。留空=用模型默认档。',
+      bigTokenBudget: '大档输入预算（token）',
+      bigTokenBudgetHint: '大档单请求输入预算，默认 420000。须大于普通预算 110000，且不超过模型上下文窗口扣除输出后的空间。',
+      bigDisabled: '大档通道已关闭（提供商留空）——超大输入将退回会话通道兜底。',
       sessionTier: '兜底档位',
-      sessionTierHint: '仅超大单文件（连 128k 都装不下）转会话通道兜底时才用：派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id）。留空=自动选路。',
+      sessionTierHint: '仅在关闭大档、且单文件连大档都装不下时才会用到：派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id）。留空=自动选路。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -185,8 +197,20 @@ window.__ModuleLoader__.load({
       batchReasoningEffortLoading: 'Reading this model\'s reasoning efforts…',
       batchReasoningEffortNone: 'This model declares no selectable efforts; only the default applies.',
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
+      secBig: 'Large-input model',
+      secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Empty provider = the large tier is off and oversized input falls back to the session channel.',
+      bigProvider: 'Large-tier provider',
+      bigProviderOff: '(large tier off)',
+      bigProviderHint: 'A provider registered in model settings. Default Volcengine Ark (volces-ark). Empty disables the large tier.',
+      bigModel: 'Large-tier model',
+      bigModelHint: 'Model id under that provider. Default glm-5.3-flash (512k context).',
+      bigReasoningEffort: 'Large-tier reasoning effort',
+      bigReasoningEffortHint: 'Options come from the model catalog. Empty = the model\'s default effort.',
+      bigTokenBudget: 'Large-tier input budget (tokens)',
+      bigTokenBudgetHint: 'Single-request input budget for the large tier, default 420000. Must exceed the normal 110000 and fit in the model context window after reserving output.',
+      bigDisabled: 'Large tier off (empty provider) — oversized input falls back to the session channel.',
       sessionTier: 'Fallback tier',
-      sessionTierHint: 'Used only for the rare oversized single file (beyond 128k) that falls back to the session channel: which subagent tier (id from dsh-subagent-auto-router) receives it. Empty = automatic routing.',
+      sessionTierHint: 'Only reachable when the large tier is off and even it cannot fit the file: which subagent tier (id from dsh-subagent-auto-router) receives it. Empty = automatic routing.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -495,36 +519,146 @@ window.__ModuleLoader__.load({
           }, [draft?.batchProvider, catalog])
 
           // 思考程度档位：选中 provider/model 后二次拉取 /api/codewiki/model-efforts，
-          // 档位清单来自模型目录（resolveModel 的 reasoning.efforts），不手填裸字符串。
-          const [effortsState, setEffortsState] = React.useState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false })
-          React.useEffect(() => {
-            const provider = String(draft?.batchProvider ?? '').trim()
-            const model = String(draft?.batchModel ?? '').trim()
-            if (!provider || !model) { setEffortsState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false }); return }
-            const key = `${provider}\u0000${model}`
-            let alive = true
-            setEffortsState((prev) => (prev.for === key ? prev : { for: key, efforts: [], defaultEffort: null, error: null, loading: true }))
-            const url = `${EFFORTS_PATH}?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`
-            apiGet(url)
-              .then((data) => {
-                if (!alive) return
-                if (data?.ok === false) {
-                  setEffortsState({ for: key, efforts: [], defaultEffort: null, error: String(data.error ?? '不可用'), loading: false })
-                  return
-                }
-                setEffortsState({
-                  for: key,
-                  efforts: Array.isArray(data?.efforts) ? data.efforts : [],
-                  defaultEffort: data?.defaultEffort ? String(data.defaultEffort) : null,
-                  error: null,
-                  loading: false,
+          // 档位清单来自模型目录（resolveModelInfo 的 reasoning.efforts），不手填裸字符串。
+          // 普通档（batch）与大档（big）各一份，同一套读取逻辑。
+          const useEfforts = (provider, model) => {
+            const [state, setState] = React.useState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false })
+            const p = String(provider ?? '').trim()
+            const m = String(model ?? '').trim()
+            React.useEffect(() => {
+              if (!p || !m) { setState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false }); return }
+              const key = `${p}\u0000${m}`
+              let alive = true
+              setState((prev) => (prev.for === key ? prev : { for: key, efforts: [], defaultEffort: null, error: null, loading: true }))
+              const url = `${EFFORTS_PATH}?provider=${encodeURIComponent(p)}&model=${encodeURIComponent(m)}`
+              apiGet(url)
+                .then((data) => {
+                  if (!alive) return
+                  if (data?.ok === false) {
+                    setState({ for: key, efforts: [], defaultEffort: null, error: String(data.error ?? '不可用'), loading: false })
+                    return
+                  }
+                  setState({
+                    for: key,
+                    efforts: Array.isArray(data?.efforts) ? data.efforts : [],
+                    defaultEffort: data?.defaultEffort ? String(data.defaultEffort) : null,
+                    error: null,
+                    loading: false,
+                  })
                 })
-              })
-              .catch((err) => {
-                if (alive) setEffortsState({ for: key, efforts: [], defaultEffort: null, error: String(err?.message ?? err), loading: false })
-              })
-            return () => { alive = false }
-          }, [draft?.batchProvider, draft?.batchModel])
+                .catch((err) => {
+                  if (alive) setState({ for: key, efforts: [], defaultEffort: null, error: String(err?.message ?? err), loading: false })
+                })
+              return () => { alive = false }
+            }, [p, m])
+            return state
+          }
+          const effortsState = useEfforts(draft?.batchProvider, draft?.batchModel)
+          const bigEffortsState = useEfforts(draft?.bigProvider, draft?.bigModel)
+
+          // 一个模型的三个字段（提供商 / 模型 / 思考程度），普通档与大档共用同一套渲染与
+          // 目录联动：换提供商清空模型与旧档位、目录里的模型下拉、档位来自 model-efforts 端点。
+          // allowEmptyProvider=true 时多给一个「（未启用）」空选项（大档留空 = 关闭）。
+          const modelTrio = ({ pKey, mKey, eKey, state, allowEmptyProvider, providerPlaceholder }) => {
+            const currentProvider = String(draft[pKey] ?? '').trim()
+            const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === currentProvider) : null
+            const models = entry?.models
+            const current = String(draft[eKey] ?? '')
+            return [
+              el('label', null, t(pKey)),
+              el('div', { 'data-dscw-field': '' },
+                catalogError
+                  ? el(Input, {
+                      value: String(draft[pKey] ?? ''),
+                      onChange: (e) => setPath(pKey, e.target.value),
+                      placeholder: providerPlaceholder,
+                    })
+                  : el('select', {
+                      'data-dscw-select': '',
+                      value: String(draft[pKey] ?? ''),
+                      onChange: (e) => {
+                        const next = e.target.value
+                        setPath(pKey, next)
+                        // 换提供商时把模型清空，避免残留上一家的模型 id 被误存
+                        const nextEntry = Array.isArray(catalog) ? catalog.find((p) => p?.id === next) : null
+                        setPath(mKey, nextEntry?.models?.[0]?.id ?? '')
+                        setPath(eKey, '') // 换模型后旧档位可能不存在
+                      },
+                    },
+                    ...(allowEmptyProvider ? [el('option', { key: '__none', value: '' }, t('bigProviderOff'))] : []),
+                    (Array.isArray(catalog) ? catalog : []).map((p) => el('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? `${p.name}（${p.id}）` : p.id)),
+                    // 已配置但目录里没有的 provider（例如刚删掉的渠道）：保留选项，避免静默丢失配置
+                    currentProvider && !(Array.isArray(catalog) ? catalog : []).some((p) => p?.id === currentProvider)
+                      ? el('option', { key: '__custom', value: currentProvider }, currentProvider)
+                      : null,
+                  ),
+                el('div', { 'data-dscw-hint': '' }, catalogError
+                  ? t('catalogUnavailable').replace('{error}', catalogError)
+                  : t(`${pKey}Hint`)),
+              ),
+              el('label', null, t(mKey)),
+              el('div', { 'data-dscw-field': '' },
+                (!currentProvider || !Array.isArray(models) || !models.length)
+                  ? el(Input, {
+                      value: String(draft[mKey] ?? ''),
+                      onChange: (e) => setPath(mKey, e.target.value),
+                      placeholder: t('batchModelManual'),
+                    })
+                  : (() => {
+                      const known = models.some((m) => m.id === String(draft[mKey] ?? ''))
+                      return el('select', {
+                        'data-dscw-select': '',
+                        value: String(draft[mKey] ?? ''),
+                        onChange: (e) => setPath(mKey, e.target.value),
+                      },
+                        ...(known ? [] : [el('option', { key: '__custom', value: String(draft[mKey] ?? '') }, String(draft[mKey] ?? ''))]),
+                        models.map((m) => el('option', { key: m.id, value: m.id }, m.name && m.name !== m.id ? `${m.name}（${m.id}）` : m.id)),
+                      )
+                    })(),
+                el('div', { 'data-dscw-hint': '' }, entry && Array.isArray(entry.models) && !entry.models.length
+                  ? t('catalogEmptyModels')
+                  : t(`${mKey}Hint`)),
+              ),
+              el('label', null, t(eKey)),
+              el('div', { 'data-dscw-field': '' },
+                (() => {
+                  if (!currentProvider && allowEmptyProvider) return el('div', { 'data-dscw-hint': '' }, t('bigDisabled'))
+                  if (!currentProvider) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone'))
+                  if (state.loading && !state.efforts.length) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
+                  if (state.error) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortError').replace('{error}', state.error))
+                  if (!state.efforts.length) {
+                    // 目录说该模型没有可选档位：只给「默认」并清空残留值
+                    return el('div', { 'data-dscw-field': '' },
+                      el('select', {
+                        'data-dscw-select': '',
+                        value: '',
+                        onChange: () => setPath(eKey, ''),
+                      },
+                        el('option', { value: '' }, t('batchReasoningEffortModel')),
+                      ),
+                      el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone')),
+                    )
+                  }
+                  const known = !current || state.efforts.some((e) => e.id === current)
+                  const labelOf = (e) => (e.description ? `${e.name}（${e.id}）— ${e.description}` : (e.name && e.name !== e.id ? `${e.name}（${e.id}）` : e.id))
+                  return el('div', { 'data-dscw-field': '' },
+                    el('select', {
+                      'data-dscw-select': '',
+                      value: current,
+                      onChange: (e) => setPath(eKey, e.target.value),
+                    },
+                      el('option', { value: '' }, state.defaultEffort
+                        ? `${t('batchReasoningEffortModel')}（${state.defaultEffort}）`
+                        : t('batchReasoningEffortModel')),
+                      ...(known ? [] : [el('option', { key: '__custom', value: current }, current)]),
+                      state.efforts.map((e) => el('option', { key: e.id, value: e.id }, labelOf(e))),
+                    ),
+                    el('div', { 'data-dscw-hint': '' }, t(`${eKey}Hint`)),
+                  )
+                })(),
+              ),
+            ]
+          }
 
           const save = async () => {
             if (!snapshot?.writable || snapshot.status !== 'ready') return
@@ -535,7 +669,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -633,109 +767,7 @@ window.__ModuleLoader__.load({
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secCompile'))),
               el('div', { 'data-dscw-hint': '' }, t('secCompileHint')),
               el('div', { 'data-dscw-grid': '' },
-                el('label', null, t('batchProvider')),
-                el('div', { 'data-dscw-field': '' },
-                  catalogError
-                    ? el(Input, {
-                        value: String(draft.batchProvider ?? ''),
-                        onChange: (e) => setPath('batchProvider', e.target.value),
-                        placeholder: 'workbuddy',
-                      })
-                    : el('select', {
-                        'data-dscw-select': '',
-                        value: String(draft.batchProvider ?? ''),
-                        onChange: (e) => {
-                          const next = e.target.value
-                          setPath('batchProvider', next)
-                          // 换提供商时把模型清空，避免残留上一家的模型 id 被误存
-                          const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === next) : null
-                          const first = entry?.models?.[0]?.id
-                          setPath('batchModel', first ?? '')
-                          setPath('batchReasoningEffort', '') // 换模型后旧档位可能不存在
-                        },
-                      },
-                      (Array.isArray(catalog) ? catalog : []).map((p) => el('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? `${p.name}（${p.id}）` : p.id)),
-                      // 已配置但目录里没有的 provider（例如刚删掉的渠道）：保留选项，避免静默丢失配置
-                      String(draft.batchProvider ?? '').trim() && !(Array.isArray(catalog) ? catalog : []).some((p) => p?.id === draft.batchProvider)
-                        ? el('option', { key: '__custom', value: String(draft.batchProvider) }, String(draft.batchProvider))
-                        : null,
-                    ),
-                  el('div', { 'data-dscw-hint': '' }, catalogError ? t('catalogUnavailable').replace('{error}', catalogError) : t('batchProviderHint')),
-                ),
-                el('label', null, t('batchModel')),
-                el('div', { 'data-dscw-field': '' },
-                  (() => {
-                    const id = String(draft.batchProvider ?? '').trim()
-                    const models = selectedProvider?.models
-                    // 有目录且该提供商有模型 → 下拉；否则手填（本地自建模型常不在目录里）
-                    if (!id || !Array.isArray(models) || !models.length) {
-                      return el(Input, {
-                        value: String(draft.batchModel ?? ''),
-                        onChange: (e) => setPath('batchModel', e.target.value),
-                        placeholder: t('batchModelManual'),
-                      })
-                    }
-                    const known = models.some((m) => m.id === String(draft.batchModel ?? ''))
-                    return el('select', {
-                      'data-dscw-select': '',
-                      value: String(draft.batchModel ?? ''),
-                      onChange: (e) => setPath('batchModel', e.target.value),
-                    },
-                      ...(known ? [] : [el('option', { key: '__custom', value: String(draft.batchModel ?? '') }, String(draft.batchModel ?? ''))]),
-                      models.map((m) => el('option', { key: m.id, value: m.id }, m.name && m.name !== m.id ? `${m.name}（${m.id}）` : m.id)),
-                    )
-                  })(),
-                  el('div', { 'data-dscw-hint': '' }, selectedProvider && Array.isArray(selectedProvider.models) && !selectedProvider.models.length
-                    ? t('catalogEmptyModels')
-                    : t('batchModelHint')),
-                ),
-                el('label', null, t('batchReasoningEffort')),
-                el('div', { 'data-dscw-field': '' },
-                  (() => {
-                    const provider = String(draft.batchProvider ?? '').trim()
-                    const model = String(draft.batchModel ?? '').trim()
-                    const current = String(draft.batchReasoningEffort ?? '')
-                    // 没有 provider 时无法读档位：给出提示（提交时会被拦下）
-                    if (!provider) {
-                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone'))
-                    }
-                    if (effortsState.loading && !effortsState.efforts.length) {
-                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
-                    }
-                    if (effortsState.error) {
-                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortError').replace('{error}', effortsState.error))
-                    }
-                    if (!effortsState.efforts.length) {
-                      // 目录说该模型没有可选档位：只给「默认」并清空残留值
-                      return el('div', { 'data-dscw-field': '' },
-                        el('select', {
-                          'data-dscw-select': '',
-                          value: '',
-                          onChange: () => setPath('batchReasoningEffort', ''),
-                        },
-                          el('option', { value: '' }, t('batchReasoningEffortModel')),
-                        ),
-                        el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone')),
-                      )
-                    }
-                    const known = !current || effortsState.efforts.some((e) => e.id === current)
-                    const labelOf = (e) => (e.description ? `${e.name}（${e.id}）— ${e.description}` : (e.name && e.name !== e.id ? `${e.name}（${e.id}）` : e.id))
-                    return el('div', { 'data-dscw-field': '' },
-                      el('select', {
-                        'data-dscw-select': '',
-                        value: current,
-                        onChange: (e) => setPath('batchReasoningEffort', e.target.value),
-                      },
-                        el('option', { value: '' }, effortsState.defaultEffort
-                          ? `${t('batchReasoningEffortModel')}（${effortsState.defaultEffort}）`
-                          : t('batchReasoningEffortModel')),
-                        ...(known ? [] : [el('option', { key: '__custom', value: current }, current)]),
-                        effortsState.efforts.map((e) => el('option', { key: e.id, value: e.id }, labelOf(e))),
-                      ),
-                      el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortHint')),
-                    )
-                  })(),
-                ),
+                ...modelTrio({ pKey: 'batchProvider', mKey: 'batchModel', eKey: 'batchReasoningEffort', state: effortsState, allowEmptyProvider: false, providerPlaceholder: 'workbuddy' }),
                 el('label', null, t('sessionTier')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {
@@ -744,6 +776,23 @@ window.__ModuleLoader__.load({
                     placeholder: 'default',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('sessionTierHint')),
+                ),
+              ),
+            ),
+            // 大档模型（超长输入）：超过普通档单请求预算的模块改用它，仍全部在插件内完成
+            el('section', { 'data-dscw-field': '' },
+              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secBig'))),
+              el('div', { 'data-dscw-hint': '' }, t('secBigHint')),
+              el('div', { 'data-dscw-grid': '' },
+                ...modelTrio({ pKey: 'bigProvider', mKey: 'bigModel', eKey: 'bigReasoningEffort', state: bigEffortsState, allowEmptyProvider: true, providerPlaceholder: 'volces-ark' }),
+                el('label', null, t('bigTokenBudget')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.bigTokenBudget ?? ''),
+                    onChange: (e) => setPath('bigTokenBudget', e.target.value),
+                    placeholder: '420000',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('bigTokenBudgetHint')),
                 ),
               ),
             ),
@@ -909,7 +958,7 @@ window.__ModuleLoader__.load({
           }
           return null
         }
-        // 用量行：输入为提交时估算，输出为响应实测；超 32k 档请求数红字提示（3 倍价）
+        // 用量行：输入为提交时估算，输出为响应实测；超单请求预算的请求数红字提示（按大档装填）
         const usageLine = (job) => {
           const u = job.usage
           if (!u || (!u.inputTok && !u.outputTok)) return null

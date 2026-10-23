@@ -25,6 +25,12 @@ const DEFAULT_CONCURRENCY = 2
 // 默认编译模型：workbuddy/hy3（免费、192k 上下文，宿主 llm 服务通道）
 const DEFAULT_BATCH_PROVIDER = 'workbuddy'
 const DEFAULT_BATCH_MODEL = 'hy3'
+// 大档模型：单批输入超过普通预算 110k 时改用它（512k 上下文的 glm-5.3-flash）。
+// 目的：超过 128k 的内容也不交会话模型，仍在插件内跑完。
+const DEFAULT_BIG_PROVIDER = 'volces-ark'
+const DEFAULT_BIG_MODEL = 'glm-5.3-flash'
+// 大档单请求输入预算：模型 512k 上下文，留出输出与系统提示余量后取 420k
+const DEFAULT_BIG_TOKEN_BUDGET = 420000
 
 // Windows/Git-Bash 兼容：MSYS 盘符路径（/e/...）Node 的 fs 不认，归一化为 E:/...。
 // 仅 win32 转换——POSIX 上 /e/... 可能是真实绝对路径，原样保留；识别不了的写法也原样交给 existsSync 报错。
@@ -45,7 +51,11 @@ export const Config = z.object({
   batchProvider: z.string().default(DEFAULT_BATCH_PROVIDER).volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
   batchModel: z.string().default(DEFAULT_BATCH_MODEL).volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id'),
   batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
-  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅单文件连 128k 大档都装不下时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
+  bigProvider: z.string().default(DEFAULT_BIG_PROVIDER).volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：留空=不启用大档，退回会话通道兜底'),
+  bigModel: z.string().default(DEFAULT_BIG_MODEL).volatile().description('大档模型 id（该 provider 下）。默认火山方舟 glm-5.3-flash（512k 上下文）'),
+  bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取'),
+  bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：超过普通预算 110k 的任务改用大档执行，仍超此值时不再交会话模型，直接在插件内截断并记录告警'),
+  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('编译请求并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -69,6 +79,10 @@ function liveConfig(config) {
     batchProvider: String(val(c.batchProvider) ?? '').trim(),
     batchModel: String(val(c.batchModel) ?? '').trim() || DEFAULT_BATCH_MODEL,
     batchReasoningEffort: String(val(c.batchReasoningEffort) ?? '').trim(),
+    bigProvider: String(val(c.bigProvider) ?? '').trim(),
+    bigModel: String(val(c.bigModel) ?? '').trim() || DEFAULT_BIG_MODEL,
+    bigReasoningEffort: String(val(c.bigReasoningEffort) ?? '').trim(),
+    bigTokenBudget: Math.max(BATCH_TOKEN_BUDGET, Number(val(c.bigTokenBudget)) || DEFAULT_BIG_TOKEN_BUDGET),
     sessionTier: String(val(c.sessionTier) ?? '').trim(),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
@@ -307,11 +321,12 @@ function applyTaskResult(task, content, notes) {
 // 并发池：唯一执行器。按 maxConcurrency 同时在飞地消费任务队列，全部走宿主 llm 服务
 // （唯一的模型通道，凭证由宿主按 provider 解析）。signal 用于取消时中断在飞请求。
 // onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
+// 每个任务可带自己的 model/provider/reasoningEffort（大档任务用），缺省回落到参数里的
+// 普通档模型——一期请求先按任务装填时的模型分派，不在运行期再改。
 // 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
 export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider }) {
   const results = new Map()
   let cursor = 0
-  const chat = (args) => llmChat({ ...args, llm, provider, reasoningEffort })
   const worker = async () => {
     for (;;) {
       if (signal?.aborted) return
@@ -320,7 +335,14 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
       const t = tasks[i]
       try {
         const startedAt = Date.now()
-        const { content, outputTokens } = await chat({ model, prompt: t.batchPrompt, signal })
+        const { content, outputTokens } = await llmChat({
+          llm,
+          provider: t.provider || provider,
+          model: t.model || model,
+          reasoningEffort: t.reasoningEffort || reasoningEffort,
+          prompt: t.batchPrompt,
+          signal,
+        })
         if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
       } catch (err) {
@@ -523,16 +545,41 @@ function batchArticlePrompt({ language, mission, sourcesText, prevArticle }) {
 // 分配 customId。
 // 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时按文件装填拆成多个小
 // 观察批（_split/ 任务，keepInMemory），收割后拼观察包提交一个合成请求写完整文章。
-// 存在单文件连观察批预算都装不下时，该任务转「兜底通道」——极少数超大单文件交给
-// 发起会话派子智能体读（正常流程全在插件内，见 dispatchSessionTasks）。
-// 返回 { prepared, sessionTasks }：prepared 含普通任务与 _split/ 观察任务，
-// 观察任务带 splitFor（所属文章 name）与 composePlan（重建合成任务所需）；
+// 存在单文件连观察批预算都装不下时，该任务走「大档通道」——改用 bigProvider/bigModel
+// （默认 volces-ark/glm-5.3-flash，512k 上下文）在插件内直接写完，不再交会话模型。
+// 只有大档也装不下（即 bigTokenBudget 都超）时，才落到会话通道兜底（见 dispatchSessionTasks），
+// 且仅当 bigProvider 留空才允许这条兜底路径。
+// 返回 { prepared, sessionTasks }：prepared 含普通任务、_split/ 观察任务与大档任务，
+// 任务上的 model/provider/reasoningEffort 指该任务用哪个模型跑；
 // sessionTasks 带 batchPrompt（大档装填，派发时写入任务文件供子智能体读取）。
-export function prepareArticleTasks(tasks, { cwd, language }) {
+export function prepareArticleTasks(tasks, { cwd, language, bigProvider = '', bigModel = '', bigReasoningEffort = '', bigBudget = DEFAULT_BIG_TOKEN_BUDGET } = {}) {
   const prepared = []
   const sessionTasks = []
+  // 大档可用：配置了 bigProvider 才算启用；启用后普通档装不下的任务改走大档，不再交会话模型
+  const bigTier = String(bigProvider ?? '').trim()
+    ? {
+        provider: String(bigProvider).trim(),
+        model: String(bigModel ?? '').trim() || DEFAULT_BIG_MODEL,
+        ...(String(bigReasoningEffort ?? '').trim() ? { reasoningEffort: String(bigReasoningEffort).trim() } : {}),
+        budget: Math.max(BATCH_TOKEN_BUDGET, Number(bigBudget) || DEFAULT_BIG_TOKEN_BUDGET),
+      }
+    : null
+  const markBig = (t) => {
+    if (!bigTier) return false
+    t.provider = bigTier.provider
+    t.model = bigTier.model
+    if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
+    else delete t.reasoningEffort
+    t.bigTier = true
+    return true
+  }
   for (const t of tasks) {
     let { text, oversized: tooBig, skipped: overflowFiles } = collectSources(cwd, t.sources)
+    // 大档开启时，单文件装填上限也放宽到大档预算（否则 collectSources 会先按 hy3 窗口截断）
+    const singleLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
+    if (tooBig && bigTier) {
+      ;({ text, oversized: tooBig } = collectSources(cwd, t.sources, singleLimit))
+    }
     if (tooBig) {
       ;({ text, oversized: tooBig } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
     }
@@ -544,13 +591,13 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
     // 前缀，余下文件本会被「不得涉及」静默甩掉——截图场景）。两者都说明该模块一请求写不完。
     if (!tooBig && (overflowFiles.length > 0 || estimateTokens(batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })) > BATCH_TOKEN_BUDGET)) {
       // 总量超单请求预算：按单请求预算逐文件装填分批，产出观察任务组。
-      // 单文件上限用 BATCH_TOKEN_HARD_LIMIT（128k，hy3 窗口扣掉输出上限后输入侧的真实天花板）
-      // ——只有单文件连大档都装不下才算「装不下」，才转兜底通道。
+      // 单文件上限用 singleLimit（大档开启时是 bigTokenBudget，否则 128k）
+      // ——只有单文件连这个上限都装不下才算「装不下」，才转大档/兜底。
       const batches = []
       let hasOversizeSingle = false
       for (const rel of t.sources) {
-        const one = collectSources(cwd, [rel], BATCH_TOKEN_HARD_LIMIT)
-        if (one.oversized) { hasOversizeSingle = true; break } // 单文件连大档都超：整任务转兜底通道
+        const one = collectSources(cwd, [rel], singleLimit)
+        if (one.oversized) { hasOversizeSingle = true; break } // 单文件连大档都超：整任务转兜底
         const last = batches[batches.length - 1]
         if (last && estimateTokens(last.text + '\n' + one.text) <= BATCH_TOKEN_BUDGET) {
           last.text += '\n' + one.text
@@ -559,15 +606,17 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
           batches.push({ text: one.text, files: [rel] })
         }
       }
-      // 分不出多批（单文件占满全部体积，但仍在 128k 大档内）：不拆观察批、也不转兜底通道，
-      // 直接用大档单请求在插件内写完——这是 0.10.2 修掉的误判：旧逻辑把 batches.length===1
-      // 一并落到 forceSession，导致单文件 110k–128k 的文章白白交给会话通道。
-      // 仍以 BATCH_TOKEN_HARD_LIMIT 兜住整条 prompt（模板开销也计入），超了才真的转兜底。
+      // 分不出多批（单文件占满全部体积，但仍在单文件上限内）：不拆观察批、也不转兜底，
+      // 直接用单请求在插件内写完——大档开启时这按大档算，否则按硬上限（128k）。
+      // 这是 0.10.2 修掉的误判：旧逻辑把 batches.length===1 一并落到 forceSession，
+      // 导致单文件 110k–128k 的文章白白交给会话通道。
       if (!hasOversizeSingle && batches.length === 1) {
         const bigPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: batches[0].text, prevArticle })
-        if (estimateTokens(bigPrompt) <= BATCH_TOKEN_HARD_LIMIT) {
+        const limit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
+        if (estimateTokens(bigPrompt) <= limit) {
           t.batchPrompt = bigPrompt
           delete t.splitFor; delete t.composePlan
+          if (bigTier && estimateTokens(bigPrompt) > BATCH_TOKEN_BUDGET) markBig(t)
           t.customId = t.customId ?? `t${prepared.length}`
           prepared.push(t)
           continue
@@ -591,8 +640,23 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
         })
         continue
       }
-      // 单文件超观察预算 / 分不出多批（单文件占全部体积）：转兜底通道，按大档装填
-      ;({ text, skipped: overflowFiles } = collectSources(cwd, t.sources, BATCH_TOKEN_HARD_LIMIT))
+      // 单文件超观察预算 / 分不出多批（单文件占全部体积）：先看大档装不装得下
+      if (bigTier) {
+        const one = collectSources(cwd, [t.sources?.[0] ?? ''], bigTier.budget)
+        const bigText = (!one.oversized && t.sources.length === 1) ? one.text : null
+        const bigPrompt = bigText ? batchArticlePrompt({ language, mission: t.mission, sourcesText: bigText, prevArticle }) : null
+        if (bigPrompt && estimateTokens(bigPrompt) <= bigTier.budget) {
+          // 大档装得下：在插件内用大档直接写完，不交会话模型
+          t.batchPrompt = bigPrompt
+          delete t.splitFor; delete t.composePlan
+          markBig(t)
+          t.customId = t.customId ?? `t${prepared.length}`
+          prepared.push(t)
+          continue
+        }
+      }
+      // 大档也装不下（或未启用大档）：转兜底通道，按大档装填
+      ;({ text, skipped: overflowFiles } = collectSources(cwd, t.sources, singleLimit))
       forceSession = true
     }
     t.batchPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })
@@ -1432,13 +1496,19 @@ function createJobService(config, onSettled) {
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
       cwd: t.cwd, // 锚点自动修正的源码根（writeValidated 用 job.cwd，普通文章直写用 t.cwd）
       batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
+      // 大档任务：记录它该用哪个模型跑，重启接管后按同档重派（否则会掉回普通档装不下）
+      ...(t.bigTier ? { provider: t.provider, model: t.model, ...(t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}) } : {}),
       // 分割观察任务（#obs）的合成重建元数据：splitFor 指向所属文章 name，
       // composePlan 携带 mission/articlePath/prevArticlePath——收割时从持久化快照重建合成任务
       ...(t.splitFor ? { splitFor: t.splitFor, composePlan: t.composePlan } : {}),
     }))
     job.batchProgress = { completed: 0, total: prepared.length }
     startBatchChatRun(job, prepared)
-    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${c.batchProvider}/${c.batchModel}，并发 ${c.maxConcurrency}）`)
+    const bigCount = prepared.filter((t) => t.bigTier).length
+    const modelText = bigCount
+      ? `${c.batchProvider}/${c.batchModel} + 大档 ${c.bigProvider}/${c.bigModel}（${bigCount} 个）`
+      : `${c.batchProvider}/${c.batchModel}`
+    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${modelText}，并发 ${c.maxConcurrency}）`)
     touch(job)
   }
 
@@ -1648,7 +1718,12 @@ function createJobService(config, onSettled) {
           }
         })
       }
-      const { prepared, sessionTasks } = prepareArticleTasks(tasks, { cwd: job.cwd, language: job.language })
+      const c0 = liveConfig(config)
+      const { prepared, sessionTasks } = prepareArticleTasks(tasks, {
+        cwd: job.cwd, language: job.language,
+        bigProvider: c0.bigProvider, bigModel: c0.bigModel,
+        bigReasoningEffort: c0.bigReasoningEffort, bigBudget: c0.bigTokenBudget,
+      })
       if (sessionTasks.length) {
         const snap = dispatchSessionTasks(job, sessionTasks)
         if (!snap) return // 会话不可用/写文件失败：fail 已记账
@@ -2452,16 +2527,28 @@ export async function listModelCatalog(llm) {
   return { ok: true, providers }
 }
 
+// 宿主 llm 服务暴露的是 resolveModelInfo(provider, model, signal)；
+// resolveModel 只存在于 adapter 注册表接口（LlmAdapterRegistry），插件拿到的是
+// LlmService，所以旧写法恒失败（设置页因此一直显示「读取思考档位失败」）。
+// 两个都试，前者为准、后者兜底旧宿主/测试桩。
+const resolveModelInfoOf = (llm) => {
+  if (!llm) return null
+  if (typeof llm.resolveModelInfo === 'function') return (p, m, s) => llm.resolveModelInfo(p, m, s)
+  if (typeof llm.resolveModel === 'function') return (p, m, s) => llm.resolveModel(p, m, s)
+  return null
+}
+
 // 单个 provider/model 的「思考程度」档位（设置页下拉的数据源）：走宿主 llm 的
-// resolveModel，它返回 adapter 声明的 reasoning.efforts 与 defaultEffort ——
+// resolveModelInfo，它返回 adapter 声明的 reasoning.efforts 与 defaultEffort ——
 // listModels 不带这两项，所以对齐思考程度必须单独解析。
 // 失败（模型不在目录/探测失败）返回 ok:false + efforts:[]，设置页降级为手填或隐藏。
 export async function resolveModelEfforts(llm, provider, model) {
-  if (!llm || typeof llm.resolveModel !== 'function') {
-    return { ok: false, error: 'llm 服务未注入或缺少 resolveModel，无法读取思考档位', efforts: [], defaultEffort: null }
+  const resolveOne = resolveModelInfoOf(llm)
+  if (!resolveOne) {
+    return { ok: false, error: 'llm 服务未注入或缺少 resolveModelInfo，无法读取思考档位', efforts: [], defaultEffort: null }
   }
   try {
-    const info = await llm.resolveModel(provider, model)
+    const info = await resolveOne(provider, model)
     const efforts = (info?.reasoning?.efforts ?? []).map((e) => ({
       id: String(e?.id ?? ''),
       name: String(e?.name ?? e?.id ?? ''),

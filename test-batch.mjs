@@ -104,6 +104,32 @@ check(obsTasks.some((t) => t.batchPrompt.includes('第 1 批')) && obsTasks.some
 const plainStill = prepareArticleTasks([{ name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') }], { cwd: workRoot, language: '中文' })
 check(plainStill.prepared.length === 1 && !plainStill.prepared[0].name.includes('#obs'), '预算内普通任务不分割')
 
+// 3d. 大档模型（0.10.4）：超 128k 也不交会话模型，改用 bigProvider/bigModel 在插件内写完
+section('prepareArticleTasks：大档模型接管超长输入（不再交会话模型）')
+const BIG = { bigProvider: 'volces-ark', bigModel: 'glm-5.3-flash', bigReasoningEffort: 'high', bigBudget: 420000 }
+// huge.ts 是 800KB 文本（≈200k+ token）：hy3 的 128k 装不下，但 420k 大档装得下
+const bigTierPrep = prepareArticleTasks([
+  { name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') },
+], { cwd: workRoot, language: '中文', ...BIG })
+check(bigTierPrep.sessionTasks.length === 0, '开了大档：超 128k 的单文件不再进会话通道')
+check(bigTierPrep.prepared.length === 1, `超长文件改由大档单请求（实际 prepared=${bigTierPrep.prepared.length}）`)
+const bt = bigTierPrep.prepared[0]
+check(bt.bigTier === true, '大档任务带 bigTier 标记（submitBatchFor 据此持久化模型）')
+check(bt.provider === 'volces-ark' && bt.model === 'glm-5.3-flash', `大档任务自带 provider/model（实际 ${bt.provider}/${bt.model}）`)
+check(bt.reasoningEffort === 'high', '大档任务自带思考档位')
+check(estimateTokens(bt.batchPrompt) > 128000 && estimateTokens(bt.batchPrompt) <= 420000, `大档 prompt 介于 128k–420k（实际 ${estimateTokens(bt.batchPrompt)}）`)
+// 关掉大档（留空 provider）：退回旧行为——超 128k 仍走会话通道
+const noBigPrep = prepareArticleTasks([
+  { name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') },
+], { cwd: workRoot, language: '中文', bigProvider: '' })
+check(noBigPrep.sessionTasks.length === 1, '大档关闭时超 128k 仍走会话通道（保持既有兜底）')
+// 普通任务在开大档时仍走普通档（不被误标）
+const normalPrep = prepareArticleTasks([
+  { name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') },
+], { cwd: workRoot, language: '中文', ...BIG })
+check(normalPrep.prepared.length === 1 && normalPrep.prepared[0].bigTier !== true, '普通任务不被标成大档')
+check(normalPrep.prepared[0].provider === undefined && normalPrep.prepared[0].model === undefined, '普通任务不带 provider/model（沿用设置里的普通档）')
+
 // ---------- 3c. 会话通道任务收割判定 ----------
 section('classifySessionTask：会话通道收割三态')
 const sessDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-sess-'))
@@ -177,6 +203,28 @@ check(llmCalls[0].temperature === 0, 'temperature 固定 0')
 check(llmCalls.some((o) => promptOf(o) === '批量任务A'), '单条 user 消息承载 prompt')
 check(batchRes.size === 2 && batchRes.get('b0').ok && fs.readFileSync(path.join(outDir, 'b0.md'), 'utf8').includes('批量结果'), '磁盘任务落盘成功')
 check(batchRes.get('b1').ok && batchRes.get('b1').content.includes('批量结果'), 'keepInMemory 结果带 content')
+
+// 混合档分派（0.10.4）：同一池里大档任务按自带 provider/model/档位路由，普通任务走默认档
+section('runRealtimeTasks：大档任务按自带模型分派（混合池）')
+llmCalls = []
+const mixedTasks = [
+  { customId: 'n0', name: '_n0', keepInMemory: true, batchPrompt: '普通任务' },
+  { customId: 'g0', name: '_g0', keepInMemory: true, batchPrompt: '大档任务', provider: 'volces-ark', model: 'glm-5.3-flash', reasoningEffort: 'max', bigTier: true },
+  { customId: 'g1', name: '_g1', keepInMemory: true, batchPrompt: '大档任务2', provider: 'volces-ark', model: 'glm-5.3-flash' },
+]
+await runRealtimeTasks(mixedTasks, {
+  provider: 'workbuddy', llm: makeLlm('---\ntitle: M\n---\n结果'),
+  model: 'hy3', reasoningEffort: 'high', concurrency: 2, notes: [],
+})
+const callFor = (label) => llmCalls.find((o) => promptOf(o) === label)
+const normalCall = callFor('普通任务')
+const bigCall = callFor('大档任务')
+const bigCall2 = callFor('大档任务2')
+check(normalCall?.provider === 'workbuddy' && normalCall?.model === 'hy3', '普通任务沿用参数里的普通档')
+check(normalCall?.reasoningEffort === 'high', '普通任务沿用参数里的思考档位')
+check(bigCall?.provider === 'volces-ark' && bigCall?.model === 'glm-5.3-flash', '大档任务覆盖 provider/model')
+check(bigCall?.reasoningEffort === 'max', '大档任务带自己的思考档位')
+check(bigCall2?.reasoningEffort === 'high', '大档任务未指定档位时回落参数档位')
 
 section('runRealtimeTasks：tps 采样与取消信号')
 {
