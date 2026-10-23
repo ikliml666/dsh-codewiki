@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.10.4 — 2026-10-23
+
+### 修复：设置页「思考程度」永远读不到档位（调错了宿主方法名）
+
+- 症状：插件页「编译模型 → 思考程度」一直显示「读取思考档位失败（llm 服务未注入或缺少 resolveModel，无法读取思考档位）」，下拉无法选择任何档位。运行中宿主实测复现：`GET /api/codewiki/model-efforts?provider=workbuddy&model=hy3` 返回该错误串。
+- 根因：`resolveModelEfforts` 调 `llm.resolveModel(provider, model)`。但宿主提供的 `LlmService` 暴露的方法是 **`resolveModelInfo(provider, model, signal)`**；`resolveModel` 只存在于 adapter 注册表接口（`LlmAdapterRegistry`，`packages/llm/llm/lib/types/index.d.ts:180` vs `:377`）。插件持有的是 `LlmService`，所以这次调用恒失败——配置链路本身没问题，是方法名写错。
+- 修法（index.js）：新增 `resolveModelInfoOf(llm)`，优先 `resolveModelInfo`、缺失时回落 `resolveModel`（兼容旧宿主与测试桩）；错误文案同步改为「缺少 resolveModelInfo」。返回结构保持 `{ok, provider, model, efforts, defaultEffort, context}` 不变，设置页无需改动。
+- 验证：假 llm（只实现 `resolveModelInfo`）→ 正确读出 hy3 的 `off/low/high` + `defaultEffort: high`；未知路由 → `ok:false` 不崩；`llm=null` → 明确提示未注入；旧 adapter 形态仍可用。
+
+### 新增：大档模型（超长输入不再交会话模型）
+
+- 需求：超过 128k 的内容也不再交给发起会话的主模型/子智能体，插件内自己跑完。
+- 新配置四项：`bigProvider`（默认 `volces-ark` 火山方舟）、`bigModel`（默认 `glm-5.3-flash`，512k 上下文、maxTokens 128000、思考档 low/high/max）、`bigReasoningEffort`（默认空 = 模型默认 high）、`bigTokenBudget`（默认 420000，下限被 `BATCH_TOKEN_BUDGET` 110k 兜住）。
+- 分派（index.js `prepareArticleTasks`）：新增 `bigProvider/bigModel/bigReasoningEffort/bigBudget` 参数。普通档装不下（单文件超 110k、或整条 prompt 超预算）时，先按大档预算重新装填；装得下就把任务标 `bigTier` 并带上自己的 `provider/model/reasoningEffort` 进 prepared，在插件内一次写完。**只有大档也装不下，才落到会话通道**；`bigProvider` 留空 = 关闭大档，退回 0.10.3 的旧行为（超 128k 走会话通道）。
+- 执行（`runRealtimeTasks`）：改成按每个任务自带的 `provider/model/reasoningEffort` 分派，缺省回落参数里的普通档——同一并发池里可以混合两档模型，并发仍受 `maxConcurrency`（2）约束。
+- 持久化（`submitBatchFor`）：`bigTier` 任务的 `provider/model/reasoningEffort` 一并写进 `job.tasks`，宿主重启接管后按同档重派，不会掉回装不下的普通档。阶段 note 会显示 `普通档 + 大档（N 个）`。
+- 设置页（client.js）：抽出 `modelTrio({pKey,mKey,eKey,state,...})` 复用「提供商/模型/思考程度」三行渲染与目录联动（换提供商清空模型与旧档位），普通档与大档共用；新增「大档模型（超长输入）」分区与「大档输入预算」输入框。`bigProvider` 留空时下拉首项为「（未启用大档）」。中英词条 18 个新 key 全部齐备。
+
+### 测试
+
+- test-batch.mjs 新增两块共 14 项：大档接管（800KB/≈234k token 单文件不再进 `sessionTasks`、带 `bigTier` 与自身 provider/model/档位）、大档关闭退回会话通道、普通任务不被误标；以及混合池分派（大档任务覆盖 provider/model、未指定档位回落参数档位）。
+- 结果：`node test-batch.mjs` **123 通过 / 0 失败**；`node test-orchestration.mjs` **编排冒烟全部通过**；`node --check index.js` / `client.js` 均 OK。
+
+### 注意
+
+- 插件以 `file://` 路径挂载（`~/.dsh/profiles/desktop/cordis.patch.yml`），改源码后**宿主不会热重载**，需重启 DeepSeek Harness 才生效。
+- 版本 0.10.3 → 0.10.4。
+
 ## 0.10.3 — 2026-10-23
 
 ### 修复：单文件 110k–128k 的文章被误判「装不下」而白送会话通道
