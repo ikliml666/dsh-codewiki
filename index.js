@@ -41,6 +41,7 @@ export const Config = z.object({
   batchModel: z.string().default('qwen3.7-flash').volatile().description('编译模型（全部模型环节共用）：batchProvider 为空时是百炼模型名，非空时是该 provider 的模型 id'),
   batchApiKey: z.string().default('').volatile().description('阿里云百炼 API Key（DashScope），可选覆盖；留空自动用模型设置「阿里百炼云」渠道的凭证'),
   batchThinkingBudget: z.number().default(0).volatile().description('思考预算：0=关闭思考（省输出 Token）；1~32768=开启思考并限制预算'),
+  sessionTier: z.string().default('').volatile().description('会话通道档位 id（dsh-subagent-auto-router 里的档位，如 codeiwiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(CONCURRENCY_HARD_CAP).volatile().description('编译请求并发上限（1–8），硬顶 8'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
@@ -64,6 +65,7 @@ function liveConfig(config) {
     batchModel: String(val(c.batchModel) ?? '').trim() || 'qwen3.7-flash',
     batchApiKey: String(val(c.batchApiKey) ?? '').trim(),
     batchThinkingBudget: Math.min(Math.max(Number(val(c.batchThinkingBudget)) || 0, 0), 32768),
+    sessionTier: String(val(c.sessionTier) ?? '').trim(),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : CONCURRENCY_HARD_CAP,
@@ -1035,6 +1037,31 @@ export function classifySessionTask(task, nowMs = Date.now()) {
   if (!content.trimStart().startsWith('---')) return 'wait'
   return 'harvest'
 }
+
+// 会话通道 steer 文本（0.9.2，纯函数，测试直接断言）：sessionTier 非空时把档位钉死。
+// 背景：codewiki 的编译主链不走子智能体档位路由（模型由 batchProvider/batchModel 决定），
+// 只有「超预算转会话通道」这一段经过 delegate。原来 steer 文本不给 tier，会话模型就按
+// 决策模型自动选路——「写 CodeWiki 模块文章」实测被判给 default（置信 0.88–0.99），
+// 用户自建的 codewiki 档永远轮不到。填 sessionTier 后本函数在文本里要求显式传 tier。
+export function buildSessionSteerText({ job, snapshots, tier = '', resend = false }) {
+  const proofread = job.stage === 'review'
+  const tierLine = tier
+    ? [`派单要求：调用 delegate 时必须显式传 tier: "${tier}"（不要依赖自动选路），mode 用 spec${resend ? '' : '，并按档位要求保持思考程度'}。`]
+    : []
+  const lines = snapshots.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
+  const kind = proofread ? '校对' : '文章'
+  const head = resend
+    ? `【CodeWiki 超预算${kind}任务·重新派发】（宿主重启接管任务 ${job.id}，此前未产出）请调用子智能体（delegate/subagent）逐篇完成：`
+    : `【CodeWiki 超预算${kind}任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇${proofread ? '文章' : '模块文章'}超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`
+  const requirement = proofread
+    ? (resend
+        ? '子智能体要求：读取任务文件（完整校对指令，含旧文章全文与全部源码），写出校对后的完整文章（以 --- frontmatter 开头）后覆写对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
+        : '子智能体要求：任务文件是完整校对指令（含旧文章全文与全部源码，源码以「行号| 」前缀标注）；读出校对后的完整文章（以 --- frontmatter 开头）后用文件工具直接覆写对应目标路径（UTF-8）。编译服务会轮询目标文件收割，超时未产出按失败处理。')
+    : (resend
+        ? '子智能体要求：读取任务文件（完整写作指令，含源码与格式要求），写出完整文章（以 --- frontmatter 开头）后直接写入对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
+        : '子智能体要求：任务文件是完整写作指令（含全部源码与文章格式要求，源码以「行号| 」前缀标注）；文件较大时用 read 的 offset/limit 分段读取。读出完整文章（以 --- frontmatter 开头）后用文件工具直接写入对应目标路径（UTF-8，覆盖旧文），无需另写标记文件。编译服务会轮询目标文件收割，超时未产出按失败处理。')
+  return [head, ...lines, '', ...tierLine, requirement].join('\n')
+}
 // 孤儿接管阈值：另一实例的 job 停更超过该时长视为宿主重启遗留，本实例接管推进
 const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)
 const MAX_JOBS_KEPT = 30
@@ -1487,28 +1514,16 @@ function createJobService(config, onSettled) {
       return null
     }
     const minutes = Math.round(SESSION_TASK_TIMEOUT_MS / 60000)
-    const lines = snapshots.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
-    // 校对的会话通道任务（review 阶段）：任务文件本身就是校对指令，输出覆写原文章
-    const text = job.stage === 'review'
-      ? [
-          `【CodeWiki 超预算校对任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇文章的校对超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`,
-          ...lines,
-          '',
-          '子智能体要求：任务文件是完整校对指令（含旧文章全文与全部源码，源码以「行号| 」前缀标注）；读出校对后的完整文章（以 --- frontmatter 开头）后用文件工具直接覆写对应目标路径（UTF-8）。编译服务会轮询目标文件收割，超时未产出按失败处理。',
-        ].join('\n')
-      : [
-          `【CodeWiki 超预算文章任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇模块文章超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`,
-          ...lines,
-          '',
-          '子智能体要求：任务文件是完整写作指令（含全部源码与文章格式要求，源码以「行号| 」前缀标注）；文件较大时用 read 的 offset/limit 分段读取。读出完整文章（以 --- frontmatter 开头）后用文件工具直接写入对应目标路径（UTF-8，覆盖旧文），无需另写标记文件。编译服务会轮询目标文件收割，超时未产出按失败处理。',
-        ].join('\n')
+    // 0.9.2：档位钉死（sessionTier 非空时文本里要求显式传 tier，见 buildSessionSteerText）
+    const tier = String(liveConfig(config).sessionTier ?? '').trim()
+    const text = buildSessionSteerText({ job, snapshots, tier })
     try {
       agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
     } catch (err) {
       fail(job, `会话通道 steer 失败 —— ${String(err?.message ?? err)}`)
       return null
     }
-    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体），等待产出（超时 ${minutes} 分钟）`)
+    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体${tier ? `，档位钉死 ${tier}` : '，档位自动选路'}），等待产出（超时 ${minutes} 分钟）`)
     return snapshots
   }
 
@@ -1544,16 +1559,8 @@ function createJobService(config, onSettled) {
       note(job, '会话通道任务接管后重发 steer 失败（发起会话不可用），等待超时按失败处理')
       return
     }
-    const lines = job.sessionTasks.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
-    const proofread = job.stage === 'review'
-    const text = [
-      `【CodeWiki 超预算${proofread ? '校对' : '文章'}任务·重新派发】（宿主重启接管任务 ${job.id}，此前未产出）请调用子智能体（delegate/subagent）逐篇完成：`,
-      ...lines,
-      '',
-      proofread
-        ? '子智能体要求：读取任务文件（完整校对指令，含旧文章全文与全部源码），写出校对后的完整文章（以 --- frontmatter 开头）后覆写对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
-        : '子智能体要求：读取任务文件（完整写作指令，含源码与格式要求），写出完整文章（以 --- frontmatter 开头）后直接写入对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。',
-    ].join('\n')
+    const tier = String(liveConfig(config).sessionTier ?? '').trim()
+    const text = buildSessionSteerText({ job, snapshots: job.sessionTasks, tier, resend: true })
     try {
       agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
       note(job, '会话通道任务已重新派发（宿主重启接管）')
