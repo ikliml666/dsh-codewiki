@@ -156,7 +156,7 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       })
     }
     let content = answerFor(prompt)
-    if (bigArticle && prompt.includes('你是 CodeWiki 文章作者')) content += `\n\n${'长'.repeat(30000)}`
+    if (bigArticle && prompt.includes('你是 CodeWiki 文章作者')) content += `\n\n${'长'.repeat(70000)}`
     return json({ choices: [{ message: { content } }], usage: { output_tokens: 128 } })
   }
   return {
@@ -355,39 +355,22 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   check(steered.length === 2, '缺省 agents（宿主未注入或无 get）→ 静默')
 }
 
-// ============================ 主模型规划（ctx.llm.stream，避开 32k 三倍价） ============================
-console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.stream） ==')
+// ============================ 规划阶段（0.10.0：全流程插件内，不再委托主模型） ============================
+console.log('== 规划走插件内批量池（不再委托发起会话的主模型） ==')
 {
-  // fake 主模型路由：ctx.llm.stream 按 provider/model 分发，勘探员 prompt 回规划 JSON
+  // fake 主模型路由：任何 ctx.llm.stream 调用都记账——新实现下必须一次都不发生
   const llmCalls = []
   const fakeLlm = {
     stream(options) {
       llmCalls.push(options)
-      const self = this
-      async function* gen() {
-        const text = String(options.messages?.[0]?.content?.[0]?.text ?? '')
-        if (text.includes('你是代码结构勘探员')) {
-          yield { type: 'block-start', index: 0, blockType: 'text' }
-          yield { type: 'text-delta', index: 0, text: '```json\n' }
-          yield { type: 'text-delta', index: 0, text: JSON.stringify({
-            project: 'fixture-mm',
-            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
-            concepts: [],
-          }) }
-          yield { type: 'text-delta', index: 0, text: '\n```' }
-          yield { type: 'block-end', index: 0, block: { type: 'text', text: '```json\n' + JSON.stringify({
-            project: 'fixture-mm',
-            modules: [{ name: 'core', summary: 'mm core', files: ['src/core.py'] }],
-            concepts: [],
-          }) + '\n```' } }
-        }
-        yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 55 } }
+      return (async function* () {
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: '不应被调用' }
         yield { type: 'finish', reason: { kind: 'stop' } }
-      }
-      return gen.call(self)
+      })()
     },
   }
-  // 场景 1：agent 带路由 → 规划走主模型，百炼零规划请求
+  // 场景 1：agent 带路由 → 规划仍走插件内批量端点，ctx.llm 零调用
   const mmRepo = makeFixtureRepo()
   const mock = makeBatchMock()
   const mmCtx = makeCtx({
@@ -401,94 +384,52 @@ console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.str
   const mmGen = mmCtx.registered.get('codewiki_generate')
   try {
     const r = await mmGen.execute({ cwd: mmRepo }, { agent: { id: 'sess-mm' } })
-    check(r.submitted === true, '主模型规划：提交即返回')
+    check(r.submitted === true, '带会话路由：提交即返回')
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
-    check(llmCalls.length === 1, `ctx.llm.stream 恰被调 1 次（实际 ${llmCalls.length}）`)
-    check(llmCalls[0]?.provider === 'deepseek-official' && llmCalls[0]?.model === 'main-model-x', '路由取自发起会话 requestHeader config')
-    check(llmCalls[0]?.messages?.[0]?.content?.[0]?.text?.includes('你是代码结构勘探员'), '规划 prompt 原文进主模型消息')
-    check(!mock.batchPrompts().some((p) => p.includes('勘探员')), '百炼端点零规划请求（不走批量通道）')
-    check(mock.batchPrompts().some((p) => p.includes('你是 CodeWiki 文章作者')), '文章阶段仍走百炼批量')
-    check(job?.stage === 'done', `主模型规划任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(job?.plan?.project === 'fixture-mm' && job?.plan?.modules?.length === 1, '主模型 JSON 计划被解析入库（含剥围栏）')
-    check((job?.notes ?? []).some((n) => n.includes('规划走主模型')), 'notes 记录主模型决策')
-    check((job?.notes ?? []).some((n) => n.includes('规划（主模型）：1 个模块')), 'notes 记录主模型规划结果')
-    check(job?.usage?.outputTok >= 55, `输出 token 实测入账（实际 ${job?.usage?.outputTok}）`)
-    check(!(job?.usage?.overTier2), '主模型规划不计超档（overTier2=0）')
+    check(llmCalls.length === 0, `ctx.llm.stream 零调用（实际 ${llmCalls.length}）`)
+    check(mock.batchPrompts().some((p) => p.includes('你是代码结构勘探员')), '规划请求走插件内批量端点')
+    check(job?.stage === 'done', `任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(job?.plan?.project === 'fixture' && job?.plan?.modules?.length === 2, '规划 JSON 解析入库（2 个模块）')
+    check((job?.notes ?? []).some((n) => n.includes('规划：2 个模块')), 'notes 记录规划结果')
+    check((job?.notes ?? []).some((n) => n.includes('阶段已启动')), 'notes 记录批量阶段启动与模型/并发')
   } finally {
     mock.restore()
     fs.rmSync(mmRepo, { recursive: true, force: true })
   }
 
-  // 场景 1b：真实 cordis 严格语义（ctx.llm 属性访问即抛）+ 会话未路由 → 路由退 agent.options
+  // 场景 2：规划应答不是合法 JSON → 降级本地按顶层目录分组，任务照常完成
   {
-    const strictRepo = makeFixtureRepo()
-    const mockS = makeBatchMock()
-    llmCalls.length = 0
-    const sCtx = makeCtx({
-      agentGet: (id) => (id === 'sess-strict' ? {
-        steer: () => {},
-        session: { requestHeader: () => undefined },
-        options: { provider: 'deepseek-official', model: 'conv-model-y' },
-      } : undefined),
-      llm: fakeLlm,
-    })
-    // 0.8.5 真宿主故障点：未 inject 的服务属性访问直接抛（旧实现据此全程降级百炼）
-    Object.defineProperty(sCtx.ctx, 'llm', {
-      get() { throw new Error('cannot get property "llm" without inject') },
-    })
-    apply(sCtx.ctx, {})
-    const sGen = sCtx.registered.get('codewiki_generate')
+    const fbRepo = makeFixtureRepo()
+    const mock2 = makeBatchMock()
+    const wrapped = globalThis.fetch
+    globalThis.fetch = async (url, init = {}) => {
+      const prompt = String(JSON.parse(init.body ?? '{}')?.messages?.[0]?.content ?? '')
+      if (prompt.includes('你是代码结构勘探员')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '抱歉我不会' } }], usage: { output_tokens: 8 } }), { status: 200 })
+      }
+      return wrapped(url, init)
+    }
+    const fbCtx = makeCtx({ llm: fakeLlm })
+    apply(fbCtx.ctx, {})
+    const fbGen = fbCtx.registered.get('codewiki_generate')
     try {
-      const r = await sGen.execute({ cwd: strictRepo }, { agent: { id: 'sess-strict' } })
+      const r = await fbGen.execute({ cwd: fbRepo }, { agent: 'test-agent' })
       const job = await waitJob(r.cwd)
-      check(llmCalls.length === 1, `严格语义下仍走主模型（stream 调用 ${llmCalls.length}）`)
-      check(llmCalls[0]?.model === 'conv-model-y', '未路由时继承 agent.options 的对话模型')
-      check(!(job?.notes ?? []).some((n) => n.includes('主模型规划异常')), 'notes 无「主模型规划异常」')
-      check(job?.plan?.project === 'fixture-mm', '严格语义下主模型计划入库')
+      check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+      check((job?.notes ?? []).some((n) => n.includes('批量规划未产出可用 JSON')), 'notes 记录本地分组降级')
+      check(Array.isArray(job?.plan?.modules) && job.plan.modules.length >= 1, '本地分组计划入库')
+      check(llmCalls.length === 0, '降级路径同样不碰 ctx.llm')
     } finally {
-      mockS.restore()
-      fs.rmSync(strictRepo, { recursive: true, force: true })
+      globalThis.fetch = wrapped
+      mock2.restore()
+      fs.rmSync(fbRepo, { recursive: true, force: true })
     }
   }
 
-  // 场景 2：主模型输出不是合法 JSON → 降级百炼批量规划，任务照常完成
-  const badLlm = {
-    stream() {
-      return (async function* () {
-        yield { type: 'block-start', index: 0, blockType: 'text' }
-        yield { type: 'text-delta', index: 0, text: '抱歉我不会' }
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: '抱歉我不会' } }
-        yield { type: 'finish', reason: { kind: 'stop' } }
-      })()
-    },
-  }
-  const fbRepo = makeFixtureRepo()
-  const mock2 = makeBatchMock()
-  const fbCtx = makeCtx({
-    agentGet: (id) => (id === 'sess-mm' ? {
-      steer: () => {},
-      session: { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) },
-    } : undefined),
-    llm: badLlm,
-  })
-  apply(fbCtx.ctx, {})
-  const fbGen = fbCtx.registered.get('codewiki_generate')
-  try {
-    const r = await fbGen.execute({ cwd: fbRepo }, { agent: { id: 'sess-mm' } })
-    const job = await waitJob(r.cwd)
-    check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(mock2.batchPrompts().some((p) => p.includes('勘探员')), '降级后规划请求走百炼端点')
-    check((job?.notes ?? []).some((n) => n.includes('主模型规划未产出可用 JSON')), 'notes 记录降级决策')
-  } finally {
-    mock2.restore()
-    fs.rmSync(fbRepo, { recursive: true, force: true })
-  }
-
-  // 场景 3：无 sessionId（面板提交）→ 直接走批量路径，不碰 ctx.llm
+  // 场景 3：无 sessionId（面板提交）→ 同一条批量路径
   const panelRepo = makeFixtureRepo()
   const mock3 = makeBatchMock()
-  llmCalls.length = 0
   const pCtx = makeCtx({ llm: fakeLlm })
   apply(pCtx.ctx, {})
   const pGen = pCtx.registered.get('codewiki_generate')
@@ -496,8 +437,8 @@ console.log('== 规划阶段改走主模型（发起会话路由 → ctx.llm.str
     const r = await pGen.execute({ cwd: panelRepo }, { agent: 'test-agent' })
     const job = await waitJob(r.cwd)
     check(job?.stage === 'done', `面板提交任务终态 done（实际 ${job?.stage}）`)
-    check(llmCalls.length === 0, '无发起会话 → 不碰 ctx.llm')
-    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走百炼批量（现状不变）')
+    check(llmCalls.length === 0, '面板提交全程不碰 ctx.llm')
+    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走批量端点')
   } finally {
     mock3.restore()
     fs.rmSync(panelRepo, { recursive: true, force: true })
@@ -560,7 +501,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '大 wiki 校对批次照常回写（动态预算）')
     check((job.notes ?? []).some((n) => n.includes('观察任务并发执行')), 'notes 记录拆分决策')
-    check((job.notes ?? []).some((n) => n.includes('3 倍价')), '单篇 30k 超大档触发 3 倍价明示')
+    check((job.notes ?? []).some((n) => n.includes('超单请求预算')), '单请求输入超预算时 notes 明示按大档装填')
     check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
   } finally {
     mock.restore()
@@ -572,10 +513,10 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
 {
   const splitRepo = makeFixtureRepo()
-  // 每模块两个 90KB 源文件：28k 装填必 skipped → 触发观察批分割
+  // 每模块两个 210KB 源文件：单请求 110k 预算必装不下 → 触发观察批分割
   for (const mn of ['core', 'util']) {
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(90 * 1024))
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(90 * 1024))
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(210 * 1024))
+    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(210 * 1024))
   }
   execFileSync('git', ['add', '-A'], { cwd: splitRepo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
@@ -595,10 +536,59 @@ console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + �
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'modules/core.md 经合成落盘')
     check(fs.existsSync(path.join(job.wikiPath, 'modules', 'util.md')), 'modules/util.md 经合成落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '分割文章照常进校对回写')
-    check(!(job.notes ?? []).some((n) => n.includes('3 倍价')), '文章阶段零请求超 32k 档（无 3 倍价明示）')
+    check(!(job.notes ?? []).some((n) => n.includes('超单请求预算')), '文章阶段观察批全部装进单请求预算（无超档明示）')
   } finally {
     mock.restore()
     fs.rmSync(splitRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 单项目串行（0.10.0） ============================
+console.log('== 单项目串行：已有项目在跑时新提交进 queued，前一个收尾后自动轮到 ==')
+{
+  const repoA = makeFixtureRepo()
+  const repoB = makeFixtureRepo()
+  const mockStall = makeBatchMock({ stall: true }) // A 的请求挂起不返回，A 长时间占住推进权
+  try {
+    const ra = await gen.execute({ cwd: repoA }, { agent: 'test-agent' })
+    check(ra.submitted === true, '项目 A 提交即返回')
+    // 等 A 真正离开 submitting 进入 plan（首个批量请求已挂起）
+    let jobA = null
+    for (let i = 0; i < 40; i += 1) {
+      jobA = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === ra.jobId)
+      if (jobA?.stage === 'plan') break
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    check(jobA?.stage === 'plan', `A 进入 plan 占住推进权（实际 ${jobA?.stage}）`)
+    const rb = await gen.execute({ cwd: repoB }, { agent: 'test-agent' })
+    check(rb.submitted === true, '项目 B 提交即返回')
+    const jobB0 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === rb.jobId)
+    check(jobB0?.stage === 'queued', `B 进 queued 排队（实际 ${jobB0?.stage}）`)
+    check((jobB0?.notes ?? []).some((n) => n.includes('单项目串行')), 'B 的 notes 说明单项目串行排队')
+    check(jobB0?.pendingStage === 'plan', `B 预置 pendingStage=plan（实际 ${jobB0?.pendingStage}）`)
+    // 排队期间 B 不发任何请求：A 之外的批量请求数不增长
+    const before = mockStall.batchPrompts().length
+    await new Promise((r) => setTimeout(r, 900))
+    check(mockStall.batchPrompts().length === before, `B 排队期间零请求（${before} → ${mockStall.batchPrompts().length}）`)
+    // 取消 A → B 自动轮到并跑完
+    const ctlEp = main.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const resC = fakeRes()
+    await ctlEp.handler(fakeReq({ action: 'cancel', jobId: ra.jobId }), resC)
+    check(resC.code === 200, '取消 A 被接受')
+    mockStall.restore()
+    const mock2 = makeBatchMock()
+    try {
+      const jobB = await waitJob(repoB, { timeout: 45000 })
+      check(jobB?.stage === 'done', `A 收尾后 B 自动轮到并跑完（实际 ${jobB?.stage}，error ${jobB?.error ?? '-'}）`)
+      check((jobB?.notes ?? []).some((n) => n.includes('排队结束，开始编译')), 'B 的 notes 记录排队结束')
+      const jobA2 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === ra.jobId)
+      check(jobA2?.stage === 'cancelled', `A 终态 cancelled（实际 ${jobA2?.stage}）`)
+    } finally {
+      mock2.restore()
+    }
+  } finally {
+    fs.rmSync(repoA, { recursive: true, force: true })
+    fs.rmSync(repoB, { recursive: true, force: true })
   }
 }
 

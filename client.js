@@ -22,8 +22,10 @@ window.__ModuleLoader__.load({
     const POLL_MS = 2000
     const REPOS_PATH = '/api/codewiki/repos'
     const MODELS_PATH = '/api/codewiki/models'
+    const EFFORTS_PATH = '/api/codewiki/model-efforts'
     const REPOS_POLL_MS = 10000
-    const ACTIVE_STAGES = ['plan', 'articles', 'crosscut', 'compose', 'review', 'index']
+    // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
+    const ACTIVE_STAGES = ['queued', 'plan', 'articles', 'crosscut', 'compose', 'review', 'index']
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -37,22 +39,30 @@ window.__ModuleLoader__.load({
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '编译并发上限',
-      maxConcurrencyHint: '1–8；硬顶 8。编译请求（chat/completions）后台并发池的并发数。',
+      maxConcurrencyHint: '1–8；硬顶 8。插件内并发池的请求数（默认 2，适合免费 hy3 档）。',
+      serialProjects: '单项目串行',
+      serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。',
       secCompile: '编译模型',
-      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）；选「内置百炼通道」则走百炼普通入口并自动取「阿里百炼云」渠道凭证。',
+      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）；选「内置百炼通道」则走百炼普通入口并自动取「阿里百炼云」渠道凭证。',
       batchProvider: '模型提供商',
-      batchProviderHint: '来自模型设置里已注册的提供商。选「内置百炼通道」= 走百炼直连（旧行为）。',
-      batchProviderBuiltin: '内置百炼通道（默认）',
+      batchProviderHint: '来自模型设置里已注册的提供商。默认 workbuddy（免费 hy3，192k 上下文）。选「内置百炼通道」= 走百炼直连（旧行为）。',
+      batchProviderBuiltin: '内置百炼通道',
       batchModel: '编译模型',
       batchModelHint: '该提供商下的模型 id。目录里没有的模型可直接手填。',
       batchModelManual: '手填模型 id…',
       catalogLoading: '正在读取模型目录…',
       catalogUnavailable: '模型目录不可用（{error}）——可手填提供商与模型 id。',
       catalogEmptyModels: '该提供商没有可枚举的模型，请手填模型 id。',
-      batchThinkingBudget: '思考预算',
-      batchThinkingBudgetHint: '仅百炼通道生效：0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。走宿主提供商时用该模型的默认思考档。',
-      sessionTier: '会话通道档位',
-      sessionTierHint: '超预算文章转会话通道时派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id，如 codeiwiki）。留空=让会话模型自动选路——自动选路依据档位职责描述，常被判给 default。',
+      batchReasoningEffort: '思考程度',
+      batchReasoningEffortHint: '档位直接取自模型目录（该模型声明的 reasoning efforts）。留空=用模型默认档。',
+      batchReasoningEffortModel: '模型默认',
+      batchReasoningEffortLoading: '正在读取该模型的思考档位…',
+      batchReasoningEffortNone: '该模型未声明可选思考档位，只能用默认档。',
+      batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
+      batchThinkingBudget: '思考预算（百炼通道）',
+      batchThinkingBudgetHint: '仅百炼直连通道生效：0=关思考；1–32768=开思考并限预算。走宿主提供商时用上面的「思考程度」档位。',
+      sessionTier: '兜底档位',
+      sessionTierHint: '仅超大单文件（连 150k 都装不下）转会话通道兜底时才用：派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id）。留空=自动选路。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -65,6 +75,7 @@ window.__ModuleLoader__.load({
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stagePlan: '规划中',
+      stageQueued: '排队中',
       stageArticles: '写文章中',
       stageCrosscut: '横切中',
       stageCompose: '合成中',
@@ -73,6 +84,7 @@ window.__ModuleLoader__.load({
       stageDone: '已完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
+      stepQueued: '排队',
       kindFull: '全量',
       kindStale: '增量',
       kindResume: '续查',
@@ -131,7 +143,7 @@ window.__ModuleLoader__.load({
       reqLabel: '请求',
       batchChannel: '批量',
       realtimeChannel: '实时',
-      overTierLabel: '个超 32k 档（3 倍价）',
+      overTierLabel: '个超单请求预算（按大档装填）',
       activityLabel: '活动流',
       lastCompile: '上次编译',
       nextScan: '下次扫描',
@@ -155,22 +167,30 @@ window.__ModuleLoader__.load({
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Compile concurrency',
-      maxConcurrencyHint: '1–8; hard cap 8. Concurrency of the background pool of compile requests (chat/completions).',
+      maxConcurrencyHint: '1–8; hard cap 8. Requests in the in-plugin pool (default 2, suited to the free hy3 tier).',
+      serialProjects: 'One project at a time',
+      serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects.',
       secCompile: 'Compile model',
-      secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model. Pick any provider configured in model settings (local OpenAI-compatible endpoints included); "Built-in Bailian channel" goes straight to the Bailian endpoint with the "阿里百炼云" credentials.',
+      secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model and runs entirely inside the plugin — the initiating session model is no longer delegated to. Pick any provider configured in model settings (local OpenAI-compatible endpoints included); "Built-in Bailian channel" goes straight to the Bailian endpoint with the "阿里百炼云" credentials.',
       batchProvider: 'Model provider',
-      batchProviderHint: 'Providers registered in model settings. "Built-in Bailian channel" = the old direct-Bailian behaviour.',
-      batchProviderBuiltin: 'Built-in Bailian channel (default)',
+      batchProviderHint: 'Providers registered in model settings. Default workbuddy (free hy3, 192k context). "Built-in Bailian channel" = the old direct-Bailian behaviour.',
+      batchProviderBuiltin: 'Built-in Bailian channel',
       batchModel: 'Compile model',
       batchModelHint: 'Model id under that provider. Ids missing from the catalog can be typed in.',
       batchModelManual: 'Type a model id…',
       catalogLoading: 'Reading the model catalog…',
       catalogUnavailable: 'Model catalog unavailable ({error}) — type the provider and model id instead.',
       catalogEmptyModels: 'This provider exposes no enumerable models; type the model id.',
-      batchThinkingBudget: 'Thinking budget',
-      batchThinkingBudgetHint: 'Bailian channel only: 0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output. Host providers use that model\'s default reasoning effort.',
-      sessionTier: 'Session-channel tier',
-      sessionTierHint: 'Which subagent tier (id from dsh-subagent-auto-router, e.g. codeiwiki) receives over-budget articles when they fall back to the session channel. Empty = let the session model route automatically, which usually lands on default.',
+      batchReasoningEffort: 'Reasoning effort',
+      batchReasoningEffortHint: 'Options come straight from the model catalog (the efforts that model declares). Empty = the model\'s default effort.',
+      batchReasoningEffortModel: 'Model default',
+      batchReasoningEffortLoading: 'Reading this model\'s reasoning efforts…',
+      batchReasoningEffortNone: 'This model declares no selectable efforts; only the default applies.',
+      batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
+      batchThinkingBudget: 'Thinking budget (Bailian)',
+      batchThinkingBudgetHint: 'Direct-Bailian channel only: 0 = thinking off; 1–32768 = thinking on with a budget. Host providers use the "Reasoning effort" selection above.',
+      sessionTier: 'Fallback tier',
+      sessionTierHint: 'Used only for the rare oversized single file (beyond 150k) that falls back to the session channel: which subagent tier (id from dsh-subagent-auto-router) receives it. Empty = automatic routing.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -183,11 +203,13 @@ window.__ModuleLoader__.load({
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stagePlan: 'Planning',
+      stageQueued: 'Queued',
       stageArticles: 'Writing articles',
       stageCrosscut: 'Cross-cutting',
       stageCompose: 'Composing',
       stageReview: 'Proofreading',
       stageIndex: 'Indexing',
+      stepQueued: 'Queue',
       stageDone: 'Done',
       stageFailed: 'Failed',
       stageCancelled: 'Cancelled',
@@ -249,7 +271,7 @@ window.__ModuleLoader__.load({
       reqLabel: 'requests',
       batchChannel: 'batch',
       realtimeChannel: 'realtime',
-      overTierLabel: 'over the 32k tier (3× price)',
+      overTierLabel: 'over the single-request budget (large tier)',
       activityLabel: 'Activity',
       lastCompile: 'last compile',
       nextScan: 'Next scan',
@@ -476,6 +498,38 @@ window.__ModuleLoader__.load({
             return catalog.find((p) => p?.id === id) ?? null
           }, [draft?.batchProvider, catalog])
 
+          // 思考程度档位：选中 provider/model 后二次拉取 /api/codewiki/model-efforts，
+          // 档位清单来自模型目录（resolveModel 的 reasoning.efforts），不手填裸字符串。
+          const [effortsState, setEffortsState] = React.useState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false })
+          React.useEffect(() => {
+            const provider = String(draft?.batchProvider ?? '').trim()
+            const model = String(draft?.batchModel ?? '').trim()
+            if (!provider || !model) { setEffortsState({ for: '', efforts: [], defaultEffort: null, error: null, loading: false }); return }
+            const key = `${provider}\u0000${model}`
+            let alive = true
+            setEffortsState((prev) => (prev.for === key ? prev : { for: key, efforts: [], defaultEffort: null, error: null, loading: true }))
+            const url = `${EFFORTS_PATH}?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`
+            apiGet(url)
+              .then((data) => {
+                if (!alive) return
+                if (data?.ok === false) {
+                  setEffortsState({ for: key, efforts: [], defaultEffort: null, error: String(data.error ?? '不可用'), loading: false })
+                  return
+                }
+                setEffortsState({
+                  for: key,
+                  efforts: Array.isArray(data?.efforts) ? data.efforts : [],
+                  defaultEffort: data?.defaultEffort ? String(data.defaultEffort) : null,
+                  error: null,
+                  loading: false,
+                })
+              })
+              .catch((err) => {
+                if (alive) setEffortsState({ for: key, efforts: [], defaultEffort: null, error: String(err?.message ?? err), loading: false })
+              })
+            return () => { alive = false }
+          }, [draft?.batchProvider, draft?.batchModel])
+
           const save = async () => {
             if (!snapshot?.writable || snapshot.status !== 'ready') return
             const concurrency = Number(draft?.maxConcurrency)
@@ -490,7 +544,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchThinkingBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'batchThinkingBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -551,11 +605,20 @@ window.__ModuleLoader__.load({
                 el('label', null, t('maxConcurrency')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {
-                    value: String(draft.maxConcurrency ?? 8),
+                    value: String(draft.maxConcurrency ?? 2),
                     onChange: (e) => setPath('maxConcurrency', Number(e.target.value)),
-                    placeholder: '8',
+                    placeholder: '2',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('maxConcurrencyHint')),
+                ),
+                el('label', null, t('serialProjects')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.serialProjects !== false,
+                    onChange: (v) => setPath('serialProjects', v),
+                    label: t('serialProjects'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('serialProjectsHint')),
                 ),
                 el('label', null, t('articleLanguage')),
                 el(Input, {
@@ -596,7 +659,7 @@ window.__ModuleLoader__.load({
                           // 换提供商时把模型清空，避免残留上一家的模型 id 被误存
                           const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === next) : null
                           const first = entry?.models?.[0]?.id
-                          setPath('batchModel', first ?? (next ? '' : 'qwen3.7-flash'))
+                          setPath('batchModel', first ?? '')
                         },
                       },
                       el('option', { value: '' }, t('batchProviderBuiltin')),
@@ -618,7 +681,7 @@ window.__ModuleLoader__.load({
                       return el(Input, {
                         value: String(draft.batchModel ?? ''),
                         onChange: (e) => setPath('batchModel', e.target.value),
-                        placeholder: id ? t('batchModelManual') : 'qwen3.7-flash',
+                        placeholder: t('batchModelManual'),
                       })
                     }
                     const known = models.some((m) => m.id === String(draft.batchModel ?? ''))
@@ -635,6 +698,53 @@ window.__ModuleLoader__.load({
                     ? t('catalogEmptyModels')
                     : t('batchModelHint')),
                 ),
+                el('label', null, t('batchReasoningEffort')),
+                el('div', { 'data-dscw-field': '' },
+                  (() => {
+                    const provider = String(draft.batchProvider ?? '').trim()
+                    const model = String(draft.batchModel ?? '').trim()
+                    const current = String(draft.batchReasoningEffort ?? '')
+                    // 百炼直连通道没有 reasoning 档位（用下面的思考预算），这里只处理宿主 provider
+                    if (!provider) {
+                      return el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint'))
+                    }
+                    if (effortsState.loading && !effortsState.efforts.length) {
+                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
+                    }
+                    if (effortsState.error) {
+                      return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortError').replace('{error}', effortsState.error))
+                    }
+                    if (!effortsState.efforts.length) {
+                      // 目录说该模型没有可选档位：只给「默认」并清空残留值
+                      return el('div', { 'data-dscw-field': '' },
+                        el('select', {
+                          'data-dscw-select': '',
+                          value: '',
+                          onChange: () => setPath('batchReasoningEffort', ''),
+                        },
+                          el('option', { value: '' }, t('batchReasoningEffortModel')),
+                        ),
+                        el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone')),
+                      )
+                    }
+                    const known = !current || effortsState.efforts.some((e) => e.id === current)
+                    const labelOf = (e) => (e.description ? `${e.name}（${e.id}）— ${e.description}` : (e.name && e.name !== e.id ? `${e.name}（${e.id}）` : e.id))
+                    return el('div', { 'data-dscw-field': '' },
+                      el('select', {
+                        'data-dscw-select': '',
+                        value: current,
+                        onChange: (e) => setPath('batchReasoningEffort', e.target.value),
+                      },
+                        el('option', { value: '' }, effortsState.defaultEffort
+                          ? `${t('batchReasoningEffortModel')}（${effortsState.defaultEffort}）`
+                          : t('batchReasoningEffortModel')),
+                        ...(known ? [] : [el('option', { key: '__custom', value: current }, current)]),
+                        effortsState.efforts.map((e) => el('option', { key: e.id, value: e.id }, labelOf(e))),
+                      ),
+                      el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortHint')),
+                    )
+                  })(),
+                ),
                 el('label', null, t('batchThinkingBudget')),
                 el('div', { 'data-dscw-field': '' },
                   el(Input, {
@@ -649,7 +759,7 @@ window.__ModuleLoader__.load({
                   el(Input, {
                     value: String(draft.sessionTier ?? ''),
                     onChange: (e) => setPath('sessionTier', e.target.value),
-                    placeholder: 'codeiwiki',
+                    placeholder: 'default',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('sessionTierHint')),
                 ),
@@ -784,7 +894,7 @@ window.__ModuleLoader__.load({
             }))
         }
         // 总进度：六阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
-        const STAGE_WEIGHTS = { plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
+        const STAGE_WEIGHTS = { queued: 0, plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           if (idx < 0) return job.stage === 'done' ? 100 : null

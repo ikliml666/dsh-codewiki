@@ -8,7 +8,7 @@ import {
   collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   buildSessionSteerText,
   prepareArticleTasks, runRealtimeTasks,
-  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey, listModelCatalog, installWebServer,
+  localPlan, packArticles, scanRepoFiles, resolveBatchApiKey, listModelCatalog, resolveModelEfforts, installWebServer,
 } from './index.js'
 
 let passed = 0
@@ -54,7 +54,7 @@ check(numberLines('').trim() === '1|', '空文件输出 1|（可接受）')
 section('prepareArticleTasks：prompt 装配与 oversized 拆分')
 const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-work-'))
 fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
-fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(300 * 1024))
+fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(420 * 1024))
 fs.writeFileSync(path.join(workRoot, 'huge.ts'), 'x'.repeat(800 * 1024))
 const outDir = path.join(workRoot, 'wiki', 'modules')
 const plainTasks = ['t0', 't1', 't2'].map((_id, i) => ({
@@ -83,7 +83,7 @@ check(hugePrep.prepared.length === 0 && hugePrep.sessionTasks.length === 1, '单
 // 3b. prepareArticleTasks：多文件超预算 → 观察→合成分割
 section('prepareArticleTasks：多文件超预算 → 观察批分割')
 for (let i = 0; i < 4; i += 1) {
-  fs.writeFileSync(path.join(workRoot, `part${i}.ts`), 'y'.repeat(90 * 1024))
+  fs.writeFileSync(path.join(workRoot, `part${i}.ts`), 'y'.repeat(140 * 1024))
 }
 const splitPrep = prepareArticleTasks([{
   name: 'modules/splitme.md', mission: '分割任务',
@@ -94,7 +94,7 @@ check(splitPrep.sessionTasks.length === 0, '分割任务不进会话通道（仍
 const obsTasks = splitPrep.prepared.filter((t) => t.name.endsWith('#obs0') || t.name.includes('#obs'))
 check(obsTasks.length >= 2, `多文件超预算拆出 ≥2 个观察批（实际 ${obsTasks.length}）`)
 check(obsTasks.every((t) => t.keepInMemory === true), '观察任务 keepInMemory（不直接落盘）')
-check(obsTasks.every((t) => estimateTokens(t.batchPrompt) <= 28000), `观察批 prompt 全部 ≤28k token（最大 ${Math.max(...obsTasks.map((t) => estimateTokens(t.batchPrompt)))}）`)
+check(obsTasks.every((t) => estimateTokens(t.batchPrompt) <= 110000), `观察批 prompt 全部 ≤110k token（最大 ${Math.max(...obsTasks.map((t) => estimateTokens(t.batchPrompt)))}）`)
 check(obsTasks.every((t) => t.splitFor === 'modules/splitme.md'), '观察任务 splitFor 指向所属文章')
 check(obsTasks.every((t) => t.composePlan?.articlePath === path.join(outDir, 'splitme.md') && t.composePlan?.mission === '分割任务'), 'composePlan 携带 articlePath 与 mission')
 check(obsTasks.some((t) => t.batchPrompt.includes('第 1 批')) && obsTasks.some((t, i) => t.batchPrompt.includes(`第 ${i + 1} 批`)), '观察 prompt 标注批次序号')
@@ -356,6 +356,60 @@ section('GET /api/codewiki/models 端点')
   const res2 = { code: null, body: null, writeHead(c) { this.code = c }, end(b) { this.body = JSON.parse(b) } }
   await handler({ socket: { remoteAddress: '10.0.0.5' } }, res2)
   check(res2.code === 403 && res2.body.error === 'loopback only', '非回环请求被拒（403）')
+}
+
+// ---- resolveModelEfforts + /api/codewiki/model-efforts：思考程度从模型目录读取 ----
+section('resolveModelEfforts / GET /api/codewiki/model-efforts')
+{
+  const effortsLlm = {
+    resolveModel: async (provider, model) => {
+      if (provider !== 'workbuddy' || model !== 'hy3') throw new Error('model not found')
+      return {
+        context: { tokens: 192000 },
+        reasoning: {
+          defaultEffort: 'high',
+          efforts: [
+            { id: 'off', name: '关闭' },
+            { id: 'low', name: '低' },
+            { id: 'high', name: '高', description: '默认档' },
+          ],
+        },
+      }
+    },
+  }
+  const okRes = await resolveModelEfforts(effortsLlm, 'workbuddy', 'hy3')
+  check(okRes.ok === true && okRes.efforts.length === 3, `解析出 3 个档位（实际 ${JSON.stringify(okRes.efforts?.map((e) => e.id))}）`)
+  check(okRes.defaultEffort === 'high', `带出模型默认档（实际 ${okRes.defaultEffort}）`)
+  check(okRes.efforts[2].description === '默认档', '档位描述透出')
+  check(okRes.context === 192000, `上下文长度透出（实际 ${okRes.context}）`)
+  const badRes = await resolveModelEfforts(effortsLlm, 'workbuddy', 'nope')
+  check(badRes.ok === false && badRes.efforts.length === 0 && badRes.error.includes('model not found'), '未知模型 → ok:false + 空档位 + 原因')
+  const noSvc = await resolveModelEfforts(null, 'workbuddy', 'hy3')
+  check(noSvc.ok === false && noSvc.error.includes('resolveModel'), 'llm 未注入 → 诚实报错（不抛）')
+  const emptyEfforts = await resolveModelEfforts({ resolveModel: async () => ({}) }, 'p', 'm')
+  check(emptyEfforts.ok === true && emptyEfforts.efforts.length === 0 && emptyEfforts.defaultEffort === null,
+    '模型未声明档位 → ok:true + 空列表（设置页可据此提示）')
+
+  // 端点：回环 200 + 参数校验 400 + 非回环 403
+  const routes2 = new Map()
+  const fakeCtx2 = {
+    inject: (deps, cb) => {
+      if (deps.includes('webServer')) cb({ webServer: { register: (r) => routes2.set(r.path, r.handler) } })
+    },
+  }
+  installWebServer(fakeCtx2, { list: () => [], cancel: () => false }, { llm: effortsLlm })
+  const ep = routes2.get('/api/codewiki/model-efforts')
+  check(typeof ep === 'function', '端点已注册')
+  const mkRes = () => ({ code: null, body: null, writeHead(c) { this.code = c }, end(b) { this.body = JSON.parse(b) } })
+  const resOk = mkRes()
+  await ep({ url: '/api/codewiki/model-efforts?provider=workbuddy&model=hy3', socket: { remoteAddress: '127.0.0.1' } }, resOk)
+  check(resOk.code === 200 && resOk.body.ok === true && resOk.body.efforts.length === 3, '回环 + 完整参数 → 200 带档位')
+  const resMissing = mkRes()
+  await ep({ url: '/api/codewiki/model-efforts?provider=workbuddy', socket: { remoteAddress: '127.0.0.1' } }, resMissing)
+  check(resMissing.code === 400 && resMissing.body.ok === false, '缺 model 参数 → 400')
+  const res403b = mkRes()
+  await ep({ url: '/api/codewiki/model-efforts?provider=workbuddy&model=hy3', socket: { remoteAddress: '10.0.0.5' } }, res403b)
+  check(res403b.code === 403, '非回环请求被拒（403）')
 }
 
 // ---- resolveBatchApiKey：凭证解析链（显式配置 > 宿主凭据库）----

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.0 — 2026-10-23
+
+### 功能：全面改用免费 hy3 主模型，全流程回到插件内，单项目串行，设置页思考程度从模型目录读取
+
+- 背景（用户需求）：放弃 qwen3.7-flash，改用免费的 `workbuddy/hy3` 作主模型（192k 上下文，足够应付大部分篇目），因此「超预算就委托发起会话的主模型 / 转会话通道」这条主路径不再需要；同时要求 hy3 并发为 2、同一时刻只允许一个项目在编译，以及插件页的思考程度改为直接从模型列表读取。两处架构级歧义经用户确认：①超 192k 的单个源文件仍保留会话通道作**最后兜底**（`sessionTier` 配置保留）；②多项目同时提交时后者**排队等待**而不是被拒。
+- 实现 ①（index.js 默认模型与预算重算）：新增 `DEFAULT_BATCH_PROVIDER='workbuddy'` / `DEFAULT_BATCH_MODEL='hy3'` 常量，`Config.batchProvider`/`batchModel` 默认值改为它们（`liveConfig` 的空值回落同步）。`BATCH_TOKEN_BUDGET` 28000 → **110000**（hy3 上下文 192k、单请求输出上限 64k，输入侧留 128k 再扣输出与估算余量）；`BATCH_TOKEN_HARD_LIMIT` 200000 → **150000**（超此才转会话通道兜底）。`estimateTokens` 与各装填点注释同步改写，不再提 32k 低价档。
+- 实现 ②（删除主模型规划）：移除 `createJobService` 内的 `runMainModelPlan`（原逻辑：向发起会话的 `agentsRef.get(job.sessionId)` 取 `requestHeader().config` 或 `agent.options` 的路由，再用 `llm.stream()` 跑规划，失败降级批量）。规划阶段不再出现「规划走主模型（…）」note，全部走插件内并发池——hy3 的 192k 装得下文件清单。`tickPlan` 里调用它的分支一并删除，只留批量规划任务。
+- 实现 ③（思考程度 → 模型目录）：新增导出纯函数 `resolveModelEfforts(llm, provider, model)`——走宿主 `llm.resolveModel()`，返回 `{ok, provider, model, efforts:[{id,name,description}], defaultEffort, context}`；`listModels` 不携带 reasoning 信息，所以必须单独解析。新增端点 `GET /api/codewiki/model-efforts?provider=&model=`（回环限定、60s 进程内缓存、缺参 400、`ok:false` 不抛 500）。`llmChat` 新增 `reasoningEffort` 入参，仅在非空时写入 `llm.stream({ ...reasoningEffort })`；`runRealtimeTasks` 与 `startBatchChatRun` 透传 `liveConfig().batchReasoningEffort`。Config 新增 `batchReasoningEffort`（默认空 = 模型默认档）。
+- 实现 ④（单项目串行）：Config 新增 `serialProjects`（默认 true）。`submit` 时若已有别的项目在推进（`jobs` 里非终态、非 queued、非 submitting 且不是自己），本任务直接进 `queued`，首个阶段与 stale 预置任务先存 `pendingStage`/`pendingTasks`，并 note「已有项目在编译（X），本任务排队等待（单项目串行）」。`tick` 每轮先算 `activeId`（已有在跑的就是它，否则取最早 `queued`），排到自己的 job 才把 `pendingStage` 落地并 note「排队结束，开始编译」；其余项目本轮跳过（不推进、不失败），取消不受闸门限制——排队期间零请求。
+- 实现 ⑤（并发默认 2）：`Config.maxConcurrency` 默认值 `CONCURRENCY_HARD_CAP`(8) → `DEFAULT_CONCURRENCY`(2)，`liveConfig` 的回落同样改为 2（硬顶仍是 8）。
+- 实现 ⑥（client.js 设置页）：新增「单项目串行」Switch（中英案齐备，保存键列表加入 `serialProjects`）；「编译模型」区新增「思考程度」下拉——选中 provider/model 后拉 `/api/codewiki/model-efforts` 渲染该模型真实档位（含「模型默认（<defaultEffort>）」空值项），加载中/无档位/读取失败三种提示齐备；删掉前端写死的 `qwen3.7-flash` 默认值与 placeholder；用量行「超 32k 档（3 倍价）」改为「超单请求预算（按大档装填）」；面板阶段条把 `queued` 放最前（点亮第 0 个点表示排队）。
+- 实现 ⑦（文案对齐）：`codewiki_generate` 工具描述、提交成功 note、校对阶段注释、`cordis.patch.yml` 设置清单、README 设置段与工具表、`CodeWiki.md` 的 Overview/Key Components/Architecture/Data Flow/Connections 全部改写为 hy3 + 插件内 + 串行口径（删掉已不存在的 `defaultProvider`/`defaultModel`/`defaultReasoningEffort` 描述）。
+- 测试：test-batch.mjs 新增 `resolveModelEfforts` + `/api/codewiki/model-efforts` 端点 11 项断言（档位解析/默认档/描述/context 透出、未知模型 ok:false、llm 未注入诚实报错、无档位模型空列表、端点注册/200/缺参 400/非回环 403），107 → 118 项全过。test-orchestration.mjs 新增「单项目串行」11 项断言（A 进 plan 占住推进权、B 提交即 queued、note 文案、pendingStage 预置、排队期间零请求、取消 A 后 B 自动轮到并 done、排队结束 note、A 终态 cancelled）全过；test-cwd-paths / test-wiki-entry 全过。test-wiki-anchors 的 287 处失败为编译前 wiki 文章行号漂移（预期，收尾由 codewiki_generate 重编修正）。
+- 文档：README 工具表与设置段、CodeWiki.md 同步；版本 0.9.2 → 0.10.0。
+
 ## 0.9.2 — 2026-10-23
 
 ### 修复：自建 codewiki 档位在写 CodeWiki 时从未被调用（用户反馈：创建了 codewiki 档位，写 wiki 时模型仍走 default 档）
