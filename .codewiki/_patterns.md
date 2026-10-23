@@ -238,6 +238,10 @@ tags: [patterns, architecture, concurrency, error-handling, token-budget]
 2. 把每个任务的完整 prompt 写入 `SESSION_TASK_DIR/<jobId>--<safe>.prompt.txt`（`index.js:1477-1484`）。
 3. steer 一条短消息（说明任务文件路径与目标文章路径，review 阶段用校对措辞，`index.js:1491-1504`）。
 
+steer 文本由 `buildSessionSteerText()`（`index.js:1046`，纯函数，0.9.2）单点生成，`dispatchSessionTasks`（`index.js:1519`）与 `resendSessionSteer`（`index.js:1563`）共用，避免两条文案路径再次分叉：按 `job.stage === 'review'` 切校对措辞、按 `resend` 切重发措辞；`tier`（来自配置 `sessionTier`）非空时插入「派单要求：调用 delegate 时必须显式传 tier: "<id>"（不要依赖自动选路），mode 用 spec」。
+
+**为什么必须能钉 tier**：编译主链的模型由 `batchProvider`/`batchModel` 直接决定，与子智能体档位是两套独立机制；只有超预算转会话通道这一段经过 `delegate`，不传 `tier` 就由上层决策模型按档位职责描述自动选路——「写 CodeWiki 模块文章」实测被判 `default`（`ask_route` 两次，置信 0.88 / 0.99，阈值 0.6），自建档位永远轮不到。
+
 收割侧 `progressSessionTasks()`（`index.js:1532`）每 tick 调 `classifySessionTask()`（`index.js:1027`，纯函数）：超时记失败不降级百炼、`harvest` 走 `writeValidated` 落盘、`wait` 留待下轮；`review` 阶段 `tally` 用 `replace: true`（`index.js:1532`）。
 
 ### 6. 质量闸门：落盘前四道

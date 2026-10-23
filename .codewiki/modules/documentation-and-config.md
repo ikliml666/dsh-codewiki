@@ -56,10 +56,10 @@ Bundle 形式安装用的 Cordis 补丁。结构与本地 file:/// 直挂完全�
 ### `index.js` 的 `Config` 与 `liveConfig`
 
 ```js
-export const Config = z.object({ ... })   // index.js:37-51
+export const Config = z.object({ ... })   // index.js:37-52
 ```
 
-13 个字段逐项（全部 `.volatile()`）：
+14 个字段逐项（全部 `.volatile()`）：
 
 | 行号 | 字段 | 类型/默认 | 语义 |
 | --- | --- | --- | --- |
@@ -69,22 +69,24 @@ export const Config = z.object({ ... })   // index.js:37-51
 | 41 | `batchModel` | string / `'qwen3.7-flash'` | 编译模型（规划/写文章/横切/审校/合成全部环节共用）；`batchProvider` 为空时是百炼模型名，非空时是该 provider 的模型 id |
 | 42 | `batchApiKey` | string / `''` | 百炼 API Key 覆盖值（存量字段，设置页已不再渲染）；留空自动取模型设置「阿里百炼云」渠道凭证 |
 | 43 | `batchThinkingBudget` | number / `0` | 0 = 关思考；1~32768 = 开启并限预算。**仅百炼通道生效**，宿主 provider 通道用该 provider 自己的 `reasoningEffort` |
-| 44 | `maxConcurrency` | number / `8` | 编译请求并发上限 1–8，`liveConfig` 里 clamp 到 `CONCURRENCY_HARD_CAP`（`index.js:22`） |
-| 45 | `articleLanguage` | string / `'中文'` | wiki 文章书写语言 |
-| 46 | `updateReminder` | boolean / `true` | 会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 `CodeWiki.md`） |
-| 47 | `excludePaths` | string / `''` | 排除清单：换行/分号/逗号分隔的绝对路径，命中即拒绝编译（schema 见 `index.js:47`，判定函数 `index.js:226-238`） |
-| 48 | `autoUpdate` | boolean / `false` | 自动更新：定时扫描历史工作区并提交 scope=auto 增量编译（调度器 `index.js:2824-2846`） |
-| 49 | `autoUpdateMin` | number / `30` | 自动更新扫描间隔（分钟），`liveConfig` 里下限 5 |
-| 50 | `workspaceOnly` | boolean / `true` | 任务页/总览页只显示属于已添加 dsh 工作区的任务 |
+| 44 | `sessionTier` | string / `''` | 会话通道档位 id（`dsh-subagent-auto-router` 里的档位，如 `codeiwiki`）：留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传该 tier。**存在理由**：编译主链不走档位路由，只有超预算转会话通道这一段经过 `delegate`，不给 tier 就按职责描述自动判档 |
+| 45 | `maxConcurrency` | number / `8` | 编译请求并发上限 1–8，`liveConfig` 里 clamp 到 `CONCURRENCY_HARD_CAP`（`index.js:22`） |
+| 46 | `articleLanguage` | string / `'中文'` | wiki 文章书写语言 |
+| 47 | `updateReminder` | boolean / `true` | 会话系统提示注入 CodeWiki 维护提醒（门控看仓库根是否存在 `CodeWiki.md` 入口文件，**不看** `.codewiki/` 目录） |
+| 48 | `excludePaths` | string / `''` | 排除清单：换行/分号/逗号分隔的绝对路径，命中即拒绝编译（schema 见 `index.js:48`，判定函数 `index.js:226-238`） |
+| 49 | `autoUpdate` | boolean / `false` | 自动更新：定时扫描历史工作区并提交 scope=auto 增量编译（调度器 `index.js:2824-2846`） |
+| 50 | `autoUpdateMin` | number / `30` | 自动更新扫描间隔（分钟），`liveConfig` 里下限 5 |
+| 51 | `workspaceOnly` | boolean / `true` | 任务页/总览页只显示属于已添加 dsh 工作区的任务 |
 
-`liveConfig(config)`（`index.js:58-77`）是配置的唯一解包口径，任何执行路径都必须先过它：
+`liveConfig(config)`（`index.js:58-78`）是配置的唯一解包口径，任何执行路径都必须先过它：
 
-- 59-69：`maxConcurrency` 经 `Number()` 后 clamp——非有限或 `< 1` 落回硬顶 8，否则 `Math.min(n, 8)`。
-- 64：`batchModel` 空字符串回落到 `'qwen3.7-flash'`。
-- 66：`batchThinkingBudget` 双向 clamp 到 `[0, 32768]`，非法值归 0。
-- 70：`articleLanguage` 空值回落 `'中文'`。
-- 73：`autoUpdateMin` 下限 5（`Math.max(5, ...)`）。
-- 74：`workspaceOnly` 只在显式 `=== false` 时关闭（默认开）。
+- 60 / 69-71：`maxConcurrency` 经 `Number()` 后 clamp——非有限或 `< 1` 落回硬顶 8，否则 `Math.min(n, 8)`。
+- 65：`batchModel` 空字符串回落到 `'qwen3.7-flash'`。
+- 67：`batchThinkingBudget` 双向 clamp 到 `[0, 32768]`，非法值归 0。
+- 68：`sessionTier` 只做 `trim()`，不做取值校验——档位是否存在由路由插件那一侧判定（不在它的档位表里会退回自动选路）。
+- 72：`articleLanguage` 空值回落 `'中文'`。
+- 75：`autoUpdateMin` 下限 5（`Math.max(5, ...)`）。
+- 76：`workspaceOnly` 只在显式 `=== false` 时关闭（默认开）。
 - 注意：`batchApiKey` 由 `liveConfig` 解出后**不落盘**——job 记录里剥掉，`apiKeyOf`（`index.js:58-65`）内存缓存优先、进程重启后重新解析。
 
 `val(x)`（`index.js:54-56`）处理 schemastery 的 `Value` 包装：带 `.get()` 的取 `.get()`，否则原样返回，这使 `liveConfig` 对 mock ctx 与真实宿主都成立。
