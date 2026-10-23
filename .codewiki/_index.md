@@ -27,6 +27,7 @@
 - [[modules/integration-test-suites|integration-test-suites]]
 - [[modules/observability|observability]]
 - [[modules/orchestration-tests|orchestration-tests]]
+- [[modules/plugin-core|plugin-core]]
 - [[modules/project-docs|project-docs]]
 - [[modules/runtime-artifacts|runtime-artifacts]]
 - [[modules/test-suite|test-suite]]
