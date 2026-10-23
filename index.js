@@ -45,7 +45,7 @@ export const Config = z.object({
   batchProvider: z.string().default(DEFAULT_BATCH_PROVIDER).volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
   batchModel: z.string().default(DEFAULT_BATCH_MODEL).volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id'),
   batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
-  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅超 192k 兜底时使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
+  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅单文件连 128k 大档都装不下时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('编译请求并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -544,8 +544,8 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
     // 前缀，余下文件本会被「不得涉及」静默甩掉——截图场景）。两者都说明该模块一请求写不完。
     if (!tooBig && (overflowFiles.length > 0 || estimateTokens(batchArticlePrompt({ language, mission: t.mission, sourcesText: text, prevArticle })) > BATCH_TOKEN_BUDGET)) {
       // 总量超单请求预算：按单请求预算逐文件装填分批，产出观察任务组。
-      // 单文件上限用 BATCH_TOKEN_HARD_LIMIT（hy3 192k 能装下的大档）——只有单文件
-      // 连大档都装不下才算「装不下」，才转兜底通道。
+      // 单文件上限用 BATCH_TOKEN_HARD_LIMIT（128k，hy3 窗口扣掉输出上限后输入侧的真实天花板）
+      // ——只有单文件连大档都装不下才算「装不下」，才转兜底通道。
       const batches = []
       let hasOversizeSingle = false
       for (const rel of t.sources) {
@@ -557,6 +557,20 @@ export function prepareArticleTasks(tasks, { cwd, language }) {
           last.files.push(rel)
         } else {
           batches.push({ text: one.text, files: [rel] })
+        }
+      }
+      // 分不出多批（单文件占满全部体积，但仍在 128k 大档内）：不拆观察批、也不转兜底通道，
+      // 直接用大档单请求在插件内写完——这是 0.10.2 修掉的误判：旧逻辑把 batches.length===1
+      // 一并落到 forceSession，导致单文件 110k–128k 的文章白白交给会话通道。
+      // 仍以 BATCH_TOKEN_HARD_LIMIT 兜住整条 prompt（模板开销也计入），超了才真的转兜底。
+      if (!hasOversizeSingle && batches.length === 1) {
+        const bigPrompt = batchArticlePrompt({ language, mission: t.mission, sourcesText: batches[0].text, prevArticle })
+        if (estimateTokens(bigPrompt) <= BATCH_TOKEN_HARD_LIMIT) {
+          t.batchPrompt = bigPrompt
+          delete t.splitFor; delete t.composePlan
+          t.customId = t.customId ?? `t${prepared.length}`
+          prepared.push(t)
+          continue
         }
       }
       if (!hasOversizeSingle && batches.length > 1) {

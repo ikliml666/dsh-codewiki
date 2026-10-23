@@ -10,185 +10,172 @@ tags: [docs, 使用者文档, 上手指南, 演进史, 维护公约]
 
 ## Overview
 
-模块「project-docs」不是代码，而是插件 `@local/dsh-codewiki` 仓库根下**面向使用者的三份 Markdown 文档**，三者共同构成该插件对外的事实说明来源：
+本模块是仓库根三份「项目文档」的地图与行号索引——它们不是代码，但承担着插件的对外说明、架构速查与演进史三重职责：
 
-| 文档 | 规模 | 职责 | 主要读者 |
+| 文件 | 行数 | 角色 | 主要读者 |
 |------|------|------|----------|
-| `README.md` | 65 行 | 定位与上手：插件是什么、提供哪些工具、全部设置项、安装步骤、开发与验证方式 | 首次接触本插件的人与 agent |
-| `CodeWiki.md` | 65 行 | 代码结构与概念索引：单段全景 Overview + 按文件/函数的组件清单 + 架构图 + 数据流 + 已知问题；同时是 `codewiki_generate` 全量编译的入口文件（CodeWiki.md:3） | 要读懂/改动代码的人与 agent |
-| `CHANGELOG.md` | 515 行（约 90KB+） | 长期演进记录：50 个版本（0.1.0 → 0.10.0，2026-10-01 至 2026-10-23）倒序逐版记录背景/实现/测试/文档同步 | 追溯某个行为「为什么是这样」的人与 agent |
+| `README.md` | 65 行 | 使用者手册：工具表、设置项、安装步骤、开发约定 | 想装/想用本插件的人与 agent |
+| `CodeWiki.md` | 65 行 | 本仓库自身 wiki 的入口文件（CodeWiki.md 公约）：架构速查 + 组件清单 + 已知问题 | 想理解/改动代码的人与 agent |
+| `CHANGELOG.md` | 541 行 | 完整版本演进史：52 个版本节（0.1.0 → 0.10.2，2026-10-01 至 2026-10-23），最新在顶 | 排查回归、查行为何时引入的人与 agent |
 
-三份文档与编译产物的关系：`CodeWiki.md` 顶部声明它是「插件自身的项目 wiki 入口（CodeWiki.md 公约）」，`codewiki_generate` 以它为入口把全文细化成 `<repo>/.codewiki/` 下的文章群（CodeWiki.md:3、CodeWiki.md:7）——本文件（`.codewiki/modules/project-docs.md`）正是该流水线的产物之一。`README.md` 与 `CHANGELOG.md` 不参与编译，是纯手写文档，但 CHANGELOG 的每个大版本都有「文档：」条目记录三份的同步动作（如 CHANGELOG.md:16、CHANGELOG.md:55、CHANGELOG.md:463）。
+三份文档的当前口径均为 **0.10.2（2026-10-23）**。阅读顺序建议：上手先读 `README.md:5-22`（工具表 + 关键行为）；查配置读 `README.md:24-38`；理解架构读 `CodeWiki.md:30-47`（框图）；查「某行为是哪个版本引入/删除」用本文 Key Components 里的 CHANGELOG 版本索引表。
 
-读法建议（写给零上下文的 agent）：先读 README.md:5-13 定位四个工具 → 按需读 CodeWiki.md:9-28 找函数与行号指针 → 对某个行为有疑问时按版本索引表（见下）跳 CHANGELOG 对应节读「背景（用户需求）」。
+⚠️ 已知不一致（详见 Known Issues 第 1 条）：0.10.2 把会话通道装填上限从 150k 收到 128k，但文档同步不彻底，`README.md:10`、`CodeWiki.md:7`、`CodeWiki.md:12`、`CodeWiki.md:16`、`CodeWiki.md:56` 五处仍残留「150k」旧值；引用该预算时**以 128000 为准**（依据 `CHANGELOG.md:8` 与 `README.md:31`、`CodeWiki.md:41`）。
 
 ## Key Components
 
-### README.md（65 行）——定位与上手
+### README.md — 使用者手册（:1-65）
 
-- **标题与一句话简介**（README.md:1-3）：「把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：仓库内代码 wiki（`<repo>/.codewiki/`，随仓库提交共享）+ 智能体编排编译，支持为编译子代理指定模型」。
-- **「提供」表**（README.md:5-13），5 行清单：
-  - `cw` 工具：CLI 薄封装，子命令白名单 `status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall`（README.md:9）；
-  - `codewiki_generate` 工具：提交制编译，全部模型环节在插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k），零子代理、不委托发起会话的主模型（0.10.0），只有单个源文件连 150k 都装不下时才转会话通道兜底（README.md:10）；
-  - `codewiki_update` 工具（0.7.0 起）：固定 scope=auto 的提交制更新，调用即返回并明确「继续下一项、不要等待」；编译完成实时唤醒发起会话（0.8.0 起 steer 直达）并注入「编译完成·请提交改动」提醒（README.md:11）；
-  - `codewiki_progress` 工具：只读查编译进度，立即返回不等待，数据与侧边栏面板同源（README.md:12）；
-  - CodeWiki 设置页：插件管理页 Official 组条目（id `codewiki`），`view=summary` 一行简介、`view=page` 完整表单 + 保存条（README.md:13）。
-- **`codewiki_generate` 关键行为清单**（README.md:15-22），六条：
-  - `scope=auto`（默认）三态：无 wiki/未编译 → 全量；有变更 → 逐篇更新过期文章；最新 → 直接报告（README.md:17）；
-  - 全部模型环节（规划/写文章/横切/审校）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型（README.md:18）；
-  - 单篇文章失败只记账不中断；全部失败则不刷新编译基线（`meta update` 不执行，可安全重试）（README.md:19）；
-  - 请求并发 `maxConcurrency` 默认 2（硬顶 8）（README.md:20）；
-  - `serialProjects` 默认开：同一时刻只推进一个仓库的编译任务，后提交的进 `queued` 排队（README.md:21）；
-  - `scope=full`：跳过 clean 短路，即使 wiki 最新也强制全量重编（README.md:22）。
-- **设置段**（README.md:26-38）：开头说明设置页保存走 `configForms.mutate`（单层 op），与 patch 手改等价、热生效（README.md:26）；随后逐项列出全部配置键——`batchProvider`/`batchModel`（0.10.0，0.10.1 起为唯一通道：内置百炼直连已删，必须指向模型设置里已注册的 provider，留空直接提交失败；默认 `workbuddy`/`hy3`，走宿主 llm 服务，本地 OpenAI 兼容端点亦可，README.md:29）、`batchReasoningEffort`（0.10.0，可选值不手填，设置页从 `/api/codewiki/model-efforts` 实时读取，README.md:30）、`sessionTier`（0.9.2，仅超大单文件兜底转会话通道时钉死子智能体档位，留空=自动选路，README.md:31）、`binaryPath`（PATH 优先、捆绑 `bin/cw.exe` 兜底，0.2.3 起此顺序，README.md:33）、`maxConcurrency`（默认 2，1–8，README.md:34）、`serialProjects`（0.10.0 默认开，README.md:35）、`articleLanguage`（默认中文，README.md:36）、`updateReminder`（系统提示注入 wiki 维护提醒，默认开；0.2.5 起维护提醒、0.7.0 起兼职编译完成提交提醒、0.8.0 起编译终态另有实时 steer 唤醒，README.md:37）；收尾注明**所有设置 `volatile`，改完即生效**（README.md:38）。
-- **安装段**（README.md:48-63）：本地 file:/// 直挂四步——源码位置（README.md:48）、`profiles/web/cordis.patch.yml` 顶层追加 `insert` 条目（含 yaml 片段 `id: codewiki` + file:/// 路径，README.md:48-55）、`@deepseek-ai/schemastery` 走插件本地 junction（README.md:48）、重启 dsh 生效（客户端半侧由 `package.json` 的 `dsh.client.platform: "web"` + `exports["./client"]` 包声明驱动，README.md:55）。
-- **开发段**（README.md:57-65）：目录说明三行——`vendor/codewiki/` 上游源码（去除 .git）、`bin/cw.exe` cargo build --release 产物（git 内跟踪，改了 vendor 记得重编）、`client.js` 插件页设置卡片（README.md:60-62）；验证命令（README.md:65）：`node --check index.js client.js`、编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）、CLI 冒烟见 CHANGELOG 0.1.0、设置页需重启 dsh 后实测。
+- `README.md:1` 标题 `@local/dsh-codewiki`；`README.md:3` 一句话定位：把 [mraza007/codewiki]（Rust CLI `cw`，MIT）接入 DeepSeek Harness，wiki 落在仓库内 `<repo>/.codewiki/` 随仓库提交共享。
+- `README.md:5-13` 「提供」工具表（5 行）：
+  - `:9` `cw` — CLI 薄封装，子命令白名单 `status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall`。
+  - `:10` `codewiki_generate` — 提交制编译：判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划→写文章→横切→审校→索引 推进；全部模型环节插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k）；⚠️ 本行末尾「连 150k 都装不下才转会话通道」是 0.10.2 未同步的残留（应为 128k）。
+  - `:11` `codewiki_update` — 日常维护入口（0.7.0 起）：固定 scope=auto，调用即返回并明确「继续下一项、不要等待」；编译完成后 steer 直达发起会话（0.8.0 起）并注入「编译完成·请提交改动」提醒，把提交动作交回模型（插件不代跑 git）。
+  - `:12` `codewiki_progress` — 只读查进度（0.5.0.6 起）：stage/百分比/已写失败篇数/失败原因，立即返回不等待，与面板同源。
+  - `:13` CodeWiki 设置页 — 插件管理页 Official 组条目（id `codewiki`），`view=summary` 一行简介 / `view=page` 完整表单。
+- `README.md:15-22` `codewiki_generate` 关键行为 6 条：`:17` scope=auto 三态（无 wiki/未编译→全量；有变更→逐篇更新；最新→直接报告）；`:18` 全部模型环节共用 `batchProvider`/`batchModel` 一个模型，不委托发起会话的主模型；`:19` 单篇失败只记账不中断，全部失败不刷新基线（`meta update` 不执行，可安全重试）；`:20` 并发 `maxConcurrency` 默认 2（硬顶 8）；`:21` `serialProjects` 默认开（单项目串行，后提交项目进 `queued` 排队，前一个收尾后自动轮到）；`:22` `scope=full` 跳过 clean 短路强制全量。
+- `README.md:24-38` 设置段（命名空间 `codewiki`，全部 volatile 热生效 `:38`）：
+  - `:26` 设置页说明：`configForms.mutate` 单层 op 保存，与 patch 手改等价；0.9.1 起「编译模型」是 provider/model 两级下拉（目录来自 `/api/codewiki/models`，不读插件配置）；0.10.0 起思考程度从 `/api/codewiki/model-efforts` 读取，不再手填。
+  - `:29` `batchProvider` / `batchModel` — 编译模型，默认 `workbuddy`/`hy3`（免费、192k 上下文）；0.10.1 起是**唯一通道**，provider 必须指向模型设置里已注册的提供商，留空直接提交失败，插件不保存任何 API Key；本地 OpenAI 兼容端点只要注册过就能选到。
+  - `:30` `batchReasoningEffort` — 思考档位 id，可选值不手填，设置页从模型目录实时读取（`GET /api/codewiki/model-efforts`）；留空 = 该模型的默认档。
+  - `:31` `sessionTier`（0.9.2）— 仅超大单文件兜底时才用：超 110k 单请求预算先按 128k 大档重装（仍在插件内），连 128k 都装不下才转会话通道，此时钉死的子智能体档位 id（如 `codeiwiki`）；留空 = 自动选路。
+  - `:33` `binaryPath` — cw 路径；顺序：binaryPath → PATH 探测 → 捆绑兜底（0.2.3 起）。
+  - `:34` `maxConcurrency` — 默认 2（1–8，硬顶 8）。
+  - `:35` `serialProjects` — 单项目串行，默认开（0.10.0）：避免多项目同时编译抢占同一个免费额度。
+  - `:36` `articleLanguage` — 文章语言，默认中文。
+  - `:37` `updateReminder` — 系统提示注入维护提醒（0.2.5 起），仅当会话仓库存在 `.codewiki/` 时出现；0.7.0 起同一 section 兼职编译完成提醒（编译完成时间晚于 wiki 最后提交 → 注入「编译完成·请提交改动」）；0.8.0 起编译终态另有实时唤醒（steer，与子代理消息同机制）。
+- `README.md:45-60` 安装 4 步：`:44` 源码位置；`:45-52` profile `cordis.patch.yml` 顶层 `insert` 条目（id `codewiki` + file:/// 直挂 URL）；`:54` `@deepseek-ai/schemastery` 走插件本地 junction；`:55` 重启生效，client 半侧由 `package.json` 的 `dsh.client.platform: "web"` + `exports["./client"]` 声明驱动。
+- `README.md:57-65` 开发段：`:60-62` 目录三行（`vendor/codewiki/` 上游源码（去 .git）、`bin/cw.exe` cargo 产物 git 跟踪、`client.js` 浏览器半侧）；`:65` 验证命令 `node --check index.js client.js` + 编排冒烟 `node test-orchestration.mjs`。
 
-### CodeWiki.md（65 行）——代码结构与概念索引
+### CodeWiki.md — wiki 入口与架构速查（:1-65）
 
-- **入口声明**（CodeWiki.md:1-3）：「本文件是插件自身的项目 wiki 入口（CodeWiki.md 公约）。重启 dsh 后可用 `codewiki_generate` 对本仓库做全量编译，把本文细化成 `<repo>/.codewiki/` 文章」。
-- **Overview**（CodeWiki.md:5-7）：单段全景，覆盖——接入目标（mraza007/codewiki 的 Rust CLI `cw`）、wiki 位置（`<repo>/.codewiki/` 随仓库提交共享）、编译形态（纯提交制；六环节 规划/写文章/横切/合成/审校/索引收尾，合成仅在横切超预算拆分时出现）、模型通道（0.10.0 起默认宿主 `llm.stream()` 的 `workbuddy`/`hy3`：免费、192k 上下文、单请求输出上限 64k，`BATCH_TOKEN_BUDGET=110000`、`BATCH_TOKEN_HARD_LIMIT=150000`）、横切 map-reduce 拆分、请求并发默认 2、`serialProjects` 排队、会话通道兜底（完整写作指令写入任务文件、服务每 tick 轮询目标文件收割——frontmatter 校验 + 行号锚点校正后入账，超时默认 30 分钟按失败处理）、hindsight 式侧边栏面板（轮询进度、可取消）。
-- **Key Components**（CodeWiki.md:9-28）：按文件的组件清单，每个条目自带行号指针——
-  - `index.js`（插件全部逻辑，单文件 Node ESM，CodeWiki.md:11）下列 11 条：
-    - `Config`（index.js:42）——schemastery 设置全集：enabled / binaryPath / maxConcurrency（默认 2，1–8）/ serialProjects（默认 true）/ articleLanguage / updateReminder / 编译模型三项（`batchProvider` 默认 `workbuddy`，0.10.1 起必须是模型设置里已注册的 provider 留空即提交失败；`batchModel` 默认 `hy3`；`batchReasoningEffort` 默认空=模型默认档）/ `sessionTier`（仅超 150k 兜底转会话通道时钉死的子智能体档位 id，留空=自动选路），全部 `.volatile()`，execute/tick 时热读取（CodeWiki.md:12）；
-    - `buildSessionSteerText`（0.9.2，纯函数）——会话通道 steer 文本的唯一生成处，`dispatchSessionTasks` 与 `resendSessionSteer` 共用；含「存在理由」：编译主链不走档位路由，只有这段经过 delegate，不给 tier 就会按职责描述自动选路（CodeWiki.md:13）；
-    - `installUpdateReminder`——`agent/created` 时注册系统提示 section `codewiki:update-reminder`（TOOL_REPORT+1），text 回调实时求值；cordis 严格语义：未 inject 的服务属性访问即抛，服务缺失静默跳过（CodeWiki.md:14）；
-    - `runCw` / `parseStatus`——cw 子进程封装与三态判定解析（missing / uncompiled / clean / stale）（CodeWiki.md:15）；
-    - 模型执行模块——`estimateTokens`（CJK≈1/字、ASCII≈3.5 字符/token）/ `collectSources`（源码内联，token 预算装填，超预算返回 oversized）/ `prepareArticleTasks`（超预算拆观察批，单文件连 150k 大档都装不下的整任务进 sessionTasks）/ `classifySessionTask`（会话通道收割三态 harvest/timeout/wait）/ `startBatchChatRun` + `submitBatchFor` + `settleJob`（阶段执行器）/ `runRealtimeTasks`（后台并发池唯一执行器，0.10.1 起内部固定走 `llmChat`）/ `llmChat`（同步单轮，唯一模型通道：宿主 `llm.stream()`，凭证由 provider 自身配置决定）/ `listModelCatalog`（设置页级联目录）/ `resolveModelEfforts`（0.10.0，思考档位单独解析）（CodeWiki.md:16）；
-    - `createJobService`——宿主常驻服务：tick（默认 10s，`DSH_CODEWIKI_TICK_MS` 可调）推进阶段机 queued→plan→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`；单项目串行闸门（每 tick 先算 activeId）；会话通道三函数（`dispatchSessionTasks` 写任务文件+steer、`progressSessionTasks` 每 tick 收割、`resendSessionSteer` 重启接管后重发）；job 状态持久化 `os.tmpdir()/dsh-codewiki-jobs.json`（多实例安全：owner/tick 串行锁/mergeFromDisk/cancel 跨实例拾取）；批次断点 `os.tmpdir()/dsh-codewiki-batch-<sha1(cwd)>.json`；`writeValidated` 校验 frontmatter 后写盘（CodeWiki.md:17）；
-    - `cwToolDefinition`——cw CLI 封装工具（子命令白名单）（CodeWiki.md:18）；
-    - `generateToolDefinition`——纯提交制：normalizeCwd → 凭证解析 → cw status 判态 → 孤儿断点并入（resume）→ 任务预构建 → `submit` 即返回 `{submitted, jobId, stage}`，零 LLM 调用（CodeWiki.md:19）；
-    - webServer 端点——四个精确端点全部仅回环放行（否则 403）：`GET /api/codewiki/jobs`、`GET /api/codewiki/repos`（30s 缓存）、`GET /api/codewiki/models`（30s 缓存）、`POST /api/codewiki/control {action:'cancel'|'refresh'|'compile', jobId}`（CodeWiki.md:20）；
-    - `apply`——`ctx.inject(['tools','webServer','credentials'])` 注册两工具 + 端点；`agent/created` 布提醒（CodeWiki.md:21）。
-  - `vendor/codewiki/`（上游源码，去 .git）+ `bin/cw.exe`（cargo release 产物，git 跟踪）（CodeWiki.md:22）。
-  - `client.js`（插件页设置卡片 + 侧边栏面板，浏览器半侧，CodeWiki.md:24）：`__ModuleLoader__.load` 注册（`plugins.item` order 30 + `main`/`sidebar.panellist` 双 slot order 52，CodeWiki.md:24）、`CodewikiCard` 设置表单（快照订阅、provider/model 两级下拉、思考档位二次拉取、回环限定 + 60s 缓存、保存 `form.mutate` 单层 op + revision CAS，CodeWiki.md:25）、`CodewikiPanel` 任务面板（2s 轮询 `GET /api/codewiki/jobs`、七阶段步骤条 `queued` 最前、双通道吞吐徽标、用量行、加权总进度条、活动任务可取消，CodeWiki.md:26）。
-  - `cordis.patch.yml`（bundle 形式挂载补丁，本地开发走 profile patch 的 file:/// 直挂，CodeWiki.md:27）、`package.json`（`exports["./client"]` + `dsh.client.platform:"web"`，CodeWiki.md:28）。
-- **Architecture**（CodeWiki.md:30-47）：```text 流程框图——模型调用 `codewiki_generate(cwd, scope)`（纯提交零 LLM）→ 任务预构建 → `JobService.submit` 立即返回 `{submitted, jobId, stage}` → 宿主后台 tick 10s 推进 `queued→plan→articles→crosscut→review→index`（queued 仅单项目串行时出现；全部走插件内后台并发池，文章/校对单文件超 150k 才转会话通道兜底→会话模型派子智能体写盘→服务轮询收割）→ `cw index + cw meta update`（有成功文章才刷新基线）；面板 2s 轮询 GET jobs、取消走 POST control（CodeWiki.md:32-47）。
-- **Data Flow**（CodeWiki.md:49-51）：四条流一段写完——配置流（profile patch `config:` → cordis 注入 apply → liveConfig 每次解包，volatile 热生效）、凭证流（插件不保存也不传递任何密钥，请求经宿主 `llm.stream()`，凭证由所选 provider 在模型设置里的配置解析）、任务流（execute 预构建含 token 预算分块 → jobs.json 持久化 → 服务 tick 消费 → 批次断点跨会话续查 → 文章落盘 + 校对回写 → cw index/meta update）、面板流（浏览器 2s 轮询，回环 only）。
-- **Connections**（CodeWiki.md:53-56）：`[[codewiki-upstream]]`（vendor 布局 `<repo>/.codewiki/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`；上游技能正文仅存于 `vendor/codewiki/skills/`，插件不再注册技能）与宿主模型目录（`llm.listProviders` / `llm.listModels` / `llm.resolveModel`；hy3 的预算推导 110k/150k、可换模型设置里已注册的任意 provider/model 含本地 OpenAI 兼容端点；0.10.1 起 `batchProvider` 留空直接提交失败，内置百炼通道已删除）。
-- **Known Issues**（CodeWiki.md:65-65），六条：插件注册不热加载（改 index.js / profile patch 后需重启；client.js 的「非 client 包」判定按条目缓存同样需重启，CodeWiki.md:65）、`@deepseek-ai/schemastery` 靠插件本地 junction 换机器需重建（CodeWiki.md:65）、上游 `cw` 无 `--version` 且 `cw path` 未 init 时退回插件侧 fallback `<cwd>/.codewiki`（CodeWiki.md:65）、上游 stale 文章路径输出为反斜杠已被插件消费侧归一为 `/`（CodeWiki.md:65）、断点文件仅记录 stage/crosscutSplit 且 0.5.x 的 24h 批次窗口语义已随 0.6.0 删除（CodeWiki.md:65）、会话通道任务依赖发起会话（面板/自动调度提交的 job 没有会话可 steer，超预算文章/校对任务直接整体失败并明示原因；超时默认 30 分钟 `DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调，不降级百炼；任务文件落 `os.tmpdir()/dsh-codewiki-session-tasks/`，CodeWiki.md:65）。
+- `CodeWiki.md:3` 入口声明：本文件是插件自身的项目 wiki 入口（CodeWiki.md 公约），重启 dsh 后可用 `codewiki_generate` 全量编译细化成 `<repo>/.codewiki/` 文章。（入口文件本身由 0.5.0.1 起「编译收尾自动补建」，见 `CHANGELOG.md:255-265`。）
+- `CodeWiki.md:5-7` Overview：编译完全不走子代理、不委托发起会话的主模型；`codewiki_generate` 纯提交制，六环节（规划/写文章/横切/合成/审校/索引收尾，合成仅横切超预算拆分时出现）全部插件内由编译模型通道完成；token 预算 110k 分块装填；横切超预算自动 map-reduce 拆分；`serialProjects` 排队。⚠️ `:7` 末段「连 150k 大档都装不下才转会话通道」是残留（应为 128k）。
+- `CodeWiki.md:9-28` Key Components（描述 `index.js` / `client.js` 的组件清单——实现细节见 [[plugin-core]] 与 [[client-interface]]）：
+  - `:11-21` `index.js`（单文件 Node ESM）：`:12` `Config`（index.js:42，⚠️ 本条「仅超 150k 兜底」为残留）；`:13` `buildSessionSteerText`（0.9.2 纯函数，会话通道 steer 文本唯一生成处，tier 非空时要求 delegate 显式传 tier——编译主链不走档位路由，只有这段经过 delegate）；`:14` `installUpdateReminder`（`agent/created` 注册 section `codewiki:update-reminder`，门控看 `<repo>/CodeWiki.md` 入口而非 `.codewiki/` 目录，服务缺失静默跳过）；`:15` `runCw` / `parseStatus`（三态判定 missing/uncompiled/clean/stale）；`:16` 模型执行模块（`estimateTokens` / `collectSources` / `prepareArticleTasks` / `classifySessionTask` / `startBatchChatRun`+`submitBatchFor`+`settleJob` / `runRealtimeTasks` / `llmChat` / `listModelCatalog` / `resolveModelEfforts`，⚠️ 本条「单文件连 150k 大档」为残留）；`:17` `createJobService`（tick 10s、七阶段机 queued→plan→articles→crosscut→compose→review→index、单项目串行闸门、会话通道三函数、jobs.json 持久化、断点文件、`writeValidated`）；`:18` `cwToolDefinition`（子命令白名单）；`:19` `generateToolDefinition`（纯提交制：判态→断点续查→任务预构建→submit，零 LLM 调用）；`:20` 四个 webServer 端点（仅回环放行：jobs/repos/models/control）；`:21` `apply`。
+  - `:22` `vendor/codewiki/` 上游源码（去 .git）+ `bin/cw.exe` cargo 产物（git 跟踪）。
+  - `:23-26` `client.js`：`:24` 注册（`plugins.item` order 30 + `main`/`sidebar.panellist` 双 slot order 52）；`:25` `CodewikiCard`（设置表单：运行节 + 编译模型节，provider/model 目录与思考档位来自两个回环端点，0.10.1 删思考预算输入与 provider 空值项）；`:26` `CodewikiPanel`（2s 轮询、七阶段步骤条、双通道吞吐徽标、用量行、活动流、取消）。
+  - `:27` `cordis.patch.yml` 挂载补丁；`:28` `package.json` client 扫描声明（改 dsh.client 后需重启）。
+- `CodeWiki.md:30-47` Architecture 框图（```text 围栏）：模型调用 codewiki_generate → 任务预构建 → JobService.submit 即返回 → 宿主后台 tick 10s 推进阶段机 → cw index + meta update，加面板 2s 轮询支线；`:41` 标注「文章/校对单文件超 128k 才转会话通道兜底」（已是 128k 口径）。
+- `CodeWiki.md:49-51` Data Flow 四条流（`:51`）：配置流（patch config → cordis 注入 apply → liveConfig 每次解包热读）、凭证流（插件不保存也不传递任何密钥，请求走宿主 `llm.stream()`，凭证由 provider 自身配置解析）、任务流（预构建 → jobs.json 持久化 → tick 消费（先排队）→ 批次断点 → 落盘/回写 → cw index/meta update）、面板流（浏览器 2s 轮询回环端点）。
+- `CodeWiki.md:53-56` Connections：`:55` [[codewiki-upstream]]（vendor/codewiki 布局 `<repo>/.codewiki/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`）；`:56` 宿主模型目录（`llm.listProviders`/`listModels`/`resolveModel`；⚠️ 本条仍写 `BATCH_TOKEN_HARD_LIMIT=150000`，应为 128000）。
+- `CodeWiki.md:58-65` Known Issues 六条：`:60` 插件注册/client 声明不热加载（需重启 dsh）；`:61` schemastery junction 换机器需重建；`:62` 上游 `cw` 无 `--version`、未 init 仓库 `cw path` 走插件 fallback；`:63` 上游 stale 路径反斜杠已归一；`:64` 断点文件仅记阶段机位置（0.5.x 批量 24h 窗口语义已随 0.6.0 删除）；`:65` 会话通道任务依赖发起会话可用（面板/自动调度提交的 job 无会话可 steer，直接失败并明示原因；超时默认 30 分钟）。
 
-### CHANGELOG.md（515 行，约 90KB+）——长期演进记录
+### CHANGELOG.md — 版本演进史（:1-541）
 
-**结构与条目模板**（每个版本一节）：
+`CHANGELOG.md:1` 标题；`:2` 起为版本节，**倒序排列（最新在顶）**。0.10.2 时共 52 个版本节，全部节头行号如下（区间 = 本节头到下一节头前一行；最新节在最上 `:3`）：
 
-- `## <版本> — <日期>`（如 `## 0.10.0 — 2026-10-23`，CHANGELOG.md:3）；
-- `### <类型>：<一句话主题>（触发来源）`（如 CHANGELOG.md:20 `### 修复：自建 codewiki 档位在写 CodeWiki 时从未被调用（用户反馈：创建了 codewiki 档位，写 wiki 时模型仍走 default 档）`）；类型取值：功能 / 修复 / 适配 / 审查修复；
-- 固定条目模式：`- 背景（用户需求）：…`（决策动机，多数版本有，如 CHANGELOG.md:7）、`- 实现 ①②③…（<文件> <符号/位置>）：<行为>`（如 0.10.0 的实现①-⑦，CHANGELOG.md:8-14）、`- 删除：…`（如 0.9.0 删超大兜底段，CHANGELOG.md:53）、`- 测试（test-*.mjs）：…N → M 项全过`（断言数前后对照，如 CHANGELOG.md:15、CHANGELOG.md:27）、`- 文档：README/CodeWiki.md 同步；版本 x.y.z`（如 CHANGELOG.md:16、CHANGELOG.md:29）、`- 验证：…`（早期版本有，如 0.1.0 的验证记录 CHANGELOG.md:511-515）。
+| 版本 | 日期 | 主题 | 行号 |
+|------|------|------|------|
+| 0.10.2 | 2026-10-23 | 大档装填上限 150k 越界修复：`BATCH_TOKEN_HARD_LIMIT` 150000→128000（192000−64000），`BATCH_TOKEN_BUDGET` 维持 110000 | :3-14 |
+| 0.10.1 | 2026-10-23 | 删除内置百炼直连通道（`bailianChat`、`resolveBatchApiKey`），编译只走模型设置里的 provider，`batchProvider` 留空即提交失败 | :15-28 |
+| 0.10.0 | 2026-10-23 | 默认 `workbuddy`/`hy3` 主模型；预算 110k/150k 重算；删 `runMainModelPlan`；`resolveModelEfforts` + `/api/codewiki/model-efforts`；`serialProjects` 默认开；并发默认 2 | :29-43 |
+| 0.9.2 | 2026-10-23 | 自建 `sessionTier` 档位打通（排查结论：编译主链不问档位）；`buildSessionSteerText` 收口 steer 文案 | :44-56 |
+| 0.9.1 | 2026-10-22 | 编译模型可选宿主已注册 provider/model（本地 9B 可用）；`listModelCatalog` + `GET /api/codewiki/models` | :57-68 |
+| 0.9.0 | 2026-10-21 | 超预算文章/校对转「会话通道」（`dispatchSessionTasks`/`progressSessionTasks`/`classifySessionTask` 三态收割，超时默认 30 分钟） | :69-82 |
+| 0.8.8 | 2026-10-19 | `fixAnchors` 行号锚点确定性自动修正（第四层兜底） | :83-93 |
+| 0.8.7 | 2026-10-19 | `numberLines` 行号前缀治行号幻觉（三层修复） | :94-105 |
+| 0.8.6 | 2026-10-18 | `llmRef` 修 cordis 严格 getter（规划真正继承对话模型） | :106-117 |
+| 0.8.5 | 2026-10-18 | 适配 DSH 0.2.1-rc.2（source 形态 `{kind:'plugin:codewiki'}` + `engines.dsh` 声明） | :118-128 |
+| 0.8.4 | 2026-10-15 | 文章阶段超预算分割：观察批 map + 合成请求 reduce（避开 32k 三倍价） | :129-142 |
+| 0.8.3 | 2026-10-15 | 规划阶段改走主模型 `runMainModelPlan`（0.10.0 已删除） | :143-153 |
+| 0.8.2 | 2026-10-15 | progress schema `type` 数组致 4 工具全部消失（`oneOf` 等价形态修复） | :154-164 |
+| 0.8.1 | 2026-10-14 | 工具拒绝编译时报错带命中的排除项（`excludedItem`） | :165-173 |
+| 0.8.0 | 2026-10-14 | 编译终态实时唤醒发起会话（`wakeCompileSession`，借用子代理 send_message 机制） | :174-185 |
+| 0.7.0 | 2026-10-14 | 新增 `codewiki_update` 日常维护工具 + 编译完成提交提醒（`commitHintText`） | :186-195 |
+| 0.6.0 | 2026-10-13 | 删除百炼批量推理通道，编译全部改走普通入口（batchMinTokens 等设置删除） | :196-207 |
+| 0.5.0.6 | 2026-10-12 | 新增 `codewiki_progress` 只读查进度工具 | :208-218 |
+| 0.5.0.5 | 2026-10-11 | 百炼通道从 Batch File 切换为 Batch Chat（同步端点实时价 5 折） | :219-227 |
+| 0.5.0.4 | 2026-10-11 | 封死「手工流程」逃生通道：reminderText 收口为「收尾必须调用 codewiki_generate」 | :228-237 |
+| 0.5.0.3 | 2026-10-10 | `test-wiki-anchors.mjs` 行号锚点自动校验守卫 | :238-245 |
+| 0.5.0.2 | 2026-10-10 | cw 真源码本地重建（vendor/codewiki 成为可维护 fork）+ 反斜杠 Rust 层根治 | :246-254 |
+| 0.5.0.1 | 2026-10-10 | 编译收尾自动补建 CodeWiki.md 入口 + Windows 路径规范化收口 | :255-265 |
+| 0.5.0 | 2026-10-07 | 面板信息密度改版（六阶段步骤条/双通道吞吐/用量统计/加权总进度） | :266-278 |
+| 0.4.11.2 | 2026-10-07 | 阶段实时阈值上限放宽（大仓库强制实时） | :279-285 |
+| 0.4.11.1 | 2026-10-07 | 孤儿任务接管（宿主重启僵尸任务修复，心跳停更 5 分钟判定） | :286-292 |
+| 0.4.11 | 2026-10-07 | 任务进度条与逐任务明细（`taskList`/`batchProgress`） | :293-301 |
+| 0.4.10 | 2026-10-06 | 端点加固与诊断（workspaceRegistry 降级、500+stack、`DSH_CODEWIKI_REPOS_FILE`、output schema 修复） | :302-311 |
+| 0.4.9 | 2026-10-06 | 工作区任务过滤（workspaceOnly，hindsight 同机制） | :312-319 |
+| 0.4.8 | 2026-10-06 | knownRepos 仓库发现 + 一键排除 + control refresh | :320-328 |
+| 0.4.7 | 2026-10-06 | excludePaths 排除清单 + 自动更新 + 面板三标签页 + `GET /api/codewiki/repos` | :329-338 |
+| 0.4.6 | 2026-10-06 | 面板收敛（焦点卡片）+ 实时 tps + Temp 残留自动清理 | :339-347 |
+| 0.4.5 | 2026-10-06 | 阶段实时阈值 batchMinTokens 混合通道（0.6.0 随批量通道一并删除） | :348-355 |
+| 0.4.4 | 2026-10-06 | 侧边栏面板完善（滚动/工作区分组/设置入面板/Key 遮蔽） | :356-365 |
+| 0.4.3 | 2026-10-06 | 审查修复：取消可靠性（jobServiceRef 多实例串台根因）、多实例安全、断点保真 | :366-385 |
+| 0.4.2 | 2026-10-06 | 超大任务升 256k 档（3 倍价）继续走批量 | :386-394 |
+| 0.4.1 | 2026-10-06 | 横切精准拆分（map-reduce）+ 校对动态预算 | :395-402 |
+| 0.4.0 | 2026-10-06 | 服务化全批量流水线：零子代理 + 侧边栏面板 + 32k 分块并行（架构定型） | :403-414 |
+| 0.3.2 | 2026-10-04 | 批量推理异步化：提交即返回，宿主后台链自动收尾（batchAsync） | :415-423 |
+| 0.3.1 | 2026-10-04 | 批量凭证自动取模型设置「阿里百炼云」渠道（resolveBatchApiKey，0.10.1 删） | :424-429 |
+| 0.3.0 | 2026-10-04 | 写文章环节改走百炼批量推理（Batch File，实时价 50%） | :430-441 |
+| 0.2.8 | 2026-10-03 | 子代理活动行 label 带模型前缀 | :442-448 |
+| 0.2.7 | 2026-10-03 | 插件整体未装载修复（严格 cordis getter 语义：未 inject 访问即抛） | :449-456 |
+| 0.2.6 | 2026-10-03 | 设置页支持选择子代理思考程度（defaultReasoningEffort） | :457-465 |
+| 0.2.5 | 2026-10-03 | wiki 维护提醒注入会话系统提示（installUpdateReminder） | :466-473 |
+| 0.2.4 | 2026-10-03 | 子代理模型路由两条编排路径被静默丢弃（修复） | :474-481 |
+| 0.2.3 | 2026-10-03 | MSYS 路径误判/二进制顺序/wiki 位置三缺陷（normalizeCwd 引入） | :482-490 |
+| 0.2.2 | 2026-10-02 | 审查修复 8 项（scope=full 不被 clean 短路等） | :491-503 |
+| 0.2.1 | 2026-10-02 | 子代理服务两处接线断裂（codewiki_generate 一进编译路径即抛，0.1.0 起从未真正可用） | :504-511 |
+| 0.2.0 | 2026-10-01 | 插件页设置 UI（client.js 浏览器半侧首次出现） | :512-521 |
+| 0.1.1 | 2026-10-01 | 移除 codewiki 技能；默认模型改 aliyun-bailian/qwen3.8-flash | :522-526 |
+| 0.1.0 | 2026-10-01 | 首次发布（cw + codewiki_generate + vendor 编译）+ CLI 冒烟验证记录 | :527-541 |
 
-**全部 50 个版本的行号索引**（倒序，接手时按行号直接跳转）：
+演进主线（时间正序，7 段）：
 
-| 版本 | 日期 | 主题 | CHANGELOG 行号 |
-|--------|------------|------|----------------|
-| 0.10.0 | 2026-10-23 | hy3 主模型、全流程回插件内、单项目串行、思考程度从模型目录读取 | :3-16 |
-| 0.9.2 | 2026-10-23 | `sessionTier` 自建档位、`buildSessionSteerText` 收口 steer 文案 | :17-29 |
-| 0.9.1 | 2026-10-22 | 编译模型可选宿主 provider/model（本地 9B 可用）、`listModelCatalog` | :31-41 |
-| 0.9.0 | 2026-10-21 | 超 32k 文章/校对转「会话通道」（`classifySessionTask` 三态收割） | :43-55 |
-| 0.8.8 | 2026-10-19 | `fixAnchors` 行号锚点确定性自动修正（第四层兜底） | :57-66 |
-| 0.8.7 | 2026-10-19 | `numberLines` 行号前缀治行号幻觉（三层修复） | :68-78 |
-| 0.8.6 | 2026-10-18 | `llmRef` 修 cordis 严格 getter（规划继承对话模型） | :80-90 |
-| 0.8.5 | 2026-10-18 | 适配 DSH 0.2.1-rc.2（source 形态 + engines.dsh 声明） | :92-101 |
-| 0.8.4 | 2026-10-15 | 文章阶段超预算分割：观察批 map + 合成 reduce | :103-115 |
-| 0.8.3 | 2026-10-15 | 规划阶段改走主模型 `runMainModelPlan`（0.10.0 已删除） | :117-126 |
-| 0.8.2 | 2026-10-15 | progress schema type 数组致 4 工具全部消失（oneOf 等价修复） | :128-137 |
-| 0.8.1 | 2026-10-14 | 工具拒绝编译时报错带命中排除项（`excludedItem`） | :139-146 |
-| 0.8.0 | 2026-10-14 | 编译终态实时唤醒发起会话（`wakeCompileSession`） | :148-158 |
-| 0.7.0 | 2026-10-14 | `codewiki_update` 工具 + 编译完成提交提醒（`commitHintText`） | :160-168 |
-| 0.6.0 | 2026-10-13 | 删除百炼批量通道，全部走普通入口 chat/completions | :170-180 |
-| 0.5.0.6 | 2026-10-12 | `codewiki_progress` 只读查进度工具 | :182-191 |
-| 0.5.0.5 | 2026-10-11 | 百炼 Batch File → Batch Chat（同步端点实时价 5 折） | :193-200 |
-| 0.5.0.4 | 2026-10-11 | 封死「手工流程」改 wiki 的逃生通道（reminderText 收口） | :202-210 |
-| 0.5.0.3 | 2026-10-10 | `test-wiki-anchors.mjs` 行号锚点自动校验守卫 | :212-218 |
-| 0.5.0.2 | 2026-10-10 | cw 真源码本地重建 fork + 反斜杠 Rust 层根治 | :220-227 |
-| 0.5.0.1 | 2026-10-10 | 编译收尾自动补建 `CodeWiki.md` 入口 + Windows 路径收口 | :229-238 |
-| 0.5.0 | 2026-10-07 | 面板信息密度改版（六阶段步骤条/双通道吞吐/用量统计） | :240-251 |
-| 0.4.11.2 | 2026-10-07 | 阶段实时阈值上限放宽（大仓库强制实时） | :253-258 |
-| 0.4.11.1 | 2026-10-07 | 孤儿任务接管（宿主重启僵尸任务修复） | :260-265 |
-| 0.4.11 | 2026-10-07 | 任务进度条与逐任务明细（taskList/batchProgress） | :267-274 |
-| 0.4.10 | 2026-10-06 | 端点加固与诊断（真宿主 HTTP 400 排查产物） | :276-284 |
-| 0.4.9 | 2026-10-06 | 工作区任务过滤（workspaceOnly，hindsight 同机制） | :286-292 |
-| 0.4.8 | 2026-10-06 | knownRepos 仓库发现 + 一键排除 + control refresh | :295-301 |
-| 0.4.7 | 2026-10-06 | 排除清单 + 自动更新 + 面板三标签页 + GET /api/codewiki/repos | :303-311 |
-| 0.4.6 | 2026-10-06 | 面板收敛 + 实时 tps + Temp 残留自动清理 | :313-320 |
-| 0.4.5 | 2026-10-06 | 阶段实时阈值 batchMinTokens 混合通道（0.6.0 删除） | :322-328 |
-| 0.4.4 | 2026-10-06 | 侧边栏面板完善（真实环境反馈） | :330-338 |
-| 0.4.3 | 2026-10-06 | 审查修复：取消可靠性、多实例安全、断点保真 | :340-358 |
-| 0.4.2 | 2026-10-06 | 超大任务升 256k 档（3 倍价）继续走批量 | :360-367 |
-| 0.4.1 | 2026-10-06 | 横切精准拆分（map-reduce）+ 校对动态预算 | :369-375 |
-| 0.4.0 | 2026-10-06 | 服务化全批量流水线：零子代理 + 侧边栏面板 + 32k 分块并行 | :377-387 |
-| 0.3.2 | 2026-10-04 | 批量推理异步化：提交即返回，宿主后台链自动收尾 | :389-396 |
-| 0.3.1 | 2026-10-04 | 批量凭证自动取模型设置「阿里百炼云」渠道 | :398-402 |
-| 0.3.0 | 2026-10-04 | 写文章环节改走百炼批量推理（Batch File，实时价 50%） | :404-414 |
-| 0.2.8 | 2026-10-03 | 子代理活动行 label 带模型前缀 | :416-421 |
-| 0.2.7 | 2026-10-03 | 插件整体未装载修复（严格 cordis getter 语义） | :423-429 |
-| 0.2.6 | 2026-10-03 | 设置页支持选择子代理思考程度 | :431-438 |
-| 0.2.5 | 2026-10-03 | wiki 维护提醒注入会话系统提示 | :440-446 |
-| 0.2.4 | 2026-10-03 | 子代理模型路由两条编排路径被静默丢弃（修复） | :448-454 |
-| 0.2.3 | 2026-10-03 | MSYS 路径误判 / 二进制顺序 / wiki 位置三缺陷 | :456-463 |
-| 0.2.2 | 2026-10-02 | 审查修复 8 项（scope=full 不短路等） | :465-476 |
-| 0.2.1 | 2026-10-02 | 子代理服务两处接线断裂（0.1.0 起从未真正可用） | :478-484 |
-| 0.2.0 | 2026-10-01 | 插件页设置 UI（client.js 浏览器半侧） | :486-494 |
-| 0.1.1 | 2026-10-01 | 移除 codewiki 技能、默认模型改 aliyun-bailian/qwen3.8-flash | :496-499 |
-| 0.1.0 | 2026-10-01 | 首次发布 + CLI 冒烟验证记录 | :501-515 |
-
-**演进主线**（时期归纳，9 段）：
-
-1. **0.1.x（10-01）**：子代理编排时代。cw CLI 封装 + `codewiki_generate` 智能体编排（规划 → 分批写文章 → 横切 → 审校 → index/meta update），带技能、默认走便宜模型（CHANGELOG.md:501-515、CHANGELOG.md:496-499）。
-2. **0.2.x（10-01→10-03）**：工程化补课。设置页 UI（0.2.0）、接线/路由/路径/严格语义四类修复（0.2.1/0.2.3/0.2.4/0.2.7）、系统提示维护提醒（0.2.5）、思考程度设置（0.2.6）。
-3. **0.3.x（10-04）**：成本优化第一轮。写文章环节转百炼批量推理（0.3.0）→ 凭证自动解析（0.3.1）→ 批量异步化（0.3.2）。
-4. **0.4.x（10-06→10-07）**：架构定型。服务化流水线零子代理（0.4.0）、横切 map-reduce + 校对动态预算（0.4.1）、取消/多实例/断点审查修复（0.4.3）、面板与运维能力齐备（0.4.4-0.4.11.2：排除清单、自动更新、工作区过滤、进度条、孤儿接管）。
-5. **0.5.x（10-07→10-12）**：可靠性收口。面板改版（0.5.0）、CodeWiki.md 入口自动补建（0.5.0.1）、cw fork 重建（0.5.0.2）、锚点守卫与封死手改（0.5.0.3/0.5.0.4）、Batch Chat（0.5.0.5）、progress 工具（0.5.0.6）。
-6. **0.6.0（10-13）**：删除批量专用通道，全部走普通入口；后台执行器骨架保留（CHANGELOG.md:170-180）。
-7. **0.7.0-0.8.x（10-14→10-19）**：与宿主/会话的协同。codewiki_update + 提交提醒（0.7.0）、实时唤醒（0.8.0）、宿主适配与 schema 修复（0.8.2/0.8.5）、规划主模型两轮（0.8.3 引入、0.8.6 修复、0.10.0 删除）、行号幻觉三层修复 + fixAnchors（0.8.7/0.8.8）。
-8. **0.9.x（10-21→10-23）**：会话通道与模型开放。超预算文章/校对转会话通道（0.9.0）、编译模型开放宿主任意 provider/model（0.9.1）、sessionTier（0.9.2）。
-9. **0.10.0（10-23）**：当前形态。免费 hy3 主模型（`workbuddy`/`hy3`）、全流程回插件内、单项目串行、思考程度从模型目录读取（CHANGELOG.md:3-16）。
+1. **0.1.x 奠基期（:522-541）**：0.1.0 首发工具面（`cw` CLI 封装 + `codewiki_generate` 子代理编排 + vendor 上游编译，`:527-541`）；0.1.1 删技能只留纯工具面、默认模型固定百炼 qwen3.8-flash（`:522-526`）。
+2. **0.2.x 子代理编排修补期（:442-521）**：设置 UI 落地（0.2.0 `:512-521`）后发现整条编排路径从未真正可用——0.2.1 两处接线断裂（`:504-511`）、0.2.2 审查 8 项（`:491-503`）、0.2.3 路径三缺陷（`:482-490`）、0.2.4 路由静默丢弃（`:474-481`）接连修复；0.2.5 系统提示提醒（`:466-473`）、0.2.6 思考程度（`:457-465`）、0.2.7 整体未装载（严格 cordis 语义，`:449-456`）、0.2.8 label 前缀（`:442-448`）。
+3. **0.3.x-0.4.x 批量降本与服务化（:286-441）**：0.3.0 写文章走百炼批量（`:430-441`）→ 0.3.1 凭证自动化（`:424-429`）→ 0.3.2 异步化（`:415-423`）→ **0.4.0 服务化全批量流水线（架构定型：纯提交制 + 宿主常驻 JobService + 零子代理 + 侧边栏面板，`:403-414`）** → 0.4.1 横切 map-reduce（`:395-402`）→ 0.4.2 升 256k 档（`:386-394`）→ 0.4.3 审查修复（`:366-385`）→ 0.4.4-0.4.11 面板与仓库管理（`:279-365`）。
+4. **0.5.0.x 质量与 fork 期（:208-278）**：面板改版（0.5.0 `:266-278`）→ CodeWiki.md 入口自动补建（0.5.0.1 `:255-265`）→ vendor fork 重建（0.5.0.2 `:246-254`）→ 锚点守卫测试（0.5.0.3 `:238-245`）→ 封死手工流程（0.5.0.4 `:228-237`）→ Batch Chat（0.5.0.5 `:219-227`）→ progress 工具（0.5.0.6 `:208-218`）。
+5. **0.6.0-0.8.5 全实时化与可靠性期（:118-207）**：0.6.0 删批量通道全走普通入口（`:196-207`）→ 0.7.0 update 工具 + 提交提醒（`:186-195`）→ 0.8.0 实时唤醒（`:174-185`）→ 0.8.1/0.8.2 修复（`:154-173`）→ 0.8.3 主模型规划（`:143-153`，后被 0.10.0 删）→ 0.8.4 观察批分割（`:129-142`）→ 0.8.5 DSH 0.2.1-rc.2 适配（`:118-128`）。
+6. **0.8.6-0.9.x 锚点与会话通道期（:44-117）**：0.8.6 `llmRef`（`:106-117`）→ 0.8.7/0.8.8 行号锚点双层修复（`:94-105`、`:83-93`）→ 0.9.0 超预算转会话通道（`:69-82`）→ 0.9.1 编译模型可选宿主 provider（`:57-68`）→ 0.9.2 `sessionTier`（`:44-56`）。
+7. **0.10.x 现状定型（:3-43）**：0.10.0 hy3 免费主模型 + 全流程回插件内 + 单项目串行（`:29-43`）→ 0.10.1 唯一通道（删百炼直连，`:15-28`）→ 0.10.2 大档 128k 修复（`:3-14`）。
 
 ## Architecture
 
+三份文档的分工与联动（行号为 0.10.2 时刻快照）：
+
 ```text
-   使用者（agent/人类）读取顺序：① 定位上手  ② 结构概念  ③ 演进查询
-          │                     │                      │
-          ▼                     ▼                      ▼
- ┌──────────────────┐  ┌───────────────────┐  ┌─────────────────────┐
- │ README.md（65行）│  │ CodeWiki.md（65行）│  │ CHANGELOG.md（515行）│
- │ 工具表 :5-13     │  │ 组件清单 :9-28    │  │ 版本节倒序 :3-515   │
- │ 设置表 :24-38    │  │ 架构图 :30-47     │  │ 50 版 0.1.0→0.10.0  │
- │ 安装 :40-55      │  │ 已知问题 :58-65   │  │ 每版=背景+实现+测试 │
- └────────┬─────────┘  └─────────┬─────────┘  └─────────────────────┘
-          │                      │ CodeWiki.md 公约（:3）
-          │                      ▼
-          │        codewiki_generate 全量编译（六环节流水线）
-          │                      ▼
-          │        <repo>/.codewiki/ 文章群（本文即产物之一）
-          │
-          └── 版本发布：CHANGELOG 顶部插入新节 + README/CodeWiki 同步改写
-              （同步存证 = 各版「文档：」条目，如 CHANGELOG.md:16/:55/:463）
+┌────────────────────────────────────────────────────────────┐
+│           仓库根项目文档三件套（本模块全部内容）            │
+├────────────────────┬───────────────────┬───────────────────┤
+│ README.md  :1-65   │ CodeWiki.md :1-65 │ CHANGELOG.md      │
+│ 使用者手册：       │ wiki 入口公约：   │ :1-541（52 版）   │
+│ · 工具表    :5-13  │ · Overview :5-7   │ · 最新节在顶 :3   │
+│ · 关键行为  :15-22 │ · 组件清单 :9-28  │ · 最早节在底      │
+│ · 设置      :24-38 │ · 架构框图 :30-47 │   :527（0.1.0）   │
+│ · 安装      :40-55 │ · Data Flow :49-51│ · 版本倒序排列    │
+│ · 开发      :57-65 │ · 已知问题 :58-65 │                   │
+└─────────┬──────────┴────────┬──────────┴─────────┬─────────┘
+          │ 描述的对象         │ 架构口径同源        │ 行号锚点
+          ▼                    ▼                    ▼
+   [[plugin-core]]      [[documentation-     每次发布在 :3 前
+   等实现模块文章        and-config]] 等      插入新节，其后全部
+                        文章                  旧行号整体下移
 ```
 
 ## Data Flow
 
-**消费流（读）**——三类典型入口：
+两条流向：
 
-1. 新会话定位工具与行为口径：README.md:5-13（工具表）→ README.md:15-22（generate 关键行为）→ README.md:24-38（设置表）。
-2. 理解代码结构：CodeWiki.md:9-28（组件清单按 `index.js:行号` 跳源码）→ CodeWiki.md:30-47（流水线全景）→ 更细粒度读 `<repo>/.codewiki/` 文章群（由 CodeWiki.md 入口编译产出）。
-3. 追溯决策：按本文 Key Components 的版本索引表定位 CHANGELOG 节 → 读「背景（用户需求）」拿决策原因、「实现 ①②③」拿改动位置、「测试」拿验证手段。
+- **消费流（agent 读文档）**：上手/装插件 → `README.md:5-22`（工具表与关键行为）+ `README.md:40-55`（安装）；查/改设置 → `README.md:24-38`（设置段）+ `CodeWiki.md:12`（Config 字段）；理解架构 → `CodeWiki.md:30-47`（框图）+ `CodeWiki.md:49-51`（四条流）；排查「行为何时引入/删除」 → 本文版本索引表 → CHANGELOG 对应版本节原文；遇到已知坑 → `CodeWiki.md:58-65` + 本文 Known Issues。
+- **维护流（发布版本时写文档）**：版本发布 → ① `CHANGELOG.md` 在 `:3` 前插入新版本节（倒序约定，含背景/实现/测试/文档同步各条）→ ② 同步 `README.md` 工具表/设置段（例：0.10.2 的 `CHANGELOG.md:11`「README 的 sessionTier 段」）→ ③ 同步 `CodeWiki.md` 架构口径（例：同条「CodeWiki.md 架构图的超预算说明同步为 128k」）→ ④ `package.json` 版本号 → ⑤ 收尾调用 `codewiki_generate` 重编译 wiki（0.5.0.4 起的硬纪律，`CHANGELOG.md:233`：「收尾未调用 codewiki_generate 视为任务未完成」）。
 
-**维护流（写）**——三份文档的更新纪律：
-
-1. 版本发布时 CHANGELOG.md 顶部插入新 `## <版本> — <日期>` 节（倒序追加，当前最新为 0.10.0，CHANGELOG.md:3），README/CodeWiki.md 受影响段落同步改写；同步动作以「文档：」条目存证（如 0.10.0 CHANGELOG.md:16、0.9.0 CHANGELOG.md:55、0.2.3 CHANGELOG.md:463）。
-2. `.codewiki/` 文章群（含本文）由 `codewiki_generate` 流水线产出，收尾必须调用它更新（CHANGELOG.md:207 记录的纪律：手改不进流水线、不被面板记录、会被下次编译覆盖）。
-3. `updateReminder` 三层提醒机制保障前两条被执行：系统提示 section（0.2.5，CHANGELOG.md:440-446）→ 编译完成提交提醒（0.7.0，CHANGELOG.md:160-168）→ 终态实时 steer 唤醒（0.8.0，CHANGELOG.md:148-158）；三层语义汇总见 README.md:37。
+同步的可靠性依赖锚点守卫链：`numberLines`（0.8.7，`CHANGELOG.md:94-105`）→ `fixAnchors`（0.8.8，`CHANGELOG.md:83-93`）→ `test-wiki-anchors.mjs` 守卫（0.5.0.3，`CHANGELOG.md:238-245`），详见 [[wiki-tests]]。
 
 ## Connections
 
-- [[codewiki-upstream]] — 上游 vendor 模块。CodeWiki.md:62 直接回链它（wiki 布局 `<repo>/.codewiki/{_index,_meta.yaml,modules/,concepts/,decisions/,learnings/}`）；README.md:60 与 CHANGELOG 0.5.0.2（CHANGELOG.md:239-246）记录 vendor fork 的维护方式（config.rs `wiki_path()` 魔改、main.rs `rel_path_string()` 反斜杠根治、FORK.md 规格）。
-- [[documentation-and-config]] — index.js 配置与工具定义的模块文章；CHANGELOG.md:65（0.8.8 节）记录 `fixAnchors` 对它的真实验证——8 处修正全部命中真实行号（Config 37、prepareArticleTasks 538-594、updateToolDefinition 2113、progressToolDefinition 2184-2280）。
-- 三份文档与 `.codewiki/` 文章群是**引用与被引用**关系：本文引用 README/CodeWiki/CHANGELOG 的行号；反过来 CodeWiki.md:9-28 的组件清单是指向 index.js/client.js 各专题文章的天然索引。
+- [[plugin-core]] — README/CodeWiki.md 所描述的 `index.js` 插件主体（Config、JobService、工具定义等）。
+- [[client-interface]] — `client.js` 设置卡与侧边栏面板（`README.md:13`、`CodeWiki.md:23-26` 描述的对象）。
+- [[configuration-and-metadata]] — `package.json`（版本号与 CHANGELOG 版本一一对应）与 `cordis.patch.yml`（安装挂载）。
+- [[documentation-and-config]] — 文档同步行为在 CHANGELOG 各版本节中的记录与 0.5.0.4 封死手工流程的维护公约。
+- [[codewiki-upstream]] — vendor/codewiki 上游（`CodeWiki.md:55` 引用的上游布局与 fork 说明）。
+- [[wiki-tests]] — `test-wiki-anchors.mjs` 行号锚点守卫（本文引用的全部行号的最后防线）。
 
 ## Known Issues
 
-1. **文档与代码的同步是纪律不是机制**：README/CodeWiki.md/CHANGELOG.md 均为手写，同步依赖版本发布流程自觉（存证仅到「文档：」条目粒度）。接手任何行为疑问时，先读 CHANGELOG.md:3-16（最新版本节）确认当前口径，不要引用旧版本节的描述——例如 0.8.3 的「规划走主模型」已被 0.10.0 删除（CHANGELOG.md:9）。
-2. **文档内嵌的 index.js 行号指针会随代码演进漂移**：CodeWiki.md:12 的 `Config`（index.js:42）等指针在后续版本可能过期。行号可靠性本身有专门机制链：0.8.7 `numberLines` 行号前缀（CHANGELOG.md:68-78）→ 0.8.8 `fixAnchors` 确定性修正（CHANGELOG.md:57-66）→ 守卫测试 `test-wiki-anchors.mjs`（0.5.0.3，CHANGELOG.md:212-218）。
-3. **CHANGELOG 的测试断言数是历史快照**：如「107 → 118 项全过」（CHANGELOG.md:15）是当轮全量计数，不能据此推断当前测试规模；当前规模以重跑 `node test-orchestration.mjs` 等为准（README.md:65）。
-4. **版本号存在四段补丁形态**（0.4.11.2、0.5.0.5 等），且 0.5.0.x 曾单日三版（0.5.0.1/0.5.0.2/0.5.0.3 均为 2026-10-10，CHANGELOG.md:220、CHANGELOG.md:229、CHANGELOG.md:212）；版本比较需逐段比较，不能按两段语义化版本惯例。
-5. **CodeWiki.md:58-65 的六条已知问题挂在文档里，无独立 issue 跟踪**：插件注册不热加载（CodeWiki.md:60）、schemastery junction 需重建（CodeWiki.md:61）、`cw` 无 `--version` / path fallback（CodeWiki.md:62）、stale 反斜杠已归一（CodeWiki.md:63）、断点文件仅记 stage/crosscutSplit（CodeWiki.md:64）、会话通道依赖发起会话（CodeWiki.md:65）——排查插件行为异常时先对照这六条。
+1. **0.10.2 文档同步不彻底（150k/128k 并存）**：`CHANGELOG.md:8` 把 `BATCH_TOKEN_HARD_LIMIT` 改为 128000，`CHANGELOG.md:11` 声明文档同步范围只覆盖「README 的 sessionTier 段、CodeWiki.md 架构图」——因此 `README.md:10`（工具表「连 150k 都装不下」）、`CodeWiki.md:56`（Overview「150k 大档」）、`CodeWiki.md:56`（Config 条目「仅超 150k 兜底」）、`CodeWiki.md:56`（prepareArticleTasks「连 150k 大档」）、`CodeWiki.md:56`（Connections「`BATCH_TOKEN_HARD_LIMIT=150000`」）五处仍残留 150k。同一仓库内与 `README.md:31`、`CodeWiki.md:56` 的 128k 口径并存；**引用该预算一律以 128000 为准**，残留点待下个版本清零。
+2. **本文行号是快照，必然漂移**：CHANGELOG 倒序加节意味着每次发布后 `:3` 以下全部行号整体下移；本文章所有行号对准 0.10.2（2026-10-23）。历史上流水线产物曾系统性幻觉行号（偏移 34~760 行，`CHANGELOG.md:243`），治理链为 `numberLines` → `fixAnchors` → `test-wiki-anchors.mjs` 守卫——引用行号前若怀疑漂移，以守卫测试与 grep 实测为准。
+3. **CHANGELOG 内的测试断言数是历史快照**：如 `CHANGELOG.md:12`「108 项全过」、`CHANGELOG.md:242`「160 断言」均为当版本时点值，不代表当前测试规模；查当前规模直接跑测试套件（见 [[testing-suite]]）。
+4. **版本号不总升一位**：0.5.0.x 出现四段式（0.5.0.1~0.5.0.6），是 0.5.0 发布当周的突发修复序列；同理 0.4.11.1/0.4.11.2。字符串排序或版本比较时注意。
+5. **六条已知问题挂 CodeWiki.md:58-65**（随该文件维护，本文不重复展开）：插件不热加载、schemastery junction、`cw` 无 `--version`、反斜杠路径、断点文件语义、会话通道依赖发起会话。
+6. **CHANGELOG 只增不减、最新在顶**：查「当前行为」先读顶部节（0.10.2，`CHANGELOG.md:3-14`），再按版本索引回溯；被删除的行为（如 0.6.0 删批量通道 `:196-207`、0.10.0 删 `runMainModelPlan` `:36`）只有删除记录没有正文，勿据旧节推断现状。
