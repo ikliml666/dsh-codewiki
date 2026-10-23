@@ -347,7 +347,9 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
 const BATCH_TOKEN_BUDGET = 110000
 // 超预算兜底装填上限：单文件/单任务装不进 110k 时按该大档再装一次；
 // 仍装不下才落到会话通道（最后的兜底，见 dispatchSessionTasks）。
-const BATCH_TOKEN_HARD_LIMIT = 150000
+// 上限由 hy3 的真实窗口反推：contextWindow 192k 是输入+输出共享的，单请求输出上限
+// maxTokens 64k，故输入必须 ≤128k（旧值 150k 输入 + 64k 输出 = 214k，已越界）。
+const BATCH_TOKEN_HARD_LIMIT = 128000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -961,7 +963,7 @@ async function wikiPathFor(cwd, binary, signal) {
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // 兜底通道：只有单个源文件大到连 BATCH_TOKEN_HARD_LIMIT 都装不下时才启用——把完整写作
 // 指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
-// 正常情况（单文件 ≤150k）全程在插件内完成，不惊动发起会话。
+// 正常情况（单文件 ≤128k）全程在插件内完成，不惊动发起会话。
 // ---------------------------------------------------------------------------
 
 // 测试可设 DSH_CODEWIKI_JOBS_FILE 隔离到独立路径——默认路径与真实宿主实例共享，
