@@ -31,7 +31,7 @@ tags: [testing, automation, orchestration, wiki-validation]
     *   支持 `signal` 中止 [test-batch.mjs:155]。
     *   失败不中断其他任务，错误记录进 `notes` [test-batch.mjs:170]。
     *   思考参数透传：`thinkingBudget=0` 时 `enable_thinking=false` 且无 `thinking_budget` 键；`budget>0` 时开启 [test-batch.mjs:135]。
-*   **`localPlan` (index.js:697-708)**：顶层目录分组规划，用于兜底架构分析。
+*   **`localPlan` (index.js:699-712)**：顶层目录分组规划，用于兜底架构分析。
 *   **`packArticles` (index.js:714-728)**：横切输入装填，超预算时仅保留头部并标注。
 *   **`scanRepoFiles` (index.js:673-702)**：仓库勘探，过滤黑名单（node_modules, .git）、二进制、超大及空文件。
 *   **`resolveBatchApiKey` (index.js:309-332)**：凭证解析链，优先级为显式配置 > 宿主凭据库。注入失败或无条目返回 `null`。
@@ -84,7 +84,7 @@ tags: [testing, automation, orchestration, wiki-validation]
 *   **`ensureWikiEntry` (index.js:188-229)**：若 `CodeWiki.md` 缺失则生成（含绝对路径指引、双语文案），已有则不覆盖。
     *   中文文案特征：包含 `.codewiki` 绝对路径、`codewiki_generate`、`.codewiki/_architecture.md`、`不会覆盖` [test-wiki-entry.mjs:27-30]。
     *   英文文案特征：包含 `living wiki`，不包含 `活 wiki` [test-wiki-entry.mjs:45-46]。
-*   **`normalizeArticlePath` (index.js:141)**：将 Windows `\` 分隔路径统一为 POSIX `/`。
+*   **`normalizeArticlePath` (index.js:143)**：将 Windows `\` 分隔路径统一为 POSIX `/`。
 *   **`parseStatus` (index.js:155-170)**：解析 `cw status` 输出，规范化 `changedFiles` 和 `staleArticles`。
     *   `staleArticles` 中的 `\` 应被规范化为 `/` [test-wiki-entry.mjs:65]。
 *   **`normalizeIndexLinks` (index.js:145-154)**：修正 `_index.md` 中的链接路径分隔符，不影响正文内容。

@@ -51,6 +51,8 @@ window.__ModuleLoader__.load({
       catalogEmptyModels: '该提供商没有可枚举的模型，请手填模型 id。',
       batchThinkingBudget: '思考预算',
       batchThinkingBudgetHint: '仅百炼通道生效：0=关思考（最省，推荐简单任务）；1–32768=开思考并限预算（轻推理 1024，复杂 4096–8192）。思考 Token 计入输出计费。走宿主提供商时用该模型的默认思考档。',
+      sessionTier: '会话通道档位',
+      sessionTierHint: '超预算文章转会话通道时派给哪个子智能体档位（dsh-subagent-auto-router 里的档位 id，如 codeiwiki）。留空=让会话模型自动选路——自动选路依据档位职责描述，常被判给 default。',
       articleLanguage: '文章语言',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw.exe。',
@@ -167,6 +169,8 @@ window.__ModuleLoader__.load({
       catalogEmptyModels: 'This provider exposes no enumerable models; type the model id.',
       batchThinkingBudget: 'Thinking budget',
       batchThinkingBudgetHint: 'Bailian channel only: 0 = thinking off (cheapest, recommended for small tasks); 1–32768 = thinking on with a budget (1024 light, 4096–8192 complex). Thinking tokens bill as output. Host providers use that model\'s default reasoning effort.',
+      sessionTier: 'Session-channel tier',
+      sessionTierHint: 'Which subagent tier (id from dsh-subagent-auto-router, e.g. codeiwiki) receives over-budget articles when they fall back to the session channel. Empty = let the session model route automatically, which usually lands on default.',
       articleLanguage: 'Article language',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first (kept in sync with the codewiki source), bundled bin/cw.exe as fallback.',
@@ -486,7 +490,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchThinkingBudget', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchApiKey', 'batchProvider', 'batchModel', 'batchThinkingBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -639,6 +643,15 @@ window.__ModuleLoader__.load({
                     placeholder: '0',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('batchThinkingBudgetHint')),
+                ),
+                el('label', null, t('sessionTier')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    value: String(draft.sessionTier ?? ''),
+                    onChange: (e) => setPath('sessionTier', e.target.value),
+                    placeholder: 'codeiwiki',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('sessionTierHint')),
                 ),
               ),
             ),

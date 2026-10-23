@@ -28,6 +28,7 @@
 - `batchProvider` / `batchModel`：编译模型（规划/写文章/横切/审校全部环节共用）。`batchProvider` 留空 = 走内置百炼兼容通道（`batchModel` 填百炼模型名，旧行为）；非空 = 走宿主 llm 服务，`batchModel` 填该 provider 的模型 id——本地 OpenAI 兼容端点（如本地 9B）只要在模型设置里注册过，就能在这里选到并参与编译。
 - `batchApiKey`：仅内置百炼通道使用（留空自动取模型设置「阿里百炼云」渠道凭证）；走宿主 provider 时凭证由该 provider 自己的配置决定。
 - `batchThinkingBudget`：仅内置百炼通道使用，0=关闭思考（省输出 Token），1~32768=开启思考并限预算；走宿主 provider 时跟随该模型的默认思考程度。
+- `sessionTier`（0.9.2）：超预算文章/校对转会话通道时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。**为什么需要它**：codewiki 的编译主链不走档位路由（模型由 `batchProvider`/`batchModel` 直接决定），只有超预算转会话通道这一段经过 `delegate`；而自动选路是按档位职责描述交给决策模型判的——「写 CodeWiki 模块文章」实测被判给 `default`（置信 0.88–0.99），自建的 codewiki 档永远轮不到。填了本项即可钉死。
 
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `defaultProvider` / `defaultModel`：编译子代理默认模型，已钉在路由插件的 **wiki 档**（`aliyun-bailian` / `qwen3.8-flash`），wiki 生成走便宜模型；要改跟随会话模型就把两项显式置空。

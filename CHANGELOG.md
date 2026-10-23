@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.2 — 2026-10-23
+
+### 修复：自建 codewiki 档位在写 CodeWiki 时从未被调用（用户反馈：创建了 codewiki 档位，写 wiki 时模型仍走 default 档）
+
+- 排查结论（分两层，均经实测）：①**编译主链不问档位**——规划/写文章/横切/校对全部走 `runRealtimeTasks`，模型由 `batchProvider`/`batchModel` 直接决定，与子智能体档位是两套独立机制，所以 28k 以内的篇目根本不会经过档位；②**唯一经过 `delegate` 的环节是超预算转会话通道**（`dispatchSessionTasks` 的 steer），而它的文本只写「请调用子智能体（delegate/subagent）」，不给 `tier`——会话模型于是走上层决策模型的自动选路。用 `ask_route` 实测「写 CodeWiki 模块文章」两次都判 `default`（置信 0.88 / 0.99，阈值 0.6），自建档位永远轮不到。
+- 实现 ①（index.js 新增配置 `sessionTier`）：`.volatile()` 字符串，留空 = 保持旧行为（自动选路）；非空 = steer 文本要求 `delegate` 显式传该 `tier`。`liveConfig` 同步解包。
+- 实现 ②（index.js 抽出纯函数 `buildSessionSteerText({job, snapshots, tier, resend})`）：把原本散在 `dispatchSessionTasks` 与 `resendSessionSteer` 里重复的两段 steer 文案合并为一处（含 review 阶段的校对措辞、重发措辞、任务文件与目标路径清单），`tier` 非空时插入「派单要求：调用 delegate 时必须显式传 tier: "<id>"（不要依赖自动选路），mode 用 spec」。两处调用点改为调用它，删掉各自的字符串拼接——顺带消除了两条文案路径再次分叉的风险。
+- 实现 ③（`dispatchSessionTasks` 的 note）：转会话通道时写明「档位钉死 <id>」或「档位自动选路」，面板上能直接看出这次用的是哪种。
+- 实现 ④（client.js）：设置页「编译模型」区新增「会话通道档位」文本输入（中英文案齐备），保存键列表加入 `sessionTier`。
+- 测试（test-batch.mjs）：新增 8 项 `buildSessionSteerText` 断言——未填档位不提 tier、填了要求显式传、含「不要依赖自动选路」、任务文件与目标路径都写进文本、无未替换的模板占位符、review 阶段按校对措辞且同样钉死、重发文案带「重新派发」、重发且未填档位不提 tier。98 → 107 项全过；test-orchestration / test-cwd-paths / test-wiki-entry / test-wiki-anchors 全过。
+- 配置：本机 profile 的 `codewiki` 插件配置补 `sessionTier: codeiwiki`，并把路由插件 `default` 档描述里的「文档测试」改为「测试执行与排错」、`codeiwiki` 档描述从 7 字扩为可判定的职责说明（减少自动选路时的语义抢占）。
+- 文档：README 设置段补 `sessionTier` 与其存在理由；版本 0.9.2。
+
 ## 0.9.1 — 2026-10-22
 
 ### 功能：设置页编译模型改为可选配置文件中的提供商与模型（用户需求：使用本地部署的 9b 模型能胜任工作吗）
