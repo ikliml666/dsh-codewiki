@@ -893,8 +893,10 @@ window.__ModuleLoader__.load({
         // 六阶段步骤条：已完成绿点（title 带各阶段耗时）、当前阶段实心点+实时计时、
         // 失败/取消在最后计时段标红/黄。终态 done 全绿。
         const stepName = (s) => tBound(`step${s.charAt(0).toUpperCase()}${s.slice(1)}`)
+        // 旧任务可能残留已删阶段（如 plan）的计时键——过滤掉，避免 indexOf 得 -1
+        // 导致失败/取消时 failIdx 失效、步骤条全熄不标红
         const lastTimedStage = (job) => {
-          const keys = Object.keys(job.stageTimings ?? {})
+          const keys = Object.keys(job.stageTimings ?? {}).filter((k) => ACTIVE_STAGES.includes(k))
           return keys.length ? keys[keys.length - 1] : null
         }
         const stageBar = (job) => {

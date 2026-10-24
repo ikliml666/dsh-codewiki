@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.8 — 2026-10-24
+
+### 变更：编译流水线全面适配 hy3 192k 上下文——放弃 32k 时代定制的拆批策略，改「大档单请求优先」
+
+- 背景：110k/128k 分块与「观察→合成」拆批是 32k 上下文 qwen3.7flash 时代的遗产。hy3 192k + 大档 420k（volces-ark/glm-5.3-flash 512k）装得下绝大多数模块，为比价而拆批纯属浪费请求与轮次。用户拍板：①观察→合成链保留，但仅超 420k（大档预算）才启用；②会话通道保留不动；③校对改批量。
+- 写文章（index.js `prepareArticleTasks` 重写）：装填直接按大档预算（未配大档=128k 硬上限）整模块单请求——110k–420k 区间输入升大档一次写完；仅当模块源码总量超 420k（或有单文件在装填中被跳过）才按 110k 逐文件拆观察批（原「110k 即拆」与 batches.length===1 特例删除）；单文件连大档都装不下的整任务转会话通道（唯一兜底）。
+- 横切（`tickCrosscut`）：总量 ≤ 大档预算即单批直出（超 110k 时任务标大档模型，note「（大档装填）」）；超 420k 才走原有观察拆分 → compose 合成。
+- 批量校对（`tickReview` 重写 + 新增 `batchProofreadBatchPrompt`/`settleProofread`）：逐篇准备（文章 + 按「预算−文章 token」装填源码，110k 装不下升大档重装）后按 110k 贪心合并成批量校对请求，请求数从 ≈文章数降到 ≈总输入/110k；模型输出按 `@@@article: 名`/`@@@end` 标记分节拆回逐篇，`writeValidated` 校验通过才覆写，缺席/非法文章保留原文（校对失败不推翻已写成功的文章）；单篇源码连大档都装不下转会话通道兜底；`submitBatchFor` 持久化快照补记 `proofreadItems`（宿主重启重跑与 settle 拆回都依赖）。
+- 修复（评审遗留）：① client.js `lastTimedStage` 过滤 `ACTIVE_STAGES`——旧任务残留 `stageTimings.plan` 键不再导致失败/取消时步骤条全熄不标红；② `localPlan` slugify 保留 CJK（`\p{Script=Han}`），多个中文顶层目录不再合并成单模块 'module'；③ `bigTokenBudget` 设置描述同步新语义。
+- 文档：README/CodeWiki.md 同步五环节阶段机、大档 420k 语义、批量校对、repos 缓存签名失效（补 0.10.7 遗留的文档失同步）。
+- 测试（test-orchestration.mjs / test-batch.mjs）：mock 审校员支持批量标记格式；分割 fixture 改 15×100KB/模块（合计 ≈439k>420k 才触发拆分，256KB 扫描上限内）；test-batch 断言按新装填语义校准。
+- 验证：`node test-orchestration.mjs` 全部通过；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths` / `test-wiki-entry` / `test-wiki-anchors`（断言部分）全部通过。
+- 版本 0.10.7 → 0.10.8。
+
 ## 0.10.7 — 2026-10-24
 
 ### 变更：删除编译流水线规划（plan）阶段——提交后直接进 articles

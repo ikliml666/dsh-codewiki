@@ -145,6 +145,16 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
     if (prompt.includes('总结仓库反复出现的模式')) return articleMd('Patterns', 'util/util.py', articleMarker, 'pattern')
     if (prompt.includes('写跨模块概念')) return articleMd('config-load', 'core/core.py', articleMarker, 'concept')
     if (prompt.includes('你是 CodeWiki 审校员')) {
+      // 0.10.8 批量校对：按输入的 @@@article 标记逐篇回标记格式（settleProofread 按标记拆回）
+      const names = [...prompt.matchAll(/@@@article: (.*)/g)].map((m) => m[1].trim())
+      if (names.length) {
+        return names.map((n) => {
+          const seg = prompt.slice(Math.max(0, prompt.indexOf(`@@@article: ${n}`)))
+          const body = seg.slice(0, seg.indexOf('==== 该篇 source_files') >= 0 ? seg.indexOf('==== 该篇 source_files') : undefined)
+          const fm = (body.match(/---\ntitle:[\s\S]*?\n---/) ?? [])[0]
+          return `@@@article: ${n}\n${fm ?? `---\ntitle: ${n}\n---`}\n\nPROOFED article.\n@@@end`
+        }).join('\n')
+      }
       const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
       return fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', 'core/core.py', 'PROOFED')
     }
@@ -496,10 +506,12 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
 {
   const splitRepo = makeFixtureRepo()
-  // 每模块目录两个 210KB 源文件：单请求 110k 预算必装不下 → 触发观察批分割
+  // 每模块 15 个 100KB 源文件（扫描层上限 256KB/文件）：合计 ≈439k token，超 420k 大档
+  // 预算才触发观察批分割（0.10.8 起 110k–420k 区间直接大档单请求写完，不再分割）
   for (const mn of ['core', 'util']) {
-    fs.writeFileSync(path.join(splitRepo, mn, `${mn}.py`), 'y'.repeat(210 * 1024))
-    fs.writeFileSync(path.join(splitRepo, mn, `${mn}2.py`), 'z'.repeat(210 * 1024))
+    for (let i = 0; i < 15; i += 1) {
+      fs.writeFileSync(path.join(splitRepo, mn, `${mn}${i}.py`), `${String(i).padStart(2, '0')}:` + 'y'.repeat(100 * 1024))
+    }
   }
   execFileSync('git', ['add', '-A'], { cwd: splitRepo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
@@ -511,7 +523,7 @@ console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + �
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     const obsPrompts = mock.batchPrompts().filter((p) => p.includes('你是 CodeWiki 文章观察员'))
     const composePrompts = mock.batchPrompts().filter((p) => p.includes('多个观察员分批通读'))
-    check(obsPrompts.length === 4, `4 个观察批请求（2 模块 × 2 批，实际 ${obsPrompts.length}）`)
+    check(obsPrompts.length === 10, `10 个观察批请求（2 模块 × 5 批，实际 ${obsPrompts.length}）`)
     check(obsPrompts.every((p) => !p.includes('你是 CodeWiki 文章作者')), '观察请求不是文章请求')
     check(composePrompts.length === 2, `2 个合成请求（每模块 1 个，实际 ${composePrompts.length}）`)
     check(composePrompts.every((p) => p.includes('分批观察')), '合成请求吃观察包')
