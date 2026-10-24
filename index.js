@@ -60,6 +60,7 @@ export const Config = z.object({
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
+  autoCommit: z.boolean().default(true).volatile().description('编译完成后由插件自己提交产物（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀；不动其它改动）：会话模型因此无需等待编译完成、也无需提交；非 git 仓库或提交失败时降级为提醒会话模型提交'),
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
@@ -92,6 +93,7 @@ function liveConfig(config) {
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
     autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
+    autoCommit: val(c.autoCommit) !== false,
     workspaceOnly: val(c.workspaceOnly) !== false,
   }
 }
@@ -1198,13 +1200,16 @@ let agentsRef = null
 let llmRef = null
 
 export function wakeCompileSession(job, outcome, agents = agentsRef) {
+  // 0.10.9：成功且插件已自动提交 → 完全不打扰会话。会话模型提交完工具就继续干活了，
+  // 不再被「请提交改动」的唤醒拉回来做一件插件自己已经做完的事（旧行为的核心缺陷）。
+  if (outcome !== 'failed' && job?.autoCommit?.committed) return
   if (!job?.sessionId || !agents || typeof agents.get !== 'function') return
   let agent
   try { agent = agents.get(job.sessionId) } catch { return }
   if (!agent || typeof agent.steer !== 'function') return
   const text = outcome === 'failed'
     ? `【CodeWiki 编译失败】任务 ${job.id}（${job.cwd}）失败：${job.error ?? '未知原因'}——可用 codewiki_progress 查详情，处理后重新提交。`
-    : `【CodeWiki 编译完成·请提交改动】任务 ${job.id} 已完成（写入 ${job.writtenCount} 篇文章）：检查 .codewiki/ 与 CodeWiki.md 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不要 git add -A）；已入库或无需提交则忽略本消息。`
+    : `【CodeWiki 产物待提交】任务 ${job.id} 已完成（写入 ${job.writtenCount} 篇文章），但插件自动提交未成功：${job.autoCommit?.reason ?? '未开启 autoCommit'}。需要入库就随手提交一次（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀）；不需要就忽略本消息，不要为此中断或轮询。`
   try {
     agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
   } catch { /* 唤醒失败不影响编译任务本身 */ }
@@ -2004,6 +2009,15 @@ function createJobService(config, onSettled) {
     }
     setStage(job, 'done')
     job.finishedAt = new Date().toISOString()
+    // 编译产物由插件自己提交（0.10.9）：把「等编译完成 → 提交 .codewiki/」从会话模型手里收回来。
+    // 只在有文章写成功时尝试；失败不改变任务终态，只记录原因供「产物待提交」提醒与面板展示。
+    if (job.writtenCount > 0 && liveConfig(config).autoCommit) {
+      const r = autoCommitWiki(job.cwd, { jobId: job.id, writtenCount: job.writtenCount })
+      job.autoCommit = r
+      if (r.committed) note(job, `已自动提交编译产物（${r.sha}）：docs(wiki)（只含 .codewiki/ 与 CodeWiki.md）`)
+      else if (r.noChanges) note(job, '产物无未提交改动，跳过自动提交')
+      else note(job, `自动提交未执行 —— ${r.reason}；产物留在工作区，需要入库时手动提交一次`)
+    }
     if (job.writtenCount > 0) onSettled?.(job, 'done') // 实时唤醒发起会话（无 sessionId 时内部静默）
   }
 
@@ -2199,7 +2213,7 @@ function generateToolDefinition(cfg, svc) {
     description: [
       '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 workbuddy/hy3，免费 192k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
-      '进度：调用即提交后请继续手头工作，不要等待或反复轮询；需要进度时用 codewiki_progress 工具（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
+      '进度：调用即提交后本步就此结束——不要等待、不要轮询、不要为了确认编译好没有而反复调 codewiki_progress；去做你手头其他工作。编译完成的产物由插件自己提交入库（autoCommit，只 add .codewiki/ 与 CodeWiki.md），正常情况下你不需要为 wiki 跑任何 git 命令。需要事件级进度时才用 codewiki_progress（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
       '单项目串行（默认开）：同一时刻只推进一个仓库的编译任务，后提交的项目进 queued 排队，前一个收尾后自动轮到（进度里 stage=queued 即排队）。',
       '凭证由模型设置里该 provider（默认 workbuddy）的配置解析，插件不保存也不传递任何密钥；provider/model 留空或该模型不可用时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
     ].join('\n'),
@@ -2231,7 +2245,7 @@ function generateToolDefinition(cfg, svc) {
       render(args, value) {
         const lines = [`codewiki_generate（${value.scope}，${value.cwd}）`]
         if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
-        if (value.submitted) lines.push(`已提交后台任务 ${value.jobId}（stage ${value.stage}）——服务 10s 节拍推进，侧边栏 CodeWiki 面板或 GET /api/codewiki/jobs 查进度`)
+        if (value.submitted) lines.push(`已提交后台任务 ${value.jobId}（stage ${value.stage}）——本步到此结束：去做手头其它工作，不要等待；编译产物由插件完成后自动提交入库。进度只在需要时用 codewiki_progress 或侧边栏 CodeWiki 面板查看`)
         else lines.push(`未提交任务（state ${value.state}）`)
         for (const n of value.notes) lines.push(`· ${n}`)
         return [{ type: 'text', text: lines.join('\n') }]
@@ -2346,18 +2360,19 @@ function generateToolDefinition(cfg, svc) {
 }
 
 // ---------------------------------------------------------------------------
-// 工具 2b：codewiki_update（日常维护入口：提交更新请求即返回，完成后提醒提交改动）
+// 工具 2b：codewiki_update（日常维护入口：提交更新请求即返回）
 // 与 codewiki_generate 的差别只在语义与引导文案：固定 scope=auto，返回值明确告诉
-// 模型「继续下一项、不要等待」；编译完成后由系统提示的提交提醒（commitHintText）
-// 把「该提交 .codewiki 改动了」送回主模型——插件不代跑 git，提交动作留给模型。
+// 模型「本步收尾、继续下一项、不要等待/轮询」。编译产物由插件在 tickIndex 顺带
+// autoCommit（0.10.9），因此成功后既不催模型提交、也不唤醒会话；只有自动提交
+// 失败时才由 commitHintText / wakeCompileSession 发一条「产物待提交」降级提醒。
 // ---------------------------------------------------------------------------
 
 function updateToolDefinition(cfg, generateDef) {
   return {
     name: 'codewiki_update',
     description: [
-      '提交 CodeWiki 更新请求（日常维护入口，scope=auto 语义）：无 wiki 走全量编译，有变更走逐篇更新，已是最新则直接报告。调用即提交、立即返回——请继续下一项工作，不要等待或反复轮询（进度可用 codewiki_progress 查询）。',
-      '更新完成后你会收到实时唤醒消息「CodeWiki 编译完成·请提交改动」（编译结束即刻 steer 送达本会话，无需轮询；系统提示 section 亦有同款提醒兜底）：届时检查并提交 .codewiki/ 与 CodeWiki.md 的改动（插件不代跑 git）。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
+      '提交 CodeWiki 更新请求（日常维护入口，scope=auto 语义）：无 wiki 走全量编译，有变更走逐篇更新，已是最新则直接报告。调用即提交、立即返回——调用后本步收尾、继续下一项工作；不要等待、不要轮询、不要为看进度反复调 codewiki_progress。',
+      '编译产物由插件自己提交（autoCommit 默认开，只 add .codewiki/ 与 CodeWiki.md，不动你的其它改动），所以正常情况下你不需要为 wiki 跑任何 git 命令，也不会被编译完成唤醒。只有插件自动提交没成功时，系统才会给一条「CodeWiki 产物待提交」提醒，届时随手提交一次即可。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -2386,7 +2401,7 @@ function updateToolDefinition(cfg, generateDef) {
       render(args, value) {
         const lines = [`codewiki_update（${value.cwd}）`]
         if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
-        if (value.submitted) lines.push(`更新已开始（任务 ${value.jobId}，stage ${value.stage}）——已提交后台编译，请继续下一项工作，不要等待；完成后系统提示会出现「请提交改动」提醒`)
+        if (value.submitted) lines.push(`更新已开始（任务 ${value.jobId}，stage ${value.stage}）——已提交后台编译，本步到此结束：继续下一项工作，不要等待，也不要去查进度；产物由插件自己提交入库`)
         else lines.push(`无需更新（state ${value.state}）——wiki 已是最新，继续手头工作即可`)
         for (const n of value.notes) lines.push(`· ${n}`)
         return [{ type: 'text', text: lines.join('\n') }]
@@ -2396,7 +2411,7 @@ function updateToolDefinition(cfg, generateDef) {
       try {
         const result = await generateDef.execute({ ...args, scope: 'auto' }, exec)
         if (result.submitted === true) {
-          result.notes.push('更新已在后台进行：继续下一项工作，不要等待；更新完成后系统提示会出现「CodeWiki 编译完成·请提交改动」提醒，按提醒提交 .codewiki/ 与 CodeWiki.md')
+          result.notes.push('更新已在后台进行：本步收尾，继续下一项工作——不要等待、不要轮询进度；编译产物由插件完成后自动提交入库（autoCommit），无需你跑 git。仅当收到「CodeWiki 产物待提交」提醒时才需要代为提交一次')
         }
         return result
       } catch (err) {
@@ -2463,6 +2478,18 @@ function progressToolDefinition(cfg, svc) {
                 usage: { type: 'object' },
                 tps: { oneOf: [{ type: 'number' }, { type: 'null' }] },
                 notes: { type: 'array', items: { type: 'string' } },
+                autoCommit: {
+                  oneOf: [{ type: 'null' }, {
+                    type: 'object',
+                    properties: {
+                      committed: { type: 'boolean' },
+                      sha: { type: 'string' },
+                      message: { type: 'string' },
+                      reason: { type: 'string' },
+                      noChanges: { type: 'boolean' },
+                    },
+                  }],
+                },
                 error: { oneOf: [{ type: 'string' }, { type: 'null' }] },
                 createdAt: { type: 'string' },
                 updatedAt: { type: 'string' },
@@ -2483,6 +2510,13 @@ function progressToolDefinition(cfg, svc) {
           for (const t of (j.taskList ?? [])) {
             const mark = t.state === 'done' ? '✓' : t.state === 'failed' ? '✗' : '·'
             lines.push(`  ${mark} ${t.name}`)
+          }
+          if (j.autoCommit) {
+            lines.push(j.autoCommit.committed
+              ? `  产物已自动提交：${j.autoCommit.sha ?? ''}（无需你跑 git）`
+              : j.autoCommit.noChanges
+                ? '  产物无未提交改动（无需提交）'
+                : `  产物未自动提交：${j.autoCommit.reason ?? '未知原因'}`)
           }
           if (j.error) lines.push(`  错误：${j.error}`)
           for (const n of (j.notes ?? []).slice(-3)) lines.push(`  · ${n}`)
@@ -2848,11 +2882,68 @@ export function installWebServer(ctx, service, extra = {}) {
 // 判定不看 .codewiki/ 目录——半途建出的空骨架（只有空子目录）会骗过目录存在性检查，
 // 提醒却指向一个读不到的入口。无 CodeWiki.md = 无可维护的 wiki。text 回调每次组装时
 // 求值——cwd、入口文件存在性、开关全部实时读取，关闭开关/项目切换/删掉 wiki 都无需重启。
-// 编译完成后的提交提醒：最近一次成功编译（stage=done 且有文章写成功）的完成时间晚于
-// .codewiki/（与 CodeWiki.md）最后一次 git 提交时间 → 该次编译产物尚未入库，系统提示
-// 注入「请提交改动」。零状态派生（jobs 文件 + git log 时间戳），提交后时间戳反超自动静默；
+// 编译完成后的提交提醒（0.10.9 起只在插件自动提交失败时出现）：最近一次成功编译
+// （stage=done 且有文章写成功）的完成时间晚于 .codewiki/（与 CodeWiki.md）最后一次
+// git 提交时间 → 该次编译产物尚未入库，系统提示注入「产物待提交」（一次性，非催促）。
+// 自动提交成功时时间戳反超，提醒自动静默；零状态派生（jobs 文件 + git log 时间戳），
 // 非 git 仓库/读 jobs 失败一律不提醒。60s TTL 缓存：text 回调每次组装系统提示都求值。
 const commitHintCache = new Map() // cwd -> { at, text }
+
+// ---------------------------------------------------------------------------
+// 编译产物自动提交（0.10.9）：把「等编译完成 → 提交 .codewiki/」整个责任从会话模型
+// 手里收回到插件侧。编译终态（done 且有文章写成功）时插件自己把 .codewiki/ 与
+// CodeWiki.md 提交到当前分支——会话模型因此无需等待编译、无需轮询、无需代跑 git。
+//
+// 安全边界（任何一条不满足就只降级为「提醒会话模型提交」，绝不做半个提交）：
+//   · 只 add 这两个路径（不用 -A / --all / .），merge/rebase 进行中不动手
+//   · 不 amend、不 push、不改写历史、不碰工作区其它改动
+//   · 目标路径存在未解决冲突、仓库无 HEAD、未配置 user.name/user.email、
+//     路径被 .gitignore 忽略、index.lock 占用 → 一律返回 {committed:false, reason}
+// 返回值：{ committed, sha?, noChanges?, reason }，调用方把结果写进 job.autoCommit。
+// ---------------------------------------------------------------------------
+export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {
+  const opts = { cwd, encoding: 'utf8', timeout: 20000, windowsHide: true }
+  const run = (...args) => spawnSync('git', args, opts)
+  const out = (r) => String(r?.stdout ?? '').trim()
+  const paths = ['.codewiki', 'CodeWiki.md']
+  try {
+    const inside = run('rev-parse', '--is-inside-work-tree')
+    if (inside.status !== 0 || out(inside) !== 'true') return { committed: false, reason: '不是 git 仓库' }
+    if (run('rev-parse', '--verify', '-q', 'HEAD').status !== 0) return { committed: false, reason: '仓库还没有首次提交（无 HEAD）' }
+    // merge / rebase / cherry-pick 进行中：此时 commit 会把 wiki 产物夹进别人的合并提交
+    for (const marker of ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD']) {
+      if (run('rev-parse', '--verify', '-q', marker).status === 0) return { committed: false, reason: `仓库正在合并/变基中（${marker}）` }
+    }
+    if (out(run('ls-files', '-u', '--', ...paths))) return { committed: false, reason: '目标路径存在未解决冲突' }
+    // .codewiki/ 常被项目 .gitignore 忽略：必须显式认出来，否则会误报「无改动」并静默丢产物。
+    // 只对「磁盘上存在且尚无任何 tracked 文件」的路径判定——已 tracked 的文件命中 ignore
+    // 规则时 git 照样记录改动，不该被这里拦下。
+    const ignored = paths.filter((p) => fs.existsSync(path.join(cwd, p))
+      && !out(run('ls-files', '--', p))
+      && run('check-ignore', '-q', '--', p).status === 0)
+    if (ignored.length) return { committed: false, reason: `${ignored.join('、')} 被 .gitignore 忽略，无法自动提交` }
+    if (!out(run('status', '--porcelain', '--', ...paths))) return { committed: false, noChanges: true, reason: '产物无未提交改动' }
+    if (!out(run('config', 'user.email')) || !out(run('config', 'user.name'))) {
+      return { committed: false, reason: '仓库未配置 git user.name/user.email' }
+    }
+    const add = run('add', '-A', '--', ...paths)
+    if (add.status !== 0) return { committed: false, reason: `git add 失败：${(add.stderr || add.stdout || '').trim().slice(0, 200)}` }
+    // add 后仍无暂存内容：路径被 .gitignore 忽略（.codewiki 常被忽略）
+    if (!out(run('diff', '--cached', '--name-only', '--', ...paths))) {
+      return { committed: false, reason: '目标路径被 .gitignore 忽略，无内容可提交' }
+    }
+    const tail = [jobId ? `任务 ${jobId}` : '', writtenCount ? `${writtenCount} 篇文章` : ''].filter(Boolean).join('，')
+    const message = `docs(wiki): 更新 CodeWiki 编译产物${tail ? `（${tail}）` : ''}`
+    // --no-verify：不跑仓库钩子——自动提交不该被 husky/lint-staged 卡住或改写
+    const commit = run('commit', '--no-verify', '-m', message, '--', ...paths)
+    if (commit.status !== 0) return { committed: false, reason: `git commit 失败：${(commit.stderr || commit.stdout || '').trim().slice(0, 200)}` }
+    const sha = out(run('rev-parse', '--short', 'HEAD'))
+    return { committed: true, sha, message }
+  } catch (err) {
+    return { committed: false, reason: `自动提交异常：${String(err?.message ?? err).slice(0, 200)}` }
+  }
+}
+
 export function commitHintText(cwd, jobs = loadJobs()) {
   const key = path.normalize(String(cwd ?? ''))
   const hit = commitHintCache.get(key)
@@ -2866,12 +2957,16 @@ export function commitHintText(cwd, jobs = loadJobs()) {
       const g = spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', '.codewiki', 'CodeWiki.md'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
       const commitSec = Number.parseInt(String(g.stdout ?? '').trim(), 10)
       const jobSec = Math.floor(Date.parse(latest.finishedAt) / 1000)
+      // 只有「插件自动提交没成功」才提醒；autoCommit 成功时产物已入库，
+      // commitSec ≥ jobSec 自然静默——会话模型无需为此等待或代跑 git。
       if (Number.isFinite(jobSec) && (!Number.isFinite(commitSec) || jobSec > commitSec)) {
-        const mins = Math.max(1, Math.round((Date.now() - Date.parse(latest.finishedAt)) / 60000))
+        const why = latest.autoCommit?.committed === false && latest.autoCommit?.reason
+          ? `插件自动提交未执行（${latest.autoCommit.reason}）`
+          : '编译产物尚未提交 git'
         text = [
-          `【CodeWiki 编译完成·请提交改动】本仓库 wiki 编译已完成（${mins} 分钟前，任务 ${latest.id}，写入 ${latest.writtenCount} 篇文章），编译产物尚未提交 git：`,
-          '- 检查 .codewiki/ 与 CodeWiki.md 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不要 git add -A）；与当前任务代码改动同轮收尾时可一起提交；',
-          '- 若这些产物已入库或判断无需提交，忽略本提醒（提交后提醒自动消失）。',
+          `【CodeWiki 产物待提交·一次性】本仓库 wiki 编译已完成（任务 ${latest.id}，写入 ${latest.writtenCount} 篇文章），${why}：`,
+          '- 若确需入库，只 add .codewiki/ 与 CodeWiki.md 后提交（建议 docs(wiki) 前缀；不要 git add -A），随手一次即可；',
+          '- 不需要提交就忽略本提醒——不要为了本提醒中断当前任务、不要轮询编译进度。',
         ].join('\n')
       }
     }
@@ -2884,9 +2979,9 @@ function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
     '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——learnings/、decisions/ 补文章与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
-    '- codewiki_generate 是后台编译：调用即返回，编译由宿主服务推进——不要等待编译完成，提交后继续其他工作，需要进度时用 codewiki_progress 工具查询；',
+    '- codewiki_generate 是后台编译：调用即返回提交回执，编译由宿主服务推进——调用后本步就此结束，不要等待、不要轮询、不要为了看进度而反复调 codewiki_progress；继续你的其他工作，编译完成的产物由插件自己提交入库（autoCommit 开，默认开），无需你跑 git；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
-    '- .codewiki/ 的改动与本次代码改动一起提交；',
+    '- 若收到「产物待提交」提醒，说明插件自动提交没成功（非 git 仓库/被忽略/冲突等），此时才需要你代为提交一次；没有该提醒就不要动 .codewiki/ 的 git 状态；',
     '- 收尾未调用 codewiki_generate 视为任务未完成。',
   ].join('\n')
 }

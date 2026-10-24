@@ -106,8 +106,12 @@ function makeFixtureRepo() {
   fs.writeFileSync(path.join(dir, 'util', 'util.py'), 'def fmt():\n    return "util"\n')
   const git = (...a) => execFileSync('git', a, { cwd: dir })
   git('init')
+  // 0.10.9：fixture 必须自带 git identity——autoCommitWiki 在缺 user.name/user.email 时
+  // 会拒绝自动提交（安全边界），否则 e2e 永远只能走「降级提醒」分支。
+  git('config', 'user.name', 'test')
+  git('config', 'user.email', 'test@test')
   git('add', '.')
-  git('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'init')
+  git('commit', '-m', 'init')
   return dir
 }
 
@@ -309,8 +313,9 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
     const jobs = [{ id: 'job-h1', cwd: hintRepo, stage: 'done', writtenCount: 3, finishedAt: fin }]
     // fixture 仓库没有 .codewiki/：git log 空 → commitSec=NaN → 提醒必现
     const h1 = commitHintText(hintRepo, jobs)
-    check(h1.includes('CodeWiki 编译完成·请提交改动') && h1.includes('job-h1'), '无 .codewiki 提交史 → 注入提交提醒')
+    check(h1.includes('CodeWiki 产物待提交') && h1.includes('job-h1'), '无 .codewiki 提交史 → 注入「产物待提交」提醒')
     check(h1.includes('git add') || h1.includes('.codewiki'), '提醒含提交动作指引')
+    check(h1.includes('不要为了本提醒中断当前任务'), '提醒明确不中断当前任务、不轮询')
     // 编译时间早于最近一次 .codewiki 提交 → 静默（构造：先提交一次带 .codewiki 的 commit）
     fs.mkdirSync(path.join(hintRepo, '.codewiki'))
     fs.writeFileSync(path.join(hintRepo, '.codewiki', 'a.md'), 'x\n')
@@ -341,7 +346,22 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
         g4('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki first')
         await new Promise((r) => setTimeout(r, 1100)) // jobSec > commitSec 严格大于：隔开同一秒的提交与编译竞态
         const h4 = commitHintText(repo3, [{ id: 'job-h3', cwd: repo3, stage: 'done', writtenCount: 2, finishedAt: new Date().toISOString() }])
-        check(h4.includes('CodeWiki 编译完成·请提交改动'), '编译完成时间晚于 .codewiki 最后提交 → 提醒')
+        check(h4.includes('CodeWiki 产物待提交'), '编译完成时间晚于 .codewiki 最后提交 → 提醒')
+        // 0.10.9：自动提交失败原因写进提醒，让会话模型知道为什么需要它来提交
+        const repo3b = makeFixtureRepo()
+        try {
+          fs.mkdirSync(path.join(repo3b, '.codewiki'))
+          fs.writeFileSync(path.join(repo3b, '.codewiki', 'a.md'), 'x\n')
+          const g5 = (...a) => execFileSync('git', a, { cwd: repo3b })
+          g5('add', '.')
+          g5('commit', '-m', 'wiki first')
+          await new Promise((r) => setTimeout(r, 1100))
+          const h4b = commitHintText(repo3b, [{
+            id: 'job-h3b', cwd: repo3b, stage: 'done', writtenCount: 2, finishedAt: new Date().toISOString(),
+            autoCommit: { committed: false, reason: '不是 git 仓库' },
+          }])
+          check(h4b.includes('插件自动提交未执行') && h4b.includes('不是 git 仓库'), '提醒带出自动提交失败原因')
+        } finally { fs.rmSync(repo3b, { recursive: true, force: true }) }
       } finally { fs.rmSync(repo3, { recursive: true, force: true }) }
       // h4 的「提醒」文本已进 repo3 缓存——h5 换新仓库验证 writtenCount=0 → 静默
       const repo4 = makeFixtureRepo()
@@ -353,23 +373,103 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
   } finally { fs.rmSync(hintRepo, { recursive: true, force: true }) }
 }
 
+// ============================ autoCommitWiki：插件自己提交编译产物（0.10.9） ============================
+console.log('== autoCommitWiki：安全边界（只提交 .codewiki/ 与 CodeWiki.md，任何可疑状态一律拒绝） ==')
+{
+  const { autoCommitWiki } = await import('./index.js')
+  // 正常路径：先写产物再提交
+  const okRepo = makeFixtureRepo()
+  try {
+    fs.mkdirSync(path.join(okRepo, '.codewiki'))
+    fs.writeFileSync(path.join(okRepo, '.codewiki', 'a.md'), '# a\n')
+    fs.writeFileSync(path.join(okRepo, 'CodeWiki.md'), '# entry\n')
+    fs.writeFileSync(path.join(okRepo, 'core', 'core.py'), 'def changed():\n    pass\n') // 未 staged 的源码改动
+    const r = autoCommitWiki(okRepo, { jobId: 'job-ac1', writtenCount: 2 })
+    check(r.committed === true && /^[0-9a-f]{7,}$/.test(String(r.sha)), `正常仓库提交成功（sha ${r.sha}）`)
+    check(String(r.message).startsWith('docs(wiki):') && String(r.message).includes('job-ac1'), '提交信息带 docs(wiki) 前缀与任务 id')
+    const files = execFileSync('git', ['-C', okRepo, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+    check(files.sort().join(',') === '.codewiki/a.md,CodeWiki.md', `只提交两个目标路径（实际：${files.join(',')}）`)
+    const status = execFileSync('git', ['-C', okRepo, 'status', '--porcelain'], { encoding: 'utf8' }).trim()
+    check(status.includes('core/core.py'), '源码改动留在工作区（不被卷进自动提交，也不被丢弃）')
+    // 无改动 → noChanges（不产出空提交）
+    const r2 = autoCommitWiki(okRepo, { jobId: 'job-ac1' })
+    check(r2.committed === false && r2.noChanges === true, '产物已入库 → noChanges，不产空提交')
+  } finally { fs.rmSync(okRepo, { recursive: true, force: true }) }
+
+  // 非 git 目录
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-plain-'))
+  try {
+    fs.writeFileSync(path.join(plain, '.codewiki'), 'x')
+    const r = autoCommitWiki(plain)
+    check(r.committed === false && r.reason.includes('不是 git 仓库'), '非 git 目录 → 拒绝并给出原因')
+  } finally { fs.rmSync(plain, { recursive: true, force: true }) }
+
+  // 路径被 .gitignore 忽略
+  const ignRepo = makeFixtureRepo()
+  try {
+    fs.writeFileSync(path.join(ignRepo, '.gitignore'), '.codewiki/\n')
+    fs.mkdirSync(path.join(ignRepo, '.codewiki'))
+    fs.writeFileSync(path.join(ignRepo, '.codewiki', 'a.md'), '# a\n')
+    const r = autoCommitWiki(ignRepo)
+    check(r.committed === false && r.reason.includes('.gitignore'), '产物被忽略 → 拒绝并说明（不会静默丢产物）')
+  } finally { fs.rmSync(ignRepo, { recursive: true, force: true }) }
+
+  // 合并进行中
+  const mergeRepo = makeFixtureRepo()
+  try {
+    fs.mkdirSync(path.join(mergeRepo, '.codewiki'))
+    fs.writeFileSync(path.join(mergeRepo, '.codewiki', 'a.md'), '# a\n')
+    fs.writeFileSync(path.join(mergeRepo, '.git', 'MERGE_HEAD'), execFileSync('git', ['-C', mergeRepo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }))
+    const r = autoCommitWiki(mergeRepo)
+    check(r.committed === false && r.reason.includes('合并'), 'merge 进行中 → 拒绝（不把 wiki 夹进别人的合并提交）')
+  } finally { fs.rmSync(mergeRepo, { recursive: true, force: true }) }
+
+  // 未配置 git identity（把全局配置指向空文件，模拟裸环境）
+  const idRepo = makeFixtureRepo()
+  const emptyCfg = path.join(os.tmpdir(), `cw-gitcfg-${process.pid}`)
+  const prevGlobal = process.env.GIT_CONFIG_GLOBAL
+  try {
+    fs.writeFileSync(emptyCfg, '')
+    fs.mkdirSync(path.join(idRepo, '.codewiki'))
+    fs.writeFileSync(path.join(idRepo, '.codewiki', 'a.md'), '# a\n')
+    const g = (...a) => execFileSync('git', ['-C', idRepo, ...a], { env: { ...process.env, GIT_CONFIG_GLOBAL: emptyCfg, GIT_CONFIG_NOSYSTEM: '1' } })
+    g('config', '--unset', 'user.name')
+    g('config', '--unset', 'user.email')
+    process.env.GIT_CONFIG_GLOBAL = emptyCfg
+    process.env.GIT_CONFIG_NOSYSTEM = '1'
+    const r = autoCommitWiki(idRepo)
+    check(r.committed === false && r.reason.includes('user.name'), '缺 git identity → 拒绝并指出该配什么')
+  } finally {
+    if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = prevGlobal
+    delete process.env.GIT_CONFIG_NOSYSTEM
+    fs.rmSync(idRepo, { recursive: true, force: true })
+    fs.rmSync(emptyCfg, { force: true })
+  }
+}
+
 // ============================ wakeCompileSession：编译终态 steer 唤醒 ============================
-console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_message 同机制） ==')
+console.log('== wakeCompileSession：终态实时唤醒（插件已自动提交时完全不打扰会话） ==')
 {
   const { wakeCompileSession } = await import('./index.js')
   const steered = []
   const fakeAgent = { steer: (m) => steered.push(m) }
   const fakeAgents = { get: (id) => (id === 'sess-1' ? fakeAgent : undefined) }
   const doneJob = { id: 'job-w1', cwd: 'C:/r', sessionId: 'sess-1', writtenCount: 4 }
-  wakeCompileSession(doneJob, 'done', fakeAgents)
-  check(steered.length === 1, 'done → steer 一次')
+  // 0.10.9 核心行为：插件已自动提交 → 成功终态零唤醒（这正是「会话模型干等编译」的根治点）
+  wakeCompileSession({ ...doneJob, autoCommit: { committed: true, sha: 'abc123' } }, 'done', fakeAgents)
+  check(steered.length === 0, 'autoCommit 成功 → done 完全不唤醒会话（无需会话模型提交）')
+  // 自动提交没成功 → 提醒一次（降级路径）
+  wakeCompileSession({ ...doneJob, autoCommit: { committed: false, reason: '不是 git 仓库' } }, 'done', fakeAgents)
+  check(steered.length === 1, 'autoCommit 失败 → done 仍唤醒一次（降级提醒）')
   const t1 = String(steered[0]?.content?.[0]?.text ?? '')
-  check(t1.includes('CodeWiki 编译完成·请提交改动') && t1.includes('job-w1'), '完成消息含标题与任务 id')
-  check(t1.includes('.codewiki') && t1.includes('docs(wiki)'), '完成消息含提交动作指引')
+  check(t1.includes('CodeWiki 产物待提交') && t1.includes('job-w1'), '降级文案含标题与任务 id')
+  check(t1.includes('不是 git 仓库'), '降级文案带上自动提交失败原因')
+  check(t1.includes('.codewiki') && t1.includes('docs(wiki)'), '降级文案含提交动作指引')
+  check(t1.includes('不要为此中断或轮询'), '降级文案明确要求不中断、不轮询')
   check(steered[0]?.source?.kind === 'plugin:codewiki', 'source 标记 plugin:codewiki (v4)')
-  wakeCompileSession({ ...doneJob, error: '编译模型不可用' }, 'failed', fakeAgents)
+  wakeCompileSession({ ...doneJob, error: '编译模型不可用', autoCommit: { committed: true } }, 'failed', fakeAgents)
   const t2 = String(steered[1]?.content?.[0]?.text ?? '')
-  check(t2.includes('CodeWiki 编译失败') && t2.includes('编译模型不可用'), 'failed 消息含失败原因')
+  check(t2.includes('CodeWiki 编译失败') && t2.includes('编译模型不可用'), 'failed 消息含失败原因（自动提交成功也不吞失败）')
   wakeCompileSession({ ...doneJob, sessionId: null }, 'done', fakeAgents)
   wakeCompileSession(doneJob, 'done', { get: () => undefined }) // 冷会话：注册表查不到
   check(steered.length === 2, '无 sessionId / 冷会话 → 不唤醒')
@@ -454,10 +554,19 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(!mock.batchPrompts().some((p) => p.includes('勘探员')), '零规划请求（宿主 llm 通道只跑文章/横切/校对）')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 3 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式）`)
-    check(e2eSteers.length === 1 && e2eSteers[0].id === 'sess-e2e', '编译终态实时唤醒发起会话（exec.agent.id → steer）')
-    const wakeText = String(e2eSteers[0]?.m?.content?.[0]?.text ?? '')
-    check(wakeText.includes('CodeWiki 编译完成·请提交改动') && wakeText.includes(r1.jobId), '唤醒消息为完成文案且含任务 id')
-    check(e2eSteers[0]?.m?.source?.kind === 'plugin:codewiki', '唤醒消息 source=plugin:codewiki (v4)')
+    check(job?.autoCommit?.committed === true && /^[0-9a-f]{7,}$/.test(String(job.autoCommit.sha ?? '')), `编译产物由插件自动提交（sha ${job?.autoCommit?.sha ?? '-'}）`)
+    {
+      // 落库核查：HEAD 提交里必须只有 .codewiki/ 与 CodeWiki.md
+      const files = execFileSync('git', ['-C', mainRepo, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+      check(files.every((f) => f.startsWith('.codewiki/') || f === 'CodeWiki.md'), `自动提交只含 wiki 产物（实际：${files.slice(0, 4).join(', ')}…）`)
+      check(files.some((f) => f.startsWith('.codewiki/')), '自动提交含 .codewiki/ 文章')
+      const msg = execFileSync('git', ['-C', mainRepo, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).trim()
+      check(msg.startsWith('docs(wiki):'), `自动提交信息带 docs(wiki) 前缀（实际：${msg}）`)
+      // 工作区干净：插件没有把 fixture 的源码改动卷进去（core.py 保持未改）
+      const status = execFileSync('git', ['-C', mainRepo, 'status', '--porcelain'], { encoding: 'utf8' }).trim()
+      check(status === '', `自动提交后工作区干净（实际：${status || 'empty'}）`)
+    }
+    check(e2eSteers.length === 0, '插件已自动提交 → 编译完成不唤醒会话（会话模型无需等待、无需提交）')
     const w = job.wikiPath
     check(fs.existsSync(path.join(w, 'modules', 'core.md')), 'modules/core.md 落盘')
     check(fs.existsSync(path.join(w, 'modules', 'util.md')), 'modules/util.md 落盘')

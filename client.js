@@ -36,6 +36,8 @@ window.__ModuleLoader__.load({
       enabledHint: '停用后 cw 与 codewiki_generate 两个工具立即报错。',
       updateReminder: 'wiki 维护提醒',
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，提醒改完代码后更新 wiki。',
+      autoCommit: '自动提交编译产物',
+      autoCommitHint: '开启后编译完成由插件自己提交产物（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动）：会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '编译并发上限',
@@ -172,6 +174,8 @@ window.__ModuleLoader__.load({
       enabledHint: 'When off, the cw and codewiki_generate tools error immediately.',
       updateReminder: 'Wiki update reminder',
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
+      autoCommit: 'Auto-commit compiled wiki',
+      autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes (only .codewiki/ and CodeWiki.md, docs(wiki) prefix suggested, no repo hooks, your other changes untouched): the session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Compile concurrency',
@@ -665,7 +669,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -713,6 +717,15 @@ window.__ModuleLoader__.load({
                     label: t('updateReminder'),
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('updateReminderHint')),
+                ),
+                el('label', null, t('autoCommit')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.autoCommit !== false,
+                    onChange: (v) => setPath('autoCommit', v),
+                    label: t('autoCommit'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('autoCommitHint')),
                 ),
                 el('label', null, t('workspaceOnly')),
                 el('div', { 'data-dscw-field': '' },

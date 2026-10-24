@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.9 — 2026-10-24
+
+### 修复：编译产物由插件自己提交，会话模型不再等待编译完成（设计缺陷根治）
+
+- 背景（用户报障）：`codewiki_generate` 提交后，会话模型习惯性地「等编译完成 → 自己跑 git 提交」，而编译是宿主后台任务、动辄几分钟——会话模型就在那儿空转/轮询，一轮对话被编译拖住。根因不是文案不够清楚，而是**提交这件事被外包给了会话模型**：产物落盘在后台，提交却要前台做，前台自然要等后台。
+- 修法一（index.js 新增 `autoCommitWiki`）：编译终态（done 且有文章写成功）由插件自己 `git add .codewiki CodeWiki.md` + `git commit --no-verify -m "docs(wiki): … <jobId> <N> 篇"`。责任从会话模型收回到插件侧，会话调用完工具就可以继续干活，编译完成后没有任何一步需要它参与。结果写入 `job.autoCommit`（`committed/sha/message/noChanges/reason`），面板与 `codewiki_progress` 直接显示。
+- 修法二（安全边界，任一不满足即**拒绝并降级**、绝不做半个提交）：非 git 仓库、无 HEAD、`MERGE_HEAD`/`REBASE_HEAD`/`CHERRY_PICK_HEAD` 存在（不把 wiki 夹进别人的合并提交）、`git ls-files -u` 有未解决冲突、`.codewiki/` 或未 tracked 的 `CodeWiki.md` 被 `git check-ignore` 忽略（否则 `git add` 会静默什么都不做、误报「无改动」丢产物）、缺 `user.name`/`user.email`、add/commit 失败。只 add 这两个路径（绝不 `-A`）、不 amend/push/改写历史、不跑仓库钩子、不触碰工作区其它改动。
+- 修法三（`wakeCompileSession`）：旧行为编译 done 也 steer 会话、要求会话模型提交，这正是「会话模型停下来等编译」的机械根源。现在 `autoCommit.committed === true` 时**直接 return，完全不打扰会话**；只有 failed、或成功但自动提交被拒时才 steer 一次，且文案改为「请处理失败原因」而非「请提交」。面板/自动调度提交与冷会话仍静默跳过。
+- 修法四（工具返回文案 `codewiki_generate`/`codewiki_update` 与系统提示 section）：把「调用后继续下一项、提交由插件自动完成」写进工具返回值顶层 `notes` 与 description，明确「**本步不必等待编译、不必调用 `codewiki_progress` 轮询、不必自己 git 提交**」；`commitHintText` 从「请提交改动」改为只在自动提交失败时出现的「产物待提交（附原因）」，并写明不要为此中断任务。
+- 设置项：新增 `autoCommit`（默认 true）。关掉即退回旧行为（插件只提醒、由会话模型提交）。
+- 面板（client.js）：编译设置节加「产物自动提交」开关与说明；任务详情显示自动提交结果（成功显示短 sha，失败显示原因）。
+- 测试（test-orchestration.mjs）：新增自动提交断言组——正常提交（只含两个路径、信息前缀 `docs(wiki):`）、无改动 `noChanges` 不空提交、非 git 仓库/合并中/冲突/被 ignore/缺身份各拒绝分支、`autoCommit=false` 不提交、唤醒在自动提交成功时不 steer。
+- 文档：README/CodeWiki.md 同步自动提交边界与会话侧新姿势。
+- 验证：`node test-orchestration.mjs` 全部通过；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths.mjs` / `test-wiki-anchors.mjs` 全部通过。
+- 版本 0.10.8 → 0.10.9。
+
 ## 0.10.8 — 2026-10-24
 
 ### 变更：编译流水线全面适配 hy3 192k 上下文——放弃 32k 时代定制的拆批策略，改「大档单请求优先」

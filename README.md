@@ -8,7 +8,7 @@
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
 | `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见，0.10.7 起无规划阶段，模块清单由 localPlan 本地分组），全部模型环节在插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），零子代理，不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
-| `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「继续下一项、不要等待」；编译完成后实时唤醒发起会话（0.8.0 起 steer 直达，与子代理消息同机制）并注入「编译完成·请提交改动」提醒，把提交动作交回模型（插件不代跑 git） |
+| `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
 | `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务 |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
 
@@ -35,7 +35,8 @@
 - `maxConcurrency`：编译请求并发上限，默认 2（1–8，硬顶 8）。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
 - `articleLanguage`：文章语言，默认中文。
-- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、提交后继续其他工作，需要进度时用 `codewiki_progress` 查；wiki 与代码同提交。0.2.5 起。0.7.0 起同一 section 兼职编译完成提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「编译完成·请提交改动」（时间戳派生自 jobs 文件与 `git log`，提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 done/failed 时收到 steer 消息（与子代理 send_message 同机制），面板/自动调度提交与冷会话静默跳过。
+- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库存在 `.codewiki/` 时出现（text 回调每次组装求值，实时判断）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
+- `autoCommit`（0.10.9）：编译产物自动提交，默认开。编译终态（done 且有文章写成功）后由插件自己 `git add .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`，带任务 id 与篇数），把「等编译完成 → 会话模型代跑 git」这件事彻底收回插件侧——会话模型因此不必等待编译、不必轮询、不必提交。安全边界：只 add 这两个路径（绝不 `-A`）、不动工作区其它改动、不 amend/push/改写历史、不跑仓库钩子；以下情形一律**拒绝并降级**为一次性「产物待提交」提醒（不会半个提交、不会静默丢产物）：非 git 仓库、仓库无 HEAD、merge/rebase/cherry-pick 进行中、目标路径存在未解决冲突、`.codewiki/`（或未 tracked 的 `CodeWiki.md`）被 `.gitignore` 忽略、缺 `user.name`/`user.email`、`git add`/`commit` 失败。结果写入 job 的 `autoCommit`（`committed`/`sha`/`message`/`reason`/`noChanges`），面板与 `codewiki_progress` 直接显示。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
 
 ## 安装（本地 file:/// 直挂）
