@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
       updateReminder: 'wiki 维护提醒',
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，提醒改完代码后更新 wiki。',
       autoCommit: '自动提交编译产物',
-      autoCommitHint: '开启后编译完成由插件自己提交产物（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动）：会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒。',
+      autoCommitHint: '开启后编译完成由插件自己提交产物（只提交 .codewiki/ 与 CodeWiki.md 这两个路径，建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动）：会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒；产物本来就没有改动（重编译无变化）时既不提交也不提醒。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '编译并发上限',
@@ -108,6 +108,9 @@ window.__ModuleLoader__.load({
       elapsedLabel: '已用时',
       historyLabel: '历史任务',
       changedLabel: '变更文件',
+      autoCommitOk: '产物已自动提交',
+      autoCommitNone: '产物无改动，未提交',
+      autoCommitPending: '产物未自动提交',
       wikiAt: 'wiki：',
       tabOverview: '总览',
       tabTasks: '任务',
@@ -175,7 +178,7 @@ window.__ModuleLoader__.load({
       updateReminder: 'Wiki update reminder',
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
       autoCommit: 'Auto-commit compiled wiki',
-      autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes (only .codewiki/ and CodeWiki.md, docs(wiki) prefix suggested, no repo hooks, your other changes untouched): the session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder.',
+      autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes (only the two paths .codewiki/ and CodeWiki.md, docs(wiki) prefix suggested, no repo hooks, your other changes untouched): the session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder; when the artifacts have no changes at all (recompile without diffs) it neither commits nor reminds.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Compile concurrency',
@@ -246,6 +249,9 @@ window.__ModuleLoader__.load({
       elapsedLabel: 'elapsed',
       historyLabel: 'History',
       changedLabel: 'changed files',
+      autoCommitOk: 'artifacts auto-committed',
+      autoCommitNone: 'no artifact changes, nothing committed',
+      autoCommitPending: 'artifacts not committed',
       wikiAt: 'wiki: ',
       tabOverview: 'Overview',
       tabTasks: 'Jobs',
@@ -1241,7 +1247,20 @@ window.__ModuleLoader__.load({
             if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
             if (active) meta.push(`${t('elapsedLabel')} ${fmtMs(Date.now() - Date.parse(job.createdAt))}`)
             else if (job.finishedAt && job.createdAt) meta.push(`${t('totalTimeLabel')} ${fmtMs(Date.parse(job.finishedAt) - Date.parse(job.createdAt))}`)
-            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null },
+            // 自动提交结果（0.10.9）：成功显示短 sha，无改动/失败各一句。
+            // 0.10.10：失败原因（可能是 git stderr 摘录，几十字）放进任务行 title，
+            // 不塞进 meta——否则一行 meta 被原因撑爆，把阶段/用时挤出可视区。
+            let acTitle = null
+            if (!active && job.autoCommit) {
+              const ac = job.autoCommit
+              if (ac.committed) meta.push(`${t('autoCommitOk')} ${ac.sha ?? ''}`.trim())
+              else if (ac.noChanges) meta.push(t('autoCommitNone'))
+              else {
+                meta.push(t('autoCommitPending'))
+                if (ac.reason) acTitle = `${t('autoCommitPending')}：${ac.reason}`
+              }
+            }
+            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: acTitle ?? undefined },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
                 el('span', {

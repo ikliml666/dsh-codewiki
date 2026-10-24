@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.10 — 2026-10-24
+
+### 修复：两轴 code-review 的全部发现（自动提交语义、边界与测试竞态）
+
+- 背景：0.10.9 把「编译产物提交」从会话模型收回插件侧后，做了双轴评审（Standards：是否守本仓成文约定；Spec：是否忠实实现「会话模型不必等编译、产物由插件自己提交」）。评审发现三类问题：①三态语义漏了「产物无改动」——插件其实没失败，却被唤醒通道和系统提示各催一次提交；②文档/注释与代码不一致（`git add -A` 与「只 add 两个路径、绝不 -A」的自述矛盾）；③测试存在两处竞态，其中一处是历史遗留的 tmp 文件污染。
+- 修复一（index.js `autoCommitState`，新增导出）：`committed` / `no-changes` / `pending` 三态的唯一判定。`wakeCompileSession`（实时 steer）与 `commitHintText`（系统提示 section）原先各写一遍判断，只看 `committed===true`，于是 `noChanges` 被当成失败：会话被唤醒一次、系统提示再注入一次「产物待提交」，让会话模型去提交一个不存在的东西——正是本次要消灭的「无谓等待/无谓动作」。现在两条通道共用同一函数，`no-changes` 一律静默；旧 job（无 `autoCommit` 字段）仍按 `pending`，与升级前行为一致。
+- 修复二（index.js `autoCommitWiki`）：`git add -A -- .codewiki CodeWiki.md` 改为 `git add -- .codewiki CodeWiki.md`。`-A` 与 pathspec 同用时行为虽等价，但与本函数注释、README、CHANGELOG 反复强调的「只 add 这两个路径，绝不 `-A`」直接冲突——读代码的人会以为哪儿写错了，或以为将来去掉 pathspec 也安全。改动由 `WIKI_PATHS`（index.js:36）唯一定义，`git log`/`check-ignore`/`add` 三处共用。
+- 修复三（错误上报）：`autoCommit` 被拒时不再只写 `committed:false`——`git add`/`git commit` 自身失败（含 `index.lock` 被并发 git 占用的常见情形）现在返回具体 stderr 摘录进 `reason`，降级提醒里能看到真实原因，而不是笼统的「产物尚未提交」。
+- 修复四（client.js 面板）：任务卡显示自动提交三态——成功显示短 sha、`noChanges` 显示「产物无改动，未提交」、失败显示「产物未自动提交（原因）」。此前 `autoCommit` 只进 `jobSummary` 不进 UI，用户在面板上看不到插件到底提交了没有。
+- 修复五（测试竞态 A，`test-orchestration.mjs` 并发提交块）：旧块用「模型通道失败」当 mock，任务在几百毫秒内进入 failed 终态，`Promise.all` 的第二次 `execute` 走到 `submit` 时已经查不到活动任务，于是新建第二个 job，偶发报「并发提交共享同一 job」失败——与占位逻辑无关，纯测试竞态（复现率约 1/4）。改为 `makeBatchMock({ stall: true })`：任务挂起在 articles 不自行终态，并在前后各用 `/api/codewiki/control` 取消收尾。连跑 5 次全部通过（改前 4 次里失败 1 次）。
+- 修复六（测试竞态 B，tmp 文件污染）：测试的 jobs 文件只按 pid 命名（`dsh-codewiki-jobs-test-<pid>.json`），Windows pid 复用后会把历史运行留下的同名文件原样读入，其中的 `job-tmp-active`（`cw-orch-alive`，articles 阶段）被单项目串行逻辑判为「已有项目在编译」，后续所有提交变成 `queued`，表现为「偶发 20 项失败」（实测复现过）。现在文件名追加随机 token，收尾删除本文件；tmp 下 74 个历史残留文件即为证据。
+- 测试补充：`autoCommitState` 三态单测（含 `committed` 优先于 `noChanges`、空 job 不抛）、`wakeCompileSession` 在 `noChanges` 时零唤醒、`commitHintText` 在 `committed`/`noChanges` 时静默、`pending` 时提醒且带失败原因。
+- 文档：README/CodeWiki.md 同步三态语义、pathspec 表述与失败原因上报。
+- 验证：`node test-orchestration.mjs` 连跑 5 次全通过（0 失败）；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths.mjs` / `test-wiki-entry.mjs` 全部通过；`test-wiki-anchors.mjs` 6918 过 / 335 败（失败全为 wiki 文章里的历史行号漂移，且本次代码改动导致行号整体下移，由随后的 codewiki 编译与 `fixAnchors` 校正）。
+- 版本 0.10.9 → 0.10.10。
+
 ## 0.10.9 — 2026-10-24
 
 ### 修复：编译产物由插件自己提交，会话模型不再等待编译完成（设计缺陷根治）
