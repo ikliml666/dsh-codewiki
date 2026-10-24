@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.6 — 2026-10-24
+
+### 修复：面板藏掉占串行闸门的工作区外编译任务（「到底哪个在编译」盲区）
+
+- 症状：面板上多个任务排队（note「已有项目在编译（perf-dock-glass-primitives-20261024）」），但面板历史里找不到这个正在编译的项目——用户看不到谁占着串行闸门、也无法从面板取消它。实际占用者是 `E:\...\worktrae\Wxxy-CampusLogin\perf-dock-glass-primitives-20261024` 的 worktree 编译任务（jobs 磁盘状态 30 条，面板 API 只回 29 条，缺的正是它）。
+- 根因：`/api/codewiki/jobs` 与 `/api/codewiki/repos` 的 workspaceOnly 过滤（默认开）把 cwd 不在宿主工作区清单里的任务一概藏掉——worktree 目录天然不在清单内。编译服务（tick 闸门）用完整任务表不受此过滤，于是出现「面板不可见的项目占住闸门、其余项目全部排队」的盲区。
+- 修法（index.js）：① jobs 端点过滤改为 `!JOB_TERMINAL.has(j.stage) || isExcluded(j.cwd, wsPaths)`——**非终态（queued/编译中）任务始终显示**，只有终态任务按工作区过滤降噪；② repos 总览的 `putCwd` 同样放行非终态任务的工作区；③ repos 30s 缓存签名加入当前非终态任务的工作区路径——编译中仓库进出总览立即反映，不吃陈旧缓存。
+- 验证：`node test-orchestration.mjs` 编排冒烟全部通过（0.4.9 块新增断言：stall 占住的工作区外 full 编译任务在 jobs 端点与 repos 总览均可见、取消终态后恢复被过滤）；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths` / `test-wiki-entry` 全部通过。
+- 版本 0.10.5 → 0.10.6。
+
 ## 0.10.5 — 2026-10-24
 
 ### 修复：codewiki_progress 工具输出校验失败（progress 为 null 时整个调用报错）

@@ -960,6 +960,22 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
       await ep2.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
       return JSON.parse(res.out).jobs
     }
+    // 0.10.5：工作区外的**非终态**任务不受 workspaceOnly 过滤——单项目串行下
+    // 闸门可能被一个不在工作区清单里的项目（如 worktree）占住，藏掉它用户
+    // 既看不到谁在编译也无法取消。stall 占住 rC 在 plan 阶段，断言后取消：
+    const stalledC = makeBatchMock({ stall: true })
+    // scope=full：rB 编译后 outsideRepo 的 wiki 已最新，auto 会被 "Wiki is up to date" 短路不提交
+    const rC = await gen2.execute({ cwd: outsideRepo, scope: 'full' }, { agent: 'test-agent' })
+    check((await readJobs()).some((j) => j.cwd === outsideRepo && !['done', 'failed', 'cancelled'].includes(j.stage)),
+      '工作区外非终态任务仍显示（排队/编译中不被 workspaceOnly 藏掉）')
+    const resRC = fakeRes()
+    await epRepos.handler(fakeReq({}, '127.0.0.1', 'GET'), resRC)
+    check((JSON.parse(resRC.out).repos ?? []).some((r) => r.cwd === outsideRepo),
+      '总览放行工作区外非终态任务（编译中仓库可见）')
+    const ctlEp2 = wx.endpoints.find((e) => e.path === '/api/codewiki/control')
+    await ctlEp2.handler(fakeReq({ action: 'cancel', jobId: rC.jobId }, '127.0.0.1', 'POST'), fakeRes())
+    await waitJob(rC.cwd)
+    stalledC.restore()
     check((await readJobs()).some((j) => j.cwd === wsRepo), '工作区内任务显示')
     check(!(await readJobs()).some((j) => j.cwd === outsideRepo), `工作区外任务被过滤（${outsideRepo}）`)
 

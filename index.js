@@ -2614,9 +2614,11 @@ export function installWebServer(ctx, service, extra = {}) {
         if (!guard(req, res)) return
         try {
           let list = service.list()
-          // workspaceOnly（默认开）：Temp 沙箱与任意路径任务不出现在面板。
+          // workspaceOnly（默认开）：Temp 沙箱与任意路径的**终态**任务不出现在面板。
+          // 非终态（queued/编译中）始终显示：单项目串行下闸门可能被一个不在工作区
+          // 清单里的项目（如 worktree）占住，藏掉它用户既看不到谁在编译也无法取消。
           const wsPaths = wsFilterPaths()
-          if (wsPaths) list = list.filter((j) => isExcluded(j.cwd, wsPaths))
+          if (wsPaths) list = list.filter((j) => !JOB_TERMINAL.has(j.stage) || isExcluded(j.cwd, wsPaths))
           writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
         } catch (err) {
           // 宿主 webserver 对 handler reject 只回 400 空 body——把错误栈直接写进响应体便于排查
@@ -2633,7 +2635,13 @@ export function installWebServer(ctx, service, extra = {}) {
       handler: async (req, res) => {
         if (!guard(req, res)) return
         try {
-        const wsSig = (() => { const p = wsFilterPaths(); return p ? [...p].sort().join('|') : '' })()
+        const wsSig = (() => {
+          // 缓存签名 = 工作区清单 + 当前非终态任务的工作区：编译中的仓库进出总览
+          // （如 worktree 任务开始/收尾）必须立即反映，不吃 30s 陈旧缓存。
+          const p = wsFilterPaths()
+          const active = service.list().filter((j) => !JOB_TERMINAL.has(j.stage)).map((j) => path.normalize(String(j.cwd ?? ''))).sort()
+          return [...(p ? [...p].sort() : []), ...active].join('|')
+        })()
         if (!reposCache || reposCache.sig !== wsSig || Date.now() - reposCacheAt > 30000) {
           const c = liveConfig(config ?? {})
           const normKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
@@ -2651,9 +2659,10 @@ export function installWebServer(ctx, service, extra = {}) {
           }
           // workspaceOnly（默认开）：总览只显示已添加工作区（含其子仓库）——knownRepos/job
           // 历史里的 Temp 沙箱与任意路径目录不再出现；无清单时不过滤。
+          // 非终态任务的工作区例外放行（同 jobs 端点）：编译中的仓库必须可见。
           const wsPaths = wsFilterPaths()
           const inWs = (dir) => !wsPaths || isExcluded(dir, wsPaths)
-          for (const j of service.list()) if (inWs(j.cwd)) putCwd(j.cwd, j)
+          for (const j of service.list()) if (!JOB_TERMINAL.has(j.stage) || inWs(j.cwd)) putCwd(j.cwd, j)
           for (const dir of loadKnownRepos()) if (inWs(dir)) putCwd(dir, null)
           const repos = []
           for (const cwd of seen.values()) {
