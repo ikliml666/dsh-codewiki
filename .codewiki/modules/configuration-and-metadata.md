@@ -12,7 +12,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 本模块负责定义 `@local/dsh-codewiki` 项目的核心元数据、运行时依赖约束以及针对 DeepSeek Harness (DSH) 插件系统的补丁加载配置。它通过 `package.json`（行1-28）声明 Node.js 环境要求及基础依赖，并通过 `cordis.patch.yml`（行1-16）精确控制 CodeWiki 功能在 DSH 中的挂载方式、默认行为参数（如 batchProvider、batchModel、并发限制、单项目串行）以及二进制文件路径解析逻辑。此外，`.gitignore`（行1-12）确保了构建产物和临时日志不会污染版本控制系统。
 
-该模块是项目静态结构的一部分，但在运行时被 `dsh bundle` 命令读取，用于生成最终的插件包或指导本地开发环境的 Cordis 挂载行为。当前版本为 `0.10.4`（见 `package.json` 行3），其描述（行4）明确了 CLI (`cw`)、全仓库 Wiki 编译管线（插件内、默认 workbuddy/hy3 192k 上下文、新增 large tier volces-ark/glm-5.3-flash 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能。
+该模块是项目静态结构的一部分，但在运行时被 `dsh bundle` 命令读取，用于生成最终的插件包或指导本地开发环境的 Cordis 挂载行为。当前版本为 `0.10.4`（见 `package.json` 行3），其描述（行4）明确了 CLI (`cw`)、全仓库 Wiki 编译管线（插件内、默认 workbuddy/hy3 192k 上下文、large tier volces-ark/glm-5.3-flash 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能。
 
 ## Key Components
 
@@ -20,24 +20,24 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 位于仓库根目录，JSON 格式配置文件（源码行1-28）。
 
-- **行2** `name`: `"@local/dsh-codewiki"`。项目唯一标识符。
-- **行3** `version`: `"0.10.4"`。当前语义化版本号（较旧版 `0.10.3` 已更新）。
-- **行4** `description`: `"CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (in-plugin, default workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k for oversized input, zero subagents, single-project serial) with a sidebar panel."` 描述 CLI、全仓库 Wiki 编译管线及侧边栏面板功能，新增了 large tier 超大输入模型支持说明。
-- **行5** `private: true`：标记为私有包，防止意外发布到 npm 公共注册表。
-- **行6** `type: "module"`：启用 ES Modules (ESM) 支持，所有 `.js` 文件默认视为 ESM。
-- **行7** `main: "index.js"`：入口点。
-- **行8-11** `exports`：定义子路径导出。
+- **行2** `"name": "@local/dsh-codewiki"`：项目唯一标识符。
+- **行3** `"version": "0.10.4"`：当前语义化版本号。
+- **行4** `"description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (in-plugin, default workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k for oversized input, zero subagents, single-project serial) with a sidebar panel."`：描述 CLI、全仓库 Wiki 编译管线及侧边栏面板功能，包含 large tier 超大输入模型支持说明。
+- **行5** `"private": true`：标记为私有包，防止意外发布到 npm 公共注册表。
+- **行6** `"type": "module"`：启用 ES Modules (ESM) 支持，所有 `.js` 文件默认视为 ESM。
+- **行7** `"main": "index.js"`：入口点。
+- **行8-11** `"exports"`：定义子路径导出。
   - **行9** `"."`: 映射至 `./index.js`。
   - **行10** `"./client"`: 映射至 `./client.js`。
-- **行12** `license: "MIT"`：开源许可证类型。
-- **行13-16** `engines`：
-  - **行14** `node`: `">=20"`。强制要求 Node.js 版本不低于 20。
-  - **行15** `dsh`: `">=0.2.0-rc.0"`。强制要求 DeepSeek Harness 版本不低于 0.2.0 的 rc.0 预发布版。
-- **行17-19** `dependencies`：
-  - **行18** `@deepseek-ai/schemastery`: `"^3.18.4"`。核心运行时依赖，用于 Schema 验证或工具定义。
-- **行20-27** `dsh`：自定义字段，专供 DSH 工具链使用。
-  - **行21-23** `client`：`platform` 为 `"web"`（行22），指定客户端运行平台为 Web。
-  - **行24-26** `bundle`：`patch` 为 `"cordis.patch.yml"`（行25），指定打包时使用的 Cordis 补丁定义文件路径。
+- **行12** `"license": "MIT"`：开源许可证类型。
+- **行13-16** `"engines"`：
+  - **行14** `"node": ">=20"`：强制要求 Node.js 版本不低于 20。
+  - **行15** `"dsh": ">=0.2.0-rc.0"`：强制要求 DeepSeek Harness 版本不低于 0.2.0 的 rc.0 预发布版。
+- **行17-19** `"dependencies"`：
+  - **行18** `"@deepseek-ai/schemastery": "^3.18.4"`：核心运行时依赖，用于 Schema 验证或工具定义。
+- **行20-27** `"dsh"`：自定义字段，专供 DSH 工具链使用。
+  - **行21-23** `"client"`：`"platform"` 为 `"web"`（行22），指定客户端运行平台为 Web。
+  - **行24-26** `"bundle"`：`"patch"` 为 `"cordis.patch.yml"`（行25），指定打包时使用的 Cordis 补丁定义文件路径。
 
 ### cordis.patch.yml
 

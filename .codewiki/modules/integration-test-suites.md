@@ -18,44 +18,44 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 
 ### test-orchestration.mjs
 
-- 环境加速与隔离：`process.env.DSH_CODEWIKI_TICK_MS='300'`（行15，生产默认 10s）；`process.env.DSH_CODEWIKI_JOBS_FILE` 独立指向 tmp 防互洗（行19）；`const { name, apply } = await import('./index.js')`（行20）。
-- 断言辅助：`check(cond, msg)` 累计失败计数（行23-26）。
-- 文章模板：`articleMd(title, source, marker='Batch-written', type='module')` 拼装带 frontmatter 的假文章（行29-30）。
-- 测试配置基线：`batchCfg(extra={})` 返回 `{ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra }`（行34），0.10.1 起编译模型须显式指向设置里的 provider/model。
-- Mock 宿主上下文：`makeCtx({agents, workspaces, brokenRegistry, agentGet, llm})`（行40-80）造 mock 宿主 ctx；`services` 含 `webServer.register`(行46)、`agents.list/get`(行47)、`tools.register`(行48)、`llm`(行49)、`workspaceRegistry.list`(行52/55 抛错形态)；`inject` 支持 cordis 回调与 promise 双风格(行58-68)；`effect` 立即执行 body 并收集 disposer(行73-77)。
-- Mock Agent：`makeMockAgent(cwd)`（行83-97）造 agent，`ctx.inject` 返回 `systemPrompt` 切片，`getSectionOrder` 对 `TOOL_REPORT` 返 2900(行90)。
-- Fixture 仓库：`makeFixtureRepo()`（行99-109）建 git 仓库含 src/core.py、src/util.py。
-- LLM 代理与 Mock：`activeLlm`(行114) 与 `llmProxy`(行115-122) 唯一通道转发，未接线抛错(行117)；`promptOf(opts)`（行123）取 `messages[0].content[0].text`。
-- 批量 Mock：`makeBatchMock({modules=['core','util'], articleMarker, stall, bigArticle, bigSources, planReply})`（行127-189）假 llm 服务；`answerFor`(行129-157) 按 prompt 关键词分发；`stream` 生成器按 block 协议 yield(行160-177)，`stall` 时挂起至 abort(行164-170)；返回 `{llm, llmCalls, batchPrompts, realtimePrompts, restore}`。
-- 轮询与 HTTP Mock：`waitJob(cwd, {timeout=30000})`（行192-205）轮询 JOBS_FILE 找终态；`fakeReq`(行207-216) / `fakeRes`(行217-219) mock HTTP。
-- 动态导入符号：`commitHintText`(行284)、`wakeCompileSession`(行354) 从 index.js 导入。
-- 同构校验器：`validateOut` 本地校验同构宿主 schema（行1019-1034）。
+- 环境加速与隔离：`process.env.DSH_CODEWIKI_TICK_MS = '300'`（行15，生产默认 10s）；`process.env.DSH_CODEWIKI_JOBS_FILE` 独立指向 tmp 防互洗（行19）；`const { name, apply } = await import('./index.js')`（行20）。
+- 断言辅助：`function check(cond, msg)` 累计失败计数（行23-26）。
+- 文章模板：`const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>` 拼装带 frontmatter 的假文章（行29-30）。
+- 测试配置基线：`const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra })`（行34），0.10.1 起编译模型须显式指向设置里的 provider/model。
+- Mock 宿主上下文：`function makeCtx({ agents = [], workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {})`（行40-80）造 mock 宿主 ctx；`services` 含 `webServer.register`（行46）、`agents.list/get`（行47）、`tools.register`（行48）、`llm`（行49）、`workspaceRegistry.list`（行52/55 抛错形态）；`inject` 支持 cordis 回调与 promise 双风格（行58-68）；`effect` 立即执行 body 并收集 disposer（行73-77）。
+- Mock Agent：`function makeMockAgent(cwd)`（行83-97）造 agent，`ctx.inject` 返回 `systemPrompt` 切片，`getSectionOrder` 对 `TOOL_REPORT` 返 2900（行90）。
+- Fixture 仓库：`function makeFixtureRepo()`（行99-109）建 git 仓库含 src/core.py、src/util.py。
+- LLM 代理与 Mock：`let activeLlm = null`（行114）与 `const llmProxy =`（行115-122）唯一通道转发，未接线抛错（行117）；`const promptOf = (opts) =>`（行123）取 `messages[0].content[0].text`。
+- 批量 Mock：`function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, bigSources = false, planReply = null } = {})`（行127-189）假 llm 服务；`answerFor`（行129-157）按 prompt 关键词分发；`stream` 生成器按 block 协议 yield（行160-177），`stall` 时挂起至 abort（行164-170）；返回 `{ llm, llmCalls, batchPrompts, realtimePrompts, restore }`。
+- 轮询与 HTTP Mock：`async function waitJob(cwd, { timeout = 30000 } = {})`（行192-205）轮询 JOBS_FILE 找终态；`function fakeReq`（行207-216） / `function fakeRes`（行217-219） mock HTTP。
+- 动态导入符号：`const { commitHintText } = await import('./index.js')`（行284）、`const { wakeCompileSession } = await import('./index.js')`（行354）从 index.js 导入。
+- 同构校验器：`const validateOut = (schema, v) =>` 本地校验同构宿主 schema（行1019-1034）。
 - 测试块（直接执行断言）：系统提醒（行222-250）、注册（行252-264）、`codewiki_update`+`commitHintText`（行272-349）、`wakeCompileSession`（行351-377）、规划阶段（行379-452）、全量编译（行454-484）、大 wiki 横切（行486-514）、大模块分割（行516-548）、单项目串行（行550-597）、唯一通道（行599-631）、stale 更新（行633-654）、progress（行656-692）、重启重跑（行693-747）、并发占位（行749-787）、面板端点（行789-841）、排除清单（行843-896）、knownRepos（行898-936）、工作区过滤（行938-983）、registry 异常（行985-1013）、schema 校验（行1015-1053）、孤儿接管（行1055-1087）、模型缺失（行1089-1102）、严格 cordis（行1104-1126）、Temp 清理（行1128-1145）。
 - scheduler 默认 `enabled:false, intervalMin:30`（行890，repos 总览 scheduler 块）。
 
 ### test-wiki-anchors.mjs
 
-- 源文件加载：引入 fs/path/fileURLToPath（行10-12）；`ROOT`/`WIKI`/`SOURCES`(行14-19) 读 index.js/client.js 行数缓存。
-- 断言：`check(cond, msg)` 行28-32 返回 cond 供 `if(!check(...))continue` 短路。
-- 符号提取：`symbolsOnLine(line)`（行38-49）提取反引号内标识符，去参数括号，正则 `^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$`，长度>=3 且尾段>=3。
-- 最近符号：`nearestSymbol(syms, anchorIndex, anchorLen)`（行52-62）取离锚点最近符号，同距取左侧。
-- 文件遍历：`walk(dir)`（行64-73）递归收集 .md。
-- 主校验循环（行82-115）：正则 `/(?:index|client)\.js[:：](\d+)(?:-(\d+))?/g`(行86)；单锚点行才做符号绑定(行105)，区间锚点搜整个 slice(行106-110)，hit 允许全名或尾段(行108-109)；退出 failures>0?1:0(行117-118)。
+- 源文件加载：引入 fs/path/fileURLToPath（行10-12）；`ROOT`/`WIKI`/`SOURCES`（行14-19）读 index.js/client.js 行数缓存。
+- 断言：`function check(cond, msg)` 行28-32 返回 cond 供 `if(!check(...))continue` 短路。
+- 符号提取：`function symbolsOnLine(line)`（行38-49）提取反引号内标识符，去参数括号，正则 `^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$`，长度>=3 且尾段>=3。
+- 最近符号：`function nearestSymbol(syms, anchorIndex, anchorLen)`（行52-62）取离锚点最近符号，同距取左侧。
+- 文件遍历：`function walk(dir)`（行64-73）递归收集 .md。
+- 主校验循环（行82-115）：正则 `/(?:index|client)\.js[:：](\d+)(?:-(\d+))?/g`（行86）；单锚点行才做符号绑定（行105），区间锚点搜整个 slice（行106-110），hit 允许全名或尾段（行108-109）；退出 failures>0?1:0（行117-118）。
 
 ### test-wiki-entry.mjs
 
 - 静态导入 `ensureWikiEntry, normalizeArticlePath, normalizeIndexLinks, parseStatus` from './index.js'（行10）。
-- 辅助：`check`(行13-16)；局部 `repo(name)` 工厂(行19-23)。
-- `ensureWikiEntry` 测试（行26-54）：缺失生成中文(行27，含绝对路径/codewiki_generate/_architecture.md/不覆盖声明)，已有不覆盖(行38)，英文文案(行43)，空 cwd 返 false(行49)，幂等(行53)。
+- 辅助：`function check(cond, msg)`（行13-16）；局部 `const repo = (name) =>`（行19-23）。
+- `ensureWikiEntry` 测试（行26-54）：缺失生成中文（行27，含绝对路径/codewiki_generate/_architecture.md/不覆盖声明），已有不覆盖（行38），英文文案（行43），空 cwd 返 false（行49），幂等（行53）。
 - Windows 规范测试（行56-72）：
-  - `normalizeArticlePath`(行57-59)：`\`→`/`，undefined→''。
-  - `parseStatus`(行60-62)：changedFiles 保留规范，staleArticles `\`→`/`。
-  - `normalizeIndexLinks(repo)`(行63-72)：改 `_index.md` 链接头 `[[modules\core|core]]`→`[[modules/core|core]]`(行69)，正文反斜杠不动(行70)，幂等(行71)，无文件 false(行72)。
+  - `normalizeArticlePath`（行57-59）：`\`→`/`，undefined→''。
+  - `parseStatus`（行60-62）：changedFiles 保留规范，staleArticles `\`→`/`。
+  - `normalizeIndexLinks(repo)`（行63-72）：改 `_index.md` 链接头 `[[modules\core|core]]`→`[[modules/core|core]]`（行69），正文反斜杠不动（行70），幂等（行71），无文件 false（行72）。
 
 ### test-batch.mjs
 
 - 导入清单（行7-12）：`collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer` 来自 `./index.js`；以及 `fs, os, path`。
-- 测试基座：`check(cond, msg)`（行16，累计 `passed`/`failures`）、`section(name)`（行20）、`mockJson`（行21，预留未用）。
+- 测试基座：`function check(cond, msg)`（行16，累计 `passed`/`failures`）、`function section(name)`（行20）、`const mockJson`（行21，预留未用）。
 - `estimateTokens` 测试（行24-28）：CJK 每字 1 token，ASCII `ceil(n/3.5)`，空串 0，混合累加。
 - `collectSources(root, files, budget?)` 测试（行31-44）：返回 `{text, skipped, oversized}`；内容内联带 `### 相对路径` 标题与 `行号| ` 前缀（行36）；缺失文件文内标“文件不存在”（行37）；预算充足无跳过（行38）；尾换行只去一个（行39）；首文件即超预算 → `oversized:true` 且原文兜底返回（行40-41）；装不下第二文件 → `skipped` 含该文件（行42-44）。
 - `numberLines` 测试（行47-51）：单尾换行末行 `2| b`；双尾换行保留空行 `2| `；CRLF 剥离 `\r`；空文件输出 `1|`。
@@ -64,7 +64,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - `classifySessionTask({articlePath, dispatchedAt})` 测试（行134-149）：>30 分钟未见产出 → `timeout`；超时判定优先于已产出；派发后产出且以 frontmatter 开头 → `harvest`；产出中无 frontmatter → `wait`；目标文件 mtime 早于派发时间 → `wait`。
 - `buildSessionSteerText({job, snapshots, tier, resend?})` 测试（行151-168）：`tier` 空不提档位；填 `tier` 则文本要求显式传 `tier: "codeiwiki"` 且禁止自动选路；任务文件与目标路径写进；无模板占位符残留；`stage:'review'` 文案按校对措辞且仍钉死档位；`resend:true` 带“重新派发”并钉档；未填档位重发不提。
 - `runRealtimeTasks(tasks, {provider, llm, model, reasoningEffort?, concurrency, notes, signal?, onTaskDone?})` 测试：
-  - 基础路由（行169-205）`makeLlm(reply)` 工厂（行173-188）返回 `{ async *stream(opts) }` 模拟 stream 协议；每任务一次流调用，按 provider/model 路由，`reasoningEffort` 原样下发，`temperature` 固定 0（行200-203）。
+  - 基础路由（行169-205）`function makeLlm(reply)` 工厂（行173-188）返回 `{ async *stream(opts) }` 模拟 stream 协议；每任务一次流调用，按 provider/model 路由，`reasoningEffort` 原样下发，`temperature` 固定 0（行200-203）。
   - 混合档分派（行207-228）：同一池里大档任务按自带 provider/model/档位路由，普通任务走默认档。
   - tps 采样与取消信号（行229-239）：`onTaskDone` 上报 `outputTokens`/`durationMs`；未配置思考程度不下发 `reasoningEffort`。
   - 外部 signal 中止（行241-251）：已 abort 则结果数少于任务数。
@@ -80,9 +80,9 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 
 ### test-cwd-paths.mjs
 
-- 导入：`plugin`（行5）、`path`（行3）、`fileURLToPath`（行4）；`pluginDir` 由 `fileURLToPath` 取（行7）。
-- 路径推导：`repoWin` 默认 `'E:/ik/Documents/trae_projects/1/Wxxy-CampusLogin'`（行8），`msys` 将 `E:/x` 转 `/e/x`（行10）。
-- 假 `ctx.inject` 收集 `tools.register`（行13-18），调 `plugin.apply(ctx, {})`（行20）后取 `registered.cw`（行22）。
+- 导入：`import * as plugin`（行5）、`import path`（行3）、`import { fileURLToPath }`（行4）；`const pluginDir =`（行7）。
+- 路径推导：`const repoWin =`（行8）默认 `'E:/ik/Documents/trae_projects/1/Wxxy-CampusLogin'`，`const msys =`（行10）将 `E:/x` 转 `/e/x`。
+- 假 `ctx.inject`（行13-18）收集 `tools.register`，调 `await plugin.apply(ctx, {})`（行20）后取 `registered.cw`（行22）。
 - `resolveBinary` 未导出，借 `cw.execute` 间接验证（行25-28, 59）。
 - MSYS 测试（行30-45）：`cw.execute({cwd: msys, args:['path']}, execStub)` 期望 exit 0 且 stdout 匹配 `.codewiki$`。
 - Windows 测试（行47-57）：`cw.execute({cwd: repoWin, args:['status']})` 期望 exit 0 且不含 `No wiki found`。
@@ -137,7 +137,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 以下条目实为测试固化的非显然语义与边界防御，并非模块缺陷：
 
 ### test-orchestration.mjs 边界
-- **cordis 语义**：`makeCtx` 的 `inject` 传 ctx 切片而非实例(行59-64)；`effect` 错写 `ctx.effect(()=>service.stop())` 会当场调用致 tick 停摆(行71-72)；严格语义下未 inject 访问 `ctx.agents` 抛错，但 `apply` 不抛且工具仍注册（行1123）。
+- **cordis 语义**：`makeCtx` 的 `inject` 传 ctx 切片而非实例（行59-64）；`effect` 错写 `ctx.effect(()=>service.stop())` 会当场调用致 tick 停摆（行71-72）；严格语义下未 inject 访问 `ctx.agents` 抛错，但 `apply` 不抛且工具仍注册（行1123）。
 - **LLM 接线**：`llmProxy.stream` 若 `activeLlm` 未接线抛 “测试未接线”（行117）；stall 模式挂起至 `opts.signal` abort（行164-170）。
 - **规划降级**：planReply 非 JSON 时降级本地按顶层目录分组，任务仍 done（行414-432）。
 - **commitHintText 缓存**：缓存键为 cwd，编译早于 `.codewiki` 最后提交则静默；`writtenCount=0` 不提醒；测试用换仓库绕开 60s 缓存（行306-345）。
@@ -164,7 +164,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - **行号/格式**：`numberLines` 空文件输出 `1|`，双尾换行保留空行 `2| `，CRLF 剥离（行47-51）；`fixAnchors` 对未找到/歧义/不在清单/basename 歧义均不动并记 `unresolved`，区间尾部钳到文件尾，CRLF 保真（行453-495）。
 - **会话通道收割**：`classifySessionTask` 超时（30min）判定优先于已产出（行139-141）；旧文未更新（mtime 早于派发）判 `wait`（行146-148）。
 - **任务执行容错**：`runRealtimeTasks` 单任务失败仅记 `notes`、不落盘、不中断并发（行253-275, 323-338）；外部 `AbortController` 已 abort 则池子立即停止消费（行241-251）；`reasoningEffort` 未配置时从请求体省略而非传 undefined（行238）；`temperature` 硬编码 0（行202）。
-- **模型/端点**：`listModelCatalog`/`resolveModelEfforts` 在 `llm=null` 或单 provider 抛错时诚实返回 `ok:false` 或保留错误条目，不抛异常（行309-314, 361, 420）；HTTP 端点强制回环（`127.0.0.1` 放行，其它 403），缺参 400（行386-391, 439-445）。
+- **模型/端点**：`listModelCatalog`/`resolveModelEfforts` 在 `llm=null` 或单 provider 抛错时诚实返回 `ok:false` 或保留错误条目，不抛异常（行350-361, 418-421）；HTTP 端点强制回环（`127.0.0.1` 放行，其它 403），缺参 400（行386-391, 439-445）。
 - **档位钉死**：`buildSessionSteerText` 填 `tier` 时显式禁止自动选路，且 `review`/`resend` 场景文案不同但均钉死（行151-168）。
 - **0.10.1 删除内置百炼通道**：`resolveBatchApiKey` 不再从 `./index.js` 导出（行448-451），插件不碰密钥。
 - **scanRepoFiles 黑名单**：跳 node_modules/.git/二进制/超大(300*1024)/空（行303-318）。

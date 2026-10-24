@@ -115,6 +115,32 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 - SVG 摊开的书本（wiki 页），默认 16×16、stroke currentColor，接受 `props.size`（第 1329 行）。
 
+### 数据模型（外部 API 与表单值对象）
+
+- **设置命名空间 `codewiki` 值对象**（由 `form.getSnapshot().value` 提供，第 485 行；`save()` 差量键全集见第 672 行）：宿主 Config 服务持久化的插件配置，全部字段如下：
+  - `enabled`（bool，默认 true）：启用插件；停用后 `cw` 与 `codewiki_generate` 工具立即报错。
+  - `updateReminder`（bool，默认 true）：会话系统提示注入收尾提醒。
+  - `workspaceOnly`（bool，默认 true）：任务页只显示工作区任务。
+  - `maxConcurrency`（number，1–8，默认 2）：编译并发上限。
+  - `serialProjects`（bool，默认 true）：单项目串行。
+  - `articleLanguage`（string）：文章语言（如「中文」）。
+  - `binaryPath`（string）：cw 可执行路径，空=优先 PATH。
+  - `batchProvider`（string）：编译模型提供商 id。
+  - `batchModel`（string）：编译模型 id。
+  - `batchReasoningEffort`（string|null）：编译模型思考档位（来自目录）。
+  - `bigProvider`（string|null，空=关闭大档）：大档提供商 id。
+  - `bigModel`（string）：大档模型 id。
+  - `bigReasoningEffort`（string|null）：大档思考档位。
+  - `bigTokenBudget`（string|number，默认 420000）：大档输入预算。
+  - `sessionTier`（string）：兜底档位（dsh-subagent-auto-router 档位 id）。
+  - `excludePaths`（string，多行/分号/逗号分隔绝对路径）：排除清单。
+  - `autoUpdate`（bool，默认 false）：自动更新开关。
+  - `autoUpdateMin`（number，最小 5，默认 30）：扫描间隔分钟。
+
+- **任务对象 job**（`GET /api/codewiki/jobs` 返回数组元素，被 `jobCard` 消费，第 1220-1278 行）：编译任务运行态。字段包括：`id`、`cwd`、`kind`（`full`/`stale`/`resume`）、`stage`（见 ACTIVE_STAGES 及终态 `done`/`failed`/`cancelled`）、`createdAt`（ISO，自动生成）、`updatedAt`（ISO，自动生成）、`finishedAt`（ISO，终态时间戳）、`articles`（数组，元素含 `ok` 布尔）、`writtenCount`（number）、`failedCount`（number）、`taskList`（数组，元素 `{name, state}`）、`batchProgress`（`{completed, total}`）、`batchSubmittedAt`（ISO 时间戳）、`tps`（number，实时通道吞吐）、`usage`（`{inputTok, outputTok, requests, batchRequests, realtimeRequests, overTier2}`）、`notes`（字符串数组，活动流）、`error`（string）、`wikiPath`（string）、`stageTimings`（对象，阶段名→耗时 ms）、`stageStartedAt`（ISO，当前阶段开始）、`cancelRequested`（bool）、`auto`（bool，自动调度触发）。
+
+- **仓库对象与调度对象**（`GET /api/codewiki/repos` 返回，被 `ReposTab` 消费，第 1044-1120 行）：`repos` 数组元素含 `cwd`、`state`（`missing`/`uncompiled`/`clean`/`stale`/`error`）、`excluded`（bool）、`lastJob`（任务对象快照）、`staleArticles`（number）、`changedFiles`（number）、`articleCount`（number）；`scheduler` 对象含 `enabled`、`intervalMin`、`scanning`、`lastScan`（ISO）、`lastError`、`lastScanRepos`（number）、`lastScanSubmitted`（number）。
+
 ## Architecture
 
 ```text
@@ -147,7 +173,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ## Connections
 
-- [[core-logic]]：本模块消费的 `/api/codewiki/jobs|control|repos|models|model-efforts` 端点由宿主半侧服务提供（常量定义第 19-25 行）；任务对象字段（stage/taskList/batchProgress/usage/notes/stageTimings/tps 等）的语义在本模块被消费。
+- [[core-logic]]：本模块消费的 `/api/codewiki/jobs|control|repos|models|model-efforts` 端点由宿主半侧服务提供（常量定义第 19-25 行）；任务对象字段（stage/taskList/batchProgress/usage/notes/stageTimings/tps 等，见数据模型小节）的语义在本模块被消费。
 - [[configuration-management]]：设置读写链路——`configForms` 命名空间 `'codewiki'`（第 17、417 行）、`getSnapshot/subscribe/mutate` 用法（第 478-495、663-685、1011-1029 行）与设置键全集（第 672 行）。
 
 ## Known Issues

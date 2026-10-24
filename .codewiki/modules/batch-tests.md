@@ -9,7 +9,7 @@ tags: [测试, 批量处理, 回归, 日志回溯]
 
 ## Overview
 
-`batch-tests` 模块由批量处理路径的测试脚本 `test-batch.mjs` 与一次历史运行产出的日志 `.tmp-test-batch.log` 组成。`test-batch.mjs` 当前共 501 行，用例矩阵覆盖纯函数（源码装填、token 估算、任务装配、本地规划、横切装填、仓库勘探、会话通道收割判定、锚点修正）与 mock 宿主 llm 服务（并发池、取消信号、失败记账、思考档位下发）、会话通道 steer 文本钉死档位、模型目录与思考程度解析、Web 端点回环校验，以及 0.10.1 起内置百炼直连通道的整体移除验证。`.tmp-test-batch.log` 保留早期版本脚本的运行产出（59 通过，0 失败），其记载的百炼端点与 28k/200k 升档行为已过时，仅作文件存在性回溯，不可用于推断当前代码行为。
+`batch-tests` 模块由批量处理路径的测试脚本 `test-batch.mjs` 与一次历史运行产出的日志 `.tmp-test-batch.log` 组成。`test-batch.mjs` 当前源码至 `501|` 行，用例矩阵覆盖纯函数（源码装填 `collectSources`、token 估算 `estimateTokens`、行号前缀 `numberLines`、任务装配 `prepareArticleTasks`、本地规划 `localPlan`、横切装填 `packArticles`、仓库勘探 `scanRepoFiles`、会话通道收割判定 `classifySessionTask`、锚点修正 `fixAnchors`）与 mock 宿主 llm 服务（并发池 `runRealtimeTasks`、取消信号、失败记账、思考档位下发、大档模型接管 `bigTier`）、会话通道 steer 文本钉死 `buildSessionSteerText`、模型目录 `listModelCatalog` 与思考程度解析 `resolveModelEfforts`、Web 端点回环校验，以及 0.10.1 起内置百炼直连通道的整体移除验证（断言 `resolveBatchApiKey` 未导出）。`.tmp-test-batch.log` 保留早期版本脚本的运行产出（第 85| 行记载 `ALL PASS：59 通过，0 失败`），其记载的百炼端点与 28k/200k 升档行为已过时，仅作文件存在性回溯，不可用于推断当前代码行为。
 
 ## Key Components
 
@@ -21,7 +21,7 @@ tags: [测试, 批量处理, 回归, 日志回溯]
 - `function check(cond, msg)` (16-19|) —— 断言函数：条件真则 `passed += 1` 并 `console.log('  ✓ ' + msg)`，否则 `failures.push(msg)` 并输出 `✗`。
 - `function section(name)` (20|) —— 打印分段标题：`console.log('\n== ' + name + ' ==')`。
 - `const mockJson = (obj, status = 200) => ...` (21|) —— 返回 mock Response-like 对象；当前测试已改用 `makeLlm` 模拟宿主 llm 通道，此常量未被后续用例调用（遗留未用，功能禁用）。
-- `function makeLlm(reply)` (173-188|) —— 构造 fake llm 对象，其 `async *stream(opts)` 生成器按协议吐块：推 `block-start`、`text-delta`、`usage`、`finish`；`reply` 可为字符串、函数（拿到 opts 返回文本）或 `Error`（触发 error finish）。用于 `runRealtimeTasks` 宿主通道 mock。
+- `function makeLlm(reply)` (173-188|) —— 构造 fake llm 对象，其 `async *stream(opts)` 生成器方法按协议吐块：推 `block-start`、`text-delta`、`usage`、`finish`；`reply` 可为字符串、函数（拿到 opts 返回文本）或 `Error`（触发 error finish）。用于 `runRealtimeTasks` 宿主通道 mock。
 - `const promptOf = (opts) => ...` (189|) —— 从 `opts.messages[0].content[0].text` 提取 prompt 文本辅助断言。
 - 各测试段内声明的临时根变量：`tmpRoot` (32|)、`workRoot` (55|)、`sessDir` (135|)、`scanRoot` (305|)、`faRoot` (455|) 等，均通过 `fs.mkdtempSync` 创建并最后 `fs.rmSync` 清理（如行 319-321、494）。
 
@@ -43,7 +43,7 @@ import {
 | 段落名 | 行号区间 | 覆盖功能 |
 | --- | --- | --- |
 | estimateTokens 粗算 | 23-28 | CJK 每字 1 token、ASCII ceil(n/3.5)、空串、混合计费 |
-| collectSources 装填/预算 | 31-44 | 内容内联带行号标题、缺失标注、token 预算、oversized/skipped |
+| collectSources 装填/预算 | 30-44 | 内容内联带行号标题、缺失标注、token 预算、oversized/skipped |
 | numberLines 前缀 | 46-51 | 行号前缀与单/双尾换行、CRLF 剥离、空文件 |
 | prepareArticleTasks 装配与 oversized 拆分 | 53-85 | prompt 含 mission/语言/源码/旧文；单文件超 110k 预算但在 128k 大档内 → 大档单请求不转会话通道（行78-81）；单文件连 128k 大档都装不下 → 会话通道兜底（行82-84） |
 | 多文件超预算观察批分割 | 86-105 | 观察批分割（≥2）、keepInMemory、composePlan、批次序号标注、prompt ≤110k |
@@ -93,10 +93,10 @@ import {
 
 1. 脚本启动，导入 `./index.js` 被测函数（行 7-12），定义 `passed`/`failures`/`check`/`section`/`mockJson`（行 14-21）及 `makeLlm`/`promptOf`（行 173-189）。
 2. 各测试段调用 `fs.mkdtempSync` 创建临时根（如行 32 `tmpRoot`、行 55 `workRoot`、行 135 `sessDir`、行 305 `scanRoot`、行 455 `faRoot`），写入假源码文件。
-3. 调用被测函数（如 `collectSources`、`prepareArticleTasks`、`runRealtimeTasks`），获取返回对象或 Map。
-4. 使用 `check` 断言返回属性（如 `cs.text.includes(...)`、`prep.prepared.length`、 `rt.get('rt0').ok`）。
-5. 对于宿主 llm 通道测试，在行 173 起构造 `makeLlm` 伪对象，其 `stream` 生成器被 `runRealtimeTasks` 调用，记录 `llmCalls` 并路由到对应 reply（字符串/函数/Error），不产生真实网络请求。
-6. Web 端点测试通过 `installWebServer` 注入假 `webServer` 注册路由（行 366-377、427-433），再用模拟 `ctx`/`res` 调用 handler 断言状态码与 body。
+3. 调用被测函数（如 `collectSources` (35|)、`prepareArticleTasks` (66|)、`runRealtimeTasks` (195|)），获取返回对象或 Map。
+4. 使用 `check` 断言返回属性（如 `cs.text.includes(...)` (36|)、`prep.prepared.length` (67|)、 `rt.get('rt0').ok` (271|)）。
+5. 对于宿主 llm 通道测试，在行 173 起构造 `makeLlm` 伪对象，其 `stream` 生成器被 `runRealtimeTasks` 调用，记录 `llmCalls` (171|) 并路由到对应 reply（字符串/函数/Error），不产生真实网络请求。
+6. Web 端点测试通过 `installWebServer` 注入假 `webServer` 注册路由（行 368-377、428-433），再用模拟 `ctx`/`res` 调用 handler 断言状态码与 body。
 7. 所有 `console.log` 输出在旧版运行中被捕获进 `.tmp-test-batch.log`；当前脚本本身不写该日志，仅文件留存作回溯。
 8. 最终在行 497 打印汇总，失败时 `process.exit(1)`（行 498-500）。
 

@@ -14,8 +14,8 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 
 代码分成两半，职责严格分离：
 
-- `index.js`（约2935行）是宿主半侧。它封装本地 `cw` CLI（`runCw` 见行125）、定义 `Config` 配置（行48）、实现 `createJobService` 阶段机（行1252），注册四个模型工具（`cw` / `codewiki_generate` / `codewiki_update` / `codewiki_progress`），并通过 `installWebServer`（行2569）在回环地址上暴露查询与控制端点。
-- `client.js`（约1343行）是浏览器半侧。经 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })`（行10-12）注册，向宿主注入设置卡片（`plugins.item`）和侧边栏面板（`main` + `sidebar.panellist`），靠轮询而非推送更新界面。
+- `index.js`（共 2935 行）是宿主半侧。它封装本地 `cw` CLI（`runCw` 见行125）、定义 `Config` 配置（行48）、实现 `createJobService` 阶段机（行1252），注册四个模型工具（`cw` / `codewiki_generate` / `codewiki_update` / `codewiki_progress`），并通过 `installWebServer`（行2569）在回环地址上暴露查询与控制端点。
+- `client.js`（共 1343 行）是浏览器半侧。经 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })`（行10-12）注册，向宿主注入设置卡片（`plugins.item`）和侧边栏面板（`main` + `sidebar.panellist`），靠轮询而非推送更新界面。
 
 核心契约是 **阶段机 + 文件状态**：一个 job 从 `plan` 依次推进到 `articles` → `crosscut` →（超预算拆分时 `compose`）→ `review` → `index` → `done`，`tick`（行1987）按 10 秒节拍每次推进一步（`TICK_MS` 见行1050），全部状态落在 `JOBS_FILE`（行1049），因此宿主重启、多实例并存都能靠磁盘快照接管续跑。模型通道唯一：宿主 `llm` 服务（`llmChat` 见行283），默认 `workbuddy/hy3`（192k 上下文，行26-27），单请求输入预算 110k（行369）；单文件超预算时改用大档 `volces-ark/glm-5.3-flash`（512k，行30-31，预算 420k，行33），仍装不下才转会话通道兜底（`dispatchSessionTasks` 见行1521）。
 
@@ -74,6 +74,7 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - `slugify(name)`：行975-977，小写化非 `[a-z0-9-_]` 折成 `-`。
 - `parsePlan(text)`：行979-999，剥围栏取 JSON，校验 modules 非空。
 - `parseSourceFiles(fm)`：行1003-1015，解析 frontmatter 的 `source_files`（行内/块状两式）。
+- `readSourceFiles(articlePath)`：行1017-1025，读文章文件并调 `parseSourceFiles` 取源文件清单，供 stale/校对流程使用。
 - `wikiPathFor(cwd, binary, signal)`：行1027-1032，跑 `cw path` 取最后一个非空行，失败回落 `<repo>/.codewiki`。
 - `generateToolDefinition(cfg, svc)`：行2153-2303，`codewiki_generate` 总入口。`execute`（行2197起）校验启用/svc/cwd/排除清单，`cw status` 判态，分支：同仓库活动任务直接返回、stale 升全量、clean 只报告、stale 有过期文章构造预建任务、missing 先 `cw init` 再提交 full。
 - `updateToolDefinition(cfg, generateDef)`：行2312-2364，`codewiki_update` 固定 `scope: 'auto'` 快捷入口。
@@ -113,13 +114,14 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - `buildSessionSteerText({ job, snapshots, tier, resend })`：行1078-1096，会话通道 steer 文本，tier 非空时要求显式传 tier。
 - `ORPHAN_TAKEOVER_MS`：行1098，默认5分钟；`MAX_JOBS_KEPT`：行1099，30。
 - `REPOS_FILE`：行1104；`loadKnownRepos`/`rememberRepo`：行1105-1116。
+- `JOB_TERMINAL`：行1117，终态集合（`done`/`failed`/`cancelled`）。
 - `SCAN_SKIP_DIRS`/`SCAN_SKIP_EXT`/`SCAN_MAX_FILE_BYTES`/`SCAN_MAX_FILES`：行1120-1133；`scanRepoFiles(cwd)`：行1134-1157。
 - `loadJobs`：行1159；`JOBS_LOCK_FILE`/`acquireTickLock`/`releaseTickLock`：行1164-1182；`saveJobs`：行1184-1189。
 - `jobSummary(job)`：行1191-1225，面板与工具共用投影，含 tps 计算。
 - `agentsRef`/`llmRef`：行1232-1237，经 `ctx.inject` 获取。
 - `wakeCompileSession(job, outcome, agents)`：行1239-1250，对 sessionId 对应会话 steer 唤醒。
-- `listModelCatalog(llm)`：行2507-2528，枚举 provider/model；`resolveModelEfforts`：行2545-2567，读思考档位。
-- `installWebServer(ctx, service, extra)`：行2569-2789，端点：`GET /api/codewiki/jobs`、`/repos`、`/models`，`POST /api/codewiki/control`（cancel/refresh/compile），均回环限制。
+- `listModelCatalog(llm)`：行2507-2528，枚举 provider/model；`resolveModelInfoOf`：行2534-2539，兼容 `resolveModelInfo`/`resolveModel`；`resolveModelEfforts`：行2545-2567，读思考档位。
+- `installWebServer(ctx, service, extra)`：行2569-2789，端点：`GET /api/codewiki/jobs`、`/repos`、`/models`、`/model-efforts`，`POST /api/codewiki/control`（cancel/refresh/compile），均回环限制（`isLoopbackRequest` 行2471、`writeJson` 行2476、`readBodyJson` 行2482）。
 - `commitHintText(cwd, jobs)`：行2804-2829，60s TTL，git 日志比对提醒提交。
 - `reminderText(cwd)`：行2831-2840，系统提示维护纪律。
 - `installUpdateReminder(ctx, config)`：行2842-2874，注入 `systemPrompt.section`。
@@ -129,14 +131,14 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 
 - 文件头注释（行1-8）记录硬约束：`id` 等于 `package.json` 的 `name`、词典值必须字符串。
 - `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', factory(require) {...} })`：行10-12；`require` 取 `Switch`/`Button`/`Input`/`Tag`（行14-15）。
-- 常量：`NS = 'codewiki'`（行17）、`KEY = 'codewiki'`（行18）、`JOBS_PATH`（行19）、`CONTROL_PATH`（行20）、`PANEL_ORDER = 52`（行21）、`POLL_MS = 2000`（行22）、`REPOS_PATH`（行23）、`MODELS_PATH`（行24）、`REPOS_POLL_MS = 10000`（行26）、`ACTIVE_STAGES`（行28）。
+- 常量：`NS = 'codewiki'`（行17）、`KEY = 'codewiki'`（行18）、`JOBS_PATH`（行19）、`CONTROL_PATH`（行20）、`PANEL_ORDER = 52`（行21）、`POLL_MS = 2000`（行22）、`REPOS_PATH`（行23）、`MODELS_PATH`（行24）、`EFFORTS_PATH`（行25）、`REPOS_POLL_MS = 10000`（行26）、`ACTIVE_STAGES`（行28）。
 - `zh()`/`en()`：行30-305，完整词典。
 - `style`：行307-387，注入 CSS 并查重。
 - `el`/`apiGet`/`apiPost`：行389-408。
 - `apply(ctx)`：行412-1341，`inject: ['slots','locale','configForms']`；注册设置卡与面板。
-- `CodewikiCard(props)`：行452-842，设置卡片，拉 `/api/codewiki/models` 填级联下拉，保存时只对变了的 key 生成 op。
+- `CodewikiCard(props)`：行452-842，设置卡片，拉 `/api/codewiki/models` 填级联下拉，保存时只对变了的 key 生成 op（key 清单行672）；内部 `useEfforts`（行524）与 `modelTrio`（行562）处理提供商/模型/思考档位联动。
 - `ReposTab()`：行981-1124，总览标签，轮询 `/api/codewiki/repos`，可排除/编译。
-- `CodewikiPanel()`：行1126-1326，侧边栏主面板（总览/任务/设置三标签），轮询 `/jobs` 并采样 tps/速率。
+- `CodewikiPanel()`：行1126-1326，侧边栏主面板（总览/任务/设置三标签），轮询 `/jobs` 并采样 tps/速率；`stageBar`（行904）、`overallPct`（行929）、`STAGE_WEIGHTS`（行928）驱动步骤条与进度。
 - `PanelIcon(props)`：行1328-1339，摊开的书 SVG 图标。
 
 ## Architecture
@@ -150,7 +152,7 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 │ CodewikiPanel 1126 ──────┤   │         │    ├─ update 2312 / progress 2383      │
 │   main + panellist       │◄──┼─ HTTP ──┤    ├─ installWebServer 2569            │
 │ ReposTab 981 / Icon 1328 │   │ 回环    │    └─ installUpdateReminder 2842       │
-│ stageBar 763 / pct 929   │   │         │                                       │
+│ stageBar 904 / pct 929   │   │         │                                       │
 └──────────────────────────┘         │    │  createJobService 1252                 │
                                      │    │   tick 1987 ── 每 10s ──┐             │
                                      │    │   STAGE_HANDLER 1978     │             │
@@ -184,7 +186,7 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 6. **横切** `tickCrosscut`（行1773）：读回成功文章全文 → ≤110k 单批直出 `_architecture.md`/`_patterns.md`/概念文章；超预算改「每篇一个观察」→ `tickCompose`（行1839）合成。
 7. **校对** `tickReview`（行1888）：`localReview`（行1866）先本地核对 frontmatter/文件存在性/`source_files`，再按「文章 + source_files 源码」装填 `batchProofreadPrompt`（行881）；结果 `tally(..., { replace: true })` 覆盖同名条目，校对失败不推翻原文。
 8. **索引** `tickIndex`（行1953）：`cw index` → `cw meta update` → `normalizeIndexLinks` → `ensureWikiEntry` → `done` + `finishedAt` + `onSettled(job, 'done')` → `wakeCompileSession`（行1239）steer 发起会话「请提交改动」。
-9. **进度回流**：面板每 2s 拉 `/api/codewiki/jobs`（client.js:1224）、每 10s 拉 `/api/codewiki/repos`（client.js:1224）；`jobSummary`（行1191）的 `taskList` 决定进度条分母，`STAGE_WEIGHTS`（client.js:928）决定权重，tps/速率由面板侧采样计算。
+9. **进度回流**：面板 `CodewikiPanel` 内 effect（行1139起）每 2s 拉 `/api/codewiki/jobs`、`ReposTab` 内 pull（行990起）每 10s 拉 `/api/codewiki/repos`；`jobSummary`（行1191）的 `taskList` 决定进度条分母，`STAGE_WEIGHTS`（行928）决定权重，tps/速率由面板侧采样计算。
 10. **取消**：`cancel()` 置 `cancelRequested` 并 `flush`（行2121-2130）；下一轮 `tick` 读到后 `abort` 在飞请求、丢未收割结果、置 `cancelled`（行2015-2024）。
 11. **重启接管**：进程重启后新 `instanceId` 与原 `owner` 不符，`tick` 在 `idleMs > ORPHAN_TAKEOVER_MS` 时改 owner 接管（行2007-2012）；在途会话任务补发 steer（`resendSessionSteer`），批量任务靠 `job.tasks` 的 `batchPrompt` 快照重跑（行1370-1391）。
 
@@ -194,7 +196,7 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - 提示词工程：`[[prompt-templates]]`（`articleFormatSection` 行675 与各 `batch*Prompt` 家族是文章产出格式与判据来源）。
 - 持久化与并发：`[[job-store-and-locking]]`（`JOBS_FILE`/`JOBS_LOCK_FILE`/`REPOS_FILE`、`mergeFromDisk` 行1284 语义在此展开）。
 - 面板与宿主 UI：`[[sidebar-panel-ui]]`（client.js 的 slot 挂载、词典、样式、组件树）。
-- 外部依赖：宿主 `llm` 服务（`llmChat` 行283）、`agents` 服务（`wakeCompileSession` 行1239）、`webServer` 服务（`installWebServer` 行2569）、`workspaceRegistry` 服务（行2578）、`systemPrompt` 服务（`installUpdateReminder` 行2842）、`tools` 服务（行2916）、模型目录 `listModelCatalog` 行2507。
+- 外部依赖：宿主 `llm` 服务（`llmChat` 行283）、`agents` 服务（`wakeCompileSession` 行1239）、`webServer` 服务（`installWebServer` 行2569）、`workspaceRegistry` 服务（行2578）、`systemPrompt` 服务（`installUpdateReminder` 行2842）、`tools` 服务（行2916）、模型目录 `listModelCatalog` 行2507 与档位 `resolveModelEfforts` 行2545（`/api/codewiki/model-efforts` 端点行2735）。
 - 参考实现：侧边栏面板挂载方式与 `dsh-hindsight-on-demand` 同款，`PANEL_ORDER = 52` 排在它的 50 之后（client.js:21）。
 
 ## Known Issues
@@ -208,8 +210,8 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - **tick 是串行推进**：`tick()`（行1987）对 `jobs` 逐个 `await handler`，一个 job 的 `settleJob`/`runCw`（最长 120s）会拖住同实例里其他 job 的推进；`ticking` 重入锁与 `TICK_MS` 让节拍可能被显著拉长。
 - **`cw status` 解析强依赖文本**：`parseStatus`（行176）匹配的是 `'No wiki found'`、`'has not been compiled yet'`、`'Wiki is up to date'` 三个英文字面量与 `^\s+[M!]\s+` 行格式。上游 `cw` 改一句文案，三态判定就会整体落到「无法解析 → 改走全量编译」（行2277-2284），代价是白跑一次全量。
 - **Windows 路径兼容是启发式**：`normalizeCwd`（行37）只处理 `/e/...` 这一类 MSYS 盘符写法；`excludedItem`（行247）、`rememberRepo`（行1108）、`samePath`（行2372）各自做归一与大小写处理，三处规则不完全一致，混合大小写与尾斜杠组合时可能出现「排除了但仍出现在总览」这类不一致。
-- **面板的速率/进度是客户端估算**：`overallPct`（client.js:929）用固定 `STAGE_WEIGHTS`（client.js:928），与实际耗时无关；`batchRateRef` 的 EWMA 只在面板轮询跨度内有效，刷新页面或切换工作区后 tps 曲线与 ETA 会从零重建，不反映真实剩余时间。
-- **UI 兜底只覆盖渲染期异常**：`ReposTab`（client.js:981）与 `CodewikiPanel`（client.js:1126）用 try/catch 把渲染异常显示成 `<...> error: <stack>`，但样式表或 `@deepseek-ai/dsh-client-ui-primitives` 加载失败发生在更外层，仍可能整块不渲染。
+- **面板的速率/进度是客户端估算**：`overallPct`（行929）用固定 `STAGE_WEIGHTS`（行928），与实际耗时无关；`batchRateRef` 的 EWMA 只在面板轮询跨度内有效，刷新页面或切换工作区后 tps 曲线与 ETA 会从零重建，不反映真实剩余时间。
+- **UI 兜底只覆盖渲染期异常**：`ReposTab`（行981）与 `CodewikiPanel`（行1126）用 try/catch 把渲染异常显示成 `<...> error: <stack>`，但样式表或 `@deepseek-ai/dsh-client-ui-primitives` 加载失败发生在更外层，仍可能整块不渲染。
 - **面板轮询无退避**：`CodewikiPanel` 固定 2s（POLL_MS 行22）、`ReposTab` 固定 10s（REPOS_POLL_MS 行26），只做「不重叠」没做指数退避；Web 服务卡顿时前端仍按原频率发请求。
-- **客户端设置 key 清单是硬编码**：`save()` 只遍历 client.js:663 里硬编码列出的 key 生成 diff op，后端 Config 新增字段时若忘了同步这份清单，该字段在设置页改不动（不报错、仍提示已保存，但值未变）。
+- **客户端设置 key 清单是硬编码**：`save()` 行663 起只遍历行672 硬编码列出的 key 生成 diff op，后端 Config 新增字段时若忘了同步这份清单，该字段在设置页改不动（不报错、仍提示已保存，但值未变）。
 - **大档启用条件严格**：仅当配置 `bigProvider` 非空才启用大档（行558-566），否则超预算直接转会话通道；`bigTokenBudget` 须大于 110k（行85），否则被钳回默认。

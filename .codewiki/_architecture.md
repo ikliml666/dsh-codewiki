@@ -1,147 +1,135 @@
 ---
-title: 系统总览
+title: System Architecture Overview
 type: architecture
 source_files:
-  - test-orchestration.mjs
-  - .tmp-test-orchestration.log
-  - modules/orchestration-tests.md
   - README.md
   - CodeWiki.md
   - CHANGELOG.md
+  - .probe3.txt
+  - test-batch.mjs
+  - test-cwd-paths.mjs
+  - test-orchestration.mjs
+  - test-wiki-anchors.mjs
+  - test-wiki-entry.mjs
   - index.js
   - client.js
+  - cordis.patch.yml
   - package.json
-tags: [架构, 总览, codewiki, dsh-codewiki, 插件, 测试, 文档]
+  - .gitignore
+  - .tmp-test-batch.log
+  - .tmp-test-cwd-paths.log
+  - .tmp-test-orchestration.log
+  - .tmp-test-wiki-anchors.log
+  - .tmp-test-wiki-entry.log
+  - watcher2.log
+tags: [架构, 系统总览, codewiki, dsh-codewiki, 模块连接]
 ---
 
 ## Overview
 
-`dsh-codewiki` 是 DeepSeek Harness（DSH）插件（package.json:2-3），将 Rust CLI `cw` 接入宿主，并在其上实现一条零子代理、服务化、分批 LLM 的全仓库 wiki 编译流水线。本文章为系统总览，基于以下三个模块文章编写，面向零上下文的未来 agent：
-
-- **plugin-runtime**（源文件 `index.js`、`client.js`、`package.json`）：插件核心代码，宿主侧流水线与服务 + 浏览器侧设置与面板。
-- **orchestration-tests**（源文件 `test-orchestration.mjs`、`.tmp-test-orchestration.log` 及自身 markdown）：端到端编排冒烟测试，验证阶段机与工具行为。
-- **project-docs**（源文件 `README.md`、`CodeWiki.md`、`CHANGELOG.md`）：面向使用者的三份手写文档，其中 `CodeWiki.md` 同时是 `codewiki_generate` 全量编译的入口。
-
-下文通过总框图、数据流图、依赖方向图及模块职责说明，梳理各模块责任与相互连接。
+本文件为 `@local/dsh-codewiki` 插件（版本 0.10.8，见 `package.json:3`）的系统总览，专为零上下文的未来 agent 编写。插件将 Rust CLI `cw`（来自 `mraza007/codewiki`）接入 DeepSeek Harness，提供代码维基自动生成、更新与进度查询能力。系统由核心代码与配置（`index.js`/`client.js` 等）、文档与元信息（`README.md`/`CodeWiki.md` 等）、测试脚本（`test-*.mjs`）以及运行/测试日志（`logs-and-temp` 模块）四大逻辑部分构成。整体以 cordis 插件机制挂载，依赖宿主 `llm` 服务进行模型推理，通过后台阶段机编排将仓库源码编译为结构化 wiki 文章。
 
 ## System Overview
 
-插件运行时由宿主加载 `index.js` 的 `apply` 注册工具与常驻服务；测试模块动态导入同一 `index.js` 并在 mock 宿主中驱动验证；文档模块描述并引用运行时符号，且由运行时编译产出 `.codewiki` 文章群（含 `modules/project-docs.md` 自身）。
+系统组件与职责连接的总框图如下：
 
 ```text
-┌─────────────────────────── System Overview 总框图 ───────────────────────────┐
-│                                                                              │
-│  ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────┐ │
-│  │   plugin-runtime     │◄─────│  orchestration-tests │─────►│  project-docs│ │
-│  │ (index.js/client.js/ │      │ (test-orchestration  │      │ (README/     │
-│  │  package.json)       │      │  .mjs + log)         │      │  CodeWiki/   │
-│  └─────────┬────────────┘      └─────────┬────────────┘      │  CHANGELOG)  │ │
-│            │                             │                    └──────┬───────┘ │
-│            │ dynamic import             │ mock ctx/apply             │ referenced│
-│            ▼                             ▼                            ▼         │
-│  ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────┐ │
-│  │ JobService + LLM     │      │ makeCtx/apply/       │      │ CodeWiki.md  │ │
-│  │ channels + HTTP API  │      │ makeBatchMock        │      │ convention   │ │
-│  └──────────────────────┘      └──────────────────────┘      └──────────────┘ │
-│            │                             │                                    │
-│            │ produces                    │ validates                          │
-│            ▼                             ▼                                    │
-│  ┌──────────────────────┐      ┌──────────────────────┐                      │
-│  │ <repo>/.codewiki/    │      │ .tmp-test-          │                      │
-│  │ articles (incl.      │      │ orchestration.log    │                      │
-│  │ project-docs.md)     │      └──────────────────────┘                      │
-│  └──────────────────────┘                                                     │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────┐     ┌───────────────────────┐
+│ docs-and-meta         │     │ logs-and-temp         │
+│ (README.md等)         │◄────│ (.tmp-test-*.log)     │
+└───────────┬───────────┘     └───────────┬───────────┘
+            │ 描述/配置约定 ►              │ 产出日志
+            ▼                             ▼
+┌───────────────────────┐     ┌───────────────────────┐
+│ core-and-config       │◄────│ test-scripts          │
+│ (index.js/client.js)  │ 验证│ (test-*.mjs)          │
+└───────────┬───────────┘     └───────────────────────┘
+            │ 经 cordis.patch.yml 挂载
+            ▼
+┌───────────────────────┐
+│ DeepSeek Harness 宿主 │
+│ (llm/webServer)       │
+└───────────────────────┘
 ```
 
-- `plugin-runtime` 是系统核心：`index.js` 提供 `Config`（index.js:42-59）、`createJobService`（index.js:42-944）、`apply`（index.js:42-102）等；`client.js` 提供 `CodewikiCard` 与 `CodewikiPanel`（client.js:428-1273）。
-- `orchestration-tests` 通过 `import('./index.js')` 获取 `{ name, apply }`（test-orchestration.mjs:20），用 `makeCtx` 构造 mock 宿主（test-orchestration.mjs:40-80）并调用 `apply` 注册工具，再借 `makeBatchMock` mock 宿主 llm 服务（test-orchestration.mjs:127-189）来验证阶段机。
-- `project-docs` 中 `CodeWiki.md:3` 声明自身为插件 wiki 入口，`codewiki_generate` 将其细化为 `.codewiki/` 文章群（含本文 `modules/project-docs.md`），形成“文档描述代码、代码编译文档”的闭环。
+`core-and-config` 模块（`index.js:2928` 的 `apply`）是系统运转中枢；`docs-and-meta` 为其提供人机接口说明与配置约定；`test-scripts` 直接导入 `./index.js`（`test-batch.mjs:7`）验证契约；`logs-and-temp` 收集测试与 watcher 输出以供排查。
 
 ## Data Flow
 
-系统存在三条主要数据流：编译任务流（宿主侧）、面板轮询流（客户端）、测试模拟流（验证侧），以及文档消费/维护流。
+请求与数据在模块间的流动路径如下：
 
 ```text
-┌─────────────────────────── Request/Data Flow 数据流 ───────────────────────────┐
-│                                                                                │
-│  Agent/Human ──► codewiki_generate ──► submit() ──► JobService.queue           │
-│      │             (index.js:2140)   (index.js:1962) (queued→plan→...→done)    │
-│      │                    │                                                    │
-│      ▼                    ▼                                                    │
-│  client.js ──GET /api/codewiki/jobs──► HTTP API (index.js:2458) ──► list()     │
-│  (2s poll)          ◄──── jobs JSON ◄───────────────────────────────────────  │
-│      │                                                                         │
-│  ┌───┴──────────────── LLM Batch Channel ────────────────┐                    │
-│  │ plugin-runtime: runRealtimeTasks ─► llmChat/bailianChat│                    │
-│  │   (index.js:311)                (index.js:269/295)     │                    │
-│  └───────────────────────────┬───────────────────────────┘                    │
-│                              ▼                                                 │
-│                   writeValidated ──► <repo>/.codewiki/**.md (articles)         │
-│                              │                                                 │
-│  orchestration-tests: makeBatchMock mock 宿主 llm 服务 ─► 驱动阶段机         │
-│   (test-orchestration.mjs:127)                                                │
-│      │                                                                         │
-│      ▼                                                                         │
-│   waitJob轮询 JOBS_FILE ─► 终态 ─► wakeCompileSession (index.js:1151)          │
-│                                                                                │
-│  project-docs: README/CodeWiki/CHANGELOG 被阅读 ─► 理解结构 ─► 追溯决策         │
-└────────────────────────────────────────────────────────────────────────────────┘
+┌──────────┐  codewiki_generate ┌──────────────┐  cw status ┌──────────┐
+│ Agent/UI │───────────────────►│ index.js     │──────────►│ cw CLI   │
+│ (会话/   │◄───────────────────│ (JobService) │◄─────────│ (bin/cw) │
+│ client)  │  进度/steer 唤醒    │              │  源码/状态 └──────────┘
+└────┬─────┘                    └──────┬───────┘
+     │ GET /api/codewiki/jobs          │ 阶段机
+     ▼                                 ▼
+┌──────────┐  submitBatchFor    ┌──────────────┐  llmChat  ┌──────────┐
+│client.js │───────────────────►│ runRealtime  │─────────►│ 宿主 llm │
+│ (面板)   │◄───────────────────│ Tasks        │◄─────────│ 服务     │
+└──────────┘  轮询渲染           └──────┬───────┘  结果     └──────────┘
+                                         │ 落盘
+                                         ▼
+                                   ┌──────────────┐
+                                   │ .codewiki/   │
+                                   │ (文章+锚点)  │
+                                   └──────────────┘
 ```
 
-流程要点：
-
-1. **任务提交**：`codewiki_generate.execute` 调用 `submit()`（index.js:1965），经凭证校验与 `serialProjects` 排队后，`void tick()` 立即推进阶段机（queued→plan→articles→crosscut→compose→review→index→done）。
-2. **批量执行**：`tickArticles`/`tickCrosscut` 等阶段通过 `runRealtimeTasks`（index.js:311）并发调用 `llmChat`（provider 非空）或 `bailianChat`（百炼通道），结果经 `writeValidated` 落盘 `.codewiki` 文章（index.js:1550）。
-3. **面板反馈**：`client.js` 每 2s 轮询 `GET /api/codewiki/jobs`（client.js:1077），经 `installWebServer` 注册的端点（index.js:2468）返回 `jobSummary` 视图。
-4. **测试驱动**：`orchestration-tests` 用 `makeBatchMock` mock 宿主 llm 服务（test-orchestration.mjs:127），使 LLM 请求走预设答案，再以 `waitJob` 轮询 `JOBS_FILE` 取终态（test-orchestration.mjs:192），验证全流程。
-5. **文档流**：使用者读 `README.md:5-13` 定位工具，读 `CodeWiki.md:9-28` 查组件行号，疑问时查 `CHANGELOG.md` 版本节（如 CHANGELOG.md:3）；版本发布时 `codewiki_generate` 重编译 `CodeWiki.md` 产出文章群。
+1. 会话内调用 `codewiki_generate`（`index.js:2097` 定义）触发 `svc.submit`（`index.js:2097`）创建 job，立即返回。
+2. 后台 `tick`（`index.js:2018`）每 10s（`index.js:2018`）推进阶段机 `articles→crosscut→compose→review→index`（`index.js:2018` 起）。
+3. 文章阶段调用 `prepareArticleTasks`（`index.js:555`）并经由 `llmChat`（`index.js:283`）走宿主 `llm` 服务；结果通过 `fixAnchors`（`index.js:396`）校正行号后写入 `.codewiki/`。
+4. `client.js` 的 `CodewikiPanel`（`client.js:1124`）每 2s（`client.js:1124`）轮询 `/api/codewiki/jobs`（`index.js:2656`）渲染进度。
+5. 测试脚本（`test-scripts`）在 CI 中导入 `index.js` 驱动相同流程，将断言结果写入 `logs-and-temp` 的 `.tmp-test-*.log`。
 
 ## Dependency Graph
 
-模块间依赖方向明确：测试与文档均依赖运行时实现，运行时不反向依赖二者（但产出文档产物）。外部依赖 `cw` 二进制与宿主服务。
+各模块间的依赖方向（箭头表示“依赖于”或“被描述/验证于”）：
 
 ```text
-┌─────────────────────────── Dependency Graph 依赖方向 ───────────────────────────┐
-│                                                                                │
-│   orchestration-tests.md ──depends on──► plugin-runtime (index.js)              │
-│        │                                   │   ▲                               │
-│        │ test-orchestration.mjs:20         │   │ referenced by                  │
-│        ▼                                   ▼   │                               │
-│   test-orchestration.mjs ──────import────► index.js (export name,apply,        │
-│                                              commitHintText,wakeCompileSession)│
-│                                              │                                 │
-│   project-docs.md ──described by──► README.md/CodeWiki.md/CHANGELOG.md         │
-│        │                                   │   ▲                               │
-│        │ generated from                    │   │ line-number refs               │
-│        ▼                                   ▼   │                               │
-│   CodeWiki.md (entry) ──compiled by──► codewiki_generate (index.js:2140)       │
-│        │                                   │                                   │
-│        ▼                                   ▼                                   │
-│   .codewiki/modules/project-docs.md ◄──── plugin-runtime output                │
-│                                              │                                 │
-│   plugin-runtime ──bundles──► cw binary (vendor/codewiki, bin/cw.exe)          │
-│   plugin-runtime ──uses─────► host llm/credentials/webServer (ctx.inject)      │
-└────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────┐       ┌──────────────────┐
+│ docs-and-meta    │◄──────│ core-and-config  │
+│ (描述契约)        │ 说明   │ (实现插件)        │
+└──────────────────┘       └────────┬─────────┘
+                                    │ 被导入
+                                    ▼
+                          ┌──────────────────┐
+                          │ test-scripts      │
+                          │ (import ./index)  │
+                          └─────────┬─────────┘
+                                    │ 产出日志 ─►
+                                    ▼
+                          ┌──────────────────┐
+                          │ logs-and-temp    │
+                          │ (日志存储)        │
+                          └──────────────────┘
 ```
 
-- **orchestration-tests → plugin-runtime**：测试脚本动态导入 `./index.js`（test-orchestration.mjs:20），并使用其导出的 `commitHintText`（test-orchestration.mjs:284）、`wakeCompileSession`（test-orchestration.mjs:354）等符号；插件行为变更会直接破坏测试断言。
-- **project-docs → plugin-runtime**：`CodeWiki.md` 组件清单硬编码 `index.js` 行号指针（如 CodeWiki.md:12 指向 `Config` index.js:42）；`codewiki_generate` 以 `CodeWiki.md` 为入口编译出 `modules/project-docs.md`（本文即产物），形成生成依赖。
-- **plugin-runtime → 外部**：依赖捆绑的 `cw` 二进制（resolveBinary，index.js:2816）与宿主注入的 `tools`/`webServer`/`credentials`/`agents`/`llm`（apply 中 ctx.inject，index.js:2816）。
-- 测试与文档之间无直接依赖，二者通过 plugin-runtime 间接关联。
+- `core-and-config` 依赖 `docs-and-meta` 定义的配置字段语义（如 `Config` schema 见 `index.js:48`，对应 `README.md:55-66`）。
+- `test-scripts` 强依赖 `core-and-config` 的 `./index.js` 导出（`test-batch.mjs:7`、`test-orchestration.mjs:20`）。
+- `logs-and-temp` 被动依赖 `test-scripts` 与运行期 watcher 产生内容（如 `.tmp-test-orchestration.log:1` 来自编排测试）。
+- `cordis.patch.yml`（`core-and-config`）将 `index.js` 挂载为 `id: codewiki`（`cordis.patch.yml:2`），由宿主环境加载。
 
 ## Module Roles
 
-### plugin-runtime（核心实现模块）
-- **职责**：提供插件全部逻辑。宿主侧 `index.js`（2911 行）定义 16 键 `Config`（index.js:42-59）、`cw` CLI 包装（index.js:42-198）、四个工具 `cw`/`codewiki_generate`/`codewiki_update`/`codewiki_progress`（index.js:42-1668）、六阶段 `createJobService` 任务状态机（index.js:42-944）、loopback HTTP API（index.js:42-262）、系统提示提醒（index.js:42-74）。浏览器侧 `client.js` 提供设置卡 `CodewikiCard`（client.js:428）与侧边栏面板 `CodewikiPanel`/`ReposTab`（client.js:932-1277）。`package.json` 声明 ESM、依赖 schemastery、挂载 patch 与 client 平台。
-- **连接**：被测试模块导入验证；被文档模块引用并编译产出文档文章；调用外部 `cw` 与宿主服务。
+各模块在系统中的具体职责与关键连接点：
 
-### orchestration-tests（编排测试模块）
-- **职责**：端到端冒烟验证。 `test-orchestration.mjs`（66KB）通过 mock 宿主 llm 服务、真实 cw CLI、真实服务 tick，覆盖提交制、阶段机（plan→articles→crosscut→review→index）、stale 更新、宿主重启重跑、面板端点与取消、编译模型缺失诚实报错等（test-orchestration.mjs:1-6, 450-480, 688-742, 783-835, 1089-1102）。`.tmp-test-orchestration.log` 记录运行观测。自身 markdown 归纳组件与已知问题。
-- **连接**：依赖 plugin-runtime 的符号与行为；不直接依赖 project-docs，但验证的插件行为在文档中有对应描述。
+### docs-and-meta（`README.md`, `CodeWiki.md`, `CHANGELOG.md`, `.probe3.txt`）
+- **职责**：提供插件安装、工具列表、配置模型字段定义（`README.md:24-39`）、架构细化（`CodeWiki.md:30-48`）、版本演进（`CHANGELOG.md:3-627`）及内部探针标记（`.probe3.txt:1`）。
+- **连接**：以纯文本形式描述 `core-and-config` 的行为；`CodeWiki.md:56` 通过 `[[codewiki-upstream]]` 关联 `vendor/codewiki` 上游布局。
 
-### project-docs（使用者文档模块）
-- **职责**：对外说明插件。`README.md`（67 行）定位上手与设置项（README.md:5-13, 26-42）；`CodeWiki.md`（65 行）提供代码结构索引与架构图（CodeWiki.md:9-28, 30-47），并作为编译入口（CodeWiki.md:3）；`CHANGELOG.md`（515 行）倒序记录 50 版本演进（CHANGELOG.md:3-515）。三份文档通过“文档：”条目保持同步（如 CHANGELOG.md:16）。
-- **连接**：被 plugin-runtime 编译产出 `.codewiki/modules/project-docs.md`；引用 index.js 行号指向 plugin-runtime；供未来 agent 与人类阅读，不直接参与代码执行。
+### core-and-config（`index.js`, `client.js`, `cordis.patch.yml`, `package.json`, `.gitignore`）
+- **职责**：插件唯一核心实现。`index.js` 导出 `name='dsh-codewiki'`（`index.js:1213`）、配置 schema（`index.js:1213`）、工具 `cw`/`codewiki_generate`/`codewiki_update`/`codewiki_progress`（分别见 `index.js:1213`, `2196`, `2355`, `2426`）、后台 `createJobService`（`index.js:1213`）及 webServer 端点（`index.js:1213`）。`client.js` 提供设置页与侧边栏面板（`client.js:7` 起）。`cordis.patch.yml` 负责挂载，`package.json` 声明包元信息（`package.json:25`）。
+- **连接**：经 `cordis.patch.yml` 由宿主加载；调用宿主 `llm` 服务（`index.js:283`）；通过 `/api/codewiki/*` 与 `client.js` 通信；写盘 `.codewiki/` 目录。
 
-以上为系统总览，未来 agent 可据此定位模块边界、数据流与依赖，进一步深入各模块文章。
+### test-scripts（`test-batch.mjs`, `test-cwd-paths.mjs`, `test-orchestration.mjs`, `test-wiki-anchors.mjs`, `test-wiki-entry.mjs`）
+- **职责**：端到端测试套件。`test-batch.mjs` 验纯函数与端点（`test-batch.mjs:16` 起）；`test-cwd-paths.mjs` 验路径归一化（`test-cwd-paths.mjs:34`）；`test-orchestration.mjs` 验服务编排与重启恢复（编排见 `test-orchestration.mjs:443`，重启恢复见 `test-orchestration.mjs:684`）；`test-wiki-anchors.mjs` 校验行号锚点符号绑定（`test-wiki-anchors.mjs:82`）；`test-wiki-entry.mjs` 验入口生成（`test-wiki-entry.mjs:26`）。
+- **连接**：直接 `import './index.js'` 驱动 `core-and-config`；与 `docs-and-meta` 中记录的契约（如 0.10.1 移除内置直连，`test-batch.mjs:451` 断言）互验。
+
+### logs-and-temp（`.tmp-test-batch.log`, `.tmp-test-cwd-paths.log`, `.tmp-test-orchestration.log`, `.tmp-test-wiki-anchors.log`, `.tmp-test-wiki-entry.log`, `watcher2.log`）
+- **职责**：保存测试运行输出与 watcher 监听日志（如 `watcher2.log:1` 记录 job 轮询），供错误排查与运行时审查（见 `logs-and-temp` 模块 `Overview`）。
+- **连接**：由 `test-scripts` 执行与 watcher 进程生成；反映 `core-and-config` 运行态与 `docs-and-meta` 已知问题（如 `.tmp-test-orchestration.log:573` 记录 `source` 标记失败）。
+
+以上即为系统全貌，未来 agent 可依据模块角色与行号锚点快速定位代码、文档与测试。

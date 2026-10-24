@@ -2,74 +2,86 @@
 title: _patterns
 type: pattern
 source_files:
-  - test-orchestration.mjs
-  - modules/orchestration-tests.md
-  - modules/plugin-runtime.md
-  - modules/project-docs.md
   - README.md
   - CodeWiki.md
   - CHANGELOG.md
+  - .probe3.txt
+  - test-batch.mjs
+  - test-cwd-paths.mjs
+  - test-orchestration.mjs
+  - test-wiki-anchors.mjs
+  - test-wiki-entry.mjs
   - index.js
   - client.js
+  - cordis.patch.yml
   - package.json
-tags: [模式, 命名约定, 错误处理, 构建测试, 目录约定]
+  - .gitignore
+  - .tmp-test-batch.log
+  - .tmp-test-cwd-paths.log
+  - .tmp-test-orchestration.log
+  - .tmp-test-wiki-anchors.log
+  - .tmp-test-wiki-entry.log
+  - watcher2.log
+tags:
+  - 模式
+  - 命名约定
+  - 错误处理
+  - 测试流程
+  - 目录约定
+  - 配置热生效
+  - 锚点引用
 ---
 
 ## Overview
 
-本文基于仓库的三个模块文章（`modules/orchestration-tests.md`、`modules/project-docs.md`、`modules/plugin-runtime.md`）总结 dsh-codewiki 插件在命名约定、错误处理风格、构建/测试流程、目录约定等方面反复出现的模式。证据均引自对应模块文章中出现的具体源文件与函数名（如 `test-orchestration.mjs`、`index.js`、`README.md` 等），以便溯源。
+本仓库围绕 `@local/dsh-codewiki` 插件形成了一系列一致的工程实践，涵盖命名约定、错误处理风格、构建与测试流程、目录布局、配置热加载与文档锚点等方面。基于 `README.md`、`CodeWiki.md`、`CHANGELOG.md`、`test-*.mjs`、`index.js`、`client.js` 等源文件证据，以下总结反复出现的模式，每一模式均引用具体文件与函数/常量名作为出处。
 
 ## Patterns
 
-### 模式：提交制工具与六阶段状态机
+### 命名约定模式
 
-仓库的核心编译流程统一采用“提交即返回、后台推进”的提交制模式，并由常驻服务驱动六阶段状态机（queued→plan→articles→crosscut→compose→review→index→done）。
+- 常量使用全大写蛇形命名：在 `index.js` 中，`CONCURRENCY_HARD_CAP`、`DEFAULT_CONCURRENCY`、`BATCH_TOKEN_BUDGET`、`JOBS_FILE` 等均遵循此风格。
+- 函数与变量使用小驼峰：如 `index.js` 的 `normalizeCwd`、`resolveBinary`、`runCw`、`estimateTokens`；`client.js` 的 `apiGet` (389|)、`apiPost` (395|)。
+- 测试辅助函数统一命名：各测试脚本均定义 `check(cond, msg)`（`test-batch.mjs` 16|、`test-wiki-anchors.mjs` 28|、`test-wiki-entry.mjs` 13|）与 `section`（`test-batch.mjs` 20|）。
+- 配置字段小驼峰且按模型角色加前缀：`Config` schema（`index.js`）中 `batchProvider`、`batchModel`、`bigProvider`、`bigModel`、`sessionTier` 等体现出 `batch*`/`big*` 分组。
+- 文档与元信息文件沿用大写首字母 Markdown：`README.md`、`CodeWiki.md`、`CHANGELOG.md`。
 
-证据：
-- `modules/orchestration-tests.md` 中描述 `codewiki_generate` 调用即提交返回 `{submitted, jobId, stage}`（`test-orchestration.mjs:459-463`），并验证阶段机推进与重启重跑（`test-orchestration.mjs:693-745`）。
-- `modules/plugin-runtime.md` 中 `generateToolDefinition` 标注为“提交制（调用即入队、立即返回）”（`index.js:2064-2213`），`createJobService` 内含 `STAGE_HANDLER` 映射与 `tick()` 推进（`index.js:2064-2071`、`index.js:2064-2129`）。
-- `modules/project-docs.md` 中 `README.md:10` 说明 `codewiki_generate` 为“提交制编译”，`CodeWiki.md:30-47` 架构图描摹同一阶段机。
+### 错误处理与失败记账风格
 
-### 模式：严格 Cordis 注入与 volatile 配置热生效
+- 断言收集而非立即中断：测试脚本中 `check` 函数成功计数 `passed` 并印 `✓`，失败压入 `failures` 印 `✗`，结尾汇总（如 `test-batch.mjs` 16| 定义的 `check`，以及 `.tmp-test-batch.log` 85| `ALL PASS：59 通过，0 失败`）。
+- 外部命令与路径错误干净抛出：`test-cwd-paths.mjs` 验证块 (22|~69|) 确认 Windows 路径三态及不存在路径干净抛 `cwd 不存在`；`index.js` 的 `runCw` 带超时/中止收集 stdout/stderr。
+- 任务失败记账与落盘：`index.js` 的 `applyTaskResult` 将结果落盘或回内存，`runRealtimeTasks` 并发池执行中标记 `failure` 记账（见 `test-batch.mjs` 170| 测试块描述）。
+- 并发安全与锁防护：`index.js` 使用 `JOBS_LOCK_FILE` 与 `instanceId` 防双提交，崩溃残留锁 60s 过期强删（见 Known Issues）。
+- 兜底失败直接置败：会话通道兜底若超预算且 `bigProvider` 留空直接 `fail`（`dispatchSessionTasks`）。
+- 锚点错误自动校正：`index.js` 的 `fixAnchors` 作为第四层兜底确定性校正 `file:NN` 引用；`test-wiki-anchors.mjs` 的 `symbolsOnLine` (38|) 与 `nearestSymbol` (52|) 用于校验绑定，失败记录在测试日志供排查。
 
-插件遵循 cordis 严格语义：未通过 `ctx.inject` 获取的服务属性访问即抛错；配置全部标记为 `.volatile()`，运行时经 `liveConfig` 重读并钳制。
+### 构建与测试流程模式
 
-证据：
-- `modules/orchestration-tests.md` 记录“严格 cordis 语义：未 inject 访问 `ctx.agents` 抛错”（`test-orchestration.mjs:57-79`），且 `makeCtx` 使用 `ctx.inject(deps, fn)`（`test-orchestration.mjs:58-68`）。
-- `modules/plugin-runtime.md` 中 `apply` 经 `ctx.inject(['agents','llm','tools','webServer','credentials'])` 装配（`index.js:2775-2834`），`Config` 全部 `.volatile()`（`index.js:42-59`），`liveConfig` 每次钳制（`index.js:2775-2797`），`hostCtxRef` 在 apply 捕获（`index.js:2775-2776`）。
-- `modules/project-docs.md` 中 `CodeWiki.md:14` 提及“cordis 严格语义：未 inject 的服务属性访问即抛”，`README.md:38` 声明所有设置 `volatile` 热生效。
+- 被测核心统一为 `./index.js` 插件主体：测试脚本通过 `import { ... } from './index.js'` (`test-batch.mjs` 7|) 或 `await import('./index.js')` (`test-orchestration.mjs` 20|) 加载，验证 `name === 'dsh-codewiki'`。
+- 临时文件系统构造边界场景：利用 `fs.mkdtempSync` 创建 fixture 仓库，如 `test-batch.mjs` 32| `tmpRoot`、`test-orchestration.mjs` 的 `makeFixtureRepo` (99|)，写入超大文件模拟 token 预算。
+- Mock 宿主上下文驱动：`test-orchestration.mjs` 的 `makeCtx` (40|) 构造 cordis 风格 `inject`/`on`/`effect`，`makeBatchMock` (130|) 按 prompt 分发假 llm 流。
+- 轮询终态：`waitJob` (197|) 轮询 `JOBS_FILE` 等 job 达 `done`/`failed`/`cancelled`；对应 `index.js` 的 `TICK_MS` 节拍推进。
+- 日志产物落盘：测试运行写入 `.tmp-test-*.log`（如 `.tmp-test-batch.log` 2| 分组起始），watcher 进程追加日志记录 job 阶段；CI/开发者读日志排查。
+- 开发验证指令：`README.md` 58-66 提及 `vendor/codewiki`、`bin/cw.exe`、`client.js` 及验证命令。
 
-### 模式：错误处理——静默降级与显式抛错结合
+### 目录与仓库布局约定
 
-仓库对预期边界采用静默容错（返回 null、降级过滤、记 note 不抛），对配置/凭证缺失则显式抛错带指引。
+- 核心代码与配置共置根目录：`index.js`、`client.js`、`cordis.patch.yml`、`package.json`、`.gitignore` 共处于插件根。
+- 捆绑二进制与上游源码分离：捆绑 `bin/cw` 由 `resolveBinary` 解析，上游 `vendor/codewiki` 在 `.gitignore` 2| 忽略 `vendor/codewiki/target/`。
+- 生成 Wiki 目录约定：默认 `<repo>/.codewiki` 存放文章，`wikiPathFor` 返回该路径；`test-wiki-anchors.mjs` 的 `WIKI` (14|~24|) 定位此目录校验。
+- 测试与临时日志平铺根目录：`test-*.mjs` 与 `.tmp-test-*.log`、`watcher2.log`、`.probe3.txt` 均位于仓库根。
+- 模块文档归入 `modules/`：本仓库 CodeWiki 横切模块文章存放于 `modules/*.md`，而源文件描述对象在根（如 `README.md`）；插件自身入口 `CodeWiki.md` 在根。
 
-证据：
-- `modules/plugin-runtime.md`：`runCw` 不抛错仅返回 `{exitCode, stdout, stderr, timedOut}`（`index.js:111-136`）；`resolveBatchApiKey` 超时返回 null（`index.js:111-131`）；`writeValidated` frontmatter 无效记 `invalid` 不落盘（`index.js:111-127`）；`workspaceRegistry.list()` 抛错时端点降级不过滤（`index.js:243-463`）。
-- `modules/orchestration-tests.md`：`brokenRegistry=true` 时 jobs/repos 降级不过滤仍 200（`test-orchestration.mjs:985-1013`）；`wakeCompileSession` 无 sessionId/异常静默不抛（`test-orchestration.mjs:351-377`）。
-- `modules/plugin-runtime.md` 中 `submit` 在百炼凭证缺失时显式抛“未找到百炼 API Key……编译流水线没有子代理回退”（`index.js:1965-2036`）。
+### 配置热生效与 Schema 声明模式
 
-### 模式：测试构建流程——Mock 宿主、llm 通道模拟与环境变量隔离
+- 全部配置项 `.volatile()` 热读取：`index.js` 的 `Config` 所有字段 `.volatile()`；`README.md` 39| 说明改完即生效；`CodeWiki.md` 12| 记录 `enabled` 等字段。
+- 运行期扁平规范化：`liveConfig` 每次调用解包并钳制并发、兜底大档预算。
+- 默认值常量集中：如 `DEFAULT_BATCH_PROVIDER`、`DEFAULT_BIG_MODEL`、`DEFAULT_BIG_TOKEN_BUDGET` 等。
+- 配置挂载通过 cordis 补丁：`cordis.patch.yml` 13| `- insert:` 以 `id: codewiki` 挂载 `index.js`；`package.json` 20| `dsh.bundle.patch` 指向同文件。
 
-端到端测试统一通过动态导入 `./index.js` 获取 `{name, apply}`，用 mock 上下文与替换 `activeLlm`（经 `llmProxy` 转发）模拟宿主 llm 服务（百炼通道），并通过环境变量加速 tick 与隔离 JOBS 文件。
+### 行号锚点与文档引用约定
 
-证据：
-- `modules/orchestration-tests.md`：动态导入 `./index.js`（`test-orchestration.mjs:40`）；`makeCtx` 构造 mock 宿主（`test-orchestration.mjs:40-80`）；`makeBatchMock` 构造 mock llm 服务并经 `activeLlm`/`llmProxy` 模拟百炼通道（`test-orchestration.mjs:127-189`）；`process.env.DSH_CODEWIKI_TICK_MS='300'` 与 `DSH_CODEWIKI_JOBS_FILE` 隔离（`test-orchestration.mjs:40,19,28`）；`check(cond, msg)` 断言（`test-orchestration.mjs:23-26`）。
-- `modules/project-docs.md`：`README.md:65` 验证命令含 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI），`CHANGELOG.md:15` 记录测试断言数前后对照。
-
-### 模式：目录与文件命名约定
-
-仓库对产物、临时文件、捆绑二进制、上游源码有固定布局：wiki 产物置于 `<repo>/.codewiki/`（`modules/`、`concepts/`、`_architecture.md`、`_patterns.md`）；临时状态在 `os.tmpdir()` 下以 `dsh-codewiki-*` 前缀；捆绑 `bin/cw(.exe)`；上游 `vendor/codewiki/`；补丁 `cordis.patch.yml`。
-
-证据：
-- `modules/plugin-runtime.md`：`JOBS_FILE = env DSH_CODEWIKI_JOBS_FILE || os.tmpdir()/dsh-codewiki-jobs.json`（`index.js:977`），`SESSION_TASK_DIR` 同目录（`index.js:977`），`resolveBinary` 解析 `pluginDir/bin/cw(.exe)`（`index.js:89-109`）。
-- `modules/project-docs.md`：`CodeWiki.md:28` 列 `vendor/codewiki/` + `bin/cw.exe`；`CodeWiki.md:27-28` 列 `cordis.patch.yml` 与 `package.json`；`README.md:45-46` 说明 `vendor/codewiki/` 与 `bin/cw.exe`。
-- `modules/orchestration-tests.md`：`makeFixtureRepo` 建临时 git 仓库写 `src/core.py`（`test-orchestration.mjs:99-109`），全量编译落盘 `modules/core.md`、`_patterns.md` 等（`test-orchestration.mjs:99-129`）。
-
-### 模式：文章 frontmatter 与章节结构约定
-
-所有 wiki 文章遵循统一 frontmatter（`title/type/source_files/tags`）与固定章节（`## Overview / Key Components / Architecture / Data Flow / Connections / Known Issues`），横切模式文件类型标记为 `pattern`。
-
-证据：
-- `modules/plugin-runtime.md`：`articleFormatSection()` 规定 frontmatter 与章节（`index.js:597-626`）；`batchPatternsPrompt` 生成 `_patterns.md` (type:pattern)（`index.js:597-633`）；`slugify` 生成 kebab-case 文件名（`index.js:597-599`）。
-- `modules/orchestration-tests.md`：`articleMd(title, source, marker='Batch-written', type='module')` 拼接假文章（`test-orchestration.mjs:29-30`），全量编译落盘 `_patterns.md`（`test-orchestration.mjs:29-59`）。
-- `modules/project-docs.md`：`CodeWiki.md:3` 声明自身为入口公约，`CHANGELOG.md` 每版记录文档同步条目（如 `CHANGELOG.md:16`）。
+- 文档普遍使用 `文件:行号` 锚点：`CodeWiki.md` 56| 使用 `[[codewiki-upstream]]` 交叉连接。
+- 代码自动修正锚点：`index.js` 的 `fixAnchors` 对照源码确定性校正 `file:NN`；`normalizeArticlePath` 规范路径反斜杠。
+- 测试守护锚点真实性：`test-wiki-anchors.mjs` 主循环 (82|~115|) 校验符号绑定。
+- 入口生成双语：`ensureWikiEntry` 缺失 `CodeWiki.md` 时生成中/英版，测试 `test-wiki-entry.mjs` 26|~54| 验证。
