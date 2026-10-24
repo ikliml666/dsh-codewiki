@@ -2410,7 +2410,7 @@ function progressToolDefinition(cfg, svc) {
                 kind: { type: 'string' },
                 scope: { type: 'string' },
                 stage: { type: 'string' },
-                progress: { type: 'number' },
+                progress: { oneOf: [{ type: 'number' }, { type: 'null' }] },
                 writtenCount: { type: 'number' },
                 failedCount: { type: 'number' },
                 cancelRequested: { type: 'boolean' },

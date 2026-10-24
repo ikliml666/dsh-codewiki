@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.5 — 2026-10-24
+
+### 修复：codewiki_progress 工具输出校验失败（progress 为 null 时整个调用报错）
+
+- 症状：调用 `codewiki_progress` 报 `tool "codewiki_progress" returned invalid output: "value.jobs[27].progress" must be a number`，进度查询完全不可用；任务列表里只要有一个无 taskList 的任务（如「已是最新、无需编译」的任务 `taskList: 0`）就必现。
+- 根因：`progressView`（index.js:2380）在任务无 taskList 时输出 `progress: null`（render 分支 `j.progress === null ? '' : …` 证明 null 是设计内取值），但输出 schema 把 `progress` 声明为 `{ type: 'number' }` 不允许 null，宿主对工具输出做 schema 校验时整个结果被拒。同 schema 里 `tps`/`error`/`finishedAt`/`batchProgress` 四个可空字段都写了 `oneOf: [type, null]`，唯独 `progress` 漏了。
+- 修法（index.js）：`progress` schema 改为 `oneOf: [{ type: 'number' }, { type: 'null' }]`，与其他可空字段写法一致。
+- 验证：`node test-orchestration.mjs` 编排冒烟全部通过（其断言本就覆盖 `progress === null` 合法取值）；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths` / `test-wiki-entry` 全部通过。`test-wiki-anchors` 27 处锚点漂移为既有状态（文章行号基线未跟上源码），与本次一行替换（不增删行）无关，由 0.10.5 增量编译修正。
+- 附注：编译任务本身的会话通道报错「超批量预算需走会话通道，但发起会话不可用」为 0.9.0 设计内降级（面板/自动调度提交无发起会话，无法派子智能体），从会话内重新提交即可，非本次修复范围。
+- 注意：插件以 `file://` 挂载，改源码后宿主不热重载，需重启 DeepSeek Harness 生效。
+- 版本 0.10.4 → 0.10.5。
+
 ## 0.10.4 — 2026-10-23
 
 ### 修复：设置页「思考程度」永远读不到档位（调错了宿主方法名）
