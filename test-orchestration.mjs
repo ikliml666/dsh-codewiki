@@ -15,8 +15,12 @@ import { fileURLToPath } from 'node:url'
 process.env.DSH_CODEWIKI_TICK_MS = '300'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-// 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写
-process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}.json`)
+// 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写。
+// 0.10.10：文件名追加随机串——只用 pid 时，历史运行留在 tmp 里的同名文件会在 pid 复用时
+// 被原样读入（旧文件里有 job-tmp-active 等 fixture 任务），让「单项目串行」误判为已有项目在编译、
+// 后续提交全部 queued，表现为「偶发 20 项失败」。收尾统一删除，不留残留。
+const TEST_JOB_TOKEN = crypto.randomBytes(4).toString('hex')
+process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}-${TEST_JOB_TOKEN}.json`)
 const { name, apply } = await import('./index.js')
 
 let failures = 0
@@ -369,6 +373,31 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
         const h5 = commitHintText(repo4, [{ id: 'job-h4', cwd: repo4, stage: 'done', writtenCount: 0, finishedAt: new Date().toISOString() }])
         check(h5 === '', 'writtenCount=0（没有文章写成功）→ 不提醒')
       } finally { fs.rmSync(repo4, { recursive: true, force: true }) }
+      // 0.10.10：自动提交成功/产物无改动的任务一律静默——不必再查 git log。
+      // 用「没有 .codewiki 提交史」的全新仓库，确保静默不是 git 时间戳凑巧造成的。
+      const repo5 = makeFixtureRepo()
+      try {
+        const fresh = new Date().toISOString()
+        const h6 = commitHintText(repo5, [{ id: 'job-ac-ok', cwd: repo5, stage: 'done', writtenCount: 3, finishedAt: fresh, autoCommit: { committed: true, sha: 'feed123' } }])
+        check(h6 === '', 'autoCommit.committed → 提示 section 静默（插件已提交，无需会话模型动手）')
+        const h7 = commitHintText(repo5, [{ id: 'job-ac-none', cwd: repo5, stage: 'done', writtenCount: 3, finishedAt: fresh, autoCommit: { committed: false, noChanges: true } }])
+        check(h7 === '', 'autoCommit.noChanges → 提示 section 也静默（无改动可提交，不催）')
+      } finally { fs.rmSync(repo5, { recursive: true, force: true }) }
+      // 提交被拒（pending）且编译晚于最后一次 wiki 提交 → 仍要提醒，且带上失败原因
+      const repo6 = makeFixtureRepo()
+      try {
+        fs.mkdirSync(path.join(repo6, '.codewiki'))
+        fs.writeFileSync(path.join(repo6, '.codewiki', 'a.md'), 'x\n')
+        const g6 = (...a) => execFileSync('git', a, { cwd: repo6 })
+        g6('add', '.')
+        g6('-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'wiki first')
+        await new Promise((r) => setTimeout(r, 1100))
+        const h8 = commitHintText(repo6, [{
+          id: 'job-ac-fail', cwd: repo6, stage: 'done', writtenCount: 2,
+          finishedAt: new Date().toISOString(), autoCommit: { committed: false, reason: '不是 git 仓库' },
+        }])
+        check(h8.includes('产物待提交') && h8.includes('不是 git 仓库'), '提交被拒（pending）→ 提醒且带自动提交失败原因')
+      } finally { fs.rmSync(repo6, { recursive: true, force: true }) }
     } finally { fs.rmSync(repo2, { recursive: true, force: true }) }
   } finally { fs.rmSync(hintRepo, { recursive: true, force: true }) }
 }
@@ -447,6 +476,18 @@ console.log('== autoCommitWiki：安全边界（只提交 .codewiki/ 与 CodeWik
   }
 }
 
+// ============================ autoCommitState：三态判定的唯一来源 ============================
+console.log('== autoCommitState：committed / no-changes / pending 三态（唤醒与提醒两条通道共用） ==')
+{
+  const { autoCommitState } = await import('./index.js')
+  check(autoCommitState({ autoCommit: { committed: true, sha: 'abc1234' } }) === 'committed', 'committed=true → committed')
+  check(autoCommitState({ autoCommit: { committed: false, noChanges: true } }) === 'no-changes', 'noChanges=true → no-changes（无需提交）')
+  check(autoCommitState({ autoCommit: { committed: false, reason: '不是 git 仓库' } }) === 'pending', '提交被拒且有原因 → pending（要降级提醒）')
+  check(autoCommitState({}) === 'pending', '旧 job 无 autoCommit 字段 → pending（与 0.10.9 之前行为一致）')
+  check(autoCommitState(null) === 'pending' && autoCommitState(undefined) === 'pending', 'job 为空 → pending，不抛')
+  check(autoCommitState({ autoCommit: { committed: true, noChanges: true } }) === 'committed', 'committed 优先于 noChanges（已提交就是终态）')
+}
+
 // ============================ wakeCompileSession：编译终态 steer 唤醒 ============================
 console.log('== wakeCompileSession：终态实时唤醒（插件已自动提交时完全不打扰会话） ==')
 {
@@ -458,6 +499,10 @@ console.log('== wakeCompileSession：终态实时唤醒（插件已自动提交�
   // 0.10.9 核心行为：插件已自动提交 → 成功终态零唤醒（这正是「会话模型干等编译」的根治点）
   wakeCompileSession({ ...doneJob, autoCommit: { committed: true, sha: 'abc123' } }, 'done', fakeAgents)
   check(steered.length === 0, 'autoCommit 成功 → done 完全不唤醒会话（无需会话模型提交）')
+  // 0.10.10：产物本就无改动 → 同样零唤醒。旧实现只看 committed，此处会把「无需提交」
+  // 当成失败去催会话模型提交一个不存在的东西（两轴评审 S1）。
+  wakeCompileSession({ ...doneJob, autoCommit: { committed: false, noChanges: true } }, 'done', fakeAgents)
+  check(steered.length === 0, 'noChanges（产物无改动）→ done 也完全不唤醒（不催提交不存在的东西）')
   // 自动提交没成功 → 提醒一次（降级路径）
   wakeCompileSession({ ...doneJob, autoCommit: { committed: false, reason: '不是 git 仓库' } }, 'done', fakeAgents)
   check(steered.length === 1, 'autoCommit 失败 → done 仍唤醒一次（降级提醒）')
@@ -867,19 +912,29 @@ console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并
   const cc = makeCtx({})
   apply(cc.ctx, batchCfg({ serialProjects: false })) // 本块只验证提交占位与 flush 合并，不掺串行
   const gen2 = cc.registered.get('codewiki_generate')
-  // 模型通道全部失败：本块不关心编译质量，只验证提交占位窗口不产生两个 job
-  const mock = makeBatchMock()
-  const failLlm = { async *stream() { yield { type: 'finish', reason: { kind: 'error', failure: { code: 'MOCK_OFF', message: 'mock off' } } } } }
-  activeLlm = failLlm
-  // 先串行走一次（cw init 建好 wiki 基线，提交因模型通道失败快速失败），
-  // 避免并发对撞在 cw init 的 TOCTOU 上——本块只验证 submit 占位窗口
-  try { await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }) } catch { /* mock 失败预期 */ }
+  // 模型通道一律挂起（stall）：任务停在 articles 阶段、不会自己进终态。
+  // 这是本块稳定性的关键——旧版用「模型失败」当 mock，任务会在几百毫秒内 failed（终态），
+  // 第二次 execute 的 await 还没走完就到 submit，查不到活动任务 → 新建第二个 job，
+  // 偶发报「并发提交共享同一 job」失败（与占位逻辑无关，纯测试竞态）。
+  const mock = makeBatchMock({ stall: true })
+  // 先串行走一次（cw init 建好 wiki 基线），避免并发对撞在 cw init 的 TOCTOU 上；
+  // 该任务挂起在 articles，随后由 control 取消，不污染并发断言。
+  const cancelOne = async (jobId) => {
+    const ctl = cc.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const res = fakeRes()
+    await ctl.handler(fakeReq({ action: 'cancel', jobId }), res)
+    return res
+  }
   try {
+    const first = await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' })
+    await cancelOne(first.jobId)
+    await waitJob(concRepo)
     const [ra, rb] = await Promise.all([
       gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
       gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
     ])
     check(ra.jobId && ra.jobId === rb.jobId, `并发提交共享同一 job（${ra.jobId} vs ${rb.jobId}）`)
+    await cancelOne(ra.jobId) // 挂起任务收尾，让 flush 落盘
     await waitJob(concRepo)
     const after = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
     check((after.jobs ?? []).some((j) => j.id === 'job-external-1'), 'flush 合并后另一实例的 job 不丢失')
@@ -1265,6 +1320,8 @@ console.log('== 服务启动清理：Temp 目录终态任务自动移除，活�
 
 // 清理主 fixture（wiki 在仓库内 .codewiki/，随目录一起删）
 fs.rmSync(mainRepo, { recursive: true, force: true })
+// 清理本次运行的 jobs 文件（随机 token 命名的临时文件，不留给下次运行与 tmp 目录）
+try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* Windows 句柄延迟释放：留 tmp 自清 */ }
 
 console.log(failures ? `\nFAIL：${failures} 项未通过` : '\nPASS：编排冒烟全部通过')
 process.exit(failures ? 1 : 0)

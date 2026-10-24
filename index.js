@@ -31,6 +31,9 @@ const DEFAULT_BIG_PROVIDER = 'volces-ark'
 const DEFAULT_BIG_MODEL = 'glm-5.3-flash'
 // 大档单请求输入预算：模型 512k 上下文，留出输出与系统提示余量后取 420k
 const DEFAULT_BIG_TOKEN_BUDGET = 420000
+// 编译产物路径：自动提交、忽略检测、待提交提醒共用的唯一定义。永远只认这两个 pathspec，
+// 不扩成 -A / 整个工作树（否则会把用户手上的其它改动卷进自动提交）。
+const WIKI_PATHS = ['.codewiki', 'CodeWiki.md']
 
 // Windows/Git-Bash 兼容：MSYS 盘符路径（/e/...）Node 的 fs 不认，归一化为 E:/...。
 // 仅 win32 转换——POSIX 上 /e/... 可能是真实绝对路径，原样保留；识别不了的写法也原样交给 existsSync 报错。
@@ -1179,6 +1182,9 @@ function jobSummary(job) {
     stageTimings: job.stageTimings ?? null,
     usage: job.usage ?? null,
     notes: (job.notes ?? []).slice(-8),
+    // 插件自动提交结果（0.10.9）：面板与 codewiki_progress 共用同一份 jobSummary，
+    // 缺了这个字段两处都拿不到，只能从 notes 里猜。
+    autoCommit: job.autoCommit ?? null,
     error: job.error ?? null,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
@@ -1199,10 +1205,24 @@ let agentsRef = null
 // 与 agentsRef 同款：apply 时经 ctx.inject(['llm']) 在注入时取服务。
 let llmRef = null
 
+// 编译产物的入库状态：自动提交的成功/无改动/失败三态由一处判定，唤醒与提醒两条通道
+// 共用同一结论——否则同一次「无需提交」会被两条通道各打扰一次。
+//   'committed'  → 产物已入库，完全静默
+//   'no-changes' → 没有未提交的产物（重编译无变化/提前提交过），同样静默
+//   'pending'    → 插件没能提交，需要会话模型代为提交一次（唯一该打扰的情形）
+// 旧 job（无 autoCommit 字段）按 pending 处理，与 0.10.9 之前的行为一致。
+export function autoCommitState(job) {
+  const ac = job?.autoCommit
+  if (ac?.committed === true) return 'committed'
+  if (ac?.noChanges === true) return 'no-changes'
+  return 'pending'
+}
+
 export function wakeCompileSession(job, outcome, agents = agentsRef) {
-  // 0.10.9：成功且插件已自动提交 → 完全不打扰会话。会话模型提交完工具就继续干活了，
+  // 0.10.9：成功且插件已提交（或根本无改动）→ 完全不打扰会话。会话模型提交完工具就继续干活了，
   // 不再被「请提交改动」的唤醒拉回来做一件插件自己已经做完的事（旧行为的核心缺陷）。
-  if (outcome !== 'failed' && job?.autoCommit?.committed) return
+  // 注：'no-changes' 也必须静默——它是「无需提交」，催它提交只会得到一条自相矛盾的消息。
+  if (outcome !== 'failed' && autoCommitState(job) !== 'pending') return
   if (!job?.sessionId || !agents || typeof agents.get !== 'function') return
   let agent
   try { agent = agents.get(job.sessionId) } catch { return }
@@ -2895,17 +2915,19 @@ const commitHintCache = new Map() // cwd -> { at, text }
 // CodeWiki.md 提交到当前分支——会话模型因此无需等待编译、无需轮询、无需代跑 git。
 //
 // 安全边界（任何一条不满足就只降级为「提醒会话模型提交」，绝不做半个提交）：
-//   · 只 add 这两个路径（不用 -A / --all / .），merge/rebase 进行中不动手
-//   · 不 amend、不 push、不改写历史、不碰工作区其它改动
+//   · 只提交 WIKI_PATHS 这两个路径（`git add -- .codewiki CodeWiki.md` 的 pathspec 形式，
+//     不是 -A / --all / . —— pathspec 已把改动限定在 wiki 产物内）
+//   · merge/rebase/cherry-pick 进行中不动手；不 amend、不 push、不改写历史、不碰其它改动
 //   · 目标路径存在未解决冲突、仓库无 HEAD、未配置 user.name/user.email、
-//     路径被 .gitignore 忽略、index.lock 占用 → 一律返回 {committed:false, reason}
+//     路径被 .gitignore 忽略 → 一律返回 {committed:false, reason}
+//   · git add / git commit 自身失败（含 index.lock 被占用等并发情形）→ 同样返回失败原因
 // 返回值：{ committed, sha?, noChanges?, reason }，调用方把结果写进 job.autoCommit。
 // ---------------------------------------------------------------------------
 export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {
   const opts = { cwd, encoding: 'utf8', timeout: 20000, windowsHide: true }
   const run = (...args) => spawnSync('git', args, opts)
   const out = (r) => String(r?.stdout ?? '').trim()
-  const paths = ['.codewiki', 'CodeWiki.md']
+  const paths = WIKI_PATHS
   try {
     const inside = run('rev-parse', '--is-inside-work-tree')
     if (inside.status !== 0 || out(inside) !== 'true') return { committed: false, reason: '不是 git 仓库' }
@@ -2926,7 +2948,8 @@ export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {
     if (!out(run('config', 'user.email')) || !out(run('config', 'user.name'))) {
       return { committed: false, reason: '仓库未配置 git user.name/user.email' }
     }
-    const add = run('add', '-A', '--', ...paths)
+    // pathspec 形式：改动被限定在这两个路径内，与 -A 无关（注释与文档都按此描述）
+    const add = run('add', '--', ...paths)
     if (add.status !== 0) return { committed: false, reason: `git add 失败：${(add.stderr || add.stdout || '').trim().slice(0, 200)}` }
     // add 后仍无暂存内容：路径被 .gitignore 忽略（.codewiki 常被忽略）
     if (!out(run('diff', '--cached', '--name-only', '--', ...paths))) {
@@ -2953,14 +2976,16 @@ export function commitHintText(cwd, jobs = loadJobs()) {
     const latest = jobs
       .filter((j) => j.stage === 'done' && (j.writtenCount ?? 0) > 0 && j.finishedAt && samePath(j.cwd, cwd))
       .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0]
-    if (latest) {
-      const g = spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', '.codewiki', 'CodeWiki.md'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+    // 自动提交已成功或产物本就无改动 → 不必再查 git：该任务不需要任何提交动作。
+    // （与 wakeCompileSession 共用 autoCommitState，两条通道对同一次编译给出同一结论。）
+    if (latest && autoCommitState(latest) === 'pending') {
+      const g = spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', ...WIKI_PATHS], { encoding: 'utf8', timeout: 5000, windowsHide: true })
       const commitSec = Number.parseInt(String(g.stdout ?? '').trim(), 10)
       const jobSec = Math.floor(Date.parse(latest.finishedAt) / 1000)
-      // 只有「插件自动提交没成功」才提醒；autoCommit 成功时产物已入库，
-      // commitSec ≥ jobSec 自然静默——会话模型无需为此等待或代跑 git。
+      // 只有「插件自动提交没成功」才提醒；插件已提交时 commitSec ≥ jobSec 也静默
+      // （人工随后提交的情形），会话模型无需为此等待或代跑 git。
       if (Number.isFinite(jobSec) && (!Number.isFinite(commitSec) || jobSec > commitSec)) {
-        const why = latest.autoCommit?.committed === false && latest.autoCommit?.reason
+        const why = latest.autoCommit?.reason
           ? `插件自动提交未执行（${latest.autoCommit.reason}）`
           : '编译产物尚未提交 git'
         text = [
@@ -2981,7 +3006,7 @@ function reminderText(cwd) {
     '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——learnings/、decisions/ 补文章与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
     '- codewiki_generate 是后台编译：调用即返回提交回执，编译由宿主服务推进——调用后本步就此结束，不要等待、不要轮询、不要为了看进度而反复调 codewiki_progress；继续你的其他工作，编译完成的产物由插件自己提交入库（autoCommit 开，默认开），无需你跑 git；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
-    '- 若收到「产物待提交」提醒，说明插件自动提交没成功（非 git 仓库/被忽略/冲突等），此时才需要你代为提交一次；没有该提醒就不要动 .codewiki/ 的 git 状态；',
+    '- 若收到「产物待提交」提醒，说明插件自动提交没成功（非 git 仓库/被忽略/冲突等），此时才需要你代为提交一次；没有该提醒就不要动 .codewiki/ 的 git 状态（插件已提交或产物无改动时不会有提醒）；',
     '- 收尾未调用 codewiki_generate 视为任务未完成。',
   ].join('\n')
 }
