@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.7 — 2026-10-24
+
+### 变更：删除编译流水线规划（plan）阶段——提交后直接进 articles
+
+- 背景：单独的规划阶段为模块划分花一次独立模型请求（勘探员批：扫源码→应答模块清单 JSON）。现在编译模型上下文足够大，模块划分不值得一次独立请求；且规划应答非 JSON 时还要走降级路径。
+- 修法（index.js）：① 删 `tickPlan`（规划阶段处理）、`batchPlannerPrompt`（「你是代码结构勘探员」勘探员批 prompt）、`parsePlan`（规划 JSON 收割）三段；② `STAGE_HANDLER` 去 plan 行，queued 唤醒恒进 articles，提交（submit）恒 `setStage('articles')`；③ `tickArticles` 组装分支：full 编译无 `job.plan` 时就地 `localPlan(scanRepoFiles(cwd))`（按顶层目录分组，原降级路径升为唯一规划路径），notes 记「规划：N 个模块（本地顶层目录分组，规划阶段已移除）」；④ 兼容旧磁盘任务：stage='plan' 的存量任务（宿主升级瞬间恢复）清掉规划批次引用与旧勘探员任务清单，迁移到 articles 按 localPlan 重建，notes 记「旧版规划阶段任务迁移到 articles」；⑤ 横切阶段对 concepts 空数组已兼容（只产 `_architecture`/`_patterns`）。
+- 面板（client.js）：阶段条去 plan（`ACTIVE_STAGES`/`STAGE_WEIGHTS`——plan 的 0.05 权重并入 articles 得 0.65，总进度分母不变）、删 stagePlan/stepPlan 中英文标签、编译设置文案去「规划」。
+- 测试（test-orchestration.mjs）：规划块重写为本地规划断言（零勘探员请求、localPlan 入库、concepts 空、notes 记录），删「规划应答非 JSON 降级」场景；fixture 仓库从单层 `src/` 改为顶层 `core/`、`util/` 两目录（localPlan 顶层目录分组直接决定模块名）；恢复块场景 B 改为旧 plan 快照迁移断言（勘探员快照作废、迁移后按 localPlan 重建）；横切/串行/面板各块的 plan 阶段断言改 articles；`writtenCount` 基线 5→4（无概念文章）、stale 精确更新 3→2 篇。
+- 验证：`node test-orchestration.mjs` 188 通过 / 0 失败（含本地规划、旧任务迁移、分割、串行、面板、schema 校验全块）；`node test-batch.mjs` 123 通过 / 0 失败；`test-cwd-paths` / `test-wiki-entry` 全部通过。
+- 版本 0.10.6 → 0.10.7。
+
 ## 0.10.6 — 2026-10-24
 
 ### 修复：面板藏掉占串行闸门的工作区外编译任务（「到底哪个在编译」盲区）

@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
     const EFFORTS_PATH = '/api/codewiki/model-efforts'
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
-    const ACTIVE_STAGES = ['queued', 'plan', 'articles', 'crosscut', 'compose', 'review', 'index']
+    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index']
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
       serialProjects: '单项目串行',
       serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。',
       secCompile: '编译模型',
-      secCompileHint: '全部模型环节（规划/写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）。',
+      secCompileHint: '全部模型环节（写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）。',
       batchProvider: '模型提供商',
       batchProviderHint: '来自模型设置里已注册的提供商。默认 workbuddy（免费 hy3，192k 上下文）。插件没有自带直连通道，模型与凭证都取自模型设置里选中的这一份。',
       batchProviderMissing: '目录不可用，请手填 provider id',
@@ -84,7 +84,6 @@ window.__ModuleLoader__.load({
       invalidConcurrency: '并发上限须为 1–8 的整数。',
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
-      stagePlan: '规划中',
       stageQueued: '排队中',
       stageArticles: '写文章中',
       stageCrosscut: '横切中',
@@ -139,7 +138,6 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: '最小 5；扫描对 jobs 历史工作区逐个 cw status 判态，仅提交有变更的。',
       excludePathsLabel: '排除清单',
       excludePathsHint: '这些目录（含子目录）不编译 CodeWiki；换行/分号/逗号分隔绝对路径。',
-      stepPlan: '规划',
       stepArticles: '文章',
       stepCrosscut: '横切',
       stepCompose: '合成',
@@ -222,7 +220,6 @@ window.__ModuleLoader__.load({
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
-      stagePlan: 'Planning',
       stageQueued: 'Queued',
       stageArticles: 'Writing articles',
       stageCrosscut: 'Cross-cutting',
@@ -277,7 +274,6 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: 'Minimum 5. Each scan runs cw status per historical workspace and submits only changed ones.',
       excludePathsLabel: 'Excluded paths',
       excludePathsHint: 'CodeWiki is never compiled under these directories (subtree included). Separate absolute paths with newlines, semicolons or commas.',
-      stepPlan: 'Plan',
       stepArticles: 'Write',
       stepCrosscut: 'Cross',
       stepCompose: 'Compose',
@@ -924,8 +920,8 @@ window.__ModuleLoader__.load({
                 el('span', { title: `${stageLabel(s)}${dur ? ` · ${fmtMs(dur)}` : ''}` }, label))
             }))
         }
-        // 总进度：六阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
-        const STAGE_WEIGHTS = { queued: 0, plan: 0.05, articles: 0.6, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
+        // 总进度：五阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
+        const STAGE_WEIGHTS = { queued: 0, articles: 0.65, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           if (idx < 0) return job.stage === 'done' ? 100 : null

@@ -2,7 +2,7 @@
 // 提供两个工具：
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
 //   codewiki_generate — 服务化编译：判态后把编译任务提交给宿主常驻服务（侧边栏 CodeWiki 面板可见），
-//                       服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进，全部环节在插件内完成
+//                       服务按 写文章 → 横切 → 审校 → 索引 推进，全部环节在插件内完成
 //                       （默认模型 workbuddy/hy3，192k 上下文，单请求输入预算 110k），零子代理。
 //   codewiki_progress — 只读查编译进度：提交后随时查 stage/百分比/篇数/失败原因，立即返回不等待。
 import fs from 'node:fs'
@@ -301,7 +301,7 @@ async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal }
   return { content, outputTokens: Number(assembler.usage?.outputTokens) || 0 }
 }
 
-// 任务结果统一出口：keepInMemory 任务（规划/校对）把 content 带回内存由服务侧消费，
+// 任务结果统一出口：keepInMemory 任务（校对）把 content 带回内存由服务侧消费，
 // 文章任务直接落盘。普通任务与超大任务兜底共用。
 function applyTaskResult(task, content, notes) {
   if (task.keepInMemory) return { name: task.name, ok: true, stopReason: 'completed', content }
@@ -357,7 +357,7 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
 
 // ---------------------------------------------------------------------------
 // 模型执行（唯一通道：宿主 llm 服务）
-// 全部环节（规划/写文章/横切/校对）都是单轮文本生成，统一走同一个后台并发池，
+// 全部环节（写文章/横切/校对）都是单轮文本生成，统一走同一个后台并发池，
 // 模型/提供商/思考档位全部取自插件设置里选中的「模型设置」条目，
 // 凭证由宿主按该 provider 解析——插件不再有任何自带直连通道。
 // 输入按 token 预算（BATCH_TOKEN_BUDGET，默认 110k）装填；装不下的单文件升
@@ -703,30 +703,9 @@ function articleFormatSection() {
   ].join('\n')
 }
 
-// 批量规划 prompt：输入是文件清单文本（scanRepoFiles 的 path+bytes），输出纯 JSON 计划。
-// keepInMemory 任务——结果由服务侧 parsePlan 消费，不落盘。
-function batchPlannerPrompt(fileLines) {
-  return [
-    '你是代码结构勘探员。下面是一个仓库的全部源码文件清单（路径 + 字节数）。',
-    '按逻辑模块分组（模块要切小，一个模块 3-8 个文件为宜），并识别真正跨模块的概念。',
-    '只输出一个 JSON 对象——禁止 markdown 围栏、禁止任何解释文字：',
-    '{',
-    '  "project": "<一句话项目定位>",',
-    '  "modules": [ {"name": "kebab-case-name", "summary": "2-3 句话", "files": ["相对路径", "..."]} ],',
-    '  "concepts": [ {"name": "kebab-case-name", "files": ["相对路径"]} ]',
-    '}',
-    '要求：',
-    '- modules 的 files 并集必须覆盖清单里全部文件；每个文件恰好归入一个模块',
-    '- 只用清单里出现的路径，不得发明清单外的文件',
-    '- concepts 只收真正跨模块的模式（错误处理、数据流、认证、配置加载等），没有就给空数组',
-    '- name 用小写 kebab-case，作为文章文件名',
-    '',
-    '文件清单：',
-    fileLines,
-  ].join('\n')
-}
-
-// 本地规划兜底：批量规划失败/解析不出 JSON 时按顶层目录分组。宁可粗也不中断整条流水线。
+// 本地规划：按顶层目录分组生成模块清单（0.10.7 起是唯一规划路径——模型勘探的单独
+// 规划阶段已删，编译模型上下文足够大，模块划分不再值得一次独立请求）。
+// 宁可粗也不中断整条流水线。
 export function localPlan(files) {
   const groups = new Map()
   for (const f of files) {
@@ -736,7 +715,7 @@ export function localPlan(files) {
     groups.get(name).push(f.path)
   }
   return {
-    project: '（本地兜底规划：按顶层目录分组）',
+    project: '（本地规划：按顶层目录分组）',
     modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
     concepts: [],
   }
@@ -976,28 +955,6 @@ function slugify(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9\-_]+/g, '-').replace(/^-+|-+$/g, '') || 'module'
 }
 
-function parsePlan(text) {
-  if (!text) return null
-  let t = String(text).trim()
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (fence) t = fence[1].trim()
-  const s = t.indexOf('{')
-  const e = t.lastIndexOf('}')
-  if (s < 0 || e <= s) return null
-  try {
-    const plan = JSON.parse(t.slice(s, e + 1))
-    if (!Array.isArray(plan.modules)) return null
-    plan.modules = plan.modules.filter((m) => m && typeof m.name === 'string' && Array.isArray(m.files) && m.files.length > 0)
-    if (!plan.modules.length) return null
-    if (!Array.isArray(plan.concepts)) plan.concepts = []
-    plan.concepts = plan.concepts.filter((c) => c && typeof c.name === 'string')
-    if (typeof plan.project !== 'string') plan.project = ''
-    return plan
-  } catch {
-    return null
-  }
-}
-
 // 读文章 frontmatter 的 source_files（缩进列表或行内数组），供 stale 流程取文件清单。
 // 从 frontmatter 文本解析 source_files 清单（inline [a,b] 与 block - a 两式），返回相对路径数组
 function parseSourceFiles(fm) {
@@ -1034,10 +991,10 @@ async function wikiPathFor(cwd, binary, signal) {
 // ---------------------------------------------------------------------------
 // 编排服务：全批量流水线（零子代理）
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
-//   full   = plan → articles → crosscut →（超预算拆分时 compose）→ review → index
+//   full   = articles → crosscut →（超预算拆分时 compose）→ review → index（0.10.7 删规划阶段）
 //   stale  = articles（任务在提交时预构建）→ review → index
 // 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 workbuddy/hy3）；单文件超
-// 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。规划/横切/校对结果
+// 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // 兜底通道：只有单个源文件大到连 BATCH_TOKEN_HARD_LIMIT 都装不下时才启用——把完整写作
 // 指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
@@ -1116,7 +1073,7 @@ function rememberRepo(cwd) {
 }
 const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])
 
-// 仓库源码勘探（规划输入）：黑名单目录 + 二进制后缀 + 单文件 256KB + 总数 2000
+// 仓库源码扫描（本地规划输入）：黑名单目录 + 二进制后缀 + 单文件 256KB + 总数 2000
 const SCAN_SKIP_DIRS = new Set([
   '.git', '.codewiki', 'node_modules', 'vendor', 'dist', 'build', 'out', 'target',
   '.next', '__pycache__', '.venv', 'venv', '.idea', '.vscode', 'bin', 'obj',
@@ -1596,40 +1553,9 @@ function createJobService(config, onSettled) {
 
   // ---- 阶段处理：每 tick 每 job 推进一步 ----
 
-  async function tickPlan(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      const planResult = results.find((r) => r.ok && r.content)
-      let plan = planResult ? parsePlan(planResult.content) : null
-      if (!plan) {
-        note(job, '批量规划未产出可用 JSON，降级本地按顶层目录分组')
-        plan = localPlan(scanRepoFiles(job.cwd))
-      }
-      job.plan = plan
-      note(job, `规划：${plan.modules.length} 个模块、${plan.concepts.length} 个概念${plan.project ? `（${plan.project}）` : ''}`)
-      job.batchRef = null
-      job.tasks = []
-      setStage(job, 'articles')
-      return
-    }
-    const files = scanRepoFiles(job.cwd)
-    if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
-    const fileLines = files.map((f) => `- ${f.path}（${f.bytes}B）`).join('\n')
-    const prompt = batchPlannerPrompt(fileLines)
-    const planTask = {
-      customId: 'plan', name: '_plan', keepInMemory: true,
-      batchPrompt: prompt,
-    }
-    try {
-      await submitBatchFor(job, [planTask])
-    } catch (err) {
-      fail(job, `规划批次提交失败 —— ${String(err?.message ?? err)}`)
-    }
-  }
-
-  // 主模型规划已移除（0.10.0）：全部模型环节统一由插件内并发池执行（默认 workbuddy/hy3
-  // 192k 上下文，规划输入远小于上下文），不再委托发起会话的主模型，路由/凭证完全由插件配置决定。
+  // 规划阶段已删（0.10.7）：全量编译提交后直接进 articles，模块清单由 localPlan
+  // 本地生成（顶层目录分组）——编译模型上下文足够大，不再值得为模块划分单独发
+  // 一次模型请求；stale 用文章 frontmatter 的 source_files，本就不经过规划。
 
   async function tickArticles(job) {
     if (job.batchRef) {
@@ -1700,12 +1626,18 @@ function createJobService(config, onSettled) {
         tally(job, results, tasks)
       }
     } else if (!job.sessionTasks?.length) {
-      // 组装文章任务并提交：stale 用预构建任务；full 用 job.plan；resume 不经此处（batchRef 已设）
+      // 组装文章任务并提交：stale 用预构建任务；full 就地本地规划生成清单；resume 不经此处（batchRef 已设）
       let tasks
       if (job.kind === 'stale') tasks = job.tasks
       else {
+        if (!job.plan) {
+          const files = scanRepoFiles(job.cwd)
+          if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
+          job.plan = localPlan(files)
+          note(job, `规划：${job.plan.modules.length} 个模块（本地顶层目录分组，规划阶段已移除）`)
+        }
         const plan = job.plan
-        if (!plan?.modules?.length) { fail(job, '规划没有可用模块'); return }
+        if (!plan?.modules?.length) { fail(job, '仓库没有可编译的源码文件'); return }
         tasks = plan.modules.map((mod) => {
           const slug = slugify(mod.name)
           return {
@@ -1976,7 +1908,6 @@ function createJobService(config, onSettled) {
   }
 
   const STAGE_HANDLER = {
-    plan: tickPlan,
     articles: tickArticles,
     crosscut: tickCrosscut,
     compose: tickCompose,
@@ -2026,7 +1957,9 @@ function createJobService(config, onSettled) {
         // 排队中的项目：只有轮到它（activeId）时才进入真正的首个阶段
         if (job.stage === 'queued') {
           if (activeId !== job.id) continue
-          const next = job.pendingStage ?? (job.kind === 'full' ? 'plan' : 'articles')
+          // 0.10.7 删了 plan 阶段：唤醒恒进 articles（模块清单在 articles 开头就地
+          // 本地生成）；旧磁盘任务残留的 pendingStage='plan' 一并落到 articles。
+          const next = 'articles'
           job.pendingStage = null
           note(job, `排队结束，开始编译（${next}）`)
           setStage(job, next)
@@ -2035,6 +1968,16 @@ function createJobService(config, onSettled) {
         }
         // 串行闸门：非当前推进项目本轮跳过（不推进、不失败，等轮次）
         if (activeId && job.id !== activeId) continue
+        // 0.10.7 前的旧任务卡在 plan 阶段：勘探员代码已删，旧任务快照不可重跑——
+        // 清掉规划批次引用与旧任务清单，按 articles 正常组装（full 由 localPlan 本地重建清单）
+        if (job.stage === 'plan') {
+          job.batchRef = null
+          job.tasks = []
+          job.plan = null
+          setStage(job, 'articles')
+          note(job, '旧版规划阶段任务迁移到 articles（本地规划重建清单）')
+          touch(job)
+        }
         const handler = STAGE_HANDLER[job.stage]
         if (!handler) { fail(job, `未知阶段 ${job.stage}`); continue }
         try {
@@ -2098,18 +2041,18 @@ function createJobService(config, onSettled) {
     job.credentialSource = `llm(${liveConfig(config).batchProvider}/${liveConfig(config).batchModel})`
     // 单项目串行（serialProjects，默认开）：已有别的项目在推进（非 queued 的非终态任务，
     // 且不是刚提交的自己）时，本任务进 queued 排队，等前一个到终态后由 tick 自动轮到。
-    // plan/articles 与 stale 的预置任务先寄存在 pending*，轮到时再落地（排队期间不占机器）。
+    // articles 与 stale 的预置任务先寄存在 pending*，轮到时再落地（排队期间不占机器）。
     const c1 = liveConfig(config)
     const busyOther = c1.serialProjects
       ? jobs.find((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
       : null
     if (busyOther) {
-      job.pendingStage = kind === 'full' ? 'plan' : 'articles'
+      job.pendingStage = 'articles'
       job.pendingTasks = kind === 'stale' ? (prebuiltTasks ?? []) : null
       note(job, `已有项目在编译（${path.basename(busyOther.cwd)}），本任务排队等待（单项目串行）`)
       setStage(job, 'queued')
     } else {
-      setStage(job, kind === 'full' ? 'plan' : 'articles')
+      setStage(job, 'articles')
       if (kind === 'stale') job.tasks = prebuiltTasks ?? []
     }
     persist()
@@ -2154,7 +2097,7 @@ function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（规划→模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 workbuddy/hy3，免费 192k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 workbuddy/hy3，免费 192k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
       '进度：调用即提交后请继续手头工作，不要等待或反复轮询；需要进度时用 codewiki_progress 工具（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
       '单项目串行（默认开）：同一时刻只推进一个仓库的编译任务，后提交的项目进 queued 排队，前一个收尾后自动轮到（进度里 stage=queued 即排队）。',
@@ -2293,7 +2236,7 @@ function generateToolDefinition(cfg, svc) {
       }
 
       const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
-      notes.push(`已提交全量编译任务 ${job.id}（规划→模块文章→横切→校对→索引，全部在插件内完成）`)
+      notes.push(`已提交全量编译任务 ${job.id}（模块文章→横切→校对→索引，全部在插件内完成）`)
       result.jobId = job.id
       result.stage = job.stage
       result.submitted = true
@@ -2386,7 +2329,7 @@ function progressToolDefinition(cfg, svc) {
     description: [
       '查询 CodeWiki 编译任务进度（只读，立即返回，不等待编译完成）。',
       'codewiki_generate 是提交制：调用即返回，编译由宿主后台服务推进——提交后直接继续手头工作，需要进度时再调用本工具（数据与侧边栏 CodeWiki 面板同源）。',
-      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（plan/articles/crosscut/compose/review/index/done/failed/cancelled）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
+      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（articles/crosscut/compose/review/index/done/failed/cancelled）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
     ].join('\n'),
     parameters: {
       type: 'object',

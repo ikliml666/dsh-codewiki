@@ -1,6 +1,6 @@
 // test-orchestration.mjs — dsh-codewiki 服务化编排冒烟：
 // mock 宿主 llm 服务（llm.stream 按 prompt 特征应答，插件零直连）+ 真实 cw CLI + 真实服务 tick，
-// 验证 codewiki_generate 提交制 + 服务阶段机（plan→articles→crosscut→review→index）、
+// 验证 codewiki_generate 提交制 + 服务阶段机（articles→crosscut→review→index，0.10.7 起无规划阶段）、
 // stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、编译模型缺失诚实报错、
 // 单项目串行排队（0.10.0）、编译终态 steer 实时唤醒发起会话（0.8.0）。
 // 运行：node test-orchestration.mjs
@@ -98,9 +98,12 @@ function makeMockAgent(cwd) {
 
 function makeFixtureRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-orch-'))
-  fs.mkdirSync(path.join(dir, 'src'))
-  fs.writeFileSync(path.join(dir, 'src', 'core.py'), 'def run():\n    return "core"\n')
-  fs.writeFileSync(path.join(dir, 'src', 'util.py'), 'def fmt():\n    return "util"\n')
+  // 顶层 core/、util/ 两个目录：0.10.7 删规划阶段后模块清单由 localPlan 按顶层目录
+  // 分组生成，fixture 结构直接决定模块名（原勘探员应答固定 core/util 的时代结束了）
+  fs.mkdirSync(path.join(dir, 'core'))
+  fs.mkdirSync(path.join(dir, 'util'))
+  fs.writeFileSync(path.join(dir, 'core', 'core.py'), 'def run():\n    return "core"\n')
+  fs.writeFileSync(path.join(dir, 'util', 'util.py'), 'def fmt():\n    return "util"\n')
   const git = (...a) => execFileSync('git', a, { cwd: dir })
   git('init')
   git('add', '.')
@@ -124,34 +127,26 @@ const promptOf = (opts) => String(opts?.messages?.[0]?.content?.[0]?.text ?? '')
 
 // mock 宿主 llm 服务：全部环节都是单轮 chat 后台并发池。
 // 按 prompt 首行特征分发应答（与真实 prompt 模板的区分句一一对应）。
-function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, bigSources = false, planReply = null } = {}) {
+function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {}) {
   const llmCalls = []
   const answerFor = (prompt) => {
-    if (prompt.includes('你是代码结构勘探员')) {
-      if (planReply !== null) return planReply
-      return JSON.stringify({
-        project: 'fixture',
-        modules: modules.map((mn) => ({ name: mn, summary: `${mn} summary`, files: bigSources ? [`src/${mn}.py`, `src/${mn}2.py`] : [`src/${mn}.py`] })),
-        concepts: [{ name: 'config-load', files: [`src/${modules[0]}.py`] }],
-      })
-    }
     if (prompt.includes('你是 CodeWiki 文章观察员')) {
       // 文章分割观察批：应答一段观察文本（合成阶段凭它产文）
       return '观察：模块职责与关键实现（来自分批观察）。\n\n文件清单：见上文。\n'
     }
     if (prompt.includes('你是 CodeWiki 文章作者')) {
       const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
-      return articleMd(mn, `src/${mn}.py`, articleMarker)
+      return articleMd(mn, `${mn}/${mn}.py`, articleMarker)
     }
     if (prompt.includes('你是 CodeWiki 架构观察员')) {
-      return '模块观察：职责一句话。\n\nsource_files:\n  - src/core.py\n'
+      return '模块观察：职责一句话。\n\nsource_files:\n  - core/core.py\n'
     }
-    if (prompt.includes('写系统总览')) return articleMd('Architecture', `src/${modules[0]}.py`, articleMarker, 'architecture')
-    if (prompt.includes('总结仓库反复出现的模式')) return articleMd('Patterns', `src/${modules[1] ?? modules[0]}.py`, articleMarker, 'pattern')
-    if (prompt.includes('写跨模块概念')) return articleMd('config-load', `src/${modules[0]}.py`, articleMarker, 'concept')
+    if (prompt.includes('写系统总览')) return articleMd('Architecture', 'core/core.py', articleMarker, 'architecture')
+    if (prompt.includes('总结仓库反复出现的模式')) return articleMd('Patterns', 'util/util.py', articleMarker, 'pattern')
+    if (prompt.includes('写跨模块概念')) return articleMd('config-load', 'core/core.py', articleMarker, 'concept')
     if (prompt.includes('你是 CodeWiki 审校员')) {
       const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
-      return fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', `src/${modules[0]}.py`, 'PROOFED')
+      return fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', 'core/core.py', 'PROOFED')
     }
     return '---\ntitle: unknown\n---\nunknown task'
   }
@@ -278,7 +273,7 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
     execute: async (args) => {
       captured.push(args)
       if (args.cwd === 'boom') throw new Error('codewiki_generate：cwd 不存在')
-      return { cwd: args.cwd, scope: args.scope, wikiPath: 'w', state: 'stale', jobId: 'job-x', stage: 'plan', submitted: true, notes: [] }
+      return { cwd: args.cwd, scope: args.scope, wikiPath: 'w', state: 'stale', jobId: 'job-x', stage: 'articles', submitted: true, notes: [] }
     },
   }
   const { commitHintText } = await import('./index.js')
@@ -376,8 +371,8 @@ console.log('== wakeCompileSession：终态实时唤醒（与子代理 send_mess
   check(steered.length === 2, '缺省 agents（宿主未注入或无 get）→ 静默')
 }
 
-// ============================ 规划阶段（0.10.0：全流程插件内，不再委托主模型） ============================
-console.log('== 规划走插件内批量池（按设置里的编译模型，不跟会话主模型） ==')
+// ============================ 本地规划（0.10.7：规划阶段已删，articles 开头就地 localPlan） ============================
+console.log('== 本地规划：零规划请求，模块清单由 localPlan 顶层目录分组生成 ==')
 {
   // 0.10.1：唯一通道是宿主 llm 服务。此块的意图不再是「不碰 ctx.llm」，
   // 而是「不沿用发起会话的主模型身份」——请求必须按配置的 provider/model 发出。
@@ -401,35 +396,19 @@ console.log('== 规划走插件内批量池（按设置里的编译模型，不�
       `全部请求按设置的编译模型发出（${mock.llmCalls.length} 次，provider/model 全为 workbuddy/hy3）`)
     check(!mock.llmCalls.some((c) => c.provider === 'deepseek-official' || c.model === 'main-model-x'),
       '不沿用会话主模型身份（零 deepseek-official/main-model-x 调用）')
-    check(mock.llmCalls.some((c) => c.prompt.includes('你是代码结构勘探员')), '规划请求走插件内批量池')
+    check(!mock.llmCalls.some((c) => c.prompt.includes('勘探员')), '全程无独立规划请求（0.10.7 删规划阶段）')
     check(job?.stage === 'done', `任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(job?.plan?.project === 'fixture' && job?.plan?.modules?.length === 2, '规划 JSON 解析入库（2 个模块）')
-    check((job?.notes ?? []).some((n) => n.includes('规划：2 个模块')), 'notes 记录规划结果')
+    check(job?.plan?.project === '（本地规划：按顶层目录分组）' && job?.plan?.modules?.length === 2, 'localPlan 入库（顶层目录分组 2 模块）')
+    check(job?.plan?.modules?.every((m) => Array.isArray(m.files) && m.files.length === 1), '每模块文件清单来自本地扫描（各 1 文件）')
+    check((job?.notes ?? []).some((n) => n.includes('规划：2 个模块')), 'notes 记录本地规划结果')
+    check(job?.plan?.concepts?.length === 0, 'concepts 为空数组（本地规划不产概念，crosscut 兼容）')
     check((job?.notes ?? []).some((n) => n.includes('阶段已启动')), 'notes 记录批量阶段启动与模型/并发')
   } finally {
     mock.restore()
     fs.rmSync(mmRepo, { recursive: true, force: true })
   }
 
-  // 场景 2：规划应答不是合法 JSON → 降级本地按顶层目录分组，任务照常完成
-  {
-    const fbRepo = makeFixtureRepo()
-    const mock2 = makeBatchMock({ planReply: '抱歉我不会' })
-    const fbCtx = makeCtx({})
-    apply(fbCtx.ctx, batchCfg())
-    const fbGen = fbCtx.registered.get('codewiki_generate')
-    try {
-      const r = await fbGen.execute({ cwd: fbRepo }, { agent: 'test-agent' })
-      const job = await waitJob(r.cwd)
-      check(job?.stage === 'done', `降级路径终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-      check((job?.notes ?? []).some((n) => n.includes('批量规划未产出可用 JSON')), 'notes 记录本地分组降级')
-      check(Array.isArray(job?.plan?.modules) && job.plan.modules.length >= 1, '本地分组计划入库')
-      check(mock2.llmCalls.every((c) => c.provider === 'workbuddy'), '降级路径同样按设置的编译模型发出')
-    } finally {
-      mock2.restore()
-      fs.rmSync(fbRepo, { recursive: true, force: true })
-    }
-  }
+  // （0.10.7 删掉了「规划应答非 JSON → 降级本地分组」场景：本地分组已是唯一路径）
 
   // 场景 3：无 sessionId（面板提交）→ 同一条批量路径
   const panelRepo = makeFixtureRepo()
@@ -442,7 +421,7 @@ console.log('== 规划走插件内批量池（按设置里的编译模型，不�
     const job = await waitJob(r.cwd)
     check(job?.stage === 'done', `面板提交任务终态 done（实际 ${job?.stage}）`)
     check(mock3.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'), '面板提交按设置的编译模型发出')
-    check(mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交规划走批量池')
+    check(!mock3.batchPrompts().some((p) => p.includes('勘探员')), '面板提交同样零规划请求')
   } finally {
     mock3.restore()
     fs.rmSync(panelRepo, { recursive: true, force: true })
@@ -459,12 +438,12 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     const r1 = await gen.execute({ cwd: mainRepo }, { agent: { id: 'sess-e2e' } })
     console.log('  notes:', r1.notes.join(' | '))
     check(r1.submitted === true && typeof r1.jobId === 'string', '提交即返回（jobId 非空）')
-    check(r1.stage === 'plan', `初始 stage=plan（实际 ${r1.stage}）`)
+    check(r1.stage === 'articles', `初始 stage=articles（实际 ${r1.stage}）`)
     check(r1.writtenCount === undefined, '返回值不含 writtenCount（编译交服务，不再就地等待）')
     const job = await waitJob(r1.cwd)
-    check(mock.batchPrompts().some((p) => p.includes('勘探员')), '规划请求已走宿主 llm 通道')
+    check(!mock.batchPrompts().some((p) => p.includes('勘探员')), '零规划请求（宿主 llm 通道只跑文章/横切/校对）')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式+概念）`)
+    check(job?.writtenCount >= 3 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式）`)
     check(e2eSteers.length === 1 && e2eSteers[0].id === 'sess-e2e', '编译终态实时唤醒发起会话（exec.agent.id → steer）')
     const wakeText = String(e2eSteers[0]?.m?.content?.[0]?.text ?? '')
     check(wakeText.includes('CodeWiki 编译完成·请提交改动') && wakeText.includes(r1.jobId), '唤醒消息为完成文案且含任务 id')
@@ -474,7 +453,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(fs.existsSync(path.join(w, 'modules', 'util.md')), 'modules/util.md 落盘')
     check(fs.existsSync(path.join(w, '_architecture.md')), '_architecture.md 落盘')
     check(fs.existsSync(path.join(w, '_patterns.md')), '_patterns.md 落盘')
-    check(fs.existsSync(path.join(w, 'concepts', 'config-load.md')), 'concepts/config-load.md 落盘')
+    check(!fs.existsSync(path.join(w, 'concepts')) || fs.readdirSync(path.join(w, 'concepts')).length === 0, '无概念文章（localPlan concepts 为空，crosscut 兼容）')
     check(fs.readFileSync(path.join(w, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '校对批次已回写模块文章（review 阶段端到端）')
     check((job.notes ?? []).some((n) => n.includes('cw index')), '收尾 cw index/meta update 已执行')
     check(!(job.notes ?? []).some((n) => n.includes('子代理')), '全程零子代理（notes 无子代理字样）')
@@ -495,7 +474,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     const obsPrompts = mock.batchPrompts().filter((p) => p.includes('架构观察员'))
     check(obsPrompts.length === 2, `端点收到 2 个观察请求（实际 ${obsPrompts.length}）`)
-    check(mock.realtimePrompts().some((p) => p.includes('勘探员')), '规划请求走同一端点（唯一通道）')
+    check(!mock.realtimePrompts().some((p) => p.includes('勘探员')) && !mock.batchPrompts().some((p) => p.includes('勘探员')), '全程无规划请求（0.10.7 删规划阶段）')
     for (const p of obsPrompts) {
       check((p.match(/^### /gm) ?? []).length === 1, '观察请求输入只含一篇模块文章')
     }
@@ -517,14 +496,14 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
 {
   const splitRepo = makeFixtureRepo()
-  // 每模块两个 210KB 源文件：单请求 110k 预算必装不下 → 触发观察批分割
+  // 每模块目录两个 210KB 源文件：单请求 110k 预算必装不下 → 触发观察批分割
   for (const mn of ['core', 'util']) {
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}.py`), 'y'.repeat(210 * 1024))
-    fs.writeFileSync(path.join(splitRepo, 'src', `${mn}2.py`), 'z'.repeat(210 * 1024))
+    fs.writeFileSync(path.join(splitRepo, mn, `${mn}.py`), 'y'.repeat(210 * 1024))
+    fs.writeFileSync(path.join(splitRepo, mn, `${mn}2.py`), 'z'.repeat(210 * 1024))
   }
   execFileSync('git', ['add', '-A'], { cwd: splitRepo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
-  const mock = makeBatchMock({ bigSources: true })
+  const mock = makeBatchMock()
   try {
     const r = await gen.execute({ cwd: splitRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '分割仓库提交即返回')
@@ -560,16 +539,16 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
     let jobA = null
     for (let i = 0; i < 40; i += 1) {
       jobA = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === ra.jobId)
-      if (jobA?.stage === 'plan') break
+      if (jobA?.stage === 'articles') break
       await new Promise((r) => setTimeout(r, 150))
     }
-    check(jobA?.stage === 'plan', `A 进入 plan 占住推进权（实际 ${jobA?.stage}）`)
+    check(jobA?.stage === 'articles', `A 进入 articles 占住推进权（实际 ${jobA?.stage}）`)
     const rb = await gen.execute({ cwd: repoB }, { agent: 'test-agent' })
     check(rb.submitted === true, '项目 B 提交即返回')
     const jobB0 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === rb.jobId)
     check(jobB0?.stage === 'queued', `B 进 queued 排队（实际 ${jobB0?.stage}）`)
     check((jobB0?.notes ?? []).some((n) => n.includes('单项目串行')), 'B 的 notes 说明单项目串行排队')
-    check(jobB0?.pendingStage === 'plan', `B 预置 pendingStage=plan（实际 ${jobB0?.pendingStage}）`)
+    check(jobB0?.pendingStage === 'articles', `B 预置 pendingStage=articles（实际 ${jobB0?.pendingStage}）`)
     // 排队期间 B 不发任何请求：A 之外的批量请求数不增长
     const before = mockStall.batchPrompts().length
     await new Promise((r) => setTimeout(r, 900))
@@ -607,7 +586,7 @@ console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 prov
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
     check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(job?.writtenCount >= 5 && job?.failedCount === 0, `编译 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇`)
+    check(job?.writtenCount >= 4 && job?.failedCount === 0, `编译 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇`)
     check(mock.llmCalls.length > 0 && mock.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'),
       '所有请求都经设置里的编译模型（workbuddy/hy3）')
     check(mock.llmCalls.every((c) => c.reasoningEffort === undefined), '未配置思考程度 → 不下发 reasoningEffort（用模型默认档）')
@@ -633,7 +612,7 @@ console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 prov
 // ============================ stale 逐篇更新 ============================
 console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 articles 阶段） ==')
 {
-  fs.writeFileSync(path.join(mainRepo, 'src', 'core.py'), 'def run():\n    return "core-v2"\n')
+  fs.writeFileSync(path.join(mainRepo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
   execFileSync('git', ['add', '-A'], { cwd: mainRepo })
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'v2'], { cwd: mainRepo })
   const mock = makeBatchMock({ articleMarker: 'Stale-batch' })
@@ -644,7 +623,7 @@ console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 art
     const job = await waitJob(r2.cwd)
     check(job?.stage === 'done' && job?.kind === 'stale', `stale job 终态 done（kind=${job?.kind}，error ${job?.error ?? '-'}）`)
     // core.py 变更 → 声明它的文章过期：modules/core.md、_architecture.md、concepts/config-load.md
-    check(job?.writtenCount === 3, `恰好更新声明了 core.py 的 3 篇（实际 ${job?.writtenCount}）`)
+    check(job?.writtenCount === 2, `恰好更新声明了 core.py 的 2 篇（实际 ${job?.writtenCount}，0.10.7 起无概念文章）`)
     const w = job.wikiPath
     check(fs.readFileSync(path.join(w, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '过期文章经批次重写并校对回写')
     check(!fs.readFileSync(path.join(w, 'modules', 'util.md'), 'utf8').includes('Stale-batch'), '未变更文章不动（util.md 保持全量版内容）')
@@ -680,7 +659,7 @@ console.log('== codewiki_progress：注册、cwd/jobId 过滤、百分比与明�
     const r = await gen.execute({ cwd: midRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '进度查询用仓库已提交编译')
     const mid = (await prog.execute({ cwd: midRepo }, { agent: 'test-agent' })).jobs.find((j) => j.id === r.jobId)
-    check(mid?.stage === 'plan' && (mid?.progress === null || (mid.progress >= 0 && mid.progress <= 100)),
+    check(mid?.stage === 'articles' && (mid?.progress === null || (mid.progress >= 0 && mid.progress <= 100)),
       `进行中 job stage 正确且百分比合法（stage=${mid?.stage}，progress=${mid?.progress}）`)
     await waitJob(midRepo)
     const fin = (await prog.execute({ jobId: r.jobId }, { agent: 'test-agent' })).jobs[0]
@@ -700,7 +679,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
   fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [{
     id: 'job-restart-batch', cwd: repoA, kind: 'full', scope: 'full', language: 'zh',
     stage: 'articles', owner: 'svc-dead-instance', wikiPath: path.join(repoA, '.codewiki'),
-    plan: { project: 'fixture', modules: [{ name: 'core', summary: 'core summary', files: ['src/core.py'] }], concepts: [] },
+    plan: { project: 'fixture', modules: [{ name: 'core', summary: 'core summary', files: ['core/core.py'] }], concepts: [] },
     batchRef: { batchId: 'stage-job-restart-batch' },
     tasks: [{ customId: 't0', name: 'modules/core.md', articlePath, keepInMemory: false,
       batchPrompt: '你是 CodeWiki 文章作者。目标：为模块「core」撰写文章 modules/core.md（重启恢复快照）' }],
@@ -720,7 +699,8 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
     fs.rmSync(repoA, { recursive: true, force: true })
   }
 
-  // 场景 B：0.5.x 旧格式任务（batchId=local 的就地实时产物）——恢复逻辑对旧前缀同样按快照重跑
+  // 场景 B：0.10.6 及更早的 plan 阶段任务（勘探员快照）——宿主升级后迁移到 articles，
+  // 旧勘探员任务作废，按 localPlan 本地重建清单继续编译
   const repoB = makeFixtureRepo()
   const mockB = makeBatchMock()
   const staleAtB = new Date(Date.now() - 6 * 60000).toISOString()
@@ -737,8 +717,10 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
     const wx = makeCtx({})
     apply(wx.ctx, batchCfg())
     const job = await waitJob(repoB)
-    check(job?.stage === 'done', `旧格式任务重启后重跑至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(mockB.batchPrompts().some((p) => p.includes('勘探员')), 'local 旧任务重跑走普通端点')
+    check(job?.stage === 'done', `旧 plan 任务迁移后编译至终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
+    check(!mockB.batchPrompts().some((p) => p.includes('勘探员')), '旧勘探员快照作废（零勘探员请求）')
+    check((job.notes ?? []).some((n) => n.includes('迁移到 articles')), 'notes 记录旧任务迁移决策')
+    check((job.notes ?? []).some((n) => n.includes('规划：2 个模块')), '迁移后按 localPlan 重建模块清单')
   } finally {
     mockB.restore()
     fs.rmSync(repoB, { recursive: true, force: true })
@@ -790,7 +772,7 @@ console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并
 console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/control（loopback 守卫 + 取消） ==')
 {
   const cancelRepo = makeFixtureRepo()
-  const mock = makeBatchMock({ stall: true }) // 请求挂起不返回，job 停在 plan 阶段等取消
+  const mock = makeBatchMock({ stall: true }) // 请求挂起不返回，job 停在 articles 阶段等取消
   try {
     const r4 = await gen.execute({ cwd: cancelRepo }, { agent: 'test-agent' })
     check(r4.submitted === true, '提交了一个将被取消的任务')
@@ -962,7 +944,7 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     }
     // 0.10.5：工作区外的**非终态**任务不受 workspaceOnly 过滤——单项目串行下
     // 闸门可能被一个不在工作区清单里的项目（如 worktree）占住，藏掉它用户
-    // 既看不到谁在编译也无法取消。stall 占住 rC 在 plan 阶段，断言后取消：
+    // 既看不到谁在编译也无法取消。stall 占住 rC 在 articles 阶段，断言后取消：
     const stalledC = makeBatchMock({ stall: true })
     // scope=full：rB 编译后 outsideRepo 的 wiki 已最新，auto 会被 "Wiki is up to date" 短路不提交
     const rC = await gen2.execute({ cwd: outsideRepo, scope: 'full' }, { agent: 'test-agent' })
