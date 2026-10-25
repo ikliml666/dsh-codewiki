@@ -8,7 +8,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ## Overview
 
-`client-interface` 是 CodeWiki 插件的前端半侧（实现于仓库根 `client.js`，文件头标注 v0.4.1，第 1 行），经 `window.__ModuleLoader__.load` 由宿主插件系统加载，模块 id 为 `@local/dsh-codewiki`（第 10-11 行），`factory(require)` 内引入 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`（解构 `Switch/Button/Input/Tag`，第 13-15 行）。它承担三类职责：
+`client-interface` 是 CodeWiki 插件的前端半侧（实现于仓库根 `client.js`，文件头标注 v0.4.1，第 1 行），经 `window.__ModuleLoader__.load` 由宿主插件系统加载，模块 id 为 `@local/dsh-codewiki`（第 10-11 行），`factory(require)` 内引入 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`（解构 `Switch`/`Button`/`Input`/`Tag`，第 13-15 行）。它承担三类职责：
 
 1. **插件设置页**：向宿主 `plugins.item` 槽位注入设置卡片 `CodewikiCard`（id = NS = `'codewiki'`，order 30，第 428-435 行），设置读写走宿主 `configForms` 服务命名空间 `'codewiki'`（第 17、425 行），热生效无需重启。
 2. **侧边栏面板**：向 `main` 与 `sidebar.panellist` 两个槽位注册 `CodewikiPanel`/`PanelIcon`（第 443-451 行），轮询宿主半侧 webServer 端点渲染编译任务进度与仓库总览（总览/任务/设置三个标签页），并提供取消、编译、排除等控制操作。
@@ -16,7 +16,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 关键约定（文件头注释，第 2-8 行）：两个挂载点分别为「插件」页设置表单与侧边栏面板（数据来自 `GET /api/codewiki/jobs`、`POST /api/codewiki/control`）；面板 key 与 `sidebar.panellist` 的 id 必须同为 `KEY`（第 18 行）；设置 id 必须等于 package.json 的 `name`（client-modules 按 nearestPackage 的 name 校验注册者）；locale 词典值必须是字符串——词典值若为函数，`t()` 会回退返回键名。
 
-当前代码中活跃阶段常量 `ACTIVE_STAGES` 为 `['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']`（第 28 行），已不含早期版本的 `plan` 阶段，并包含终态前的 `commit` 阶段。
+当前代码中活跃阶段常量 `ACTIVE_STAGES` 为 `['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']`（第 28 行），包含终态前的 `commit` 阶段，并配合 `STAGE_WEIGHTS`（第 947 行）计算总体进度。
 
 ## Key Components
 
@@ -54,7 +54,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ### 模块入口 apply(ctx)
 
-- 入口声明：`return { inject: ['slots', 'locale', 'configForms'], apply(ctx) { ... } }`（第 418-419 行），`apply(ctx)` 方法体从第 420 行起涵盖至第 1373 行闭括号（内部定义所有 UI 组件）。
+- 入口声明：`return { inject: ['slots', 'locale', 'configForms'], apply(ctx) { ... } }`（第 418-420 行），`apply(ctx)` 方法体从第 420 行起涵盖至第 1372 行闭括号（内部定义所有 UI 组件）。
 - 词典注册（第 421-422 行）；`form = ctx.configForms.get(NS)`（第 425 行）。
 - `plugins.item` 挂载（第 428-440 行）：`mount` 注册 `{ name: 'plugins.item', id: NS, order: 30, label, locale: NS, inject: () => ({ t: tBound }) }` + `CodewikiCard`（第 428-435 行）；宿主提供 `ctx.configForms.whileServed` 时仅在该命名空间被服务期间挂载（插件停用/未加载则插件页不显形，第 436-440 行），否则直接挂载。
 - 侧边栏面板挂载（第 443-454 行）：`ctx.effect` 内同时注入 `main`（`{ name: 'main', key: KEY }` + `CodewikiPanel`，第 445 行）与 `sidebar.panellist`（`{ id: KEY, order: PANEL_ORDER, label }` + `PanelIcon`，第 446-451 行），effect 返回 disposers 逐个清理（第 453 行）。
@@ -82,7 +82,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ### 面板辅助函数与小组件（第 865-997 行）
 
-- `stageLabel(stage)`（第 865 行）/`stateLabel(st)`（第 866 行）/`kindLabelOf(t, kind)`（第 867 行）：拼接 `stage*/state*/kind*` 键取翻译。
+- `stageLabel(stage)`（第 865 行）/`stateLabel(st)`（第 866 行）/`kindLabelOf(t, kind)`（第 867 行）：拼接 `stage*`/`state*`/`kind*` 键取翻译。
 - `progressBar(done, total)`（第 868-871 行）：total>0 时渲染 `data-dscw-p-bar` 进度条（宽度取完成比）。
 - `repoName(cwd)`（第 872-875 行）：取路径末两段「父目录/目录名」，Temp 沙箱残留一眼可辨。
 - `fmtMs(ms)`（第 876-882 行）：`HH:MM:SS`/`MM:SS`；`fmtTok(n)`（第 883-888 行）：token 数 k/M 缩写；`fmtDur(ms)`（第 889-894 行）：`X min`/`X h Y min`；`fmtAgo(iso)`（第 895-898 行）：相对时间 + agoSuffix。
@@ -120,25 +120,25 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 ### 数据模型（外部 API 与表单值对象）
 
 - **设置命名空间 `codewiki` 值对象**（由 `form.getSnapshot().value` 提供，第 491 行；`save()` 差量键全集见第 680 行）：宿主 Config 服务持久化的插件配置，全部字段如下：
-  - `enabled`（bool，默认 true）：启用插件；停用后 `cw` 与 `codewiki_generate` 工具立即报错。
-  - `updateReminder`（bool，默认 true）：会话系统提示注入收尾提醒。
-  - `autoCommit`（bool，默认 true）：编译完成由插件自动提交产物（只 add .codewiki/ 与 CodeWiki.md）。
-  - `workspaceOnly`（bool，默认 true）：任务页只显示工作区任务。
-  - `maxConcurrency`（number，1–8，默认 2）：编译并发上限。
-  - `serialProjects`（bool，默认 true）：单项目串行。
-  - `articleLanguage`（string）：文章语言（如「中文」）。
-  - `binaryPath`（string）：cw 可执行路径，空=优先 PATH。
-  - `batchProvider`（string）：编译模型提供商 id。
-  - `batchModel`（string）：编译模型 id。
-  - `batchReasoningEffort`（string|null）：编译模型思考档位（来自目录）。
-  - `bigProvider`（string|null，空=关闭大档）：大档提供商 id。
-  - `bigModel`（string）：大档模型 id。
-  - `bigReasoningEffort`（string|null）：大档思考档位。
-  - `bigTokenBudget`（string|number，默认 420000）：大档输入预算。
-  - `sessionTier`（string）：兜底档位（dsh-subagent-auto-router 档位 id）。
-  - `excludePaths`（string，多行/分号/逗号分隔绝对路径）：排除清单。
-  - `autoUpdate`（bool，默认 false）：自动更新开关。
-  - `autoUpdateMin`（number，最小 5，默认 30）：扫描间隔分钟。
+  - `enabled`（bool，默认 true）：启用插件；停用后 `cw` 与 `codewiki_generate` 工具立即报错（第 714 行读取 `!== false`，词典第 36 行）。
+  - `updateReminder`（bool，默认 true）：会话系统提示注入收尾提醒（第 723 行读取 `!== false`，词典第 38 行）。
+  - `autoCommit`（bool，默认 true）：编译完成由插件自动提交产物（第 732 行读取 `!== false`，词典第 40 行）。
+  - `workspaceOnly`（bool，默认 true）：任务页只显示工作区任务（第 741 行读取 `!== false`，词典第 42 行）。
+  - `maxConcurrency`（number，1–8，默认 2）：编译并发上限（第 750 行 `String(draft.maxConcurrency ?? 2)`，词典第 44 行）。
+  - `serialProjects`（bool，默认 true）：单项目串行（第 759 行读取 `!== false`，词典第 46 行）。
+  - `articleLanguage`（string）：文章语言（如「中文」）（第 766-770 行）。
+  - `binaryPath`（string）：cw 可执行路径，空=优先 PATH（第 773-778 行）。
+  - `batchProvider`（string）：编译模型提供商 id（第 787 行）。
+  - `batchModel`（string）：编译模型 id（第 787 行）。
+  - `batchReasoningEffort`（string|null）：编译模型思考档位（来自目录）（第 787 行）。
+  - `bigProvider`（string|null，空=关闭大档）：大档提供商 id（第 804 行）。
+  - `bigModel`（string）：大档模型 id（第 804 行）。
+  - `bigReasoningEffort`（string|null）：大档思考档位（第 804 行）。
+  - `bigTokenBudget`（string|number，默认 420000）：大档输入预算（第 808 行，词典第 74 行）。
+  - `sessionTier`（string）：兜底档位（dsh-subagent-auto-router 档位 id）（第 790-795 行）。
+  - `excludePaths`（string，多行/分号/逗号分隔绝对路径）：排除清单（第 842 行）。
+  - `autoUpdate`（bool，默认 false）：自动更新开关（第 823 行读取 `=== true`，词典第 142 行）。
+  - `autoUpdateMin`（number，最小 5，默认 30）：扫描间隔分钟（第 832 行 `String(draft.autoUpdateMin ?? 30)`，词典第 144 行）。
 
 - **任务对象 job**（`GET /api/codewiki/jobs` 返回数组元素，被 `jobCard` 消费，第 1239-1310 行）：编译任务运行态。字段包括：`id`（第 1265 行）、`cwd`（第 1228 行）、`kind`（`full`/`stale`/`resume`，第 1267 行）、`stage`（见 ACTIVE_STAGES 及终态 `done`/`failed`/`cancelled`，第 1269 行）、`createdAt`（ISO，第 1250 行引用）、`updatedAt`（ISO，第 1234 行）、`finishedAt`（ISO，终态时间戳，第 1251 行）、`articles`（数组，元素含 `ok` 布尔，第 1241 行）、`writtenCount`（number，第 1247 行）、`failedCount`（number，第 1248 行）、`taskList`（数组，元素 `{name, state}`，第 1243 行）、`batchProgress`（`{completed, total}`，第 1249 行）、`batchSubmittedAt`（ISO 时间戳，第 966 行）、`tps`（number，实时通道吞吐，第 961 行）、`usage`（`{inputTok, outputTok, requests, batchRequests, realtimeRequests, overTier2}`，第 982 行）、`notes`（字符串数组，活动流，第 1285 行）、`error`（string，第 1293 行）、`wikiPath`（string，第 1300 行）、`stageTimings`（对象，阶段名→耗时 ms，第 920 行）、`stageStartedAt`（ISO，当前阶段开始，第 933 行）、`cancelRequested`（bool，第 1277 行）、`autoCommit`（对象，含 `committed`/`sha`/`noChanges`/`reason`/`branch`，第 1257-1263 行）、`auto`（bool，自动调度触发，于 ReposTab 第 1126 行消费）。
 
@@ -149,7 +149,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 ```text
 ┌───────────────────────────────────────────────────────────────┐
 │      client.js — @local/dsh-codewiki（加载入口 10-12 行）      │
-│  apply(ctx)（418）：注册 zh/en 词典（421-422）· 注入 slots（428-454）│
+│  apply(ctx)（418-420）：注册 zh/en 词典（421-422）· 注入 slots（428-454）│
 └───────┬───────────────────────────────┬───────────────────────┘
         ▼ plugins.item（order 30）      ▼ main + sidebar.panellist
 ┌───────────────────────────┐  ┌──────────────────────────────┐
@@ -168,9 +168,9 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ## Data Flow
 
-1. **初始化**：`window.__ModuleLoader__.load`（第 10 行）→ `factory` 建样式表（第 315-395 行，HMR 去重 395 行）→ `apply(ctx)`（第 418 行）：`tBound`（第 421 行）、词典注册（第 422 行）、取 `form`（第 425 行）、`whileServed` 守卫下挂 `plugins.item`（第 428-440 行）、`ctx.effect` 挂双 slot 挂载面板并返回 disposers 清理（第 443-454 行）。
+1. **初始化**：`window.__ModuleLoader__.load`（第 10 行）→ `factory` 建样式表（第 315-395 行，HMR 去重 395 行）→ `apply(ctx)`（第 418-420 行）：`tBound`（第 421 行）、词典注册（第 422 行）、取 `form`（第 425 行）、`whileServed` 守卫下挂 `plugins.item`（第 428-440 行）、`ctx.effect` 挂双 slot 挂载面板并返回 disposers 清理（第 443-454 行）。
 2. **配置读写**：`CodewikiCard` 经 `form.getSnapshot()` + `form.subscribe` 同步宿主值到草稿（第 486-503 行，revision 门控防止覆盖编辑中的草稿）；保存 `save()` 差量 ops → `form.mutate(ops, snapshot.revision)`（第 671-693 行），revision 过期提示冲突重试；总览页 `toggleExclude` 也走同一条 `form.mutate` 链路（第 1030-1048 行）。
-3. **任务流（2s 轮询）**：`apiGet(JOBS_PATH)`（第 1158-1198 行）→ `setJobs`；面板侧差分采样：tps → sparkRef 滚动窗口（≤30 点），batchProgress.completed → EWMA 速率（0.6/0.4）；`jobCard` 渲染步骤条/吞吐徽标/进度/用量/活动流；`cancel` 经 `apiPost(CONTROL_PATH)`（第 1203-1211 行）。
+3. **任务流（2s 轮询）**：`apiGet(JOBS_PATH)`（第 1158-1198 行）→ `setJobs`；面板侧差分采样：tps → sparkRef 滚动窗口（≤30 点，第 1170-1174 行），batchProgress.completed → EWMA 速率（0.6/0.4，第 1177-1183 行）；`jobCard` 渲染步骤条/吞吐徽标/进度/用量/活动流；`cancel` 经 `apiPost(CONTROL_PATH)`（第 1203-1211 行）。
 4. **仓库流（10s 轮询）**：`apiGet(REPOS_PATH)`（第 1009-1025 行）→ 调度卡 + 仓库状态列表；stale 仓库可 `compile`（第 1050-1058 行）、可 `toggleExclude`（第 1030-1048 行，写配置后 POST refresh 失效服务端缓存再重拉）。
 5. **模型目录/档位流**：设置卡挂载拉 `MODELS_PATH`（第 472-483 行）；provider 变更联动清空模型与档位（第 587-594 行）；provider/model 齐备时拉 `EFFORTS_PATH`（第 541-560 行）；目录不可用逐级退化为手填，不阻断保存。
 

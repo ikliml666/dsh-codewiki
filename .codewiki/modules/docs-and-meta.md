@@ -35,7 +35,7 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 | `README.md` | 42-57 | 安装（本地 file:/// 直挂） | `cordis.patch.yml` 追加条目(行47-54)、依赖解析(行56)、客户端半侧(行57) |
 | `README.md` | 59-67 | 开发 | `vendor/codewiki`(行62)、`bin/cw.exe`(行63)、`client.js`(行64)、验证命令(行67) |
 | `CodeWiki.md` | 5-7 | Overview | 编译不走子代理、大档/会话通道适配说明 |
-| `CodeWiki.md` | 9-30 | Key Components | 描述 `index.js` 单文件逻辑(行11-24)、`client.js`(行26-29)、`cordis.patch.yml`(行30)、`package.json`(行31) |
+| `CodeWiki.md` | 9-31 | Key Components | 描述 `index.js` 单文件逻辑(行11-24)、`client.js`(行26-29)、`cordis.patch.yml`(行30)、`package.json`(行31) |
 | `CodeWiki.md` | 33-57 | Architecture | 阶段机框图与流程（行35-57） |
 | `CodeWiki.md` | 59-61 | Data Flow | 配置流、凭证流、任务流、面板流 |
 | `CodeWiki.md` | 63-65 | Connections | 指向 `[[codewiki-upstream]]`(行65) |
@@ -60,15 +60,15 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 以下字段在文档中被定义为插件 `Config` 的键值（schemastery 声明，全部 `.volatile()` 热读取）：
 
 - `enabled`：开关，见于 `CodeWiki.md:12`。
-- `binaryPath`：`cw` 可执行路径；留空优先 PATH（README.md:34）。
-- `maxConcurrency`：编译并发上限，默认 2，硬顶 8（README.md:35）。
+- `binaryPath`：`cw` 可执行路径；留空优先 PATH（README.md:34，CodeWiki.md:12）。
+- `maxConcurrency`：编译并发上限，默认 2，硬顶 8（README.md:35，CodeWiki.md:12）。
 - `serialProjects`：单项目串行，默认 true（README.md:36，CodeWiki.md:12）。
-- `articleLanguage`：文章语言，默认中文（README.md:37）。
-- `updateReminder`：系统提示注入提醒，默认开（README.md:38）。
+- `articleLanguage`：文章语言，默认中文（README.md:37，CodeWiki.md:12）。
+- `updateReminder`：系统提示注入提醒，默认开（README.md:38，CodeWiki.md:12）。
 - `autoCommit`：编译产物自动提交，默认开（README.md:39，CodeWiki.md:12）。
 - `batchProvider`：编译模型 provider，默认 `workbuddy`；0.10.1 起必须已注册，留空提交失败（README.md:29，CodeWiki.md:12）。
-- `batchModel`：编译模型 id，默认 `hy3`（README.md:29）。
-- `batchReasoningEffort`：思考档位 id，从模型目录读取（README.md:30）。
+- `batchModel`：编译模型 id，默认 `hy3`（README.md:29，CodeWiki.md:12）。
+- `batchReasoningEffort`：思考档位 id，从模型目录读取（README.md:30，CodeWiki.md:12）。
 - `sessionTier`：仅超大输入兜底时钉死的子智能体档位 id（README.md:32，CodeWiki.md:12）。
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`：大档模型四项，默认 `volces-ark`/`glm-5.3-flash`/空/420000（README.md:31，CodeWiki.md:12）。
 
@@ -124,4 +124,4 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 - **探针文件无 schema**：`.probe3.txt:1` 仅含 `probe` 字面量，无字段结构，依赖外部解析器约定，不保证扩展性。
 - **上游 cw 限制**：`CodeWiki.md:72-73` 记录上游 `cw` 无 `--version`、stale 路径反斜杠等已知问题，文档已说明但底层未完全解决（仅插件层归一化）。
 - **junction 依赖**：`CodeWiki.md:71` 指出 `@deepseek-ai/schemastery` 靠插件本地 junction，换机器需重建，文档已提示但非代码修复。
-- **断点文件语义**：`CodeWiki.md:75` 记录未终态断点仅存阶段机位置，0.5.x 批量窗口语义已删；`CodeWiki.md:75` 会话通道任务依赖发起会话可用，否则整体失败并明示原因（用户定案，不退超大兜底、不静默跳过校对）；会话通道任务超时默认 30 分钟（`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调），超时按失败处理、不降级。文章阶段与校对阶段共用 `job.sessionTasks`（按 stage 区分文案与 tally 的 replace 语义）；任务文件与 prompt 快照落在 `os.tmpdir()/dsh-codewiki-session-tasks/`，重启接管后重发 steer。
+- **断点文件语义**：`CodeWiki.md:75-75` 记录未终态断点仅存阶段机位置，0.5.x 批量窗口语义已删；会话通道任务依赖发起会话可用，否则整体失败并明示原因（用户定案，不退超大兜底、不静默跳过校对）；会话通道任务超时默认 30 分钟（`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调），超时按失败处理、不降级。文章阶段与校对阶段共用 `job.sessionTasks`（按 stage 区分文案与 tally 的 replace 语义）；任务文件与 prompt 快照落在 `os.tmpdir()/dsh-codewiki-session-tasks/`，重启接管后重发 steer。

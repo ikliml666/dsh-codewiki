@@ -57,12 +57,12 @@ tags: [docs, 使用者文档, 上手指南, 演进史, 维护公约]
   - `:17` `wakeCompileSession`（0.10.9 起自动提交成功直接 return）。
   - `:18` `runCw`/`parseStatus`（cw 子进程封装与三态判定）。
   - `:19` 模型执行模块（`estimateTokens`/`collectSources`/`prepareArticleTasks`/`batchProofreadBatchPrompt`+`settleProofread`/`classifySessionTask`/`runRealtimeTasks`/`llmChat`/`listModelCatalog`/`resolveModelEfforts`）。
-  - `:20` `createJobService`（tick 10s、阶段机 queued→articles→crosscut→compose→review→index、单项目串行闸门、会话通道三函数、jobs.json 持久化）。
+  - `:20` `createJobService`（tick 10s、阶段机 queued→articles→crosscut→compose→review→index→收尾 `cw index`+`meta update`、单项目串行闸门、会话通道三函数、jobs.json 持久化）。
   - `:21` `cwToolDefinition`；`:22` `generateToolDefinition`（纯提交制）；`:23` 四个 webServer 端点（仅回环放行：jobs/repos/models/control）；`:24` `apply`。
   - `:25` `vendor/codewiki/` 上游源码 + `bin/cw.exe` cargo 产物。
   - `:26-29` `client.js`：`:27` 注册（`plugins.item` order 30 + `main`/`sidebar.panellist` 双 slot order 52）；`:28` `CodewikiCard`（设置表单：运行节 + 编译模型节，provider/model 目录与思考档位来自两个回环端点，0.10.1 删思考预算输入）；`:29` `CodewikiPanel`（2s 轮询、六阶段步骤条、双通道吞吐徽标、用量行、活动流、取消）。
   - `:30` `cordis.patch.yml` 挂载补丁；`:31` `package.json` client 扫描声明。
-- `CodeWiki.md:33-57` Architecture 框图（```text 围栏 `:35-57`）：模型调用 codewiki_generate → 任务预构建 → JobService.submit 即返回 → 宿主后台 tick 10s 推进阶段机 → cw index + meta update → autoCommitWiki（`:50-53`），加面板 2s 轮询支线；`:44` 标注「单文件连大档都装不下才转会话通道兜底」。
+- `CodeWiki.md:33-57` Architecture 框图（```text 围栏 `:35-57`）：模型调用 codewiki_generate → 任务预构建 → JobService.submit 即返回 → 宿主后台 tick 10s 推进阶段机 → cw index + meta update → autoCommitWiki（`:50-53`），加面板 2s 轮询支线；`:42` 标注阶段机 `queued → articles → crosscut → review → index`，`:43` 标注 compose 仅超 420k 出现；`:44` 标注单项目串行；`:45` 标注大档/会话通道兜底。
 - `CodeWiki.md:59-61` Data Flow 四条流（`:61`）：配置流、凭证流（插件不保存也不传递任何密钥）、任务流、面板流。
 - `CodeWiki.md:63-66` Connections：`:65` [[codewiki-upstream]]（vendor/codewiki 布局）；`:66` 宿主模型目录（`llm.listProviders`/`llm.listModels`/`llm.resolveModel`；BATCH_TOKEN_HARD_LIMIT 语义已更新为 420k 大档预算）。
 - `CodeWiki.md:68-75` Known Issues 六条：`:70` 插件注册/client 声明不热加载；`:71` schemastery junction 换机器需重建；`:72` 上游 `cw` 无 `--version`、未 init 仓库 `cw path` 走插件 fallback；`:73` 上游 stale 路径反斜杠已归一；`:74` 断点文件仅记阶段机位置、0.6.0 删 24h 批次窗口；`:75` 会话通道任务依赖发起会话可用（超时默认 30 分钟）。
@@ -189,7 +189,7 @@ tags: [docs, 使用者文档, 上手指南, 演进史, 维护公约]
 ## Known Issues
 
 1. **本文行号是快照，必然漂移**：CHANGELOG 倒序加节意味着每次发布后 `:3` 以下全部行号整体下移；本文章所有行号对准提供源码时刻（README 67 行 / CodeWiki 75 行 / CHANGELOG 673 行）。历史上流水线产物曾系统性幻觉行号（偏移 34~760 行，`CHANGELOG.md:360-368` 提及的审核教训），治理链为 `numberLines` → `fixAnchors` → `test-wiki-anchors.mjs` 守卫——引用行号前若怀疑漂移，以守卫测试与 grep 实测为准。
-2. **CHANGELOG 内的测试断言数是历史快照**：如 `CHANGELOG.md:117`「123 通过 / 0 失败」、`CHANGELOG.md:349`「55/0」均为当版本时点值，不代表当前测试规模；查当前规模直接跑测试套件（见 [[testing-suite]]）。
+2. **CHANGELOG 内的测试断言数是历史快照**：如 `CHANGELOG.md:117`「123 通过 / 0 失败」、`CHANGELOG.md:358`「55/0」均为当版本时点值，不代表当前测试规模；查当前规模直接跑测试套件（见 [[testing-suite]]）。
 3. **版本号不总升一位**：0.5.0.x 出现四段式（0.5.0.1~0.5.0.6），是 0.5.0 发布当周的突发修复序列；同理 0.4.11.1/0.4.11.2。字符串排序或版本比较时注意。
 4. **六条已知问题挂 CodeWiki.md:68-75**（随该文件维护，本文不重复展开）：插件不热加载、schemastery junction、`cw` 无 `--version`、反斜杠路径、断点文件语义、会话通道依赖发起会话。
 5. **CHANGELOG 只增不减、最新在顶**：查「当前行为」先读顶部节（0.10.11，`CHANGELOG.md:3-15`），再按版本索引回溯；被删除的行为（如 0.6.0 删批量通道 `:328-338`、0.10.0 删 `runMainModelPlan` `:161-174`、0.10.1 删百炼直连 `:147-159`）只有删除记录没有正文，勿据旧节推断现状。

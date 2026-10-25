@@ -30,7 +30,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - 批量 Mock：`function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {})`（行138-202）假 llm 服务；`answerFor`（行140-170）按 prompt 关键词分发；`stream` 生成器按 block 协议 yield（行172-191），`stall` 时挂起至 abort（行177-184）；返回 `{ llm, llmCalls, batchPrompts, realtimePrompts, restore }`（行194-201）。
 - 轮询与 HTTP Mock：`async function waitJob(cwd, { timeout = 30000 } = {})`（行205-218）轮询 JOBS_FILE 找终态；`function fakeReq`（行220-229） / `function fakeRes`（行230-232） mock HTTP。
 - 动态导入符号：`const { commitHintText } = await import('./index.js')`（行297）、`const { autoCommitWiki } = await import('./index.js')`（行408）、`const { autoCommitState } = await import('./index.js')`（行511）、`const { wakeCompileSession } = await import('./index.js')`（行523）从 index.js 导入。
-- 同构校验器：`const validateOut = (schema, v) =>`（行1224，位于行1220-1258 工具输出 schema 形态块）本地校验同构宿主 schema。
+- 同构校验器：`const validateOut = (schema, v) =>`（行1224-1238，位于行1220-1258 工具输出 schema 形态块）本地校验同构宿主 schema。
 - 测试块（直接执行断言）：系统提醒（行234-263）、注册（行265-277）、`cw` 工具（行279-283）、`codewiki_update`+`commitHintText`（行285-403）、`autoCommitWiki`（行405-506）、`autoCommitState`（行508-518）、`wakeCompileSession`（行520-556）、本地规划（行558-615）、全量编译（行617-658）、大 wiki 横切（行660-688）、大模块分割（行690-724）、单项目串行（行726-773）、唯一通道（行775-807）、stale 更新（行809-830）、progress（行832-868）、重启重跑（行869-926）、并发占位（行928-976）、面板端点（行978-1030）、排除清单/repos 总览/compile 动作（行1032-1085）、knownRepos/refresh（行1087-1125）、工作区过滤（行1127-1188）、registry 异常（行1190-1218）、schema 校验（行1220-1258）、孤儿接管（行1260-1292）、模型缺失（行1294-1307）、严格 cordis（行1309-1331）、Temp 清理（行1333-1350）。
 - scheduler 默认 `enabled:false, intervalMin:30`（行1079，repos 总览 scheduler 块）。
 

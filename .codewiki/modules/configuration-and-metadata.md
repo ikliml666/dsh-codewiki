@@ -10,7 +10,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 ## Overview
 
-本模块负责定义 `@local/dsh-codewiki` 项目的核心元数据、运行时依赖约束以及针对 DeepSeek Harness (DSH) 插件系统的补丁加载配置。它通过 `package.json`（行1-28）声明 Node.js 环境要求及基础依赖，并通过 `cordis.patch.yml`（行1-16）精确控制 CodeWiki 功能在 DSH 中的挂载方式、默认行为参数（如 batchProvider、batchModel、并发限制、单项目串行）以及二进制文件路径解析逻辑。此外，`.gitignore`（行1-12）确保了构建产物和临时日志不会污染版本控制系统。
+本模块负责定义 `@local/dsh-codewiki` 项目的核心元数据、运行时依赖约束以及针对 DeepSeek Harness (DSH) 插件系统的补丁加载配置。它通过 `package.json`（行1-28）声明 Node.js 环境要求及基础依赖，并通过 `cordis.patch.yml`（行1-16）精确控制 CodeWiki 功能在 DSH 中的挂载方式、默认行为参数（如 `batchProvider`、`batchModel`、并发限制、单项目串行）以及二进制文件路径解析逻辑。此外，`.gitignore`（行1-12）确保了构建产物和临时日志不会污染版本控制系统。
 
 该模块是项目静态结构的一部分，但在运行时被 `dsh bundle` 命令读取，用于生成最终的插件包或指导本地开发环境的 Cordis 挂载行为。当前版本为 `0.10.11`（见 `package.json` 行3），其描述（行4）明确了 CLI (`cw`)、全仓库 Wiki 编译管线（插件内、默认 workbuddy/hy3 192k 上下文、large tier volces-ark/glm-5.3-flash 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能。
 

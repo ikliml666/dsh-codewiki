@@ -29,7 +29,7 @@ tags: [core, config, plugin-entry, client-ui, dsh-codewiki]
 - `374| const BATCH_TOKEN_BUDGET = 110000`、`379| const BATCH_TOKEN_HARD_LIMIT = 128000` — 单请求输入预算与硬上限。
 - `1015| const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')`、`1016| const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)`、`1020| const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_CODEWIKI_SESSION_TIMEOUT_MS) || 30 * 60 * 1000)`、`1021| const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')` — 任务持久化文件、tick 间隔、会话通道超时与任务目录。
 - `1070| const REPOS_FILE = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')` — 已知仓库清单持久化。
-- `1064| const ORPHAN_TAKEOVER_MS = ...`、`1065| const MAX_JOBS_KEPT = 30` — 孤儿接管阈值与历史截断数。
+- `1064| const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)`、`1065| const MAX_JOBS_KEPT = 30` — 孤儿接管阈值与历史截断数。
 - `1086| const SCAN_SKIP_DIRS = new Set([...])`、`1091| const SCAN_SKIP_EXT = new Set([...])`、`1097| const SCAN_MAX_FILE_BYTES = 256 * 1024`、`1098| const SCAN_MAX_FILES = 2000` — 仓库源码扫描黑名单。
 
 ### index.js 内部函数与工具定义
@@ -70,7 +70,7 @@ tags: [core, config, plugin-entry, client-ui, dsh-codewiki]
 - `1044| export function buildSessionSteerText({ job, snapshots, tier = '', resend = false })` 至 `1062| }` — 会话通道 steer 文本（纯函数）。
 - `1071| function loadKnownRepos()` 至 `1073| }`、`1074| function rememberRepo(cwd)` 至 `1082| }` — 已知仓库持久化。
 - `1100| export function scanRepoFiles(cwd)` 至 `1123| }` — 仓库源码扫描（黑名单/大小/总数限制）。
-- `1125| function loadJobs()` 至 `1128| }`、`1130| const JOBS_LOCK_FILE = ...`、`1133| function acquireTickLock()` 至 `1147| }`、`1148| function releaseTickLock()` 至 `1148| } 末尾`、`1150| function saveJobs(jobs)` 至 `1155| }` — 任务文件读写与跨进程锁。
+- `1125| function loadJobs()` 至 `1128| }`、`1130| const JOBS_LOCK_FILE = `${JOBS_FILE}.lock``、`1133| function acquireTickLock()` 至 `1147| }`、`1148| function releaseTickLock()` 至 `1148| } 末尾`、`1150| function saveJobs(jobs)` 至 `1155| }` — 任务文件读写与跨进程锁。
 - `1157| function jobSummary(job)` 至 `1194| }` — 任务摘要（含 tps 聚合）。
 - `1214| export function autoCommitState(job)` 至 `1219| }` — 自动提交三态（committed/no-changes/pending）判定，唤醒与提醒共用。
 - `1221| export function wakeCompileSession(job, outcome, agents = agentsRef)` 至 `1236| }` — 编译终态向发起会话 steer 唤醒（成功且已自动提交时不打扰）。
