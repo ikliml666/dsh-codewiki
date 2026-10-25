@@ -23,7 +23,6 @@
 - [[modules/core-and-config|core-and-config]]
 - [[modules/core-application|core-application]]
 - [[modules/cwd-path-tests|cwd-path-tests]]
-- [[modules/docs-and-meta|docs-and-meta]]
 - [[modules/documentation|documentation]]
 - [[modules/git-and-ops-artifacts|git-and-ops-artifacts]]
 - [[modules/integration-test-suites|integration-test-suites]]

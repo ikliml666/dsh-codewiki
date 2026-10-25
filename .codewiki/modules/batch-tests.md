@@ -9,7 +9,7 @@ tags: [测试, 批量处理, 回归, 日志回溯]
 
 ## Overview
 
-`batch-tests` 模块由批量处理路径的测试脚本 `test-batch.mjs` 与一次历史运行产出的日志 `.tmp-test-batch.log` 组成。`test-batch.mjs` 当前源码至 `501|` 行，用例矩阵覆盖纯函数（源码装填 `collectSources`、token 估算 `estimateTokens`、行号前缀 `numberLines`、任务装配 `prepareArticleTasks`、本地规划 `localPlan`、横切装填 `packArticles`、仓库勘探 `scanRepoFiles`、会话通道收割判定 `classifySessionTask`、锚点修正 `fixAnchors`）与 mock 宿主 llm 服务（并发池 `runRealtimeTasks`、取消信号、失败记账、思考档位下发、大档模型接管 `bigTier`）、会话通道 steer 文本钉死 `buildSessionSteerText`、模型目录 `listModelCatalog` 与思考程度解析 `resolveModelEfforts`、Web 端点回环校验，以及 0.10.1 起内置百炼直连通道的整体移除验证（断言 `resolveBatchApiKey` 未导出）。`.tmp-test-batch.log` 保留早期版本脚本的运行产出（第 85| 行记载 `ALL PASS：59 通过，0 失败`），其记载的百炼端点与 28k/200k 升档行为已过时，仅作文件存在性回溯，不可用于推断当前代码行为。
+`batch-tests` 模块由批量处理路径的测试脚本 `test-batch.mjs` 与一次历史运行产出的日志 `.tmp-test-batch.log` 组成。`test-batch.mjs` 当前源码至 `501|` 行，用例矩阵覆盖纯函数（源码装填 `collectSources`、token 估算 `estimateTokens`、行号前缀 `numberLines`、任务装配 `prepareArticleTasks`（含大档模型接管，任务标记 `bigTier`）、本地规划 `localPlan`、横切装填 `packArticles`、仓库勘探 `scanRepoFiles`、会话通道收割判定 `classifySessionTask`、锚点修正 `fixAnchors`）与 mock 宿主 llm 服务（并发池 `runRealtimeTasks`、取消信号、失败记账、思考档位下发）、会话通道 steer 文本钉死 `buildSessionSteerText`、模型目录 `listModelCatalog` 与思考程度解析 `resolveModelEfforts`、Web 端点回环校验，以及 0.10.1 起内置百炼直连通道的整体移除验证（断言 `resolveBatchApiKey` 未导出）。`.tmp-test-batch.log` 保留早期版本脚本的运行产出（第 85| 行记载 `ALL PASS：59 通过，0 失败`），其记载的百炼端点与 28k/200k 升档行为已过时，仅作文件存在性回溯，不可用于推断当前代码行为。
 
 ## Key Components
 

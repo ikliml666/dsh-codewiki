@@ -9,7 +9,7 @@ tags: [测试, 编排, 端到端, 冒烟测试, codewiki, 阶段机]
 
 ## Overview
 
-`test-orchestration.mjs` 是 dsh-codewiki 插件的端到端服务化编排冒烟测试脚本，通过 mock 宿主 llm 服务（`llm.stream` 按 prompt 特征应答，插件零直连）、真实 cw CLI、真实服务 tick，验证 `codewiki_generate` 提交制、服务阶段机（articles→crosscut→review→index→commit，0.10.7 起无规划阶段，commit 为 0.10.11 独立阶段）、stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、编译模型缺失诚实报错、单项目串行排队（0.10.0）、并行项目上限（1.1.0）、编译终态 steer 实时唤醒发起会话等（`test-orchestration.mjs:172-191`）；另覆盖 0.10.11 起独立 commit 阶段与插件自动提交产物（分支合并式，见 `test-orchestration.mjs:405-506`、`index.js:2188` 的 `tickCommit` 与 `index.js:3155` 的 `autoCommitWiki`）。
+`test-orchestration.mjs` 是 dsh-codewiki 插件的端到端服务化编排冒烟测试脚本，通过 mock 宿主 llm 服务（`llm.stream` 按 prompt 特征应答，插件零直连）、真实 cw CLI、真实服务 tick，验证 `codewiki_generate` 提交制、服务阶段机（articles→crosscut→review→index→commit，0.10.7 起无规划阶段，commit 为 0.10.11 独立阶段）、stale 逐篇更新、宿主重启后按 prompt 快照重跑、面板端点（jobs/control）与取消、编译模型缺失诚实报错、单项目串行排队（0.10.0）、并行项目上限（1.1.0）、编译终态 steer 实时唤醒发起会话等（见 `test-orchestration.mjs:172-176` 注释与 `138-202` 的 mock 服务；另覆盖 0.10.11 起独立 commit 阶段与插件自动提交产物（分支合并式，见 `test-orchestration.mjs:405-506`、`index.js:2188` 的 `tickCommit` 与 `index.js:3155` 的 `autoCommitWiki`））。
 
 测试加速通过将 tick 间隔设为 300ms（生产默认 10s，插件侧下限 250ms 见 `index.js:1040`，测试设置 `test-orchestration.mjs:32`）实现；使用独立 `JOBS_FILE` 与真实宿主服务实例隔离，避免互相洗写（`test-orchestration.mjs:22-23`，插件侧默认路径 `index.js:1040`）；0.10.10 起文件名追加随机串避免 pid 复用时旧 fixture 污染（`test-orchestration.mjs:22` 的 `TEST_JOB_TOKEN` 与 `23` 的拼接）。
 
@@ -37,7 +37,7 @@ tags: [测试, 编排, 端到端, 冒烟测试, codewiki, 阶段机]
 - `makeFixtureRepo()`：建临时 git 仓库，建顶层 `core/`、`util/` 目录并写 `core/core.py`、`util/util.py`，配置 git identity 后 init 提交（`test-orchestration.mjs:103-120`）。
 - `makeBatchMock({ modules=['core','util'], articleMarker='Batch-written', stall=false, bigArticle=false }={})`：模拟宿主 llm 服务（替换 `activeLlm`/`llmProxy`），返回 `{ llm, llmCalls, batchPrompts(), realtimePrompts(), restore() }`（`test-orchestration.mjs:138-202`）。
   - 内部 `answerFor(prompt)`：按 prompt 特征分发（观察员/作者/架构观察员/总览/模式/概念/审校员，`test-orchestration.mjs:140-170`）。
-  - `llm.stream` 复写：未知 prompt 返回默认（`test-orchestration.mjs:172-191`）；`stall=true` 时挂起至 `signal.abort`（`test-orchestration.mjs:172-178`）；`bigArticle=true` 追加 7 万字符（`test-orchestration.mjs:172`）。
+  - `llm.stream` 复写：未知 prompt 返回默认（`test-orchestration.mjs:172-191`）；`stall=true` 时挂起至 `signal.abort`（`test-orchestration.mjs:172-179`）；`bigArticle=true` 追加 7 万字符（`test-orchestration.mjs:172`）。
 - `waitJob(cwd, { timeout=30000 }={})`：轮询 `JOBS_FILE` 取该 cwd 最新 job 终态（done/failed/cancelled，`test-orchestration.mjs:205-218`）。
 - `fakeReq(body, addr='127.0.0.1', method='POST')` 与 `fakeRes()`：mock HTTP 请求/响应（`test-orchestration.mjs:220-232`）。
 - `validateOut` 同构校验器：在“工具输出 schema 形态”块内定义（`test-orchestration.mjs:1264-1279`），验证 `codewiki_generate` 输出 schema。
@@ -66,7 +66,7 @@ tags: [测试, 编排, 端到端, 冒烟测试, codewiki, 阶段机]
 - knownRepos/refresh（`test-orchestration.mjs:1127-1165`）：提交即登记 knownRepos（持久化 `dsh-codewiki-repos.json`）；job 历史丢失后 refresh 仍发现。
 - 工作区过滤（`test-orchestration.mjs:1167-1228`）：`workspaceRegistry` 仅显示工作区内；`workspaceOnly=false` 不过滤；非终态任务始终显示（含工作区外）。
 - registry 异常防御（`test-orchestration.mjs:1230-1258`）：`brokenRegistry` 时 jobs/repos 降级不过滤仍 200。
-- 工具输出 schema（`test-orchestration.mjs:1264-1302`）：同构校验器 `validateOut` 验证 `codewiki_generate` 输出过 schema。
+- 工具输出 schema（`test-orchestration.mjs:1264-1298`）：同构校验器 `validateOut` 验证 `codewiki_generate` 输出过 schema。
 - 孤儿任务接管（`test-orchestration.mjs:1305-1337`）：`mkForeign` 构造 foreign 任务，停更 6 分钟被接管取消，新鲜的不抢。
 - 编译模型缺失诚实报错（`test-orchestration.mjs:1334-1347`）：`batchProvider=''` 时诚实报“编译模型提供商为空”，失败留痕 job 的 failed 态。
 - 严格 cordis 语义（`test-orchestration.mjs:61-83`）：未 inject 访问 `ctx.agents` 抛错，但 `apply` 不抛且工具仍注册。
@@ -97,17 +97,17 @@ tags: [测试, 编排, 端到端, 冒烟测试, codewiki, 阶段机]
 - `reg`：`registered` Map 收集 `cw`、`codewiki_generate` 等工具（`test-orchestration.mjs:52`，插件侧注册于 `index.js:3357-3373` 的 `ctx.inject(['tools'])` 循环）。
 - `batch`：`makeBatchMock` 模拟宿主 llm 服务（`test-orchestration.mjs:138-202`）替换 `activeLlm`。
 - `wait`：`waitJob` 轮询 `JOBS_FILE` 取终态（`test-orchestration.mjs:205-218`）。
-- `fake`+`llm`+`endpt`：面板端点用 `fakeReq/fakeRes`（`test-orchestration.mjs:220-232`）调用 `endpoints` handler（注册于 `test-orchestration.mjs:50`，调用如 `test-orchestration.mjs:1026`、`1078`）。
+- `fake`+`llm`+`endpt`：面板端点用 `fakeReq/fakeRes`（`test-orchestration.mjs:220-232`）调用 `endpoints` handler（注册于 `test-orchestration.mjs:50`，调用如 `test-orchestration.mjs:1033`、`1078`）。
 
 ## Data Flow
 
 1. 测试启动设置环境变量 `DSH_CODEWIKI_TICK_MS='300'` 与 `DSH_CODEWIKI_JOBS_FILE`（`test-orchestration.mjs:15-23`），动态导入 `./index.js` 得到 `{ name, apply }`（`test-orchestration.mjs:24`，`index.js:19` 的 `name` 与 `index.js:3317` 的 `apply`）。
 2. `makeCtx` 构造 mock 宿主上下文，收集 `registered` Map、`endpoints` 数组、`listeners`（`test-orchestration.mjs:44-84`）。
-3. 调用 `apply(ctx, config)` 注入插件（如 `test-orchestration.mjs:271`），插件通过 `ctx.tools.register` 将 `cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress` 等工具定义存入 `registered`（`index.js:3317-3333`），通过 `installWebServer` 推端点（`index.js:2843`），通过 `ctx.on('agent/created', fn)` 记录监听（`index.js:3317`）。
-4. `makeBatchMock` 模拟宿主 llm 服务（`test-orchestration.mjs:138-202`），`llm.stream` 按 prompt 特征返回固定 markdown 驱动服务阶段机（`test-orchestration.mjs:138-170`）。
-5. 调用 `registered.get('codewiki_generate').execute({cwd, scope, auto}, {agent})` 提交任务（如 `test-orchestration.mjs:45`），立即返回 `{submitted, jobId, stage, notes}`（不含 writtenCount）。后台服务以 300ms tick 推进阶段机（含 articles→crosscut→review→index→commit，`index.js:2206-2213` 的 `STAGE_HANDLER`，commit 为 0.10.11 独立阶段实现见 `index.js:2206`），读写 `JOBS_FILE`（JSON `{jobs:[...]}`，`test-orchestration.mjs:32`）。
+3. 调用 `apply(ctx, config)` 注入插件（如 `test-orchestration.mjs:271`），插件通过 `ctx.tools.register` 将 `cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress` 等工具定义存入 `registered`（`index.js:3317-3373` 的注册循环），通过 `installWebServer` 推端点（`index.js:2843`），通过 `ctx.on('agent/created', fn)` 记录监听（`index.js:3317`）。
+4. `makeBatchMock` 模拟宿主 llm 服务（`test-orchestration.mjs:138-202`），`llm.stream` 按 prompt 特征返回固定 markdown 驱动服务阶段机（`test-orchestration.mjs:138-168`）。
+5. 调用 `registered.get('codewiki_generate').execute({cwd, scope, auto}, {agent})` 提交任务（如 `test-orchestration.mjs:622` 的 `gen.execute`），立即返回 `{submitted, jobId, stage, notes}`（不含 writtenCount，见 `test-orchestration.mjs:45`）。后台服务以 300ms tick 推进阶段机（含 articles→crosscut→review→index→commit，`index.js:2206-2213` 的 `STAGE_HANDLER`，commit 为 0.10.11 独立阶段实现见 `index.js:2206`），读写 `JOBS_FILE`（JSON `{jobs:[...]}`，`test-orchestration.mjs:32`）。
 6. `waitJob(cwd)` 轮询 `JOBS_FILE` 解析出 job 终态对象，形状含 `stage, plan, wikiPath, writtenCount, failedCount, notes, taskList, batchProgress, usage, tps` 等（`test-orchestration.mjs:205-218`）。
-7. 面板端点通过 `fakeReq`/`fakeRes` 调用 `endpoints.find(e=>e.path===...).handler(req, res)` 验证 HTTP 层行为（`test-orchestration.mjs:220-232`、`1026`、`1078`）。
+7. 面板端点通过 `fakeReq`/`fakeRes` 调用 `endpoints.find(e=>e.path===...).handler(req, res)` 验证 HTTP 层行为（`test-orchestration.mjs:220-232`、`1033`、`1078`）。
 8. `wakeCompileSession` 在 job 终态时通过 `steer` 唤醒发起会话（`test-orchestration.mjs:520-556`、`index.js:1366-1381`）。
 9. 重启重跑场景预置含 `batchPrompt` 快照的 job 文件，服务启动后 `settleJob` 自动接管重跑（`test-orchestration.mjs:909-966`、`index.js:1501-1522`）。
 
@@ -121,6 +121,6 @@ tags: [测试, 编排, 端到端, 冒烟测试, codewiki, 阶段机]
 
 - 当前测试基于最新代码全部应通过（无 FAIL 项）。旧版运行残留日志中记录的缺陷（如 source 标记 `plugin:codewiki` 未生效）已修复：当前 `index.js:1379` 已在 `wakeCompileSession` 中通过 `createUserMessage({ ..., source: { kind: 'plugin:codewiki' } })` 标记，测试 `test-orchestration.mjs:543` 断言 `source?.kind === 'plugin:codewiki'` 已通过。
 - 静默容错（如 `registry.get` 与 `steer` 抛异常均静默不抛、缺省 `agents` 静默、`workspaceRegistry.list()` 抛错降级不过滤）属于设计内边界行为，非缺陷（见 `test-orchestration.mjs:544-555`、`1230-1258`、`1167-1228`）。
-- 旧文章中提及的 `plan` 阶段、概念文章 `concepts/config-load.md` 等均已过时：0.10.7 起规划阶段删除，阶段机为 `articles→crosscut→review→index→commit`（`index.js:3195-3202` STAGE_HANDLER，其中 `commit` 为 0.10.11 独立阶段，实现见 `index.js:3195`；`compose` 仅在横切拆分时介入 `index.js:3195`、`2018`）；fixture 使用 `core/core.py` 与 `util/util.py`（`test-orchestration.mjs:107-110`），`localPlan` 产出空 concepts 数组（`index.js:710-723`），故无概念文章落盘（`test-orchestration.mjs:651`）。
+- 旧文章中提及的 `plan` 阶段、概念文章 `concepts/config-load.md` 等均已过时：0.10.7 起规划阶段删除，阶段机为 `articles→crosscut→review→index→commit`（`index.js:2206-2213` 的 `STAGE_HANDLER`，其中 `commit` 为 0.10.11 独立阶段，实现见 `index.js:2188` 的 `tickCommit`；`compose` 仅在横切拆分时介入，见 `index.js:1995-2007` 的 `tickCompose`）；fixture 使用 `core/core.py` 与 `util/util.py`（`test-orchestration.mjs:107-110`），`localPlan` 产出空 concepts 数组（`index.js:710-723`），故无概念文章落盘（`test-orchestration.mjs:651`）。
 - 编译模型默认 `workbuddy/hy3`，非百炼/ qwen（旧日志残留），测试检查 provider/model 全为 workbuddy/hy3（`test-orchestration.mjs:38`、`579-582`、`827-828`），插件零直连宿主 llm 服务（`index.js:296-321`、`test-orchestration.mjs:125-133`）。
 - 并行项目上限（1.1.0）为新增覆盖块（`test-orchestration.mjs:792-821`），关闭单项目串行后按 `parallelProjects` 并行推进多仓库，旧文章未涵盖此场景。

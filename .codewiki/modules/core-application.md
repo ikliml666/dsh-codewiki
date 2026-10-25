@@ -14,15 +14,15 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 
 代码分成两半，职责严格分离：
 
-- `index.js`（宿主半侧，行1起至行3375）封装本地 `cw` CLI（`runCw` 见行136）、定义 `Config` 配置（行51-72）、实现 `createJobService` 阶段机（行1383-2397），注册四个模型工具（`cwToolDefinition` 行917 / `generateToolDefinition` 行2404 / `updateToolDefinition` 行2564 / `progressToolDefinition` 行2635），并通过 `installWebServer`（行2843）在回环地址暴露查询与控制端点，插件入口 `apply` 在行3317。
-- `client.js`（浏览器半侧，行1起至行1544）经 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })`（行10-12）注册，向宿主注入设置卡片（`CodewikiCard` 行508）和侧边栏面板（`CodewikiPanel` 行1296、`PanelIcon` 行1529），靠轮询而非推送更新界面（轮询间隔 `POLL_MS=2000` 行22，`REPOS_POLL_MS=10000` 行31）。
+- `index.js`（宿主半侧，行1起至行3377）封装本地 `cw` CLI（`runCw` 见行136）、定义 `Config` 配置（行51-72）、实现 `createJobService` 阶段机（行1383-2397），注册四个模型工具（`cwToolDefinition` 行917 / `generateToolDefinition` 行2404 / `updateToolDefinition` 行2564 / `progressToolDefinition` 行2635），并通过 `installWebServer`（行2843）在回环地址暴露查询与控制端点，插件入口 `apply` 在行3317。
+- `client.js`（浏览器半侧，行10起至行1554）经 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })`（行10-12）注册，向宿主注入设置卡片（`CodewikiCard` 行508）和侧边栏面板（`CodewikiPanel` 行1296、`PanelIcon` 行1539），靠轮询而非推送更新界面（轮询间隔 `POLL_MS=2000` 行22，`REPOS_POLL_MS=10000` 行31）。
 
-核心契约是 **阶段机 + 文件状态**：一个 job 从 `articles` 依次推进到 `crosscut` →（超预算拆分时 `compose`）→ `review` → `index` → `commit` → `done`，规划阶段已于 0.10.7 删除（`localPlan` 行710 本地分组替代，旧 `plan` 阶段在 `tick` 行2280 附近被迁移到 `articles`）。`tick`（行2215）按 10 秒节拍（`TICK_MS` 行1041）每次推进一步，全部状态落在 `JOBS_FILE`（行1040），因此宿主重启、多实例并存都能靠磁盘快照接管续跑。模型通道唯一：宿主 `llm` 服务（`llmChat` 见行296），默认 `workbuddy/hy3`（192k 上下文，行26-27），单请求输入预算 110k（`BATCH_TOKEN_BUDGET` 行399）；单文件超预算时改用大档 `volces-ark/glm-5.3-flash`（512k，行30-31，预算 420k，行33），仍装不下才转会话通道兜底（`dispatchSessionTasks` 在行1683）。编译产物自提交在 0.10.11 起独立成 `commit` 阶段（`tickCommit` 行2188），走主题分支合并式（`autoCommitWiki` 行3155）。
+核心契约是 **阶段机 + 文件状态**：一个 job 从 `articles` 依次推进到 `crosscut` →（超预算拆分时 `compose`）→ `review` → `index` → `commit` → `done`，规划阶段已于 0.10.7 删除（`localPlan` 行710 本地分组替代，旧 `plan` 阶段在 `tick` 行2279 附近被迁移到 `articles`）。`tick`（行2215）按 10 秒节拍（`TICK_MS` 行1041）每次推进一步，全部状态落在 `JOBS_FILE`（行1040），因此宿主重启、多实例并存都能靠磁盘快照接管续跑。模型通道唯一：宿主 `llm` 服务（`llmChat` 见行296），默认 `workbuddy/hy3`（192k 上下文，行26-27），单请求输入预算 110k（`BATCH_TOKEN_BUDGET` 行399）；单文件超预算时改用大档 `volces-ark/glm-5.3-flash`（512k，行30-31，预算 420k，行33），仍装不下才转会话通道兜底（`dispatchSessionTasks` 在行1683）。编译产物自提交在 0.10.11 起独立成 `commit` 阶段（`tickCommit` 行2188），走主题分支合并式（`autoCommitWiki` 行3155）。
 
 ## Key Components
 
 ### package.json（行1-28）
-- `name`：行2，`"@local/dsh-codewiki"`，插件注册 id（client.js `load` 的 `id` 行11须与此一致）；`NS`（行17）/`KEY`（行18）为设置命名空间与面板 key，默认 `'codewiki'`。
+- `name`：行2，`"@local/dsh-codewiki"`，插件注册 id（client.js `load` 的 `id` 行11须与此一致）；`NS`（行17 client.js）/`KEY`（行18 client.js）为设置命名空间与面板 key，默认 `'codewiki'`。
 - `version`：行3，`"0.11.2"`。
 - `private` / `type`：行5-6，私有模块、ESM。
 - `exports`：行8-11，`.` 指向 `index.js`，`./client` 指向 `client.js`。
@@ -49,7 +49,7 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - `excludedItem` / `isExcluded`：行258-270，排除清单 `[\n;，,]+` 分隔，子树命中（大小写不敏感）。
 - `estimateTokens(text)`：行278-286，CJK 1 token/字，其余 3.5 字符/token。
 
-### index.js — 模型通道与执行器（行288-386）
+### index.js — 模型通道与执行器（行288-404）
 - `BATCH_TOKEN_BUDGET`：行399，`110000` 单请求输入预算。
 - `BATCH_TOKEN_HARD_LIMIT`：行404，`128000` 超预算兜底装填上限。
 - `llmChat({llm,provider,model,reasoningEffort,prompt,signal,onDelta})`：行296-321，唯一模型通道，走宿主 `llm.stream` + `BlockAssembler`，`temperature:0`，来源 `plugin:codewiki`；不支持的 effort 自动重试（行310-314）。
@@ -70,4 +70,4 @@ tags: [CodeWiki, 编译流水线, 阶段机, DeepSeek Harness, 侧边栏面板, 
 - `batchArticleObservePrompt`：行809-825，文章分割 map 观察。
 - `batchArticleComposePrompt`：行829-857，观察合成整文。
 - `batchProofreadPrompt`：行861-880，单篇校对。
-- `batchProofreadBatchPrompt`：行884-911，多篇合并校对（`@@@article/
+- `batchProofreadBatchPrompt`：行884-911，多篇合并校对（`@@@article`/`

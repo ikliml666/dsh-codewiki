@@ -7,11 +7,10 @@ source_files:
   - CHANGELOG.md
   - .probe3.txt
 tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
----
 
 ## Overview
 
-`docs-and-meta` 模块收纳 `@local/dsh-codewiki` 插件的项目说明、代码维基与变更日志等文档，并附带探针文件用于内部检测与元信息记录。本模块本身不含可执行代码，而是以纯文本形式（Markdown 与探针标记）定义插件的人机接口、架构约定、配置项语义与版本演进历史，为开发者与后续 agent 提供零上下文接入所需的完整描述。当前文档覆盖插件版本至 0.11.2（见 `CHANGELOG.md:3-10` 与 `CHANGELOG.md:11-19`）。
+`docs-and-meta` 模块收纳 `@local/dsh-codewiki` 插件的项目说明、代码维基与变更日志等文档，并附带探针文件用于内部检测与元信息记录。本模块本身不含可执行代码，而是以纯文本形式（Markdown 与探针标记）定义插件的人机接口、架构约定、配置项语义与版本演进历史，为开发者与后续 agent 提供零上下文接入所需的完整描述。当前文档覆盖插件版本至 0.11.2（见 `CHANGELOG.md:3-9` 与 `CHANGELOG.md:11-19`）。
 
 收录文件如下：
 
@@ -40,9 +39,9 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 | `CodeWiki.md` | 59-61 | Data Flow | 配置流、凭证流、任务流、面板流 |
 | `CodeWiki.md` | 63-65 | Connections | 指向 `[[codewiki-upstream]]`(行65) |
 | `CodeWiki.md` | 68-75 | Known Issues | 不热加载、junction 重建、cw 限制等（行70-75） |
-| `CHANGELOG.md` | 3-10 | 0.11.2 版本 | 大档思考档位在模型目录未声明时也可手动调节（面板降级为通用档位下拉） |
+| `CHANGELOG.md` | 3-9 | 0.11.2 版本 | 大档思考档位在模型目录未声明时也可手动调节（面板降级为通用档位下拉） |
 | `CHANGELOG.md` | 11-19 | 0.11.1 版本 | 修复大档任务思考档位回落错误导致整批失败（job-mvnxh0am-0 根因之一） |
-| `CHANGELOG.md` | 21-32 | 0.11.0 版本 | 编译会话透明化（面板可看 LLM 会话内容，保留 24h）+ 并行项目推进 + 排队可见性；新增 `parallelProjects` 配置(行26)与会话记录端点 |
+| `CHANGELOG.md` | 21-31 | 0.11.0 版本 | 编译会话透明化（面板可看 LLM 会话内容，保留 24h）+ 并行项目推进 + 排队可见性；新增 `parallelProjects` 配置(行26)与会话记录端点 |
 | `CHANGELOG.md` | 33-45 | 0.10.11 版本 | 编译收尾新增独立 commit 阶段——产物提交改走「主题分支 → 合并回原分支」 |
 | `CHANGELOG.md` | 47-61 | 0.10.10 版本 | 两轴 code-review 修复、自动提交三态 `autoCommitState` 等 |
 | `CHANGELOG.md` | 63-77 | 0.10.9 版本 | 编译产物自动提交 `autoCommit`、会话模型不再等待 |
@@ -58,10 +57,10 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 | `CHANGELOG.md` | 206-217 | 0.9.2 版本 | 自建 codewiki 档位在写 CodeWiki 时从未被调用修复 |
 | `CHANGELOG.md` | 219-229 | 0.9.1 版本 | 设置页编译模型改为可选配置文件中的提供商与模型 |
 | `CHANGELOG.md` | 231-243 | 0.9.0 版本 | 超 32k 文章转「会话通道」 |
-| `CHANGELOG.md` | 245-697 | 历史版本 | 0.8.8 至 0.1.0 全部修复/功能/测试说明 |
+| `CHANGELOG.md` | 245-703 | 历史版本 | 0.8.8 至 0.1.0 全部修复/功能/测试说明 |
 | `.probe3.txt` | 1 | 探针标记 | 内容 `probe`，供内部检测与元信息记录 |
 
-### 文档中记录的配置模型字段（对应 `Config` 结构，详见 `CodeWiki.md:12` 与 `README.md:56-67`）
+### 文档中记录的配置模型字段（对应 `Config` 结构，详见 `CodeWiki.md:12` 指向 `index.js:51` 与 `README.md:24-40`）
 
 以下字段在文档中被定义为插件 `Config` 的键值（schemastery 声明，全部 `.volatile()` 热读取）：
 
@@ -77,7 +76,7 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 - `batchReasoningEffort`：思考档位 id，从模型目录读取（README.md:30，CodeWiki.md:12）。
 - `sessionTier`：仅超大输入兜底时钉死的子智能体档位 id（README.md:32，CodeWiki.md:12）。
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`：大档模型四项，默认 `volces-ark`/`glm-5.3-flash`/空/420000（README.md:31，CodeWiki.md:12）。
-- `parallelProjects`：并行项目数，默认 2，1–4（CHANGELOG.md:26 新增，0.11.0；`serialProjects=true` 时恒 1，关闭单项目串行后多仓库同时编译）。注：该字段在 `CodeWiki.md:12` 的 Config 描述中尚未同步列出，属文档失同步（见 Known Issues）。
+- `parallelProjects`：并行项目数，默认 2，1–4（CHANGELOG.md:26 新增，0.11.0；`serialProjects=true` 时恒 1，关闭单项目串行后多仓库同时编译）。注：该字段在 `CodeWiki.md:12` 的 Config 描述与 `README.md:24-40` 设置段中均未同步列出，属文档失同步（见 Known Issues）。
 
 ### 探针文件组件
 
@@ -114,7 +113,7 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 1. **阅读与理解**：开发者/agent 读取 `README.md`(行 24-40) 与 `CodeWiki.md`(行 12) 获取配置模型字段定义与默认值。
 2. **配置落地**：通过修改 `profiles/web/cordis.patch.yml`(`README.md:47-54`) 或插件设置页（`client.js`，`README.md:57`) 写入配置。
 3. **热生效**：插件 `apply` 注入时 `liveConfig` 每次调用解包，配置 `volatile` 改完即生效（`README.md:40`）。
-4. **演进追踪**：`CHANGELOG.md`(行 1-703) 按版本记录行为变更，如 0.10.1 删除内置直连、0.10.8 大档单请求优先、0.10.9 自动提交、0.10.10 三态语义、0.10.11 独立 commit 阶段、0.11.0 并行项目与会话记录、0.11.1 大档思考档位回落修复等。
+4. **演进追踪**：`CHANGELOG.md`(行 1-703) 按版本记录行为变更，如 0.10.1 删除内置直连、0.10.8 大档单请求优先、0.10.9 自动提交、0.10.10 三态语义、0.10.11 独立 commit 阶段、0.11.0 并行项目与会话记录、0.11.1 大档思考档位回落修复、0.11.2 大档思考档位手动调节等。
 5. **元信息检测**：`.probe3.txt`(行1) 提供探针标记，供外部脚本或内部检测确认模块存在性与仓库布局。
 6. **交叉连接**：`CodeWiki.md` 通过 `[[codewiki-upstream]]`(行65) 关联上游 vendor 源码布局。
 
@@ -126,9 +125,9 @@ tags: [文档, 元信息, 项目说明, 变更日志, 探针, codewiki]
 
 ## Known Issues
 
-- **文档同步风险**：`CHANGELOG.md` 各版本记录代码与文档同步要求，但存在失同步：① `CodeWiki.md` 架构图(行42-43)阶段机未包含 0.10.11 新增的 `commit` 独立阶段（见 `CHANGELOG.md:33-45` 阶段顺序变为 queued→articles→crosscut→compose→review→index→commit→done）；② 0.11.0 新增 `parallelProjects` 配置与会话记录端点(`CHANGELOG.md:21-32`)，但 `CodeWiki.md:12` 的 Config 描述与 `README.md:39-55` 设置段均未提及；③ 0.11.0 会话透明化新增 `GET /api/codewiki/sessions` 端点，但 `CodeWiki.md:23` 的 webServer 端点列表仅列四个精确端点。未来改代码须同步 `README.md`/`CodeWiki.md`。
+- **文档同步风险**：`CHANGELOG.md` 各版本记录代码与文档同步要求，但存在失同步：① `CodeWiki.md` 架构图(行42-43)阶段机未包含 0.10.11 新增的 `commit` 独立阶段（见 `CHANGELOG.md:33-45` 阶段顺序变为 queued→articles→crosscut→compose→review→index→commit→done，且 `CodeWiki.md:48` 仍写 `cw index + cw meta update` 收尾、`CodeWiki.md:50` 写 `autoCommitWiki（0.10.9）` 未体现 0.10.11 主题分支合并式提交）；② 0.11.0 新增 `parallelProjects` 配置与会话记录端点(`CHANGELOG.md:21-31`)，但 `CodeWiki.md:12` 的 Config 描述、`README.md:24-40` 设置段均未提及 `parallelProjects`，且 `CodeWiki.md:23` 的 webServer 端点列表仅列四个精确端点（jobs/repos/models/control），未包含 `GET /api/codewiki/sessions`（`CHANGELOG.md:28` 新增）；③ `CodeWiki.md:20` 描述 `createJobService` 阶段机仍写 `queued→articles→crosscut→compose→review→index→收尾 cw index+meta update`，未含 commit 阶段。未来改代码须同步 `README.md`/`CodeWiki.md`。
 - **插件注册不热加载**：`CodeWiki.md:70`、`README.md:57` 明确指出改 `index.js` / `client.js` / profile patch 后需重启 dsh，仅配置值热读。
 - **探针文件无 schema**：`.probe3.txt:1` 仅含 `probe` 字面量，无字段结构，依赖外部解析器约定，不保证扩展性。
-- **上游 cw 限制**：`CodeWiki.md:72-73` 记录上游 `cw` 无 `--version`、stale 路径反斜杠等已知问题，文档已说明但底层未完全解决（仅插件层归一化）。
+- **上游 cw 限制**：`CodeWiki.md:73-74` 记录上游 `cw` 无 `--version`、stale 路径反斜杠等已知问题，文档已说明但底层未完全解决（仅插件层归一化）。
 - **junction 依赖**：`CodeWiki.md:71` 指出 `@deepseek-ai/schemastery` 靠插件本地 junction，换机器需重建，文档已提示但非代码修复。
-- **断点文件语义**：`CodeWiki.md:75-75` 记录未终态断点仅存阶段机位置，0.5.x 批量窗口语义已删；会话通道任务依赖发起会话可用，否则整体失败并明示原因（用户定案，不退超大兜底、不静默跳过校对）；会话通道任务超时默认 30 分钟（`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调），超时按失败处理、不降级。文章阶段与校对阶段共用 `job.sessionTasks`（按 stage 区分文案与 tally 的 replace 语义）；任务文件与 prompt 快照落在 `os.tmpdir()/dsh-codewiki-session-tasks/`，重启接管后重发 steer。
+- **断点文件语义**：`CodeWiki.md:75` 记录未终态断点仅存阶段机位置，0.5.x 批量窗口语义已删；会话通道任务依赖发起会话可用，否则整体失败并明示原因（用户定案，不退超大兜底、不静默跳过校对）；会话通道任务超时默认 30 分钟（`DSH_CODEWIKI_SESSION_TIMEOUT_MS` 可调），超时按失败处理、不降级。文章阶段与校对阶段共用 `job.sessionTasks`（按 stage 区分文案与 tally 的 replace 语义）；任务文件与 prompt 快照落在 `os.tmpdir()/dsh-codewiki-session-tasks/`，重启接管后重发 steer。

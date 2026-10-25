@@ -23,7 +23,7 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 - **行2** `"name": "@local/dsh-codewiki"`：项目唯一标识符。
 - **行3** `"version": "0.11.2"`：当前语义化版本号。
 - **行4** `"description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (in-plugin, default workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k for oversized input, zero subagents, single-project serial) with a sidebar panel."`：描述 CLI、全仓库 Wiki 编译管线及侧边栏面板功能，包含 large tier 超大输入模型支持说明。
-- **行5** `"private": true`：标记为私有包，防止意外发布到 npm 公共注册表。
+- **行5** `"private": true`：标记为私有包，防止意外发布到公共注册表。
 - **行6** `"type": "module"`：启用 ES Modules (ESM) 支持，所有 `.js` 文件默认视为 ESM。
 - **行7** `"main": "index.js"`：入口点。
 - **行8-11** `"exports"`：定义子路径导出。
