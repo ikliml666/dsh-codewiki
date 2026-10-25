@@ -21,6 +21,8 @@ window.__ModuleLoader__.load({
     const PANEL_ORDER = 52 // 排在 dsh-hindsight-on-demand（50）之后
     const POLL_MS = 2000
     const REPOS_PATH = '/api/codewiki/repos'
+    const SESSIONS_PATH = '/api/codewiki/sessions'
+    const SESSIONS_ITEM_PATH = '/api/codewiki/sessions/item'
     const MODELS_PATH = '/api/codewiki/models'
     const EFFORTS_PATH = '/api/codewiki/model-efforts'
     const REPOS_POLL_MS = 10000
@@ -43,7 +45,19 @@ window.__ModuleLoader__.load({
       maxConcurrency: '编译并发上限',
       maxConcurrencyHint: '1–8；硬顶 8。插件内并发池的请求数（默认 2，适合免费 hy3 档）。',
       serialProjects: '单项目串行',
-      serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。',
+      serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。关闭后按「并行项目上限」同时推进多个仓库。',
+      parallelProjects: '并行项目上限',
+      parallelProjectsHint: '1–4；关闭「单项目串行」后生效。同时推进的仓库编译任务数（默认 2）——多仓库不再互相排队。额度紧张或上游限流时调回 1。',
+      queueWaitLabel: '排队',
+      runTimeLabel: '执行',
+      queueAheadLabel: '在等',
+      sessBtn: '会话',
+      sessTitle: '编译会话（LLM 请求记录 · 保留 24h）',
+      sessEmpty: '暂无会话记录（编译请求发起后出现）',
+      sessRunning: '进行中',
+      sessPrompt: '输入 prompt',
+      sessOutput: '模型输出',
+      sessBack: '← 返回列表',
       secCompile: '编译模型',
       secCompileHint: '全部模型环节（写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）。',
       batchProvider: '模型提供商',
@@ -185,7 +199,19 @@ window.__ModuleLoader__.load({
       maxConcurrency: 'Compile concurrency',
       maxConcurrencyHint: '1–8; hard cap 8. Requests in the in-plugin pool (default 2, suited to the free hy3 tier).',
       serialProjects: 'One project at a time',
-      serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects.',
+      serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects. Turn off to compile several repos in parallel up to the parallel limit.',
+      parallelProjects: 'Parallel repo limit',
+      parallelProjectsHint: '1–4; effective when "One project at a time" is off. How many repo jobs compile simultaneously (default 2). Drop to 1 when quota is tight or the upstream rate-limits.',
+      queueWaitLabel: 'queued',
+      runTimeLabel: 'running',
+      queueAheadLabel: 'waiting for',
+      sessBtn: 'Sessions',
+      sessTitle: 'Compile sessions (LLM request log · kept 24h)',
+      sessEmpty: 'No session records yet (they appear once compile requests start).',
+      sessRunning: 'in flight',
+      sessPrompt: 'Input prompt',
+      sessOutput: 'Model output',
+      sessBack: '← Back to list',
       secCompile: 'Compile model',
       secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model and runs entirely inside the plugin — the initiating session model is no longer delegated to. Pick any provider configured in model settings (local OpenAI-compatible endpoints included). The plugin has no built-in channel of its own: model and credentials both come from the selected entry.',
       batchProvider: 'Model provider',
@@ -390,6 +416,23 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-activity] summary { cursor: pointer; user-select: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
       '[data-dscw-p-activity] > div { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l3); }',
       '[data-dscw-p-activity] > div > div { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
+      // 排队可见性（在等谁）
+      '[data-dscw-p-queueahead] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); word-break: break-all; }',
+      // 会话视图（LLM 请求记录）
+      '[data-dscw-p-sesslist] { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }',
+      '[data-dscw-p-sessrow] { display: flex; gap: 8px; align-items: baseline; text-align: left; border: 0.5px solid var(--dsw-alias-border-l3); background: transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-sessrow]:hover { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }',
+      '[data-dscw-p-sessrow] [data-mark] { flex: none; width: 12px; }',
+      '[data-dscw-p-sessrow][data-status="running"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); animation: dscw-pulse 1.2s ease-in-out infinite; }',
+      '[data-dscw-p-sessrow][data-status="done"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
+      '[data-dscw-p-sessrow][data-status="error"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
+      '[data-dscw-p-sessrow] [data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }',
+      '[data-dscw-p-sessrow] [data-sub] { flex: none; margin-left: auto; font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
+      '[data-dscw-p-sessitem] { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }',
+      '[data-dscw-p-sessbody] { font-size: 11px; line-height: 16px; }',
+      '[data-dscw-p-sessbody] summary { cursor: pointer; user-select: none; color: var(--dsw-alias-label-tertiary); }',
+      '[data-dscw-p-sessbody] pre { max-height: 300px; overflow: auto; margin: 4px 0 0; padding: 8px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }',
+      '@keyframes dscw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
     if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
@@ -677,7 +720,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -761,6 +804,16 @@ window.__ModuleLoader__.load({
                     label: t('serialProjects'),
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('serialProjectsHint')),
+                ),
+                el('label', null, t('parallelProjects')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 1, max: 4, step: 1,
+                    disabled: draft.serialProjects !== false,
+                    value: String(draft.parallelProjects ?? 2),
+                    onChange: (e) => setPath('parallelProjects', Math.max(1, Math.min(4, Number(e.target.value) || 2))),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('parallelProjectsHint')),
                 ),
                 el('label', null, t('articleLanguage')),
                 el(Input, {
@@ -1142,12 +1195,102 @@ window.__ModuleLoader__.load({
           }
         }
 
+        // 会话视图（1.1.0）：某任务的 LLM 请求记录——像给 codewiki 专门开的会话。
+        // 列表 5s 轮询（running 请求实时涨 outputChars），点开看 prompt/输出全文；保留 24h。
+        function SessionView({ job, onClose }) {
+          const t = tBound
+          const [list, setList] = React.useState(null)
+          const [err, setErr] = React.useState(null)
+          const [sel, setSel] = React.useState(null) // 选中的请求 n
+          const [item, setItem] = React.useState(null)
+          React.useEffect(() => {
+            let alive = true
+            let inFlight = false
+            const pull = async () => {
+              if (inFlight) return
+              inFlight = true
+              try {
+                const d = await apiGet(`${SESSIONS_PATH}?jobId=${encodeURIComponent(job.id)}`)
+                if (alive) { setList(Array.isArray(d.sessions) ? d.sessions : []); setErr(null) }
+              } catch (e) {
+                if (alive) setErr(String(e?.message ?? e))
+              } finally {
+                inFlight = false
+              }
+            }
+            pull()
+            const id = setInterval(pull, 5000)
+            return () => { alive = false; clearInterval(id) }
+          }, [job.id])
+          React.useEffect(() => {
+            if (sel == null) { setItem(null); return }
+            let alive = true
+            apiGet(`${SESSIONS_ITEM_PATH}?jobId=${encodeURIComponent(job.id)}&n=${sel}`)
+              .then((d) => { if (alive) setItem(d) })
+              .catch((e) => { if (alive) setItem({ error: String(e?.message ?? e) }) })
+            return () => { alive = false }
+          }, [job.id, sel])
+          const close = () => { setSel(null); onClose() }
+          return el('div', { 'data-dscw-p-page': '' },
+            el('div', { 'data-dscw-p-head': '' },
+              el('h3', null, t('sessTitle')),
+              el(Button, { variant: 'ghost', size: 'sm', onClick: close }, '✕'),
+            ),
+            el('div', { 'data-dscw-p-meta': '', title: job.cwd ?? job.id }, `${job.id}`),
+            sel != null
+              ? el('div', { 'data-dscw-p-sessitem': '' },
+                el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')),
+                (() => {
+                  const meta = (list ?? []).find((x) => x.n === sel)
+                  const bits = [meta?.name, meta?.model, meta?.status, meta?.startedAt]
+                  return el('div', { 'data-dscw-p-meta': '' }, bits.filter(Boolean).join(' · '))
+                })(),
+                item == null
+                  ? el('div', { 'data-dscw-p-empty': '' }, '…')
+                  : item.error
+                    ? el('div', { 'data-dscw-p-error': '' }, item.error)
+                    : el(React.Fragment, null,
+                      el('details', { 'data-dscw-p-sessbody': '' },
+                        el('summary', null, t('sessPrompt')),
+                        el('pre', null, item.prompt ?? '')),
+                      el('div', { 'data-dscw-p-sessbody': '' },
+                        el('div', { 'data-dscw-p-meta': '' }, t('sessOutput')),
+                        el('pre', null, item.output || '…'),
+                      ),
+                    ),
+              )
+              : err
+                ? el('div', { 'data-dscw-p-empty': '' }, err)
+                : list === null
+                  ? el('div', { 'data-dscw-p-empty': '' }, '…')
+                  : !list.length
+                    ? el('div', { 'data-dscw-p-empty': '' }, t('sessEmpty'))
+                    : el('div', { 'data-dscw-p-sesslist': '' },
+                      list.map((s) => el('button', {
+                        key: s.n, 'data-dscw-p-sessrow': '', 'data-status': s.status,
+                        onClick: () => setSel(s.n),
+                      },
+                        el('span', { 'data-mark': '' }, s.status === 'running' ? '▸' : s.status === 'done' ? '✓' : '✗'),
+                        el('span', { 'data-name': '', title: s.name }, `#${s.n} ${s.name}`),
+                        el('span', { 'data-sub': '' }, [
+                          s.status === 'running' ? t('sessRunning') : null,
+                          s.model,
+                          s.outputChars ? `~${Math.round(s.outputChars / 1000)}k ch` : null,
+                          s.inputTokens ? `in ${Math.round(s.inputTokens / 1000)}k tok` : null,
+                          s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : null,
+                        ].filter(Boolean).join(' · ')),
+                      ))),
+          )
+        }
+
         function CodewikiPanel() {
           const t = tBound
           const [jobs, setJobs] = React.useState(null) // null = 尚未拿到首轮
           const [err, setErr] = React.useState(null)
           const [busyId, setBusyId] = React.useState(null)
           const [tab, setTab] = React.useState('overview')
+          const [sessJob, setSessJobState] = React.useState(null) // 打开会话视图的任务
+          const setSessJob = (j) => { setSessJobState(j); if (j) setTab('tasks') }
           const [copiedPath, setCopiedPath] = React.useState(null)
           // 面板侧采样（2s 轮询差分）：tps 滚动窗口画 spark；批量完成速率 EWMA 算吞吐与 ETA
           const sparkRef = React.useRef(new Map()) // jobId -> number[]
@@ -1247,8 +1390,21 @@ window.__ModuleLoader__.load({
             else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
             if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
             if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
-            if (active) meta.push(`${t('elapsedLabel')} ${fmtMs(Date.now() - Date.parse(job.createdAt))}`)
-            else if (job.finishedAt && job.createdAt) meta.push(`${t('totalTimeLabel')} ${fmtMs(Date.parse(job.finishedAt) - Date.parse(job.createdAt))}`)
+            // 已用时拆「排队 / 执行」：排队时长来自 stageTimings.queued（正在排队时实时算），
+            // 执行 = 总时长 − 排队。不再让 2 小时排队被看成「编译跑了 2 小时」。
+            const elapsedSplit = (j, endNow) => {
+              const q = j.stageTimings?.queued ?? (j.stage === 'queued' ? endNow - Date.parse(j.createdAt) : 0)
+              const total = (j.finishedAt ? Date.parse(j.finishedAt) : endNow) - Date.parse(j.createdAt)
+              return { q: Math.max(0, q), run: Math.max(0, total - Math.max(0, q)) }
+            }
+            if (active && job.createdAt) {
+              const { q, run } = elapsedSplit(job, Date.now())
+              if (job.stage === 'queued') meta.push(`${t('elapsedLabel')} ${fmtMs(q)}（${t('queueWaitLabel')}）`)
+              else meta.push(`${t('elapsedLabel')} ${fmtMs(q + run)}（${t('queueWaitLabel')} ${fmtMs(q)} · ${t('runTimeLabel')} ${fmtMs(run)}）`)
+            } else if (job.finishedAt && job.createdAt) {
+              const { q, run } = elapsedSplit(job, Date.now())
+              meta.push(`${t('totalTimeLabel')} ${fmtMs(q + run)}（${t('queueWaitLabel')} ${fmtMs(q)} · ${t('runTimeLabel')} ${fmtMs(run)}）`)
+            }
             // 自动提交结果（0.10.9）：成功显示短 sha，无改动/失败各一句。
             // 0.10.10：失败原因（可能是 git stderr 摘录，几十字）放进任务行 title，
             // 不塞进 meta——否则一行 meta 被原因撑爆，把阶段/用时挤出可视区。
@@ -1270,6 +1426,10 @@ window.__ModuleLoader__.load({
                   'data-running': active ? 'true' : null,
                 }, stageLabel(job.stage)),
                 throughputBadge(job, sparkOf, rateOf),
+                el(Button, {
+                  variant: 'ghost', size: 'sm',
+                  onClick: () => setSessJob({ id: job.id, cwd: job.cwd }),
+                }, t('sessBtn')),
                 active
                   ? el(Button, {
                     variant: 'ghost', size: 'sm',
@@ -1280,6 +1440,11 @@ window.__ModuleLoader__.load({
               ),
               stageBar(job),
               meta.length ? el('div', { 'data-dscw-p-meta': '' }, meta.join(' · ')) : null,
+              // 排队可见性：在等谁（正在跑的 + 排在前面的 queued），服务端 jobs 端点注入
+              job.stage === 'queued' && Array.isArray(job.queueAhead) && job.queueAhead.length
+                ? el('div', { 'data-dscw-p-queueahead': '' },
+                  `${t('queueAheadLabel')}：${job.queueAhead.join(' → ')}`)
+                : null,
               active ? progressBar(overallPct(job) ?? 0, 100) : null,
               usageLine(job),
               (job.notes ?? []).length
@@ -1311,6 +1476,9 @@ window.__ModuleLoader__.load({
 
           try {
             return el('div', { 'data-dscw-p-page': '' },
+              sessJob
+                ? el(SessionView, { job: sessJob, onClose: () => setSessJobState(null) })
+                : el(React.Fragment, null,
               el('div', { 'data-dscw-p-head': '' },
                 el('h3', null, t('panelTitle')),
                 (jobs ?? []).filter(isActive).length
@@ -1349,6 +1517,7 @@ window.__ModuleLoader__.load({
                           : null,
                       ))
                 : null,
+                ),
             )
           } catch (e) {
             // 渲染构建期异常直接显形，避免整块白屏无从排查

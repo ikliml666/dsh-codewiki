@@ -60,7 +60,8 @@ export const Config = z.object({
   bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
   sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('编译请求并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
-  serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个'),
+  serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
+  parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
   autoCommit: z.boolean().default(true).volatile().description('编译完成后由插件自己在主题分支上提交产物再合并回原分支（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀；不动其它改动）：会话模型因此无需等待编译完成、也无需提交；非 git 仓库或提交失败时降级为提醒会话模型提交'),
@@ -92,6 +93,11 @@ function liveConfig(config) {
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : DEFAULT_CONCURRENCY,
     serialProjects: val(c.serialProjects) !== false,
+    parallelLimit: (() => {
+      const raw = Number(val(c.parallelProjects))
+      if (val(c.serialProjects) !== false) return 1
+      return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), 4) : 2
+    })(),
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
@@ -285,7 +291,9 @@ export function estimateTokens(text) {
 // reasoningEffort 是宿主 llm 的枚举档位（off/low/medium/high/xhigh/max），由模型目录
 // （resolveModel().reasoning.efforts）给出可选值；留空=用该模型默认档。
 // 失败统一抛错，由并发池按单任务失败记账。
-async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal }) {
+// onDelta（可选）：每收到一个流式 chunk 就回调一次（传原始 chunk）——会话记录器用它
+// 做「正在进行」的实时增量落盘；提取不到文本时静默，完成时全文覆盖。
+async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal, onDelta }) {
   const assembler = new BlockAssembler()
   for await (const chunk of llm.stream({
     provider,
@@ -296,6 +304,7 @@ async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal }
     signal,
   })) {
     assembler.push(chunk)
+    if (onDelta) { try { onDelta(chunk) } catch { /* 记录失败不影响编译 */ } }
   }
   const finish = assembler.finish
   if (finish?.kind === 'error' || finish?.kind === 'aborted') {
@@ -329,7 +338,10 @@ function applyTaskResult(task, content, notes) {
 // 每个任务可带自己的 model/provider/reasoningEffort（大档任务用），缺省回落到参数里的
 // 普通档模型——一期请求先按任务装填时的模型分派，不在运行期再改。
 // 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
-export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider }) {
+// onRequestStart(task)（可选）：每个请求发起前回调，返回 null 或
+// { onDelta(chunk), onDone(content, outputTokens), onError(err) }——会话记录器挂钩，
+// 让面板能看到「目前正在进行的会话内容」。
+export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider, onRequestStart }) {
   const results = new Map()
   let cursor = 0
   const worker = async () => {
@@ -338,6 +350,7 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
       const i = cursor++
       if (i >= tasks.length) return
       const t = tasks[i]
+      const rec = onRequestStart ? onRequestStart(t) : null
       try {
         const startedAt = Date.now()
         const { content, outputTokens } = await llmChat({
@@ -347,12 +360,15 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
           reasoningEffort: t.reasoningEffort || reasoningEffort,
           prompt: t.batchPrompt,
           signal,
+          onDelta: rec?.onDelta,
         })
         if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
         results.set(t.customId, applyTaskResult(t, content, notes))
+        rec?.onDone?.(content, outputTokens)
       } catch (err) {
         notes.push(`${t.name} 请求失败 —— ${String(err?.message ?? err)}`)
         results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
+        rec?.onError?.(err)
       }
     }
   }
@@ -1020,6 +1036,126 @@ const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
 const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_CODEWIKI_SESSION_TIMEOUT_MS) || 30 * 60 * 1000)
 const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')
 
+// ---------------------------------------------------------------------------
+// 会话内容记录（面板「会话」视图的数据底座）：把并发池每个 LLM 请求的 prompt 与
+// 流式输出落盘，面板可实时看到「目前正在进行的会话内容」，像给 codewiki 专门开的会话。
+// 目录 <tmp>/dsh-codewiki-sessions/<jobId>/：nnn.meta.json（轻量元数据，列表用）+
+// nnn.full.json（prompt/output 全文，查看时才读）。保留一天（TTL），tick 定期清理。
+// 大文件节流写：流式增量每 3s 至多落盘一次，完成时全文覆盖。仅本地临时目录、仅回环面板
+// 可读，不进 git、不随 job 持久化（job 只存 sessionSeq 计数）。
+// ---------------------------------------------------------------------------
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000
+export const SESSIONS_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-sessions')
+const SESSION_FLUSH_MS = 3000
+
+function sessionDirFor(jobId) {
+  return path.join(SESSIONS_DIR, String(jobId).replace(/[^\w-]/g, '_'))
+}
+function writeSessionMeta(jobId, meta) {
+  try {
+    const dir = sessionDirFor(jobId)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, `${String(meta.n).padStart(3, '0')}.meta.json`), JSON.stringify(meta), 'utf8')
+  } catch { /* tmp 不可写则放弃记录，不影响编译 */ }
+}
+function writeSessionFull(jobId, n, full) {
+  try {
+    const dir = sessionDirFor(jobId)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, `${String(n).padStart(3, '0')}.full.json`), JSON.stringify(full), 'utf8')
+  } catch { /* 同上 */ }
+}
+// 列表：只读 meta 文件（轻量），按 n 倒序（最新在前）
+export function listSessionRecords(jobId) {
+  const dir = sessionDirFor(jobId)
+  let names
+  try { names = fs.readdirSync(dir) } catch { return [] }
+  return names
+    .filter((f) => f.endsWith('.meta.json'))
+    .map((f) => readJsonFile(path.join(dir, f)))
+    .filter(Boolean)
+    .sort((a, b) => (b.n ?? 0) - (a.n ?? 0))
+}
+export function readSessionRecord(jobId, n) {
+  return readJsonFile(path.join(sessionDirFor(jobId), `${String(n).padStart(3, '0')}.full.json`))
+}
+// 过期清理：删超 TTL 的记录文件与随之为空的 job 目录。返回删除数（供 note/测试）。
+export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) {
+  let removed = 0
+  let jobDirs
+  try { jobDirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }) } catch { return 0 }
+  for (const d of jobDirs) {
+    if (!d.isDirectory()) continue
+    const dir = path.join(SESSIONS_DIR, d.name)
+    let files
+    try { files = fs.readdirSync(dir) } catch { continue }
+    let left = 0
+    for (const f of files) {
+      const p = path.join(dir, f)
+      try {
+        const st = fs.statSync(p)
+        if (nowMs - st.mtimeMs > ttlMs) { fs.rmSync(p); removed += 1 } else left += 1
+      } catch { /* 单文件失败不拖累整轮 */ }
+    }
+    if (!left) { try { fs.rmdirSync(dir) } catch { /* 非空/占用则留着 */ } }
+  }
+  return removed
+}
+// 从流式 chunk 尽力提取文本增量：不同 provider 的 chunk 形态不一（{text} / {delta:{text}} /
+// {content} 等），提取不到就返回空串——完成时全文覆盖兜底，实时性损失可接受。
+function textDeltaOf(chunk) {
+  if (typeof chunk === 'string') return chunk
+  if (!chunk || typeof chunk !== 'object') return ''
+  if (typeof chunk.text === 'string') return chunk.text
+  if (typeof chunk.delta?.text === 'string') return chunk.delta.text
+  if (typeof chunk.content === 'string') return chunk.content
+  return ''
+}
+// 开始记录一个请求：写 meta（status:running）+ full（prompt 全文），返回句柄给并发池回调
+function beginSessionRecord(job, task) {
+  const n = (job.sessionSeq ?? 0) + 1
+  job.sessionSeq = n
+  const startedAt = new Date().toISOString()
+  const meta = {
+    n, jobId: job.id, name: task.name, model: task.model || null, provider: task.provider || null,
+    startedAt, finishedAt: null, status: 'running',
+    inputTokens: estimateTokens(task.batchPrompt), outputChars: 0, outputTokens: 0,
+  }
+  const full = { n, jobId: job.id, name: task.name, startedAt, prompt: task.batchPrompt ?? '', output: '' }
+  writeSessionMeta(job.id, meta)
+  writeSessionFull(job.id, n, full)
+  let out = ''
+  let lastFlush = 0
+  return {
+    onDelta(chunk) {
+      const d = textDeltaOf(chunk)
+      if (!d) return
+      out += d
+      meta.outputChars = out.length
+      const now = Date.now()
+      if (now - lastFlush >= SESSION_FLUSH_MS) {
+        lastFlush = now
+        writeSessionFull(job.id, n, { ...full, output: out })
+      }
+    },
+    onDone(content, outputTokens) {
+      meta.status = 'done'
+      meta.finishedAt = new Date().toISOString()
+      meta.outputChars = (content ?? '').length
+      meta.outputTokens = outputTokens ?? 0
+      writeSessionMeta(job.id, meta)
+      writeSessionFull(job.id, n, { ...full, output: content ?? '', finishedAt: meta.finishedAt })
+    },
+    onError(err) {
+      meta.status = 'error'
+      meta.finishedAt = new Date().toISOString()
+      meta.error = String(err?.message ?? err).slice(0, 300)
+      writeSessionMeta(job.id, meta)
+      writeSessionFull(job.id, n, { ...full, output: out, error: meta.error, finishedAt: meta.finishedAt })
+    },
+  }
+}
+
 // 会话通道任务收割判定（纯函数，测试直接断言三态）：
 // 'timeout' 派发后超时未产出（按失败处理，不降级到插件内通道）；'harvest' 目标文件已产出，
 // 且 mtime ≥ 派发时间、以 frontmatter 开头（子智能体写完整了）；'wait' 尚未产出
@@ -1470,6 +1606,7 @@ function createJobService(config, onSettled) {
         concurrency: c.maxConcurrency,
         notes: job.notes,
         signal: ac.signal,
+        onRequestStart: (t) => beginSessionRecord(job, t), // 会话内容记录（面板「会话」视图）
         onTaskDone: (s) => {
           doneCount += 1
           job.batchProgress = { completed: doneCount, total: prepared.length }
@@ -2071,15 +2208,24 @@ function createJobService(config, onSettled) {
     if (!acquireTickLock()) return // 另一实例正在推进，本轮让路
     ticking = true
     try {
+      // 会话记录过期清理（保留一天）：每 10 分钟一轮足够，不用每 tick 扫目录
+      if (!tick.lastPruneAt || Date.now() - tick.lastPruneAt > 10 * 60 * 1000) {
+        tick.lastPruneAt = Date.now()
+        pruneSessionRecords()
+      }
       syncCancelFlags()
-      // 单项目串行闸门（serialProjects，默认开）：同一时刻只推进一个仓库的编译任务。
-      // 已经在推进的项目优先（不打断），没有在跑的才轮到最早排队（queued）的那个；
-      // 其余排队项目本轮不推进，等前一个到终态后自然轮到。取消仍不受闸门限制。
-      let activeId = null
-      if (liveConfig(config).serialProjects) {
-        const busy = jobs.find((j) => !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued')
-        const queued = busy ? null : jobs.find((j) => j.stage === 'queued')
-        activeId = (busy ?? queued)?.id ?? null
+      // 项目闸门（serialProjects 默认串行=上限1；关闭后按 parallelLimit 并行推进多仓库）。
+      // 已经在推进的项目优先（不打断），活跃数不满上限时按提交顺序唤醒最早排队的；
+      // 其余排队项目本轮不推进，等前面的到终态后自然轮到。取消仍不受闸门限制。
+      const parallelLimit = Math.max(1, liveConfig(config).parallelLimit ?? 1)
+      const activeIds = new Set()
+      for (const j of jobs) {
+        if (JOB_TERMINAL.has(j.stage)) continue
+        if (j.stage !== 'queued' && j.stage !== 'submitting') activeIds.add(j.id)
+      }
+      for (const j of jobs) {
+        if (activeIds.size >= parallelLimit) break
+        if (j.stage === 'queued') activeIds.add(j.id)
       }
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
@@ -2105,9 +2251,9 @@ function createJobService(config, onSettled) {
           touch(job)
           continue
         }
-        // 排队中的项目：只有轮到它（activeId）时才进入真正的首个阶段
+        // 排队中的项目：只有轮到它（activeIds）时才进入真正的首个阶段
         if (job.stage === 'queued') {
-          if (activeId !== job.id) continue
+          if (!activeIds.has(job.id)) continue
           // 0.10.7 删了 plan 阶段：唤醒恒进 articles（模块清单在 articles 开头就地
           // 本地生成）；旧磁盘任务残留的 pendingStage='plan' 一并落到 articles。
           const next = 'articles'
@@ -2117,8 +2263,8 @@ function createJobService(config, onSettled) {
           if (job.kind === 'stale') job.tasks = job.pendingTasks ?? job.tasks ?? []
           job.pendingTasks = null
         }
-        // 串行闸门：非当前推进项目本轮跳过（不推进、不失败，等轮次）
-        if (activeId && job.id !== activeId) continue
+        // 项目闸门：非本轮推进项目跳过（不推进、不失败，等轮次）
+        if (activeIds.size && !activeIds.has(job.id)) continue
         // 0.10.7 前的旧任务卡在 plan 阶段：勘探员代码已删，旧任务快照不可重跑——
         // 清掉规划批次引用与旧任务清单，按 articles 正常组装（full 由 localPlan 本地重建清单）
         if (job.stage === 'plan') {
@@ -2190,17 +2336,19 @@ function createJobService(config, onSettled) {
       throw err
     }
     job.credentialSource = `llm(${liveConfig(config).batchProvider}/${liveConfig(config).batchModel})`
-    // 单项目串行（serialProjects，默认开）：已有别的项目在推进（非 queued 的非终态任务，
-    // 且不是刚提交的自己）时，本任务进 queued 排队，等前一个到终态后由 tick 自动轮到。
-    // articles 与 stale 的预置任务先寄存在 pending*，轮到时再落地（排队期间不占机器）。
+    // 项目闸门（serialProjects 串行=上限1 / parallelProjects 并行上限）：忙碌项目数
+    // （非 queued 的非终态任务，不含刚提交的自己）达到上限时，本任务进 queued 排队，
+    // 等前面的到终态后由 tick 自动轮到。articles 与 stale 的预置任务先寄存在 pending*，
+    // 轮到时再落地（排队期间不占机器）。
     const c1 = liveConfig(config)
-    const busyOther = c1.serialProjects
-      ? jobs.find((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
-      : null
+    const limit = Math.max(1, c1.parallelLimit ?? 1)
+    const busyOthers = jobs.filter((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
+    const busyOther = busyOthers.length >= limit ? busyOthers[limit - 1] : null
     if (busyOther) {
       job.pendingStage = 'articles'
       job.pendingTasks = kind === 'stale' ? (prebuiltTasks ?? []) : null
-      note(job, `已有项目在编译（${path.basename(busyOther.cwd)}），本任务排队等待（单项目串行）`)
+      const limitTxt = c1.serialProjects ? '单项目串行' : `并行上限 ${limit}`
+      note(job, `编译通道已满（${limitTxt}，正在跑 ${path.basename(busyOther.cwd)} 等），本任务排队等待`)
       setStage(job, 'queued')
     } else {
       setStage(job, 'articles')
@@ -2736,6 +2884,20 @@ export function installWebServer(ctx, service, extra = {}) {
           // 清单里的项目（如 worktree）占住，藏掉它用户既看不到谁在编译也无法取消。
           const wsPaths = wsFilterPaths()
           if (wsPaths) list = list.filter((j) => !JOB_TERMINAL.has(j.stage) || isExcluded(j.cwd, wsPaths))
+          // 排队可见性：queued 任务标注「在等谁」——正在跑的项目 + 排在它前面的 queued
+          //（按提交顺序，jobs 列表本身已按 createdAt 升序）。面板直接渲染，不再让用户猜。
+          const running = list.filter((j) => !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
+          const queued = list.filter((j) => j.stage === 'queued')
+          if (queued.length) {
+            list = list.map((j) => {
+              if (j.stage !== 'queued') return j
+              const ahead = [
+                ...running.map((r) => path.basename(String(r.cwd ?? ''))),
+                ...queued.filter((q) => q !== j && String(q.createdAt ?? '') <= String(j.createdAt ?? '')).map((q) => path.basename(String(q.cwd ?? ''))),
+              ]
+              return { ...j, queueAhead: ahead, queueAheadCount: ahead.length }
+            })
+          }
           writeJson(res, 200, { now: new Date().toISOString(), jobs: list })
         } catch (err) {
           // 宿主 webserver 对 handler reject 只回 400 空 body——把错误栈直接写进响应体便于排查
@@ -2830,6 +2992,42 @@ export function installWebServer(ctx, service, extra = {}) {
         writeJson(res, 200, reposCache)
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
+        }
+      },
+    })
+    // 会话内容（1.1.0）：并发池每个 LLM 请求的 prompt/输出记录，保留一天，仅回环面板可读。
+    //   GET /api/codewiki/sessions?jobId=      → { sessions: [meta] }（最新在前）
+    //   GET /api/codewiki/sessions/item?jobId=&n= → 单条全文 { prompt, output, ... }
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/sessions',
+      handler: (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const url = new URL(req.url ?? '', 'http://localhost')
+          const jobId = String(url.searchParams.get('jobId') ?? '').trim()
+          if (!jobId) { writeJson(res, 400, { error: '缺少 jobId 查询参数' }); return }
+          writeJson(res, 200, { sessions: listSessionRecords(jobId) })
+        } catch (err) {
+          writeJson(res, 500, { error: String(err?.message ?? err) })
+        }
+      },
+    })
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/sessions/item',
+      handler: (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const url = new URL(req.url ?? '', 'http://localhost')
+          const jobId = String(url.searchParams.get('jobId') ?? '').trim()
+          const n = Number(url.searchParams.get('n'))
+          if (!jobId || !Number.isInteger(n) || n < 1) { writeJson(res, 400, { error: '缺少 jobId/n 查询参数' }); return }
+          const rec = readSessionRecord(jobId, n)
+          if (!rec) { writeJson(res, 404, { error: '会话记录不存在或已过期（保留 24h）' }); return }
+          writeJson(res, 200, rec)
+        } catch (err) {
+          writeJson(res, 500, { error: String(err?.message ?? err) })
         }
       },
     })

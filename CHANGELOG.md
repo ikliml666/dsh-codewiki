@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 — 2026-10-25
+
+### 新增：编译会话透明化（面板可看 LLM 会话内容，保留 24h）+ 并行项目推进 + 排队可见性
+
+- 背景（用户需求）：①编译任务排队长（实测单任务排队 2h05m：serialProjects 串行闸门 + 当天 32 个任务逐个排队），面板「已用时」把排队计入且看不到「在等谁」，严重误导；②用户要求「增加可以查看目前正在进行的会话内容，就像给 codewiki 专门开的会话，保存一天时间只在 codewiki 界面查看」。
+- 并行调度（index.js）：新增配置 `parallelProjects`（z.number().default(2)，1–4）；派生 `parallelLimit`——`serialProjects=true` 时恒 1（行为与旧版完全一致），否则 clamp(round(parallelProjects),1..4)。tick 闸门由单选 activeId 改为 `activeIds` 集合：忙碌项优先入集，再按提交顺序唤醒最早 queued 直到上限；submit 的排队判定改为 `busyOthers.length >= limit`。关闭单项目串行后多仓库同时编译，不再互相排队。
+- 排队可见性（index.js）：jobs 端点为每个 queued job 注入 `queueAhead`（正在跑的 + 排在前面 queued 的仓库 basename 数组）与 `queueAheadCount`。
+- 会话记录（index.js，新模块）：`SESSIONS_DIR=<tmp>/dsh-codewiki-sessions/<jobId>/`，每请求双文件 `nnn.meta.json`（轻元数据）+ `nnn.full.json`（prompt/output 全文）；`SESSION_TTL_MS=24h`、流式 3s 节流落盘。导出 `listSessionRecords(jobId)` / `readSessionRecord(jobId,n)` / `pruneSessionRecords(now,ttl)` / `SESSIONS_DIR`；私有 `beginSessionRecord(job,task)` 返回 `{onDelta,onDone,onError}`——`onDelta` 尽力从流 chunk 提取增量文本，完成时以全文覆盖。`llmChat` 加可选 `onDelta` 回调（逐 chunk try/catch），`runRealtimeTasks` 加可选 `onRequestStart`，`startBatchChatRun` 接线记录每个请求。tick 每 10 分钟静默 prune 一次。新端点 `GET /api/codewiki/sessions?jobId=`（倒序列表）与 `GET /api/codewiki/sessions/item?jobId=&n=`（全文，404=过期），仅回环可达。
+- 面板（client.js）：①任务卡「已用时」拆「排队 X · 执行 Y」（queued 态只显排队，排队时长取 stageTimings.queued ?? 实时差）；②queued 且 queueAhead 非空时渲染「在等：a → b」行；③每张任务卡新增「会话」按钮 → SessionView：列表 5s 轮询（running 项闪烁指示），点击拉单条全文（prompt 折叠 + output 正文）；④设置页新增 `parallelProjects` 数字输入（serialProjects=true 时禁用并提示）。样式追加 sess/queueahead 系列 + `@keyframes dscw-pulse`。
+- 测试：新建 `test-sessions.mjs`（列表倒序/全文读取/TTL prune/幂等/空目录移除）全过；`test-orchestration.mjs` 串行段加 queueAhead 断言（实测 `["cw-orch-…"]` ✓）、新增「并行项目上限」段（serialProjects:false + parallelProjects:3，A/B 两仓库同时提交，断言 B 不 queued、双双 done）✓。`test-batch.mjs` 123/123 ✓。
+- 版本 0.10.11 → 0.11.0。
+
 ## 0.10.11 — 2026-10-25
 
 ### 变更：编译收尾新增独立 commit 阶段——产物提交改走「主题分支 → 合并回原分支」

@@ -746,6 +746,15 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
     check(jobB0?.stage === 'queued', `B 进 queued 排队（实际 ${jobB0?.stage}）`)
     check((jobB0?.notes ?? []).some((n) => n.includes('单项目串行')), 'B 的 notes 说明单项目串行排队')
     check(jobB0?.pendingStage === 'articles', `B 预置 pendingStage=articles（实际 ${jobB0?.pendingStage}）`)
+    // queueAhead（1.1.0）：queued 任务的 jobs 响应带「在等谁」（正在跑的 A）
+    {
+      const jobsEpQ = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+      const resQ = fakeRes()
+      jobsEpQ.handler(fakeReq({}, '127.0.0.1', 'GET'), resQ)
+      const sumB = JSON.parse(resQ.out).jobs.find((j) => j.id === rb.jobId)
+      check(Array.isArray(sumB?.queueAhead) && sumB.queueAhead.length === 1 && sumB.queueAhead[0] === path.basename(repoA),
+        `jobs 端点带 queueAhead 在等谁（实际 ${JSON.stringify(sumB?.queueAhead)}）`)
+    }
     // 排队期间 B 不发任何请求：A 之外的批量请求数不增长
     const before = mockStall.batchPrompts().length
     await new Promise((r) => setTimeout(r, 900))
@@ -767,6 +776,37 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
       mock2.restore()
     }
   } finally {
+    fs.rmSync(repoA, { recursive: true, force: true })
+    fs.rmSync(repoB, { recursive: true, force: true })
+  }
+}
+
+// ============================ 并行项目上限（1.1.0） ============================
+console.log('== 并行项目上限：关闭单项目串行后多仓库同时推进，不再互相排队 ==')
+{
+  const repoA = makeFixtureRepo()
+  const repoB = makeFixtureRepo()
+  const mock = makeBatchMock()
+  try {
+    const cc2 = makeCtx({})
+    apply(cc2.ctx, batchCfg({ serialProjects: false, parallelProjects: 3 }))
+    const gen2 = cc2.registered.get('codewiki_generate')
+    const ra = await gen2.execute({ cwd: repoA }, { agent: 'test-agent' })
+    const rb = await gen2.execute({ cwd: repoB }, { agent: 'test-agent' })
+    check(ra.submitted === true && rb.submitted === true, 'A/B 相继提交即返回')
+    // B 不应停留 queued：并行上限 3 下两个项目各自推进
+    let jobB = null
+    for (let i = 0; i < 60; i += 1) {
+      jobB = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === rb.jobId)
+      if (jobB?.stage !== 'queued' && jobB?.stage !== 'submitting') break
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    check(jobB?.stage !== 'queued' && jobB?.stage !== 'submitting', `B 不排队直接推进（实际 ${jobB?.stage}）`)
+    const jobA = await waitJob(repoA, { timeout: 45000 })
+    const jobB2 = await waitJob(repoB, { timeout: 45000 })
+    check(jobA?.stage === 'done' && jobB2?.stage === 'done', `A/B 并行各自跑完（A=${jobA?.stage} B=${jobB2?.stage}）`)
+  } finally {
+    mock.restore()
     fs.rmSync(repoA, { recursive: true, force: true })
     fs.rmSync(repoB, { recursive: true, force: true })
   }
