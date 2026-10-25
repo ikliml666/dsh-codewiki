@@ -402,8 +402,8 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
   } finally { fs.rmSync(hintRepo, { recursive: true, force: true }) }
 }
 
-// ============================ autoCommitWiki：插件自己提交编译产物（0.10.9） ============================
-console.log('== autoCommitWiki：安全边界（只提交 .codewiki/ 与 CodeWiki.md，任何可疑状态一律拒绝） ==')
+// ============================ autoCommitWiki：插件自己提交编译产物（0.10.11 分支合并式） ============================
+console.log('== autoCommitWiki：安全边界（主题分支提交→合并回原分支；可疑状态一律拒绝） ==')
 {
   const { autoCommitWiki } = await import('./index.js')
   // 正常路径：先写产物再提交
@@ -415,6 +415,9 @@ console.log('== autoCommitWiki：安全边界（只提交 .codewiki/ 与 CodeWik
     fs.writeFileSync(path.join(okRepo, 'core', 'core.py'), 'def changed():\n    pass\n') // 未 staged 的源码改动
     const r = autoCommitWiki(okRepo, { jobId: 'job-ac1', writtenCount: 2 })
     check(r.committed === true && /^[0-9a-f]{7,}$/.test(String(r.sha)), `正常仓库提交成功（sha ${r.sha}）`)
+    check(r.mode === 'branch' && String(r.branch).startsWith('codewiki/wiki-'), `走分支合并式（mode ${r.mode}，branch ${r.branch ?? '-'}）`)
+    const leftTopics = execFileSync('git', ['-C', okRepo, 'branch', '--list', 'codewiki/*'], { encoding: 'utf8' }).trim()
+    check(leftTopics === '', `合并后主题分支已删除（codewiki/* 剩余：${leftTopics || '无'}）`)
     check(String(r.message).startsWith('docs(wiki):') && String(r.message).includes('job-ac1'), '提交信息带 docs(wiki) 前缀与任务 id')
     const files = execFileSync('git', ['-C', okRepo, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
     check(files.sort().join(',') === '.codewiki/a.md,CodeWiki.md', `只提交两个目标路径（实际：${files.join(',')}）`)
@@ -474,6 +477,32 @@ console.log('== autoCommitWiki：安全边界（只提交 .codewiki/ 与 CodeWik
     fs.rmSync(idRepo, { recursive: true, force: true })
     fs.rmSync(emptyCfg, { force: true })
   }
+
+  // detached HEAD：没有「原分支」可回 → 降级直接提交（与 0.10.9 行为一致）
+  const detRepo = makeFixtureRepo()
+  try {
+    execFileSync('git', ['-C', detRepo, 'checkout', '--detach'], { encoding: 'utf8' })
+    fs.mkdirSync(path.join(detRepo, '.codewiki'))
+    fs.writeFileSync(path.join(detRepo, '.codewiki', 'a.md'), '# a\n')
+    const r = autoCommitWiki(detRepo, { jobId: 'job-det' })
+    check(r.committed === true && r.mode === 'direct' && String(r.fallback).includes('detached'), `detached HEAD → 降级直接提交（mode ${r.mode}，fallback ${r.fallback ?? '-'}）`)
+  } finally { fs.rmSync(detRepo, { recursive: true, force: true }) }
+
+  // 主题分支名已被占用（上次编译异常退出留下的分支）→ switch -c 失败 → 降级为直接提交，
+  // 且预占分支绝不被误删。同步流程内原分支不会再前进，merge 恒为 fast-forward，真正的
+  // add/add 冲突（编译期间用户在原分支推进）在黑盒测试里构造不出来——index.js 里的
+  // 「merge 失败 → abort + 保留主题分支」是防御性路径，不在单测覆盖内。
+  const usedRepo = makeFixtureRepo()
+  try {
+    fs.mkdirSync(path.join(usedRepo, '.codewiki'))
+    fs.writeFileSync(path.join(usedRepo, '.codewiki', 'a.md'), '# a\n')
+    fs.writeFileSync(path.join(usedRepo, 'CodeWiki.md'), '# entry\n')
+    execFileSync('git', ['-C', usedRepo, 'branch', 'codewiki/wiki-job-used'], { encoding: 'utf8' }) // 预占主题分支名
+    const r = autoCommitWiki(usedRepo, { jobId: 'job-used' })
+    check(r.committed === true && r.mode === 'direct' && String(r.fallback).includes('建主题分支失败'), `主题分支名被占用 → 降级直接提交（mode ${r.mode}，fallback ${r.fallback ?? '-'}）`)
+    const kept = execFileSync('git', ['-C', usedRepo, 'branch', '--list', 'codewiki/*'], { encoding: 'utf8' }).trim()
+    check(kept.includes('codewiki/wiki-job-used'), `预占分支未被误删（codewiki/*：${kept}）`)
+  } finally { fs.rmSync(usedRepo, { recursive: true, force: true }) }
 }
 
 // ============================ autoCommitState：三态判定的唯一来源 ============================
@@ -600,6 +629,8 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
     check(job?.writtenCount >= 3 && job?.failedCount === 0, `编译完成 ${job?.writtenCount} 篇、失败 ${job?.failedCount} 篇（2 模块+架构+模式）`)
     check(job?.autoCommit?.committed === true && /^[0-9a-f]{7,}$/.test(String(job.autoCommit.sha ?? '')), `编译产物由插件自动提交（sha ${job?.autoCommit?.sha ?? '-'}）`)
+    check(!!job?.stageTimings?.commit, `任务走过了独立的 commit 阶段（阶段计时含：${Object.keys(job?.stageTimings ?? {}).join('/')}）`)
+    check(job?.autoCommit?.mode === 'branch', `端到端走分支合并式（mode ${job?.autoCommit?.mode ?? '-'}，branch ${job?.autoCommit?.branch ?? '-'}）`)
     {
       // 落库核查：HEAD 提交里必须只有 .codewiki/ 与 CodeWiki.md
       const files = execFileSync('git', ['-C', mainRepo, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.11 — 2026-10-25
+
+### 变更：编译收尾新增独立 commit 阶段——产物提交改走「主题分支 → 合并回原分支」
+
+- 背景（用户需求）：0.10.9 的 autoCommit 是在 index 收尾后顺带执行、直接提交到当前分支，不是流程里的显式一步，产物提交也永远长在用户的当前分支上。用户要求「增加流程，最后一步提交分支合并」：把提交升级为阶段机里的独立阶段，并以主题分支合并的方式落库。
+- 阶段机（index.js）：`STAGE_HANDLER` 新增 `commit: tickCommit`，阶段顺序变为 queued → articles → crosscut → compose → review → index → commit → done。`tickIndex` 末尾在有产物且开关开启时 `setStage('commit')` 提前返回，不再就地提交；`tickCommit` 执行提交后才置 done/finishedAt 并唤醒会话——终态因此最多晚一个 tick（默认 TICK_MS 10s，测试 300ms），换面板上可见的「提交产物中」一步。中途死在 commit 阶段的任务重启后重跑本阶段，`autoCommitWiki` 对已入库产物报 noChanges，幂等。
+- 提交方式（index.js `autoCommitWiki` 重写）：先建主题分支 `codewiki/wiki-<jobId>`，在其上 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（pathspec 限定两个路径的老规矩不变），再切回原分支 `git merge --no-edit` 合并（能 ff 则 ff），成功后 `git branch -d` 删主题分支（`-d` 只删已合并分支，绝不强删）。
+- 降级与安全：detached HEAD（无「原分支」可回）或建主题分支失败 → 降级为直接提交（`mode:'direct'` + `fallback` 原因，与 0.10.9 行为一致）；进入主题分支后任何失败先切回原分支，绝不把用户留在插件建出的分支上；合并冲突/失败 → `git merge --abort`、保留主题分支，返回 `committed:false` 与说明（产物不丢，等手动合并），绝不强合。0.10.9 的全部前置安全检查（非 git 仓库、无 HEAD、merge/rebase 中、未解决冲突、被 .gitignore 忽略、缺 user.name、无改动 noChanges）原样保留且在分支切换之前执行。
+- 面板（client.js）：`ACTIVE_STAGES` 加 `commit`（步骤条显示「提交产物中」/「Committing」），进度权重改为 articles 0.63 / commit 0.02（总和不变）；任务卡自动提交成功行追加主题分支名；`autoCommitHint` 双语说明改为分支合并式语义。
+- schema/文案（index.js）：`codewiki_progress` 的 job.autoCommit 输出增加 `mode`/`branch`/`fallback` 字段；`autoCommit` 配置描述与 `codewiki_generate`/`codewiki_update` 工具描述、系统提示 section 同步为「主题分支提交后合并回原分支」。
+- 测试（test-orchestration.mjs）：正常提交断言升级（mode==='branch'、主题分支已删除）；新增 detached HEAD 降级直接提交用例、主题分支名被占用降级用例（预占分支不被误删）；端到端补断言「走过独立 commit 阶段（stageTimings 含 commit）」与「mode==='branch'」。合并 add/add 冲突路径（编译期间用户在原分支推进）同步流程内构造不出来，为防御性代码、单测不覆盖（用例内注释说明）。
+- 验证：`node test-orchestration.mjs` → `PASS：编排冒烟全部通过`（exit 0；无 ✗，端到端阶段计时含 articles/crosscut/review/index/commit）。
+- 版本 0.10.10 → 0.10.11。
+
 ## 0.10.10 — 2026-10-24
 
 ### 修复：两轴 code-review 的全部发现（自动提交语义、边界与测试竞态）

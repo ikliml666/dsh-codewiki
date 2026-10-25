@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
     const EFFORTS_PATH = '/api/codewiki/model-efforts'
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
-    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index']
+    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
       updateReminder: 'wiki 维护提醒',
       updateReminderHint: '会话系统提示注入收尾提醒：仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，提醒改完代码后更新 wiki。',
       autoCommit: '自动提交编译产物',
-      autoCommitHint: '开启后编译完成由插件自己提交产物（只提交 .codewiki/ 与 CodeWiki.md 这两个路径，建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动）：会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒；产物本来就没有改动（重编译无变化）时既不提交也不提醒。',
+      autoCommitHint: '开启后编译完成由插件自己提交产物：先在主题分支 codewiki/wiki-<任务id> 上提交 .codewiki/ 与 CodeWiki.md 这两个路径（建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动），再合并回原分支并删除主题分支；无法走分支时（detached HEAD 等）降级为直接提交。会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒；合并冲突时产物保留在主题分支，等手动合并；产物本来就没有改动（重编译无变化）时既不提交也不提醒。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '编译并发上限',
@@ -92,6 +92,7 @@ window.__ModuleLoader__.load({
       stageCompose: '合成中',
       stageReview: '校对中',
       stageIndex: '建索引中',
+      stageCommit: '提交产物中',
       stageDone: '已完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
@@ -178,7 +179,7 @@ window.__ModuleLoader__.load({
       updateReminder: 'Wiki update reminder',
       updateReminderHint: 'Injects a wrap-up reminder into the session system prompt — only when the session repo has a .codewiki/.',
       autoCommit: 'Auto-commit compiled wiki',
-      autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes (only the two paths .codewiki/ and CodeWiki.md, docs(wiki) prefix suggested, no repo hooks, your other changes untouched): the session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder; when the artifacts have no changes at all (recompile without diffs) it neither commits nor reminds.',
+      autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes: it commits .codewiki/ and CodeWiki.md on a topic branch codewiki/wiki-<jobId> (docs(wiki) prefix suggested, no repo hooks, your other changes untouched), then merges it back into the original branch and deletes it; when a branch workflow is impossible (detached HEAD, …) it falls back to a direct commit. The session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder; on merge conflicts the artifacts stay on the topic branch for manual merging; when the artifacts have no changes at all (recompile without diffs) it neither commits nor reminds.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Compile concurrency',
@@ -233,6 +234,7 @@ window.__ModuleLoader__.load({
       stageCompose: 'Composing',
       stageReview: 'Proofreading',
       stageIndex: 'Indexing',
+      stageCommit: 'Committing',
       stepQueued: 'Queue',
       stageDone: 'Done',
       stageFailed: 'Failed',
@@ -942,7 +944,7 @@ window.__ModuleLoader__.load({
             }))
         }
         // 总进度：五阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
-        const STAGE_WEIGHTS = { queued: 0, articles: 0.65, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05 }
+        const STAGE_WEIGHTS = { queued: 0, articles: 0.63, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05, commit: 0.02 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           if (idx < 0) return job.stage === 'done' ? 100 : null
@@ -1253,7 +1255,7 @@ window.__ModuleLoader__.load({
             let acTitle = null
             if (!active && job.autoCommit) {
               const ac = job.autoCommit
-              if (ac.committed) meta.push(`${t('autoCommitOk')} ${ac.sha ?? ''}`.trim())
+              if (ac.committed) meta.push(`${t('autoCommitOk')} ${ac.sha ?? ''}${ac.branch ? ` · ${ac.branch}` : ''}`.trim())
               else if (ac.noChanges) meta.push(t('autoCommitNone'))
               else {
                 meta.push(t('autoCommitPending'))
