@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.2 — 2026-10-25
+
+### 变更：大档思考档位在模型目录未声明时也可手动调节
+
+- 背景（用户需求）：trae/mimo-v2.6-flash 等模型在宿主模型目录中不声明 reasoning efforts（`/api/codewiki/model-efforts` 返回空数组），面板设置页遇到这种情况就把大档「思考程度」锁死为「模型默认」无法调节。
+- 面板（client.js）：目录未声明 efforts 时不再渲染死下拉，改为通用档位下拉（模型默认 + off/low/medium/high/xhigh/max，常量 `GENERIC_EFFORTS`），配文案说明「若模型不支持所选值，请求会自动回落模型默认档（不会失败）」——安全性由 0.11.1 的 llmChat 剥档重试兜底保证。已配置但不在通用列表的残留值保留为自定义选项。
+- 验证：`node --check client.js` 通过；`test-batch.mjs` 123/123。版本 0.11.1 → 0.11.2。
+
 ## 0.11.1 — 2026-10-25
 
 ### 修复：大档任务思考档位回落错误导致整批失败（job-mvnxh0am-0 根因之一）

@@ -25,6 +25,9 @@ window.__ModuleLoader__.load({
     const SESSIONS_ITEM_PATH = '/api/codewiki/sessions/item'
     const MODELS_PATH = '/api/codewiki/models'
     const EFFORTS_PATH = '/api/codewiki/model-efforts'
+    // 目录未声明 efforts 的模型（如 trae/mimo-v2.6-flash）在设置页展示的通用思考档位；
+    // 选了模型不支持的值由 llmChat 兜底剥档重试，不会失败
+    const GENERIC_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
     const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']
@@ -74,6 +77,7 @@ window.__ModuleLoader__.load({
       batchReasoningEffortModel: '模型默认',
       batchReasoningEffortLoading: '正在读取该模型的思考档位…',
       batchReasoningEffortNone: '该模型未声明可选思考档位，只能用默认档。',
+      batchReasoningEffortGeneric: '该模型目录未声明可选思考档位，以下为通用档位供手动指定；若模型不支持所选值，请求会自动回落模型默认档（不会失败）。',
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
       secBig: '大档模型（超长输入）',
       secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。留空提供商 = 关闭大档，退回会话通道兜底。',
@@ -228,6 +232,7 @@ window.__ModuleLoader__.load({
       batchReasoningEffortModel: 'Model default',
       batchReasoningEffortLoading: 'Reading this model\'s reasoning efforts…',
       batchReasoningEffortNone: 'This model declares no selectable efforts; only the default applies.',
+      batchReasoningEffortGeneric: 'The model catalog declares no efforts for this model; the generic levels below can be set manually. If the model rejects the chosen level, the request automatically falls back to the model default (it will not fail).',
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
       secBig: 'Large-input model',
       secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Empty provider = the large tier is off and oversized input falls back to the session channel.',
@@ -678,16 +683,21 @@ window.__ModuleLoader__.load({
                   if (state.loading && !state.efforts.length) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
                   if (state.error) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortError').replace('{error}', state.error))
                   if (!state.efforts.length) {
-                    // 目录说该模型没有可选档位：只给「默认」并清空残留值
+                    // 目录未声明可选档位：不再锁死「默认」，给通用档位手动选；
+                    // 选了模型不支持的值由 llmChat 兜底剥档重试，不会失败
                     return el('div', { 'data-dscw-field': '' },
                       el('select', {
                         'data-dscw-select': '',
-                        value: '',
-                        onChange: () => setPath(eKey, ''),
+                        value: current,
+                        onChange: (e) => setPath(eKey, e.target.value),
                       },
                         el('option', { value: '' }, t('batchReasoningEffortModel')),
+                        ...(GENERIC_EFFORTS.includes(current) ? [] : current
+                          ? [el('option', { key: '__custom', value: current }, current)]
+                          : []),
+                        GENERIC_EFFORTS.map((e) => el('option', { key: e, value: e }, e)),
                       ),
-                      el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone')),
+                      el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortGeneric')),
                     )
                   }
                   const known = !current || state.efforts.some((e) => e.id === current)
