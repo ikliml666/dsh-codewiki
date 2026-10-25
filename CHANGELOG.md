@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.1 — 2026-10-25
+
+### 修复：大档任务思考档位回落错误导致整批失败（job-mvnxh0am-0 根因之一）
+
+- 现象：codewiki 仓库自编译任务 19 篇全失败。8 个大档请求（trae/mimo-v2.6-flash）全部 `UNSUPPORTED_REASONING_EFFORT: does not support reasoning effort "off"`；其余 11 个是 workbuddy 上游 502（账号池 3 个账号全不可用，外部服务问题）。
+- 根因（index.js `runRealtimeTasks`）：`markBig` 给大档任务 `delete t.reasoningEffort`（大档未配 effort → 用模型默认档），但并发池 `reasoningEffort: t.reasoningEffort || reasoningEffort` 把它回落到普通档配置的 `off` 下发——大档模型不支持 off，请求全灭。
+- 修复一：任务自带 provider+model（大档任务）时 effort 完全以任务为准（空=模型默认档），不回落普通档配置。
+- 修复二（兜底，index.js `llmChat`）：流式 finish 为 error 且 code=`UNSUPPORTED_REASONING_EFFORT` 且本次带了 effort 时，剥掉 effort 用模型默认档重试一次——任何模型/配置组合不再因此整篇失败。
+- 测试：test-batch 断言按新语义更新（「大档任务未指定档位时不回落普通档」），123/123 过；`test-orchestration.mjs` 冒烟全过。版本 0.11.0 → 0.11.1。
+
 ## 0.11.0 — 2026-10-25
 
 ### 新增：编译会话透明化（面板可看 LLM 会话内容，保留 24h）+ 并行项目推进 + 排队可见性
