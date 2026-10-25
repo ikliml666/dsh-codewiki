@@ -224,7 +224,7 @@ check(normalCall?.provider === 'workbuddy' && normalCall?.model === 'hy3', '普�
 check(normalCall?.reasoningEffort === 'high', '普通任务沿用参数里的思考档位')
 check(bigCall?.provider === 'volces-ark' && bigCall?.model === 'glm-5.3-flash', '大档任务覆盖 provider/model')
 check(bigCall?.reasoningEffort === 'max', '大档任务带自己的思考档位')
-check(bigCall2?.reasoningEffort === 'high', '大档任务未指定档位时回落参数档位')
+check(bigCall2?.reasoningEffort === undefined, '大档任务未指定档位时不回落普通档（用模型默认）')
 
 section('runRealtimeTasks：tps 采样与取消信号')
 {

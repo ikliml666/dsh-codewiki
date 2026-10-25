@@ -307,6 +307,11 @@ async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal, 
     if (onDelta) { try { onDelta(chunk) } catch { /* 记录失败不影响编译 */ } }
   }
   const finish = assembler.finish
+  if ((finish?.kind === 'error' || finish?.kind === 'aborted') && reasoningEffort
+    && String(finish.failure?.code ?? '') === 'UNSUPPORTED_REASONING_EFFORT') {
+    // 该模型不支持配置的思考档位：剥掉 effort 用模型默认档重试一次，不让整篇编译失败
+    return llmChat({ llm, provider, model, reasoningEffort: undefined, prompt, signal, onDelta })
+  }
   if (finish?.kind === 'error' || finish?.kind === 'aborted') {
     throw new Error(`llm 通道失败（${finish.kind}，${String(finish.failure?.code ?? 'unknown')}）：${String(finish.failure?.message ?? '')}`)
   }
@@ -357,7 +362,11 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
           llm,
           provider: t.provider || provider,
           model: t.model || model,
-          reasoningEffort: t.reasoningEffort || reasoningEffort,
+          // 任务自带 provider+model（大档任务）时 effort 完全以任务为准（空=模型默认档），
+          // 不回落普通档配置——普通档的 effort（如 off）可能不被大档模型支持
+          reasoningEffort: (t.provider && t.model)
+            ? (t.reasoningEffort || undefined)
+            : (t.reasoningEffort || reasoningEffort),
           prompt: t.batchPrompt,
           signal,
           onDelta: rec?.onDelta,
