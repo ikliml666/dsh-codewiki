@@ -61,6 +61,10 @@ window.__ModuleLoader__.load({
       sessPrompt: '输入 prompt',
       sessOutput: '模型输出',
       sessBack: '← 返回列表',
+      tabSessions: '会话',
+      sessGlobalTitle: '编译会话 · 全部任务（保留 24h）',
+      sessGlobalHint: '跨任务列出并发池的每一次 LLM 请求：正在跑的实时刷新，点开看 prompt 与模型输出。',
+      sessJob: '任务',
       secCompile: '编译模型',
       secCompileHint: '全部模型环节（写文章/横切/校对）共用一个模型，全部在插件内完成，不再委托发起会话的主模型。可选模型设置里已配置的任意提供商（含本地 OpenAI 兼容端点）。',
       batchProvider: '模型提供商',
@@ -216,6 +220,10 @@ window.__ModuleLoader__.load({
       sessPrompt: 'Input prompt',
       sessOutput: 'Model output',
       sessBack: '← Back to list',
+      tabSessions: 'Sessions',
+      sessGlobalTitle: 'Compile sessions · all jobs (kept 24h)',
+      sessGlobalHint: 'Every LLM request of the concurrency pool across all jobs: running ones refresh live; open one for its prompt and model output.',
+      sessJob: 'job',
       secCompile: 'Compile model',
       secCompileHint: 'Every model step (plan / articles / crosscut / proofreading) shares one model and runs entirely inside the plugin — the initiating session model is no longer delegated to. Pick any provider configured in model settings (local OpenAI-compatible endpoints included). The plugin has no built-in channel of its own: model and credentials both come from the selected entry.',
       batchProvider: 'Model provider',
@@ -1205,13 +1213,16 @@ window.__ModuleLoader__.load({
           }
         }
 
-        // 会话视图（1.1.0）：某任务的 LLM 请求记录——像给 codewiki 专门开的会话。
-        // 列表 5s 轮询（running 请求实时涨 outputChars），点开看 prompt/输出全文；保留 24h。
+        // 会话视图（1.1.0 单任务 / 1.2.0 全局）：并发池的每一次 LLM 请求，像给 codewiki
+        // 专门开的会话。列表 5s 轮询（running 请求实时涨 outputChars），点开看 prompt/输出
+        // 全文；保留 24h。job 为 null 时走全局聚合接口（不带 jobId），跨任务列出全部请求，
+        // 行里带上「哪个任务 + 哪个仓库」；选中后仍按 (jobId, n) 拉单条全文。
         function SessionView({ job, onClose }) {
           const t = tBound
+          const global = !job
           const [list, setList] = React.useState(null)
           const [err, setErr] = React.useState(null)
-          const [sel, setSel] = React.useState(null) // 选中的请求 n
+          const [sel, setSel] = React.useState(null) // 选中的请求 { jobId, n }
           const [item, setItem] = React.useState(null)
           React.useEffect(() => {
             let alive = true
@@ -1220,7 +1231,7 @@ window.__ModuleLoader__.load({
               if (inFlight) return
               inFlight = true
               try {
-                const d = await apiGet(`${SESSIONS_PATH}?jobId=${encodeURIComponent(job.id)}`)
+                const d = await apiGet(global ? SESSIONS_PATH : `${SESSIONS_PATH}?jobId=${encodeURIComponent(job.id)}`)
                 if (alive) { setList(Array.isArray(d.sessions) ? d.sessions : []); setErr(null) }
               } catch (e) {
                 if (alive) setErr(String(e?.message ?? e))
@@ -1231,27 +1242,30 @@ window.__ModuleLoader__.load({
             pull()
             const id = setInterval(pull, 5000)
             return () => { alive = false; clearInterval(id) }
-          }, [job.id])
+          }, [job?.id, global])
           React.useEffect(() => {
-            if (sel == null) { setItem(null); return }
+            if (!sel) { setItem(null); return }
             let alive = true
-            apiGet(`${SESSIONS_ITEM_PATH}?jobId=${encodeURIComponent(job.id)}&n=${sel}`)
+            apiGet(`${SESSIONS_ITEM_PATH}?jobId=${encodeURIComponent(sel.jobId)}&n=${sel.n}`)
               .then((d) => { if (alive) setItem(d) })
               .catch((e) => { if (alive) setItem({ error: String(e?.message ?? e) }) })
             return () => { alive = false }
-          }, [job.id, sel])
+          }, [sel?.jobId, sel?.n])
           const close = () => { setSel(null); onClose() }
+          const jobTag = (id) => String(id ?? '').replace(/^job-/, '')
           return el('div', { 'data-dscw-p-page': '' },
             el('div', { 'data-dscw-p-head': '' },
-              el('h3', null, t('sessTitle')),
+              el('h3', null, global ? t('sessGlobalTitle') : t('sessTitle')),
+              sel ? el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')) : null,
               el(Button, { variant: 'ghost', size: 'sm', onClick: close }, '✕'),
             ),
-            el('div', { 'data-dscw-p-meta': '', title: job.cwd ?? job.id }, `${job.id}`),
-            sel != null
+            global
+              ? el('div', { 'data-dscw-p-meta': '' }, t('sessGlobalHint'))
+              : el('div', { 'data-dscw-p-meta': '', title: job.cwd ?? job.id }, `${job.id}`),
+            sel
               ? el('div', { 'data-dscw-p-sessitem': '' },
-                el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')),
                 (() => {
-                  const meta = (list ?? []).find((x) => x.n === sel)
+                  const meta = (list ?? []).find((x) => x.n === sel.n && (x.jobId ?? job?.id) === sel.jobId)
                   const bits = [meta?.name, meta?.model, meta?.status, meta?.startedAt]
                   return el('div', { 'data-dscw-p-meta': '' }, bits.filter(Boolean).join(' · '))
                 })(),
@@ -1277,13 +1291,15 @@ window.__ModuleLoader__.load({
                     ? el('div', { 'data-dscw-p-empty': '' }, t('sessEmpty'))
                     : el('div', { 'data-dscw-p-sesslist': '' },
                       list.map((s) => el('button', {
-                        key: s.n, 'data-dscw-p-sessrow': '', 'data-status': s.status,
-                        onClick: () => setSel(s.n),
+                        key: `${s.jobId ?? job?.id}#${s.n}`, 'data-dscw-p-sessrow': '', 'data-status': s.status,
+                        onClick: () => setSel({ jobId: s.jobId ?? job?.id, n: s.n }),
                       },
                         el('span', { 'data-mark': '' }, s.status === 'running' ? '▸' : s.status === 'done' ? '✓' : '✗'),
                         el('span', { 'data-name': '', title: s.name }, `#${s.n} ${s.name}`),
                         el('span', { 'data-sub': '' }, [
                           s.status === 'running' ? t('sessRunning') : null,
+                          global ? jobTag(s.jobId) : null,
+                          global && s.cwd ? String(s.cwd).split(/[\\/]/).filter(Boolean).pop() : null,
                           s.model,
                           s.outputChars ? `~${Math.round(s.outputChars / 1000)}k ch` : null,
                           s.inputTokens ? `in ${Math.round(s.inputTokens / 1000)}k tok` : null,
@@ -1300,6 +1316,8 @@ window.__ModuleLoader__.load({
           const [busyId, setBusyId] = React.useState(null)
           const [tab, setTab] = React.useState('overview')
           const [sessJob, setSessJobState] = React.useState(null) // 打开会话视图的任务
+          // 单任务会话视图（任务行「会话」按钮）会占满整页；全局「会话」Tab（1.2.0）则留在
+          // Tab 页内渲染，页面顶部的 Tab 条保持可见，随时能切走。
           const setSessJob = (j) => { setSessJobState(j); if (j) setTab('tasks') }
           const [copiedPath, setCopiedPath] = React.useState(null)
           // 面板侧采样（2s 轮询差分）：tps 滚动窗口画 spark；批量完成速率 EWMA 算吞吐与 ETA
@@ -1496,7 +1514,7 @@ window.__ModuleLoader__.load({
                   : null,
               ),
               el('div', { 'data-dscw-p-tabs': '' },
-                [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['settings', t('tabSettings')]].map(([id, label]) =>
+                [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['sessions', t('tabSessions')], ['settings', t('tabSettings')]].map(([id, label]) =>
                   el('button', {
                     key: id, 'data-dscw-p-tab': '',
                     'data-on': tab === id ? 'true' : null,
@@ -1504,6 +1522,8 @@ window.__ModuleLoader__.load({
                   }, label)),
               ),
               tab === 'overview' ? el(ReposTab) : null,
+              // 全局会话（1.2.0）：跨任务列出并发池全部 LLM 请求；job=null 走聚合接口
+              tab === 'sessions' ? el(SessionView, { job: null, onClose: () => setTab('overview') }) : null,
               tab === 'settings' ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
               tab === 'tasks'
                 ? (err ? el('div', { 'data-dscw-p-empty': '' }, err)

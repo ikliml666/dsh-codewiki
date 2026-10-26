@@ -5,10 +5,12 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `cw-sess-test-${process.pid}-${crypto.randomBytes(3).toString('hex')}.json`)
-const { SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords } = await import('./index.js')
+const { SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords } = await import('./index.js')
 
 let failures = 0
 const check = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { failures++; console.error(`  ✗ ${msg}`) } }
+// 上一轮中断可能留下残留目录，先把会话根清干净，断言才稳定
+fs.rmSync(SESSIONS_DIR, { recursive: true, force: true })
 
 check(Array.isArray(listSessionRecords('job-none')) && listSessionRecords('job-none').length === 0, '不存在的 job → 空列表')
 
@@ -25,6 +27,20 @@ check(list.length === 2 && list[0].n === 2 && list[0].status === 'running', '列
 const item = readSessionRecord('job_manual', 1)
 check(item?.prompt === 'PROMPT' && item?.output === 'OUTPUT', '单条全文读取（prompt/output）')
 check(readSessionRecord('job_manual', 99) == null, '不存在的 n → null')
+
+// 全局聚合（1.2.0）：跨任务汇总，最新在前，带 jobId
+const dirB = path.join(SESSIONS_DIR, 'job_second')
+fs.mkdirSync(dirB, { recursive: true })
+fs.writeFileSync(path.join(dirB, '001.meta.json'), JSON.stringify({ n: 1, name: 'c.md', status: 'done', startedAt: '2026-10-26T10:00:00.000Z' }))
+fs.writeFileSync(path.join(dir, '002.meta.json'), JSON.stringify({ n: 2, name: 'b.md', status: 'running', startedAt: '2026-10-26T11:00:00.000Z' }))
+const all = listAllSessionRecords()
+check(all.length === 3, '全局列表跨任务聚合（job_manual 2 条 + job_second 1 条）')
+check(all[0].jobId === 'job_manual' && all[0].n === 2, 'startedAt 最新的排最前')
+check(all.every((x) => typeof x.jobId === 'string'), '全局列表每条带 jobId')
+check(listAllSessionRecords({ limit: 1 }).length === 1, 'limit 生效')
+check(listAllSessionRecords({ jobIds: new Set(['job_second']) }).length === 1, 'jobIds 过滤生效')
+check(listAllSessionRecords({ jobIds: new Set(['nope']) }).length === 0, 'jobIds 无匹配 → 空')
+fs.rmSync(dirB, { recursive: true, force: true })
 
 // TTL 清理：把 001 两个文件 mtime 改到 25h 前
 const old = new Date(Date.now() - 25 * 3600e3)

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 — 2026-10-26
+
+### 新增：全局「会话」Tab + worktree 拒绝编译 + 会话记录定时清理确认
+
+- 背景（用户需求）：①「增加可以查看目前正在进行的会话内容，就像给 codewiki 专门开的会话，保存一天时间只在 codewiki 界面查看。这个好似没有实现」——0.11.0 的记录能力只挂在**每个任务行**的「会话」按钮上，不点进任务就看不到，跨任务也汇总不了；②「不要给 worktree 中的文件编译 code wiki，等它合并到仓库中再统一编译」——隔离工作区与主仓库各编一遍会让产物互相覆盖、提交时机混乱。
+- 全局会话 Tab（index.js + client.js）：`listAllSessionRecords({limit, jobIds})` 跨所有任务聚合记录元数据（只读轻量 meta，全文仍按 `(jobId, n)` 单条拉），按 `startedAt` 倒序、limit 兜底 200。`GET /api/codewiki/sessions`（不带 `jobId`）改为全局聚合，并回填每个任务的 `cwd`——面板行里能直接看出「哪个任务 · 哪个仓库」在跟模型说什么；带 `jobId` 时行为不变（向后兼容）。面板顶部新增「会话」Tab，直接渲染 `SessionView job={null}`；该视图与原单任务视图共用组件：`global=!job` 时走聚合接口、行内追加任务短 id 与仓库名、选中项由 `n` 改为 `{jobId, n}` 以支持跨任务拉全文。5s 轮询与 running 闪烁不变，仍保留 24h。
+- worktree 闸门（index.js，`detectLinkedWorktree`）：判据只用 git 自己——`git rev-parse --git-dir --git-common-dir` 两者 resolve 后不同即 linked worktree（主工作区两者都是 `.git`；submodule 也相同，不误判；非 git 仓库放行）。三处拦截：`svc.submit`（所有入口的公共汇合点，`auto` 时返回 `{skipped:'worktree', reason}` 不抛错）、`codewiki_generate` 工具（在跑 `cw status` **之前**就拦，报错文案含真实 `gitDir` 并说明「请等合并回主仓库后统一编译」；`auto` 直调时降级为 `state:'worktree'` + note 返回，`wikiPath` 给空串以满足 output schema）、`autoScan`（历史任务里的 worktree 路径静默跳过，不污染 note）。
+- 清理确认：`pruneSessionRecords()` 在 `tick()` 内每 10 分钟静默跑一轮（`SESSION_TTL_MS=24h`），过期记录与随之为空的 job 目录一并移除。
+- 测试：新建 `test-worktree.mjs`（真实 `git init` + `git worktree add` 造环境，8 条断言：主工作区放行 / linked worktree 命中 / gitDir 指 `.git/worktrees/<name>` / commonDir 指主仓库 `.git` / 不存在路径不误报 / worktree 子目录命中 / 非 git 目录放行 / 空输入放行）全过；`test-sessions.mjs` 加全局聚合段（跨任务聚合、startedAt 排序、每条带 jobId、limit、jobIds 过滤、无匹配为空）全过；`test-orchestration.mjs` 加 worktree 闸门段（worktree 目录提交报错、文案核对、主工作区照常提交到 done、auto 调度扫到 worktree 记 note 不提交）并修正会话单任务断言，全过；`test-batch.mjs` 123/123。
+- 版本 0.11.2 → 0.12.0。
+
 ## 0.11.2 — 2026-10-25
 
 ### 变更：大档思考档位在模型目录未声明时也可手动调节

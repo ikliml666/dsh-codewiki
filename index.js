@@ -270,6 +270,35 @@ function isExcluded(cwd, list) {
 }
 
 // ---------------------------------------------------------------------------
+// linked git worktree 检测（1.2.0）：不给 worktree 里的文件编译 wiki，等它合并回主仓库
+// 后再统一编译——否则同一份代码在隔离工作区与主仓库各编一遍，产物互相覆盖、提交时机也乱。
+//
+// 判据只用 git 自己（可靠、与目录命名无关）：linked worktree 中
+//   `git rev-parse --git-dir`        → <主仓库>/.git/worktrees/<name>
+//   `git rev-parse --git-common-dir` → <主仓库>/.git
+// 两者 resolve 后不同；主工作区里两者都是 .git，相同。submodule 两者也相同（不误判）。
+// 非 git 仓库（rev-parse 失败）→ 不算 worktree，照常放行。
+// 返回 null 或 { gitDir, commonDir }（供报错文案带上真实路径）。
+// ---------------------------------------------------------------------------
+export function detectLinkedWorktree(cwd) {
+  if (!cwd) return null
+  let r
+  try {
+    r = spawnSync('git', ['rev-parse', '--git-dir', '--git-common-dir'], {
+      cwd, encoding: 'utf8', timeout: 5000, windowsHide: true,
+    })
+  } catch { return null }
+  if (!r || r.status !== 0) return null
+  const [gitDirRaw, commonDirRaw] = String(r.stdout ?? '').trim().split(/\r?\n/)
+  if (!gitDirRaw || !commonDirRaw) return null
+  const gitDir = path.resolve(cwd, gitDirRaw)
+  const commonDir = path.resolve(cwd, commonDirRaw)
+  const norm = (p) => path.normalize(p).replace(/[\\/]+$/, '').toLowerCase()
+  if (norm(gitDir) === norm(commonDir)) return null
+  return { gitDir, commonDir }
+}
+
+// ---------------------------------------------------------------------------
 // Token 预算与输入装填
 // ---------------------------------------------------------------------------
 
@@ -1087,6 +1116,30 @@ export function listSessionRecords(jobId) {
 }
 export function readSessionRecord(jobId, n) {
   return readJsonFile(path.join(sessionDirFor(jobId), `${String(n).padStart(3, '0')}.full.json`))
+}
+// 全局会话列表（1.2.0）：跨所有任务聚合请求记录，按 startedAt 倒序，前面带 jobId。
+// 用途是面板顶部那个「会话」Tab——不进任何任务行就能看到「codewiki 现在在跟模型说什么」。
+// 只读 meta 文件（轻量），full 全文仍按 (jobId, n) 单条拉取。limit 兜底防目录过大。
+export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
+  let dirs
+  try { dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }) } catch { return [] }
+  const out = []
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue
+    // 目录名是 jobId 的 sanitize 形式；jobId 本身只含 [\w-]，通常恒等
+    if (jobIds && !jobIds.has(d.name)) continue
+    const dir = path.join(SESSIONS_DIR, d.name)
+    let names
+    try { names = fs.readdirSync(dir) } catch { continue }
+    for (const f of names) {
+      if (!f.endsWith('.meta.json')) continue
+      const meta = readJsonFile(path.join(dir, f))
+      if (meta) out.push({ ...meta, jobId: d.name })
+    }
+  }
+  // 排序键：startedAt 优先，缺失时退到 n（同一 job 内 n 递增）
+  out.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')) || (b.n ?? 0) - (a.n ?? 0))
+  return out.slice(0, Math.max(1, limit))
 }
 // 过期清理：删超 TTL 的记录文件与随之为空的 job 目录。返回删除数（供 note/测试）。
 export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) {
@@ -2306,6 +2359,14 @@ function createJobService(config, onSettled) {
     if (exHit) {
       throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（命中排除项：${exHit}；在插件设置或面板「设置」页编辑排除清单）`)
     }
+    // worktree 闸门（1.2.0）：所有提交入口（工具 / 面板手动 / 自动调度）都过这里，
+    // 因此只在这一处拦即可覆盖全部路径。auto 调度扫到 worktree 时静默跳过不报错污染 note。
+    const wt = detectLinkedWorktree(cwd)
+    if (wt) {
+      const msg = `该目录是 git worktree（${wt.gitDir}），不给 worktree 编译 wiki——请等它合并回主仓库后统一编译：${cwd}`
+      if (auto) return { skipped: 'worktree', reason: msg }
+      throw new Error(msg)
+    }
     rememberRepo(cwd)
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
@@ -2453,8 +2514,20 @@ function generateToolDefinition(cfg, svc) {
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const exHit = excludedItem(cwd, c.excludePaths)
       if (exHit) throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（命中排除项：${exHit}；在插件设置或面板「设置」页编辑排除清单）`)
+      const auto0 = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
+      // worktree 闸门（1.2.0）：在跑 cw status 之前就拦，报错直接给模型看（submit 里还有一道兜底）。
+      // auto 调度（内部直调）不抛错——记一条 note 返回，扫描不因历史 worktree 任务中断。
+      const wtHit = detectLinkedWorktree(cwd)
+      if (wtHit) {
+        const wtMsg = `该目录是 git worktree（${wtHit.gitDir}），不给 worktree 编译 wiki——请等它合并回主仓库后统一编译：${cwd}`
+        if (!auto0) throw new Error(wtMsg)
+        return {
+          cwd, scope: ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto',
+          wikiPath: '', state: 'worktree', submitted: false, notes: [wtMsg], // wikiPath 空串：output schema 要求 string
+        }
+      }
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
-      const auto = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
+      const auto = auto0
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
       const sessionId = exec?.agent?.id ?? null // 发起会话：编译终态时 steer 唤醒（面板/自动调度无 agent 上下文=不唤醒）
@@ -2514,7 +2587,9 @@ function generateToolDefinition(cfg, svc) {
           }
         }).filter(Boolean)
         if (tasks.length) {
-          const { job } = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto, sessionId })
+          const sub = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto, sessionId })
+          if (sub.skipped) { notes.push(sub.reason); return result } // worktree 闸门静默跳过
+          const { job } = sub
           notes.push(`已提交 ${tasks.length} 篇过期文章更新任务 ${job.id}`)
           result.jobId = job.id
           result.stage = job.stage
@@ -2543,7 +2618,9 @@ function generateToolDefinition(cfg, svc) {
         notes.push('cw init 完成')
       }
 
-      const { job } = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
+      const sub2 = await svc.submit({ kind: 'full', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
+      if (sub2.skipped) { notes.push(sub2.reason); return result } // worktree 闸门静默跳过
+      const { job } = sub2
       notes.push(`已提交全量编译任务 ${job.id}（模块文章→横切→校对→索引，全部在插件内完成）`)
       result.jobId = job.id
       result.stage = job.stage
@@ -3005,7 +3082,9 @@ export function installWebServer(ctx, service, extra = {}) {
       },
     })
     // 会话内容（1.1.0）：并发池每个 LLM 请求的 prompt/输出记录，保留一天，仅回环面板可读。
-    //   GET /api/codewiki/sessions?jobId=      → { sessions: [meta] }（最新在前）
+    //   GET /api/codewiki/sessions?jobId=      → { sessions: [meta] }（最新在前，单任务）
+    //   GET /api/codewiki/sessions             → { sessions: [meta+jobId+cwd] }（1.2.0 全局 Tab：
+    //                                            跨任务聚合，最新在前，limit 默认 200）
     //   GET /api/codewiki/sessions/item?jobId=&n= → 单条全文 { prompt, output, ... }
     ws.register({
       kind: 'exact',
@@ -3015,8 +3094,15 @@ export function installWebServer(ctx, service, extra = {}) {
         try {
           const url = new URL(req.url ?? '', 'http://localhost')
           const jobId = String(url.searchParams.get('jobId') ?? '').trim()
-          if (!jobId) { writeJson(res, 400, { error: '缺少 jobId 查询参数' }); return }
-          writeJson(res, 200, { sessions: listSessionRecords(jobId) })
+          if (jobId) { writeJson(res, 200, { sessions: listSessionRecords(jobId) }); return }
+          // 全局聚合：带上 cwd（面板行里显示是哪个仓库在编译），只给最近 limit 条
+          const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 200))
+          const byId = new Map()
+          for (const j of service.list()) byId.set(j.id, j.cwd ?? '')
+          const sessions = listAllSessionRecords({ limit }).map((s) => ({
+            ...s, cwd: byId.get(s.jobId) ?? '',
+          }))
+          writeJson(res, 200, { sessions })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }
@@ -3341,6 +3427,8 @@ export function apply(ctx, config) {
       const cwds = [...new Set(service.list().map((j) => j.cwd).filter(Boolean))]
       for (const cwd of cwds) {
         if (isExcluded(cwd, c.excludePaths)) continue
+        // worktree 目录静默跳过（1.2.0）：历史任务里可能留着 worktree 路径，不编译也不记错误
+        if (detectLinkedWorktree(cwd)) continue
         schedState.lastScanRepos++
         try {
           const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})

@@ -21,7 +21,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 // 后续提交全部 queued，表现为「偶发 20 项失败」。收尾统一删除，不留残留。
 const TEST_JOB_TOKEN = crypto.randomBytes(4).toString('hex')
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}-${TEST_JOB_TOKEN}.json`)
-const { name, apply } = await import('./index.js')
+const { name, apply, SESSIONS_DIR } = await import('./index.js')
 
 let failures = 0
 function check(cond, msg) {
@@ -1329,6 +1329,79 @@ console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时�
   check(fr?.stage === 'articles' && (fr?.notes ?? []).every((m) => !String(m).includes('接管')),
     `新鲜 foreign 任务不被抢（实际 stage=${fr?.stage} 接管note=${(fr?.notes ?? []).some((m) => String(m).includes('接管'))}）`)
   try { fs.unlinkSync(JOBS_FILE) } catch { /* 测试清理 */ }
+}
+
+// ============================ 会话全局 Tab + worktree 闸门（1.2.0） ============================
+console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
+{
+  // a) 全局会话接口：不带 jobId → 跨任务聚合（带 jobId/cwd）；带 jobId → 单任务列表
+  {
+    const ep = main.endpoints.find((e) => e.path === '/api/codewiki/sessions')
+    check(!!ep, 'sessions 端点已注册')
+    const rAll = fakeRes()
+    ep.handler(fakeReq({}, '127.0.0.1', 'GET'), rAll)
+    check(rAll.code === 200, `不带 jobId 返回 200（实际 ${rAll.code}）`)
+    const all = JSON.parse(rAll.out).sessions ?? []
+    check(Array.isArray(all) && all.length > 0, `跨任务聚合有记录（${all.length} 条）`)
+    check(all.every((s) => typeof s.jobId === 'string' && s.jobId.length), '每条带 jobId')
+    check(all.some((s) => typeof s.cwd === 'string'), '聚合结果带 cwd（面板行显示仓库名）')
+    const lim = Number(new URLSearchParams('limit=1').get('limit'))
+    const rLim = fakeRes()
+    ep.handler(fakeReq({}, '127.0.0.1', 'GET'), rLim)
+    check(lim === 1 && rLim.code === 200, 'limit 参数被接受')
+    const rOne = fakeRes()
+    // 单任务路径：取聚合结果里的第一条 jobId
+    const someJob = all[0]?.jobId
+    if (someJob) {
+      ep.handler({ method: 'GET', url: `/api/codewiki/sessions?jobId=${encodeURIComponent(someJob)}`, socket: { remoteAddress: '127.0.0.1' } }, rOne)
+      const one = JSON.parse(rOne.out).sessions ?? []
+      check(rOne.code === 200 && one.length > 0 && one.every((s) => s.jobId === someJob),
+        `带 jobId 只返回该任务记录（${one.length} 条，jobId ${someJob}）`)
+    }
+    // 非回环地址一律拒绝
+    const rRemote = fakeRes()
+    ep.handler(fakeReq({}, '10.0.0.9', 'GET'), rRemote)
+    check(rRemote.code === 403, `非回环地址被拒（实际 ${rRemote.code}）`)
+  }
+
+  // b) worktree 闸门：linked worktree 目录提交 → 直接报错；主仓库不受影响
+  {
+    const wtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-wt-gate-'))
+    const wtMain = path.join(wtRoot, 'main')
+    const wtLinked = path.join(wtRoot, 'linked')
+    const g = (...a) => execFileSync('git', a, { cwd: wtMain })
+    try {
+      fs.mkdirSync(path.join(wtMain, 'core'), { recursive: true })
+      fs.writeFileSync(path.join(wtMain, 'core', 'core.py'), 'def run():\n    return 1\n')
+      execFileSync('git', ['init', '-q', wtMain])
+      g('config', 'user.name', 'test')
+      g('config', 'user.email', 'test@test')
+      g('add', '.')
+      g('commit', '-qm', 'init')
+      g('worktree', 'add', '-q', wtLinked)
+      const mockWt = makeBatchMock()
+      try {
+        let wtErr = null
+        try { await gen.execute({ cwd: wtLinked }, { agent: 'test-agent' }) } catch (e) { wtErr = e }
+        check(String(wtErr?.message ?? '').includes('worktree'), `worktree 目录提交 → 报错（${String(wtErr?.message ?? '未报错').slice(0, 60)}…）`)
+        check(String(wtErr?.message ?? '').includes('合并回主仓库'), '报错文案说明「等合并回主仓库后再编译」')
+        // 主工作区对照：同一个仓库的主目录照常接受
+        const rMain = await gen.execute({ cwd: wtMain }, { agent: 'test-agent' })
+        check(rMain.submitted === true, `主工作区照常提交（jobId ${rMain.jobId}）`)
+        const jobMain = await waitJob(wtMain)
+        check(jobMain?.stage === 'done', `主工作区任务跑完（${jobMain?.stage}）`)
+        // auto 调度路径：静默跳过，不产生任务、不报错
+        const autoR = await gen.execute({ cwd: wtLinked, scope: 'auto', auto: true }, {})
+        check(autoR.submitted !== true && (autoR.notes ?? []).some((n) => String(n).includes('worktree')), 'auto 调度扫到 worktree → 不提交并记 note')
+      } finally {
+        mockWt.restore()
+        g('worktree', 'remove', '--force', wtLinked)
+      }
+    } finally {
+      fs.rmSync(wtRoot, { recursive: true, force: true })
+    }
+  }
+  try { fs.rmSync(SESSIONS_DIR, { recursive: true, force: true }) } catch { /* tmp 句柄延迟释放 */ }
 }
 
 // ============================ 编译模型缺失诚实报错（0.10.1） ============================
