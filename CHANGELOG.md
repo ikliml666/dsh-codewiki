@@ -1,5 +1,21 @@
 # Changelog
 
+## 未发布 — 2026-10-26
+
+### 文档：hy3 子智能体并发的实测结果与配置根因
+
+- 新增 `docs/hy3-concurrency-handoff.md` 第七章「实测结果」，记录方案 B（给
+  `subagent-auto-router.config.allowedModels` 补 `workbuddy/hy3`）生效后
+  在同一会话内跑出的 8 路并发数据：**8/8 成功、0 限流**，总墙钟 72.6 s，
+  串行估算 361.5 s，**并行加速比 5.0×**；单任务跨度 26.8–62.8 s，
+  输入稳定 ~66 k tok，`agent_inspect` 身份行 8 路全为 `provider=workbuddy/hy3`。
+  同时修正第一章「选方案 A」的过时前提（B 已实施并在本会话生效）。
+
+- 补充根因说明：后台 `delegate(persist="durable")` 为 continuable 模式，
+  **不下发 `structured_output` schema**（该能力只在同步模式或 workflow
+  `agent(opts.schema)` 时挂载），因此要求子智能体「必须调 structured_output」
+  不可行，回报走 `send_message` 自包含文本即可——属预期行为而非故障。
+
 ## 0.12.1 — 2026-10-26
 
 ### 修复：worktree / 空壳目录彻底不出现在面板与调度里
