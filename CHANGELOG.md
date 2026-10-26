@@ -24,7 +24,7 @@
 
 - **设置页（`client.js`）**：新增「编译流程（吸收自 FSoft CodeWiki）」一节，含 `planMode` 下拉（auto/dirs）与 `agenticArticles` / `symbolIncremental` 开关、`agenticMaxSteps` 数字输入（1–100，硬顶 100）；中英 i18n 词条齐备。
 
-- **测试**：新增 6 个测试文件、共 111 条断言——`test-symbols.mjs`（19）、`test-cluster.mjs`（28）、`test-agentic.mjs`（39）、`test-agentic-host.mjs`（15）、`test-agentic-fallback.mjs`（10，覆盖退回判定与可装填性）、`test-semantic-plan.mjs`（10，AST→聚类→模块清单端到端）；另有 `test-graphdiff.mjs`（78 条与 Python 原版**逐位对拍**全过）与 `test-incremental.mjs`（15）+ `test-incremental-e2e.mjs`（8，含真实临时仓库的快照落盘与四类改动场景）。`test-orchestration.mjs` 的配置基线显式钉住 `LEGACY_CHANNEL = { planMode: 'dirs', agenticArticles: false, symbolIncremental: false }`——该文件断言的是旧通道的请求次数与装填时序，不钉住会因「通道换了」而不是「功能坏了」失败；新通道由上面几个文件守护。全套回归：新通道 9 个文件全绿、`test-batch.mjs` 128 条全过、`test-orchestration.mjs` 编排冒烟全过、其余既有测试（cwd-paths / sessions / wiki-entry / worktree）全过。
+- **测试**：新增 6 个测试文件、共 121 条断言——`test-symbols.mjs`（19）、`test-cluster.mjs`（28）、`test-agentic.mjs`（39）、`test-agentic-host.mjs`（15）、`test-agentic-fallback.mjs`（10，覆盖退回判定与可装填性）、`test-semantic-plan.mjs`（10，AST→聚类→模块清单端到端）；另有 `test-graphdiff.mjs`（78 条与 Python 原版**逐位对拍**全过）与 `test-incremental.mjs`（15）+ `test-incremental-e2e.mjs`（8，含真实临时仓库的快照落盘与四类改动场景）。`test-orchestration.mjs` 的配置基线显式钉住 `LEGACY_CHANNEL = { planMode: 'dirs', agenticArticles: false, symbolIncremental: false }`——该文件断言的是旧通道的请求次数与装填时序，不钉住会因「通道换了」而不是「功能坏了」失败；新通道由上面几个文件守护。全套回归：新通道 9 个文件全绿、`test-batch.mjs` 128 条全过、`test-orchestration.mjs` 编排冒烟全过、其余既有测试（cwd-paths / sessions / wiki-entry / worktree）全过。
 
 - 版本 0.12.2 → 0.13.0（minor：新增能力与配置，默认行为改变但可一键回退）。
 
