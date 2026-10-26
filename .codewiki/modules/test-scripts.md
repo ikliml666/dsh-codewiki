@@ -14,7 +14,7 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 
 `test-scripts` 模块是本仓库的端到端测试套件集合，由五个独立的 `.mjs` 脚本组成，覆盖编译执行链纯函数、宿主 llm 服务 mock、工作目录路径归一化、服务化编排阶段机、wiki 行号锚点校验以及入口文件生成等核心业务逻辑。
 
-所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 及 1.1.0 系列特性：大档模型接管超长输入、插件自动提交编译产物、会话通道 steer 档位钉死、并行项目上限、孤儿任务接管、worktree 闸门等。
+所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`，见 `test-orchestration.mjs` `272|`）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 至 1.2.0 系列特性：大档模型接管超长输入、插件自动提交编译产物、会话通道 steer 档位钉死、并行项目上限、孤儿任务接管、worktree 闸门、空壳目录闸门等。
 
 ## Key Components
 
@@ -23,49 +23,67 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 编译执行链自检脚本，验证纯函数与 mock 宿主 llm 通道。
 
 - `import { ... } from './index.js'` — `7-12|`：导入被测函数（collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer）。
-- `check(cond, msg)` / `section(name)` / `mockJson(obj, status)` — `14-21|`：断言辅助（成功计数 `passed` 印 `✓`，失败压入 `failures` 印 `✗`）；分段打印 `== name ==`；构造类 fetch 响应对象（含 `ok`/`status`/`text()`）。
+- `let passed` / `const failures` / `function check(cond, msg)` — `14-19|`：断言辅助（成功计数 `passed` 印 `✓`，失败压入 `failures` 印 `✗`）。
+- `function section(name)` — `20|`：分段打印 `== name ==`。
+- `const mockJson = (obj, status = 200) => ...` — `21|`：构造类 fetch 响应对象（含 `ok`/`status`/`text()`）。
 - 测试块 `estimateTokens` — `23-28|`：CJK 与 ASCII 粗算（每字 1 token、ASCII `ceil(n/3.5)`）。
 - 测试块 `collectSources` — `30-44|`：源码装填、缺失标注、token 预算溢出（`oversized`/`skipped`）、尾换行处理。
 - 测试块 `numberLines` — `46-51|`：行号前缀与尾换行处理（CRLF 剥离、双尾换行保留空行）。
-- 测试块 `prepareArticleTasks` — `53-105|`：prompt 装配、旧文上下文、单文件大档（`bigTier`）、超大会话通道兜底、多文件观察批分割（`#obs` + `composePlan`）；`107-131|` 大档模型接管超长输入（不再交会话模型，使用 `bigProvider`/`bigModel` 等）。
+- 测试块 `prepareArticleTasks` — `53-105|`：prompt 装配、旧文上下文、单文件大档（`bigTier`）、超大会话通道兜底、多文件观察批分割（`#obs` + `composePlan`）。
+- 测试块 `prepareArticleTasks` 大档模型接管 — `107-131|`：超长输入改用 `bigProvider`/`bigModel`/`bigReasoningEffort`/`bigBudget` 大档单请求（不再交会话模型）。
 - 测试块 `classifySessionTask` — `133-149|`：会话通道收割三态（`timeout`/`harvest`/`wait`）。
 - 测试块 `buildSessionSteerText` — `151-167|`：steer 文本档位钉死（`tier: "codeiwiki"`）与阶段文案（articles/review/resend）。
-- `makeLlm(reply)` / `promptOf(opts)` — `173-189|`：构造假 llm 服务（按 stream 协议吐块；reply 可为字符串、函数或 Error）；从 `opts.messages[0].content[0].text` 提取 prompt。
-- 测试块 `runRealtimeTasks` — `169-205|`：宿主 llm 通道请求体（provider/model/reasoningEffort/temperature）、失败记账；`207-227|` 混合池大档分派；`229-239|` tps 采样与取消信号；`241-251|` 外部 signal 中止；`253-275|` 并发池失败记账；`323-338|` 失败通道错误码透传。
-- 测试块 `localPlan` — `277-288|`：顶层目录分组。
-- 测试块 `packArticles` — `290-301|`：横切输入整篇装填与头部截断。
-- 测试块 `scanRepoFiles` — `303-322|`：勘探黑名单（跳 node_modules/.git/二进制/超大/空）。
-- 测试块 `listModelCatalog` — `340-362|`：宿主 provider/model 目录映射（兼容 provider/name 写法，跳过无 id）。
-- 测试块 `installWebServer` — `364-392|`：`/api/codewiki/models` 端点回环 200/非回环 403。
-- 测试块 `resolveModelEfforts` — `394-446|`：思考档位解析与 `/api/codewiki/model-efforts` 端点参数校验（回环 200/缺参 400/非回环 403）。
-- 删除校验 — `448-451|`：`mod.resolveBatchApiKey === undefined` 确认 0.10.1 起移除内置百炼直连通道。
-- 测试块 `fixAnchors` — `453-495|`：行号锚点确定性修正（错行修正、歧义不动、CRLF 保真）。
+- `function makeLlm(reply)` / `const promptOf` — `173-189|`：构造假 llm 服务（按 stream 协议吐块；reply 可为字符串、函数或 Error）；从 `opts.messages[0].content[0].text` 提取 prompt。
+- 测试块 `runRealtimeTasks` 宿主通道 — `169-205|`：含上述 `makeLlm`/`promptOf`、`kmTasks`（`190-193|`）与 `runRealtimeTasks` 调用（`195-205|`），验证请求体（provider/model/reasoningEffort/temperature）与落盘。
+- 测试块 `runRealtimeTasks` 混合池大档分派 — `207-227|`：同一池里大档任务按自带 provider/model/档位路由。
+- 测试块 `runRealtimeTasks` 大档与默认档并发分池 — `229-296|`：分池限流（0.12.2），`makeSlowLlm`（`232-242|`）延时吐块、`poolProbe`（`243-258|`）统计在飞峰值、`mk`（`259-262|`）构造任务；默认档并发打满 2 且大档独立限 1 两池并行（263-282|），`bigConcurrency` 缺省跟随默认档（283-296|）。
+- 测试块 `runRealtimeTasks` tps 采样与取消信号 — `298-308|`：onTaskDone 上报与未配置思考档位不下发。
+- 测试块 `runRealtimeTasks` 外部 signal 中止 — `310-320|`：已 abort 的 signal 使池不消费任务。
+- 测试块 `runRealtimeTasks` 并发池失败记账 — `322-344|`：失败记账进 notes，不中断其他任务。
+- 测试块 `localPlan` — `346-358|`：顶层目录分组。
+- 测试块 `packArticles` — `359-371|`：横切输入整篇装填与头部截断。
+- 测试块 `scanRepoFiles` — `372-387|`：勘探黑名单（跳 node_modules/.git/二进制/超大/空）。
+- 测试块 `runRealtimeTasks` 失败通道错误码透传 — `392-407|`：finish kind=error 记账含错误码。
+- 测试块 `listModelCatalog` — `409-431|`：宿主 provider/model 目录映射（兼容 provider/name 写法，跳过无 id）。
+- 测试块 `GET /api/codewiki/models 端点` — `433-461|`：`installWebServer` 注册端点，回环 200/非回环 403。
+- 测试块 `resolveModelEfforts` 与 `/api/codewiki/model-efforts` — `463-515|`：思考档位解析与端点参数校验（回环 200/缺参 400/非回环 403）。
+- 删除校验 — `517-520|`：`mod.resolveBatchApiKey === undefined` 确认 0.10.1 起移除内置百炼直连通道。
+- 测试块 `fixAnchors` — `522-564|`：行号锚点确定性修正（错行修正、歧义不动、CRLF 保真）。
 
 ### test-cwd-paths.mjs
 
 验证 0.2.3 路径修复：直接调 `cw` 工具覆盖三种 cwd 形态。
 
-- `pluginDir` — `7|`：`fileURLToPath(import.meta.url)` 取插件目录。
-- `repoWin` — `8|`：从 `process.argv[2]` 取 Windows 形式仓库路径（默认 `E:/ik/...`）。
-- `msys` — `10|`：将 `E:/x` 推导为 `/e/x` 的 MSYS 形式。
-- `registered` / `ctx` — `12-18|`：模拟宿主 `inject` 与 `effect`，将 `tools.register` 写入 `registered`。
-- `plugin.apply(ctx, {})` — `20|`：注册插件。
-- `cw` 工具获取 — `22|`：从 registered 取 `cw`。
-- `cfgProbe` — `26|`：测试用配置（enabled/batchProvider 等）。
-- 验证块 — `30-45|`：MSYS 路径归一化执行；`47-57|` Windows 路径 `status` 三态；`61-69|` 不存在路径干净抛 `cwd 不存在`。
+- `import * as plugin from './index.js'` — `1-5|`：加载插件与 path/fileURLToPath。
+- `const pluginDir` — `7|`：`fileURLToPath(import.meta.url)` 取插件目录。
+- `const repoWin` — `8|`：从 `process.argv[2]` 取 Windows 形式仓库路径（默认 `E:/ik/...`）。
+- `const msys` — `9-10|`：将 `E:/x` 推导为 `/e/x` 的 MSYS 形式。
+- `const registered` / `const ctx` — `12-18|`：模拟宿主 `inject` 与 `effect`，将 `tools.register` 写入 `registered`。
+- `await plugin.apply(ctx, {})` — `20|`：注册插件。
+- `const cw = registered.cw` — `22-23|`：从 registered 取 `cw` 工具，缺失则退出。
+- `const cfgProbe` — `26|`：测试用配置（enabled/batchProvider 等，仅注释说明未直接用 resolveBinary）。
+- 验证块 MSYS 路径 — `30-45|`：调用 `cw.execute({ cwd: msys, args: ['path'] })` 归一化执行并断言返回 `.codewiki`。
+- 验证块 Windows 路径 `status` 三态 — `47-57|`：调用 `cw.execute({ cwd: repoWin, args: ['status'] })` 验证非 "No wiki found"。
+- 验证块 不存在路径干净报错 — `61-69|`：调用 `cw.execute` 不存在路径，断言抛出 `cwd 不存在`。
 
 ### test-orchestration.mjs
 
 服务化编排冒烟测试，mock 宿主 llm 服务 + 真实 cw CLI + 真实服务 tick。
 
-- `makeCtx({ agents, workspaces, brokenRegistry, agentGet, llm })` — `44-84|`：构造 cordis 风格 `inject`/`on`/`effect` 上下文，返回 `{ ctx, registered, endpoints, listeners, disposers }`；支持 `workspaceRegistry` 与 `brokenRegistry` 形态。
-- `makeMockAgent(cwd)` — `86-101|`：构造 `agent.ctx.inject` 以注册 `systemPrompt.section`。
-- `makeFixtureRepo()` — `103-120|`：创建含 `core/`+`util/` 的 git 仓库 fixture（自带 git identity）。
-- `activeLlm` / `llmProxy` / `promptOf` — `125-134|`：当前生效假 llm 与转发代理，提取 prompt。
-- `makeBatchMock({ modules, articleMarker, stall, bigArticle })` — `138-202|`：按 prompt 首行特征分发应答的假 llm 流；返回 `{ llm, llmCalls, batchPrompts, realtimePrompts, restore }`。
-- `waitJob(cwd, { timeout })` — `205-218|`：轮询 `JOBS_FILE` 等某 cwd 最新 job 终态。
-- `fakeReq(body, addr, method)` / `fakeRes()` — `220-232|`：模拟 HTTP 请求（回环地址 `127.0.0.1`）与响应（捕获 `code` 与 `out`）。
+- `process.env.DSH_CODEWIKI_TICK_MS` / `DSH_CODEWIKI_JOBS_FILE` — `14-23|`：测试加速 tick 间隔与独立 JOBS_FILE（追加随机 token 避免复用）。
+- `const { name, apply, SESSIONS_DIR } = await import('./index.js')` — `24|`：加载插件主体。
+- `let failures` / `function check` — `26-30|`：断言辅助。
+- `const JOBS_FILE` / `articleMd` — `32-34|`：任务文件路径与构造文章 markdown 的辅助函数。
+- `const batchCfg` — `36-38|`：测试配置基线（batchProvider/batchModel）。
+- `function makeCtx({ agents, workspaces, brokenRegistry, agentGet, llm })` — `44-84|`：构造 cordis 风格 `inject`/`on`/`effect` 上下文，返回 `{ ctx, registered, endpoints, listeners, disposers }`；支持 `workspaceRegistry` 与 `brokenRegistry` 形态。
+- `function makeMockAgent(cwd)` — `86-101|`：构造 `agent.ctx.inject` 以注册 `systemPrompt.section`。
+- `function makeFixtureRepo()` — `103-120|`：创建含 `core/`+`util/` 的 git 仓库 fixture（自带 git identity）。
+- `let activeLlm` / `const llmProxy` / `const promptOf` — `125-134|`：当前生效假 llm 与转发代理，提取 prompt。
+- `function makeBatchMock({ modules, articleMarker, stall, bigArticle })` — `138-202|`：按 prompt 首行特征分发应答的假 llm 流；返回 `{ llm, llmCalls, batchPrompts, realtimePrompts, restore }`。
+- `async function waitJob(cwd, { timeout })` — `205-218|`：轮询 `JOBS_FILE` 等某 cwd 最新 job 终态。
+- `function fakeReq(body, addr, method)` / `function fakeRes()` — `220-232|`：模拟 HTTP 请求（回环地址 `127.0.0.1`）与响应（捕获 `code` 与 `out`）。
 - 系统提示提醒块 — `234-263|`：验证 `agent/created` 监听与 `codewiki:update-reminder` section。
+- 注册与 cw 工具块 — `265-283|`：apply 注册，断言 `cw`/`codewiki_generate`/`codewiki_progress` 存在，cw status 判定 missing。
 - `codewiki_update` 与 `commitHintText` 块 — `285-403|`：scope 强制 `auto`、提交引导 note、git 提交史提醒（含 autoCommit 状态分支）。
 - `autoCommitWiki` 块 — `405-506|`：安全边界（主题分支提交→合并回原分支，只提交 `.codewiki/` 与 `CodeWiki.md`；非 git/忽略/merge/detached/预占分支降级）。
 - `autoCommitState` 块 — `508-518|`：三态判定（committed/no-changes/pending）。
@@ -81,16 +99,16 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 - `codewiki_progress` 块 — `872-908|`：只读查进度、百分比与明细。
 - 0.6.0 重启重跑块 — `909-966|`：按持久化 prompt 快照重跑/迁移（旧 plan 任务迁移到 articles）。
 - 并发提交占位块 — `968-1016|`：首个 tick 窗口共享 job 与 flush 合并。
-- 面板端点块 — `1018-1070|`：`/api/codewiki/jobs`、`/api/codewiki/control` 回环守卫与取消。
-- 排除清单块 — `1072-1125|`：excludePaths 拒绝与 repos 总览。
-- knownRepos 登记块 — `1127-1165|`：knownRepos 独立于 job 历史、refresh 动作。
-- 工作区过滤块 — `1167-1228|`：jobs/repos 按 workspaceOnly 过滤（含 registry 异常降级）。
+- 面板端点与取消块 — `1018-1070|`：`/api/codewiki/jobs`、`/api/codewiki/control` 回环守卫与取消。
+- 排除清单/repos 总览/compile 动作块 — `1072-1125|`：excludePaths 拒绝与 repos 总览。
+- knownRepos 登记/refresh 块 — `1127-1165|`：knownRepos 独立于 job 历史、refresh 动作。
+- 工作区任务过滤块 — `1167-1228|`：jobs/repos 按 workspaceOnly 过滤（含 registry 异常降级）。
 - registry 异常防御块 — `1230-1258|`：workspaceRegistry.list() 抛错时降级不过滤。
 - 工具输出 schema 块 — `1260-1298|`：codewiki_generate 输出过 schema 校验。
 - 孤儿任务接管块 — `1300-1332|`：foreign 任务停更超时接管。
 - 会话全局 Tab + worktree 闸门块 — `1334-1406|`：sessions 端点聚合接口、worktree 目录提交报错与 auto 调度跳过。
-- 空壳目录闸门块 — `1407-1456|`：扫不出源码的空壳目录（如被删 worktree 残留）手动提交报错、auto 调度静默跳过，且面板 jobs/repos 过滤掉此类终态任务。
-- 编译模型缺失块 — `1458-1471|`：provider 留空诚实报错并落 job failed 态。
+- 空壳目录闸门块 — `1407-1456|`：扫不出源码的空壳目录手动提交报错、auto 调度静默跳过，且面板 jobs/repos 过滤掉此类终态任务。
+- 编译模型缺失诚实报错块 — `1458-1471|`：provider 留空诚实报错并落 job failed 态。
 - 严格 cordis 语义块 — `1473-1495|`：未 inject 服务属性访问即抛，apply 不回滚。
 - Temp 残留清理块 — `1497-1514|`：Temp 目录终态任务自动移除，活动/工作区任务保留。
 
@@ -98,27 +116,25 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 
 wiki 文章行号锚点自动校验脚本，拦截幻觉锚点。
 
-- `ROOT` / `WIKI` / `SOURCES` — `14-24|`：定位仓库根、`.codewiki` 目录与待校验源文件（`index.js`/`client.js`）行缓存，结构为 `{ lines: null, total: 0 }`。
-- `check(cond, msg)` — `26-32|`：断言并返回 `cond` 供短路。
-- `symbolsOnLine(line)` — `34-49|`：提取行内反引号代码标识符（允许点分/调用形式，排除短符号），返回 `{ sym, at }` 数组。
-- `nearestSymbol(syms, anchorIndex, anchorLen)` — `51-62|`：取离锚点最近的符号（同距取左侧），返回 `{ ...s, d, left }`。
-- `walk(dir)` — `64-73|`：递归收集 `.md` 文章路径。
-- 主校验循环 — `75-115|`：基础行号范围、非空行、区间有序、单锚点符号绑定区间搜索。
+- `const ROOT` / `const WIKI` / `const SOURCES` — `14-24|`：定位仓库根、`.codewiki` 目录与待校验源文件（`index.js`/`client.js`）行缓存，结构为 `{ lines: null, total: 0 }`。
+- `let passed` / `let failures` / `function check(cond, msg)` — `26-32|`：断言并返回 `cond` 供短路。
+- `function symbolsOnLine(line)` — `34-49|`：提取行内反引号代码标识符（允许点分/调用形式，排除短符号），返回 `{ sym, at }` 数组。
+- `function nearestSymbol(syms, anchorIndex, anchorLen)` — `51-62|`：取离锚点最近的符号（同距取左侧），返回 `{ ...s, d, left }`。
+- `function walk(dir)` — `64-73|`：递归收集 `.md` 文章路径。
+- 主校验循环 — `75-115|`：基础行号范围、非空行、区间有序、单锚点符号绑定区间搜索；调用 `check` 落断言。
 
 ### test-wiki-entry.mjs
 
 `CodeWiki.md` 入口生成与 Windows 路径规范化单元测试。
 
-- `check(cond, msg)` — `12-16|`：断言辅助。
-- `tmp` / `repo(name)` — `18-23|`：临时目录与子仓库创建。
+- `let failures` / `function check(cond, msg)` — `12-16|`：断言辅助。
+- `const tmp` / `const repo(name)` — `18-23|`：临时目录与子仓库创建。
 - `ensureWikiEntry` 测试 — `25-54|`：缺失生成（含绝对路径/双语）、已有不覆盖、空 cwd 安全、幂等。
 - `normalizeArticlePath` 测试 — `56-59|`：反斜杠转正斜杠、undefined 安全。
 - `parseStatus` 测试 — `60-62|`：解析 `cw status` 输出（返回 `{ state, changedFiles, staleArticles }`），stale 清单 `\` 规范化。
 - `normalizeIndexLinks` 测试 — `63-72|`：修复 `_index.md` 链接头反斜杠，正文反斜杠不受影响。
 
 ## Architecture
-
-测试套件以 `./index.js` 插件为被测核心，通过轻量 mock 上下文驱动，按验证粒度分为纯函数单测、工具路径单测、服务编排冒烟、产物质量校验四类。
 
 ```text
 ┌─────────────────────────────┐
@@ -149,7 +165,7 @@ wiki 文章行号锚点自动校验脚本，拦截幻觉锚点。
 ## Connections
 
 - [[dsh-codewiki]]：所有脚本验证的插件主体（导出自 `./index.js`，`name === 'dsh-codewiki'` 见 `test-orchestration.mjs` `272|`）。
-- [[wiki-anchors]]：`fixAnchors`（`test-batch.mjs` `453-495|`）与 `test-wiki-anchors.mjs` 符号绑定逻辑互验。
+- [[wiki-anchors]]：`fixAnchors`（`test-batch.mjs` `522-564|`）与 `test-wiki-anchors.mjs` 符号绑定逻辑互验。
 - [[cw-cli]]：`cw.execute` 路径（`test-cwd-paths.mjs` `34|`）与 `status` 三态（`test-cwd-paths.mjs` `48|` 及 `test-orchestration.mjs` `281-283|`）覆盖。
 - [[codewiki-generate]]：`codewiki_generate` 工具注册与提交占位逻辑在 `test-orchestration.mjs` `273-274|` 等覆盖。
 
@@ -158,6 +174,6 @@ wiki 文章行号锚点自动校验脚本，拦截幻觉锚点。
 - `test-cwd-paths.mjs` `25-28|` 注释明确：捆绑副本一致性校验交由外部 sha256 完成，测试内不再重复验证 `resolveBinary` 内部细节，仅通过 MSYS 路径跑通间接证明归一化生效。
 - `test-cwd-paths.mjs` `59|`：注释声明 `wikiPathFor` 兜底路径未直接导出，契约由 `cw path` 成功路径覆盖。
 - `test-orchestration.mjs` `1014|`：并发块清理使用 `fs.rmSync(concRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })`，注释指出 Windows 句柄延迟释放可能导致异常，留待 tmp 自清。
-- `test-batch.mjs` `448-451|`：断言 `mod.resolveBatchApiKey === undefined`，标记 0.10.1 起内置百炼直连通道与凭证解析链整体删除，插件不再触碰任何密钥。
+- `test-batch.mjs` `517-520|`：断言 `mod.resolveBatchApiKey === undefined`，标记 0.10.1 起内置百炼直连通道与凭证解析链整体删除，插件不再触碰任何密钥。
 - `test-orchestration.mjs` `520-556|`：wakeCompileSession 场景下自动提交成功则零唤醒，若自动提交失败才降级提醒，该行为依赖 `autoCommit` 字段存在（见 `508-518|` 中 `autoCommitState` 三态判定与断言）。
 - `test-orchestration.mjs` `1334-1406|`：会话全局 Tab 聚合接口与 worktree 闸门测试中，worktree 目录提交报错文案要求说明「等合并回主仓库后再编译」，主工作区对照不受影响。

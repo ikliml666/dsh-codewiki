@@ -14,7 +14,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 
 ## Overview
 
-本模块是一组 Node ESM 集成测试，覆盖 `dsh-codewiki` 服务的批量执行、工作目录路径解析、编排流程以及 wiki 锚点与入口生成。测试文件与运行期日志同名对应，构成可追溯的验证资产。包含五个测试脚本：`test-orchestration.mjs`（服务化编排冒烟测试，行1-1522）、`test-wiki-anchors.mjs`（wiki 行号锚点校验，行1-118）、`test-wiki-entry.mjs`（CodeWiki.md 入口生成与路径规范化，行1-76）、`test-batch.mjs`（编译执行链自检，行1-501）、`test-cwd-paths.mjs`（0.2.3 路径修复验证，行1-71）。当前代码基线强调 0.10.1 起插件不再直连任何端点、唯一通道为宿主 llm 服务（编译模型必须显式配置），0.10.4 起大档模型接管超长输入，1.1.0 起支持并行项目上限与队列前置信息，1.2.0 起全局会话 Tab 与 worktree 闸门。
+本模块是一组 Node ESM 集成测试，覆盖 `dsh-codewiki` 服务的批量执行、工作目录路径解析、编排流程以及 wiki 锚点与入口生成。测试文件与运行期日志同名对应，构成可追溯的验证资产。包含五个测试脚本：`test-orchestration.mjs`（服务化编排冒烟测试，行1-1522）、`test-wiki-anchors.mjs`（wiki 行号锚点校验，行1-118）、`test-wiki-entry.mjs`（CodeWiki.md 入口生成与路径规范化，行1-76）、`test-batch.mjs`（编译执行链自检，行1-570）、`test-cwd-paths.mjs`（0.2.3 路径修复验证，行1-71）。当前代码基线强调 0.10.1 起插件不再直连任何端点、唯一通道为宿主 llm 服务（编译模型必须显式配置），0.10.4 起大档模型接管超长输入，0.10.11 起 autoCommitWiki 采用分支合并式提交，0.12.1 起空壳目录闸门与面板过滤，1.1.0 起支持并行项目上限与队列前置信息（queueAhead），1.2.0 起全局会话 Tab 与 worktree 闸门。
 
 ## Key Components
 
@@ -35,7 +35,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - 动态导入符号：`const { commitHintText } = await import('./index.js')`（行297）、`const { autoCommitWiki } = await import('./index.js')`（行408）、`const { autoCommitState } = await import('./index.js')`（行511）、`const { wakeCompileSession } = await import('./index.js')`（行523）从 index.js 导入。
 - 同构校验器：`const validateOut = (schema, v) =>`（行1264-1279，位于行1260-1298 工具输出 schema 形态块）本地校验同构宿主 schema。
 - 测试块（直接执行断言）：系统提醒（行234-263）、注册（行265-277）、`cw` 工具（行279-283）、`codewiki_update`+`commitHintText`（行285-403）、`autoCommitWiki`（行405-506）、`autoCommitState`（行508-518）、`wakeCompileSession`（行520-556）、本地规划（行558-615）、全量编译（行617-658）、大 wiki 横切（行660-688）、大模块分割（行690-724）、单项目串行（行726-782）、并行项目上限（行784-813）、唯一通道（行815-847）、stale 更新（行849-870）、progress（行872-908）、重启重跑（行909-966）、并发占位（行968-1016）、面板端点（行1018-1070）、排除清单/repos 总览/compile 动作（行1072-1125）、knownRepos/refresh（行1127-1165）、工作区过滤（行1167-1228）、registry 异常（行1230-1258）、schema 校验（行1260-1298）、孤儿接管（行1300-1332）、全局会话 Tab/worktree 闸门（行1334-1405）、空壳目录闸门（行1407-1456）、模型缺失（行1458-1471）、严格 cordis（行1473-1495）、Temp 清理（行1497-1514）。
-- 持久化 job 对象字段示例（行916-925）：`id, cwd, kind, scope, language, stage, owner, wikiPath, plan{project, modules[], concepts[]}, batchRef{batchId}, tasks[{customId, name, articlePath, keepInMemory, batchPrompt}], articles[], writtenCount, failedCount, notes[], createdAt, updatedAt`，以及运行时扩展的 `autoCommit{committed, sha, mode, branch, noChanges, reason}`、`stageTimings`、`usage`、`queueAhead`、`batchProgress`、`taskList`、`progress`、`tps` 等。
+- 持久化 job 对象字段示例（行916-925）：`id, cwd, kind, scope, language, stage, owner, wikiPath, plan{project, modules[], concepts[]}, batchRef{batchId}, tasks[{customId, name, articlePath, keepInMemory, batchPrompt}], articles[], writtenCount, failedCount, notes[], createdAt, updatedAt`，以及运行时扩展的 `autoCommit{committed, sha, mode, branch, noChanges, reason}`（行631）、`stageTimings`（行632）、`usage`（行838）、`queueAhead`（行755）、`batchProgress`（行1042）、`taskList`、`progress`、`tps`（行835）等。
 
 ### test-wiki-anchors.mjs
 
@@ -69,17 +69,17 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - `runRealtimeTasks(tasks, {provider, llm, model, reasoningEffort?, concurrency, notes, signal?, onTaskDone?})` 测试：
   - 基础路由（行169-205）`function makeLlm(reply)` 工厂（行173-188）返回 `{ async *stream(opts) }` 模拟 stream 协议；每任务一次流调用，按 provider/model 路由，`reasoningEffort` 原样下发，`temperature` 固定 0（行200-203）。
   - 混合档分派（行207-228）：同一池里大档任务按自带 provider/model/档位路由，普通任务走默认档。
-  - tps 采样与取消信号（行229-239）：`onTaskDone` 上报 `outputTokens`/`durationMs`；未配置思考程度不下发 `reasoningEffort`。
-  - 外部 signal 中止（行241-251）：已 abort 则结果数少于任务数。
-  - 失败记账（行253-275）：失败进 `notes` 不中断其他，失败任务不落盘；以及行323-338 失败通道错误码透传（`finish kind=error` → 任务失败，错误码进 notes）。
-- `localPlan(files)` 测试（行277-288）：按顶层目录分组，根文件归 `root`，不造概念（`concepts:[]`）。
-- `packArticles(articles, budget)` 测试（行290-301）：预算内整篇装填；超预算后续文章只装头部（含 frontmatter 与 Overview）并标“仅头部”。
-- `scanRepoFiles(root)` 测试（行303-318）：跳过 `node_modules`/`.git`/二进制/超大（300*1024 被跳）/空文件；只收有效源码，返回项含 `path` 与 `bytes`。
-- `listModelCatalog(llm)` 测试（行340-362）：`llm` 需有 `listProviders()`/`listModels(id)`；跳过无 `id` 的 provider；兼容 `{provider, name}` 写法；单 provider 抛错时条目保留 `error` 不影响其他；`llm` 为 `null` → `{ok:false, providers:[]}`。
-- `installWebServer(ctx, jobSvc, {llm})` + `/api/codewiki/models` 测试（行364-392）：注入假 `webServer.register` 收集路由；回环（`127.0.0.1`）请求 → 200 且 `ok:true` 返回宿主 provider/model；非回环 → 403 `loopback only`。
-- `resolveModelEfforts(llm, provider, model)` + `/api/codewiki/model-efforts` 测试（行394-446）：`llm.resolveModel` 返回 `{context:{tokens}, reasoning:{defaultEffort, efforts:[...]}}`；解析出档位/默认档/上下文长度；未知模型 → `ok:false` 带 error 不抛；`llm` 为 `null` → 诚实报错含 `resolveModel`；模型未声明档位 → `ok:true` 空列表；端点回环+完整参数 200，缺 `model` 参数 400，非回环 403。
-- 0.10.1 通道移除校验（行448-451）：动态 `import('./index.js')` 断言 `resolveBatchApiKey === undefined`。
-- `fixAnchors(articleText, rootDir)` 测试（行453-495）：返回 `{fixed, text, unresolved}`；仅处理 frontmatter 中 `source_files` 列出的文件；错行号唯一符号修正；起点行含符号视为正确不动；符号未找到记 `unresolved` 不动；多声明歧义不动；多处出现取声明行；区间锚点起点对齐符号、尾部钳到文件末行；basename 唯一解析修正并保留原文写法；不在清单不碰；CRLF 文章行尾保真；无 frontmatter 原样；basename 根与子目录同名歧义不碰。
+  - tps 采样与取消信号（行298-308）：`onTaskDone` 上报 `outputTokens`/`durationMs`；未配置思考程度不下发 `reasoningEffort`。
+  - 外部 signal 中止（行310-320）：已 abort 则结果数少于任务数。
+  - 失败记账（行323-344）：失败进 `notes` 不中断其他，失败任务不落盘；以及行394-407 失败通道错误码透传（`finish kind=error` → 任务失败，错误码进 notes）。
+- `localPlan(files)` 测试（行346-357）：按顶层目录分组，根文件归 `root`，不造概念（`concepts:[]`）。
+- `packArticles(articles, budget)` 测试（行359-370）：预算内整篇装填；超预算后续文章只装头部（含 frontmatter 与 Overview）并标“仅头部”。
+- `scanRepoFiles(root)` 测试（行372-386）：跳过 `node_modules`/`.git`/二进制/超大（300*1024 被跳）/空文件；只收有效源码，返回项含 `path` 与 `bytes`。
+- `listModelCatalog(llm)` 测试（行409-431）：`llm` 需有 `listProviders()`/`listModels(id)`；跳过无 `id` 的 provider；兼容 `{provider, name}` 写法；单 provider 抛错时条目保留 `error` 不影响其他；`llm` 为 `null` → `{ok:false, providers:[]}`。
+- `installWebServer(ctx, jobSvc, {llm})` + `/api/codewiki/models` 测试（行433-461）：注入假 `webServer.register` 收集路由；回环（`127.0.0.1`）请求 → 200 且 `ok:true` 返回宿主 provider/model；非回环 → 403 `loopback only`。
+- `resolveModelEfforts(llm, provider, model)` + `/api/codewiki/model-efforts` 测试（行463-515）：`llm.resolveModel` 返回 `{context:{tokens}, reasoning:{defaultEffort, efforts:[...]}}`；解析出档位/默认档/上下文长度；未知模型 → `ok:false` 带 error 不抛；`llm` 为 `null` → 诚实报错含 `resolveModel`；模型未声明档位 → `ok:true` 空列表；端点回环+完整参数 200，缺 `model` 参数 400，非回环 403。
+- 0.10.1 通道移除校验（行517-520）：动态 `import('./index.js')` 断言 `resolveBatchApiKey === undefined`。
+- `fixAnchors(articleText, rootDir)` 测试（行522-564）：返回 `{fixed, text, unresolved}`；仅处理 frontmatter 中 `source_files` 列出的文件；错行号唯一符号修正；起点行含符号视为正确不动；符号未找到记 `unresolved` 不动；多声明歧义不动；多处出现取声明行；区间锚点起点对齐符号、尾部钳到文件末行；basename 唯一解析修正并保留原文写法；不在清单不碰；CRLF 文章行尾保真；无 frontmatter 原样；basename 根与子目录同名歧义不碰。
 
 ### test-cwd-paths.mjs
 
@@ -106,7 +106,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
           │ mock ctx/llm         │ fake paths          │ static check
 ┌─────────┴──────────┐   ┌───────┴────────┐   ┌────────┴────────┐
 │ test-batch.mjs     │   │ test-cwd-paths │   │ makeLlm/ctx.inject│
-│ (行1-501)          │   │ .mjs (行1-71)  │   │                 │
+│ (行1-570)          │   │ .mjs (行1-71)  │   │                 │
 └────────────────────┘   └────────────────┘   └──────────────────┘
 ```
 
@@ -118,7 +118,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 
 ### test-batch.mjs 数据流
 
-用 `fs.mkdtempSync` 造临时目录，写入源码/文章；将路径与任务描述传入 `prepareArticleTasks`（行53-131）等，得到 `{prepared, sessionTasks}` 或 prompt 字符串，再喂给 `runRealtimeTasks(tasks, opts)`（行169-338）断言返回 `Map<customId, {ok, content?}>` 及磁盘落盘；`installWebServer`（行364-446）注入伪 `ctx` 得路由 handler，以伪 `req{url, socket.remoteAddress}`/`res{writeHead, end}` 调 handler 验 HTTP 行为。
+用 `fs.mkdtempSync` 造临时目录，写入源码/文章；将路径与任务描述传入 `prepareArticleTasks`（行53-131）等，得到 `{prepared, sessionTasks}` 或 prompt 字符串，再喂给 `runRealtimeTasks(tasks, opts)`（行169-205、207-228、298-320、323-344、394-407 等）断言返回 `Map<customId, {ok, content?}>` 及磁盘落盘；`installWebServer`（行433-461、463-515）注入伪 `ctx` 得路由 handler，以伪 `req{url, socket.remoteAddress}`/`res{writeHead, end}` 调 handler 验 HTTP 行为。
 
 ### test-cwd-paths.mjs 数据流
 
@@ -147,7 +147,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 
 - **cordis 语义**：`makeCtx` 的 `inject` 传 ctx 切片而非实例（行62-72）；`effect` 错写 `ctx.effect(()=>service.stop())` 会当场调用致 tick 停摆（行77-81）；严格语义下未 inject 访问 `ctx.agents` 抛错（`Object.defineProperty` 行1487-1489），但 `apply` 不抛且工具仍注册（行1490-1493）。
 - **LLM 接线**：`llmProxy.stream` 若 `activeLlm` 未接线抛 “测试未接线”（行128）；stall 模式挂起至 `opts.signal` abort（行177-184）。
-- **本地规划**：0.10.7 起删规划阶段，模块清单由 localPlan 按顶层目录分组生成（行558-615），fixture 结构直接决定模块名（行103-120）；无勘探员请求（行583, 628）。
+- **本地规划**：0.10.7 起删规划阶段，模块清单由 localPlan 按顶层目录分组生成（行558-615），fixture 结构直接决定模块名（行103-120）；无勘探员请求（行583, 628）；0.10.7 删掉了规划应答非 JSON 降级场景，本地分组已是唯一路径（行595）。
 - **commitHintText 缓存**：缓存键为 cwd，编译早于 `.codewiki` 最后提交则静默；`writtenCount=0` 不提醒；测试用换仓库绕开 60s 缓存（行312-402）。
 - **wakeCompileSession 静默**：autoCommit 成功 → done 完全不唤醒会话（行529-530）；无 sessionId、冷会话、registry.get 抛、steer 抛、缺省 agents 均不抛仅跳过（行547-555）。
 - **单项目串行**：A 用 stall 占推进权，B 提交进 `queued` 且排队期零请求；取消 A 后 B 自动轮到（行726-782）。
@@ -161,7 +161,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - **模型缺失**：`batchProvider:''` 时 `codewiki_generate` 抛 “编译模型提供商为空”，且失败落 job.failed 留痕（行1463-1470）。
 - **Temp 清理**：启动 tick 移除 Temp 目录终态任务，保留活动/工作区终态（行1501-1513）。
 - **错误前缀改写**：`codewiki_update` 包装 `generate` 错误，消息前缀改写为 `codewiki_update`（行307-309）。
-- **autoCommitWiki 安全边界**：只提交 `.codewiki/` 与 `CodeWiki.md`，非 git/被 gitignore/merge 进行中/缺 git identity 均拒绝（行405-506）。
+- **autoCommitWiki 安全边界**：只提交 `.codewiki/` 与 `CodeWiki.md`，非 git/被 gitignore/merge 进行中/缺 git identity 均拒绝（行405-506）；merge 失败防御性路径不在单测覆盖内（行492-494）。
 
 ### test-wiki-anchors.mjs 边界
 
@@ -174,13 +174,13 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 ### test-batch.mjs 边界
 
 - **Token/预算边界**：`estimateTokens` 空串 0，混合分别计费（行23-28）；`collectSources` 首文件超预算即 `oversized` 兜底返回首文件（行40-41），后续装不下进 `skipped`；多文件超预算拆观察批且每批 ≤110k token（行87-105）；单文件超大走会话通道 128k 大档，再超则全长装填（行78-84）；大档模型接管超 128k 单文件（行107-131）。
-- **行号/格式**：`numberLines` 空文件输出 `1|`，双尾换行保留空行 `2| `，CRLF 剥离（行46-51）；`fixAnchors` 对未找到/歧义/不在清单/basename 歧义均不动并记 `unresolved`，区间尾部钳到文件尾，CRLF 保真（行453-495）。
+- **行号/格式**：`numberLines` 空文件输出 `1|`，双尾换行保留空行 `2| `，CRLF 剥离（行46-51）；`fixAnchors` 对未找到/歧义/不在清单/basename 歧义均不动并记 `unresolved`，区间尾部钳到文件尾，CRLF 保真（行522-564）。
 - **会话通道收割**：`classifySessionTask` 超时（30min）判定优先于已产出（行139-141）；旧文未更新（mtime 早于派发）判 `wait`（行146-148）。
-- **任务执行容错**：`runRealtimeTasks` 单任务失败仅记 `notes`、不落盘、不中断并发（行253-275, 323-338）；外部 `AbortController` 已 abort 则池子立即停止消费（行241-251）；`reasoningEffort` 未配置时从请求体省略而非传 undefined（行238）；`temperature` 硬编码 0（行202）。
-- **模型/端点**：`listModelCatalog`/`resolveModelEfforts` 在 `llm=null` 或单 provider 抛错时诚实返回 `ok:false` 或保留错误条目，不抛异常（行360-361, 420-421）；HTTP 端点强制回环（`127.0.0.1` 放行，其它 403），缺参 400（行385-391, 438-445）。
+- **任务执行容错**：`runRealtimeTasks` 单任务失败仅记 `notes`、不落盘、不中断并发（行323-344, 394-407）；外部 `AbortController` 已 abort 则池子立即停止消费（行310-320）；`reasoningEffort` 未配置时从请求体省略而非传 undefined（行307）；`temperature` 硬编码 0（行202）。
+- **模型/端点**：`listModelCatalog`/`resolveModelEfforts` 在 `llm=null` 或单 provider 抛错时诚实返回 `ok:false` 或保留错误条目，不抛异常（行428-430, 487-493）；HTTP 端点强制回环（`127.0.0.1` 放行，其它 403），缺参 400（行454-460, 506-514）。
 - **档位钉死**：`buildSessionSteerText` 填 `tier` 时显式禁止自动选路，且 `review`/`resend` 场景文案不同但均钉死（行151-168）。
-- **0.10.1 删除内置百炼通道**：`resolveBatchApiKey` 不再从 `./index.js` 导出（行448-451），插件不碰密钥。
-- **scanRepoFiles 黑名单**：跳 node_modules/.git/二进制/超大(300*1024)/空（行303-318）。
+- **0.10.1 删除内置百炼通道**：`resolveBatchApiKey` 不再从 `./index.js` 导出（行517-520），插件不碰密钥。
+- **scanRepoFiles 黑名单**：跳 node_modules/.git/二进制/超大(300*1024)/空（行372-386）。
 
 ### test-cwd-paths.mjs 边界
 
