@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.13.0 — 2026-10-27
+
+### 新增：吸收 FSoft-AI4Code/CodeWiki 的三层能力（AST 聚类 / agentic 写作 / 符号级增量）
+
+- 背景（用户需求）：用户看到 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（ACL 2026，MIT）比底层的 [mraza007/codewiki](https://github.com/mraza007/codewiki) 活跃得多，问能否换掉。核查后的结论是**不该换栈、该吸收**：`mraza007/codewiki` 是 Rust CLI 骨架，提供 `status`/`init`/`index`/`meta update` 这套文件级接口，插件与它 1:1 相符；而它**不含**「模块怎么划分」与「文章怎么写」这两件真正决定 wiki 质量的事——插件原先补的是最省事的两刀（顶层目录分组 + 源码整包内联一次成文）。FSoft 那套恰好就是在这两处做工程化，但它本身没有 `status`/`index`/`meta`，换掉会把插件的三态判定与增量链路一起丢掉，且要引入 Python 运行时（实测装下来 668MB）。用户 2026-10-26 选定「路线三：吸收优势、不换栈」，语言经三方案实测后定为 Node + tree-sitter WASM（不引 Python/Rust 运行时）。
+
+- **符号提取（`lib/symbols.js`，701 行）**：表驱动 `LANG_RULES` 替代上游按语言逐个 `analyzer`（约 800 行/语言）。用 `web-tree-sitter` + `tree-sitter-wasms` 的 36 个 WASM 语法，覆盖 16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name, kind, parameters, baseClasses, dependsOn, bodyHash, sourceCode, docstring}>`；`resolveImportEdges` 建跨文件依赖边（相对路径、包名、`__init__.py`、Go module 路径、Rust `crate::` 都有归一）。某语言无 WASM 语法时退回正则级符号提取，不影响其它语言。本仓库自检：135 个组件、0 解析失败。
+
+- **模块划分（`lib/cluster.js`，452 行）**：移植上游 `cluster_modules.py` 的两阶段聚类——先按组件职责聚类，再对超大模块递归下钻（`CLUSTER_MODULE_PROMPT` 分支），最后 super-group 合并。`heuristicCluster` 兜底：**单顶层目录（极常见的 `src/` 布局）时自动下探到第二层**，否则整仓会被塞进一个模块。模型请求失败或没有模型时退回 `localPlan` 顶层目录分组，并在 job note 里写明降级原因。
+
+- **文章写作（`lib/agentic.js` 388 + `lib/agentic-host.js` 101 + `lib/articles-agentic.js` 131）**：上游 `run_module_agent` 的工具循环。工具 `read_code`（带行号前缀、支持行范围）、`list_files`（递归深度）、`edit_article`（view / str_replace / insert，空文章用 insert 从第 0 行搭骨架）、`generate_sub_module`（委派子模块成文）。好处是不再把源码整包塞进 prompt，因此**没有「超预算 → 拆观察批 → 合成」那一整套**，大文件也不会退化成观察批。`agentic-host.js` 负责裸消息 ↔ 宿主 `llm.stream` 的 Message/chunk 协议适配（`makeHostStream`/`makeFsWorkspace`/`toRequestMessages`），`articles-agentic.js` 接 job 生命周期（并发池、落盘、锚点修正）。单篇空文章算失败，不会用空文件覆盖旧文。
+
+- **符号级增量（`lib/graph-diff.js` 497 + `lib/incremental.js` 169）**：逐位移植上游 `updater/graph_diff.py`——组件级 `bodyHash` + 签名比对，区分 `interface` / `added` / `deleted` / `renamed` / `body` / `edge` 六类变更，其中 `renamed` 用「删除+新增近似」配对。`incremental.js` 负责快照存取（`.codewiki/temp/symbol-graph.json`，随 wiki 入库）、文件级 → 组件级折算、按文章 frontmatter 的 `source_files` 过滤出「哪些文章真的要重写」。**收益**：纯注释、空白、格式化、函数体局部改动不再触发全文重写。快照缺失/版本不符/提取失败一律退回文件级 mtime/hash 判定。
+
+- **接入（`index.js`）**：新增 `planMode` / `agenticArticles` / `agenticMaxSteps` / `symbolIncremental` 四个配置，**默认全开**；三者分别设成 `dirs`/`false`/`false` 即恢复 0.12.x 旧行为。`buildPlan` 走 `semanticPlan`（新导出）并由 `extractCurrentGraph` 提供符号图；`tickArticles` 增加 agentic 通道分支，与 `startBatchChatRun` 并列的第二条执行器（结果同样进 `batchResults` 由 `settleJob` 收割），宿主重启后按 `t.tasks[*].agentic === true` 重跑而不再找 `batchPrompt`。
+
+- **补齐退回链路（本次自查发现注释写了、代码没写）**：`index.js` 原注释称「失败率过半且旧通道可用时退回单轮通道重跑一次（见下）」，但「见下」处并不存在该实现。新增导出 `shouldFallBackFromAgentic(results)`（**严格过半**才算系统性失败，恰好一半不退）+ 内部 `shouldFallBackHere`（另守 `job.agenticRetried`，**只退一次**，否则退回后仍失败会每 tick 重新提交成死循环）。退回时**只重排失败篇**，已写成功的文章不再重写（重复写同一路径既费 token，又会覆盖掉 agentic 现场读代码写出的更好版本）。
+
+- **修复 `tally` 的重复计数**：原逻辑只在 `replace=true`（校对阶段）时按名字查旧条目，其它阶段一律 `push`。这对新增的重跑路径是错的——agentic 失败退回单轮重跑、宿主重启整批重跑都会第二次收到同一个 `name`，导致 `writtenCount` 重复累加、`job.articles` 里留两条同名记录（面板显示成两篇）。改为**始终按名字去重**（文章名就是落盘路径，天然唯一）：曾在成功的条目不因后续失败被抹掉，由失败转成功时才把计数从 `failedCount` 挪到 `writtenCount`。
+
+- **依赖落位（`vendor/tree-sitter/`）**：`web-tree-sitter` + `tree-sitter-wasms` 装在插件根的独立 npm 子根，**不装进插件根 `node_modules`**——后者是宿主注入的，在那里 `npm i` 会把宿主包标记 retire 并破坏运行环境（实测）。体积 56MB（对比 Python 方案 668MB）。`node_modules/` 按 `.gitignore` 规则不入库，新机器按需 `cd vendor/tree-sitter && npm i`；没装时插件照常启动，只是没有 AST 能力、三层全部自动降级。
+
+- **设置页（`client.js`）**：新增「编译流程（吸收自 FSoft CodeWiki）」一节，含 `planMode` 下拉（auto/dirs）与 `agenticArticles` / `symbolIncremental` 开关、`agenticMaxSteps` 数字输入（1–100，硬顶 100）；中英 i18n 词条齐备。
+
+- **测试**：新增 6 个测试文件、共 111 条断言——`test-symbols.mjs`（19）、`test-cluster.mjs`（28）、`test-agentic.mjs`（39）、`test-agentic-host.mjs`（15）、`test-agentic-fallback.mjs`（10，覆盖退回判定与可装填性）、`test-semantic-plan.mjs`（10，AST→聚类→模块清单端到端）；另有 `test-graphdiff.mjs`（78 条与 Python 原版**逐位对拍**全过）与 `test-incremental.mjs`（15）+ `test-incremental-e2e.mjs`（8，含真实临时仓库的快照落盘与四类改动场景）。`test-orchestration.mjs` 的配置基线显式钉住 `LEGACY_CHANNEL = { planMode: 'dirs', agenticArticles: false, symbolIncremental: false }`——该文件断言的是旧通道的请求次数与装填时序，不钉住会因「通道换了」而不是「功能坏了」失败；新通道由上面几个文件守护。全套回归：新通道 9 个文件全绿、`test-batch.mjs` 128 条全过、`test-orchestration.mjs` 编排冒烟全过、其余既有测试（cwd-paths / sessions / wiki-entry / worktree）全过。
+
+- 版本 0.12.2 → 0.13.0（minor：新增能力与配置，默认行为改变但可一键回退）。
+
 ## 0.12.2 — 2026-10-26
 
 ### 新增：编译并发按「大档 / 默认档」分开设置
