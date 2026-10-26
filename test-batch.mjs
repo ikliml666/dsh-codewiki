@@ -226,6 +226,75 @@ check(bigCall?.provider === 'volces-ark' && bigCall?.model === 'glm-5.3-flash', 
 check(bigCall?.reasoningEffort === 'max', '大档任务带自己的思考档位')
 check(bigCall2?.reasoningEffort === undefined, '大档任务未指定档位时不回落普通档（用模型默认）')
 
+// 分池限流（0.12.2）：大档任务与默认档任务各自独立计数、同时推进。
+// 用带延迟的 mock llm 统计「同时在飞」的峰值——只有真正分开限流才能观测到两池各自打满。
+section('runRealtimeTasks：大档与默认档并发分池')
+function makeSlowLlm(reply, delayMs = 30) {
+  return {
+    async *stream(opts) {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      await new Promise((r) => setTimeout(r, delayMs))
+      yield { type: 'text-delta', index: 0, text: reply }
+      yield { type: 'usage', usage: { outputTokens: 8 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }
+}
+function poolProbe() {
+  const st = { normal: 0, big: 0, peakNormal: 0, peakBig: 0, total: 0, peakTotal: 0 }
+  return {
+    st,
+    onTaskStart(t) {
+      if (t.bigTier) { st.big += 1; st.peakBig = Math.max(st.peakBig, st.big) }
+      else { st.normal += 1; st.peakNormal = Math.max(st.peakNormal, st.normal) }
+      st.total += 1
+      st.peakTotal = Math.max(st.peakTotal, st.normal + st.big)
+    },
+    onTaskEnd(t) {
+      if (t.bigTier) st.big -= 1
+      else st.normal -= 1
+    },
+  }
+}
+const mk = (id, big) => ({
+  customId: id, name: `_${id}`, keepInMemory: true, batchPrompt: `任务${id}`,
+  ...(big ? { provider: 'volces-ark', model: 'glm-5.3-flash', bigTier: true } : {}),
+})
+{
+  // concurrency=2 / bigConcurrency=1：默认档被打满 2，大档单独限 1，两池并行 → 总峰值 3
+  const probe = poolProbe()
+  const timedTasks = [
+    mk('n0'), mk('n1'), mk('n2'), mk('n3'),
+    mk('g0', true), mk('g1', true), mk('g2', true),
+  ]
+  const res = await runRealtimeTasks(timedTasks, {
+    provider: 'workbuddy', llm: makeSlowLlm('---\ntitle: P\n---\n结果'),
+    model: 'hy3', concurrency: 2, bigConcurrency: 1, notes: [],
+    onRequestStart: (t) => {
+      probe.onTaskStart(t)
+      return { onDone: () => probe.onTaskEnd(t), onError: () => probe.onTaskEnd(t) }
+    },
+  })
+  check(res.size === 7 && [...res.values()].every((r) => r.ok), '分池后 7 个任务全部完成')
+  check(probe.st.peakNormal === 2, `默认档并发打满 2（实测 ${probe.st.peakNormal}）`)
+  check(probe.st.peakBig === 1, `大档并发独立限到 1（实测 ${probe.st.peakBig}）`)
+  check(probe.st.peakTotal >= 2, `两池同时推进（总峰值 ${probe.st.peakTotal} ≥ 2）`)
+}
+{
+  // bigConcurrency 不传/为 0 → 跟随默认档（等价 0.12.1 的单一池行为）
+  const probe = poolProbe()
+  const followTasks = [mk('g0', true), mk('g1', true), mk('g2', true), mk('g3', true)]
+  await runRealtimeTasks(followTasks, {
+    provider: 'workbuddy', llm: makeSlowLlm('---\ntitle: F\n---\n结果'),
+    model: 'hy3', concurrency: 2, notes: [],
+    onRequestStart: (t) => {
+      probe.onTaskStart(t)
+      return { onDone: () => probe.onTaskEnd(t), onError: () => probe.onTaskEnd(t) }
+    },
+  })
+  check(probe.st.peakBig === 2, `bigConcurrency 缺省=跟随默认档 2（实测 ${probe.st.peakBig}）`)
+}
+
 section('runRealtimeTasks：tps 采样与取消信号')
 {
   llmCalls = []

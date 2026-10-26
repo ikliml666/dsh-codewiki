@@ -59,7 +59,8 @@ export const Config = z.object({
   bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取'),
   bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
   sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
-  maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('编译请求并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
+  maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
+  bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -78,6 +79,7 @@ function val(x) {
 function liveConfig(config) {
   const c = config ?? {}
   const concurrency = Number(val(c.maxConcurrency))
+  const bigConcurrency = Number(val(c.bigConcurrency))
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
@@ -92,6 +94,10 @@ function liveConfig(config) {
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : DEFAULT_CONCURRENCY,
+    // 大档并发：0/未填 = 跟随默认档（与 0.12.1 前的单一池行为等价）
+    bigConcurrency: Number.isFinite(bigConcurrency) && bigConcurrency >= 1
+      ? Math.min(bigConcurrency, CONCURRENCY_HARD_CAP)
+      : 0,
     serialProjects: val(c.serialProjects) !== false,
     parallelLimit: (() => {
       const raw = Number(val(c.parallelProjects))
@@ -432,46 +438,72 @@ function applyTaskResult(task, content, notes) {
 // onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
 // 每个任务可带自己的 model/provider/reasoningEffort（大档任务用），缺省回落到参数里的
 // 普通档模型——一期请求先按任务装填时的模型分派，不在运行期再改。
+// 大档与默认档并发上限分开（0.12.2）：t.bigTier === true 的任务进大档池（bigConcurrency），
+// 其余进默认档池（concurrency）。两个池各自独立计数、同时推进——大档模型常是付费长上下文档，
+// 与免费默认档的配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全部堵住。
+// bigConcurrency 为 0 / 未传时回落到 concurrency（与 0.12.1 行为一致）。
 // 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
 // onRequestStart(task)（可选）：每个请求发起前回调，返回 null 或
 // { onDelta(chunk), onDone(content, outputTokens), onError(err) }——会话记录器挂钩，
 // 让面板能看到「目前正在进行的会话内容」。
-export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, notes, onTaskDone, signal, llm, provider, onRequestStart }) {
+export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, bigConcurrency = 0, notes, onTaskDone, signal, llm, provider, onRequestStart }) {
   const results = new Map()
-  let cursor = 0
-  const worker = async () => {
-    for (;;) {
-      if (signal?.aborted) return
-      const i = cursor++
-      if (i >= tasks.length) return
-      const t = tasks[i]
-      const rec = onRequestStart ? onRequestStart(t) : null
-      try {
-        const startedAt = Date.now()
-        const { content, outputTokens } = await llmChat({
-          llm,
-          provider: t.provider || provider,
-          model: t.model || model,
-          // 任务自带 provider+model（大档任务）时 effort 完全以任务为准（空=模型默认档），
-          // 不回落普通档配置——普通档的 effort（如 off）可能不被大档模型支持
-          reasoningEffort: (t.provider && t.model)
-            ? (t.reasoningEffort || undefined)
-            : (t.reasoningEffort || reasoningEffort),
-          prompt: t.batchPrompt,
-          signal,
-          onDelta: rec?.onDelta,
-        })
-        if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
-        results.set(t.customId, applyTaskResult(t, content, notes))
-        rec?.onDone?.(content, outputTokens)
-      } catch (err) {
-        notes.push(`${t.name} 请求失败 —— ${String(err?.message ?? err)}`)
-        results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
-        rec?.onError?.(err)
+  // 分池：大档任务与默认档任务各自独立限流。判定只看任务装填时打的 bigTier 标记
+  // （文章装填 markBig、横切/校对的大档标记都写它），不按 provider 猜——用户完全可能
+  // 把默认档也配成同一个 provider。
+  const bigTasks = []
+  const normalTasks = []
+  for (const t of tasks) {
+    if (t.bigTier === true) bigTasks.push(t)
+    else normalTasks.push(t)
+  }
+  const pools = []
+  if (normalTasks.length) {
+    pools.push({ tasks: normalTasks, limit: Math.max(1, Math.min(concurrency, normalTasks.length)) })
+  }
+  if (bigTasks.length) {
+    const bigLimit = Number.isFinite(Number(bigConcurrency)) && Number(bigConcurrency) >= 1
+      ? Number(bigConcurrency)
+      : concurrency
+    pools.push({ tasks: bigTasks, limit: Math.max(1, Math.min(bigLimit, bigTasks.length)) })
+  }
+  const runPool = async (pool) => {
+    let cursor = 0
+    const worker = async () => {
+      for (;;) {
+        if (signal?.aborted) return
+        const i = cursor++
+        if (i >= pool.tasks.length) return
+        const t = pool.tasks[i]
+        const rec = onRequestStart ? onRequestStart(t) : null
+        try {
+          const startedAt = Date.now()
+          const { content, outputTokens } = await llmChat({
+            llm,
+            provider: t.provider || provider,
+            model: t.model || model,
+            // 任务自带 provider+model（大档任务）时 effort 完全以任务为准（空=模型默认档），
+            // 不回落普通档配置——普通档的 effort（如 off）可能不被大档模型支持
+            reasoningEffort: (t.provider && t.model)
+              ? (t.reasoningEffort || undefined)
+              : (t.reasoningEffort || reasoningEffort),
+            prompt: t.batchPrompt,
+            signal,
+            onDelta: rec?.onDelta,
+          })
+          if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
+          results.set(t.customId, applyTaskResult(t, content, notes))
+          rec?.onDone?.(content, outputTokens)
+        } catch (err) {
+          notes.push(`${t.name} 请求失败 —— ${String(err?.message ?? err)}`)
+          results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
+          rec?.onError?.(err)
+        }
       }
     }
+    await Promise.all(Array.from({ length: pool.limit }, worker))
   }
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, worker))
+  await Promise.all(pools.map(runPool))
   return results
 }
 
@@ -1761,6 +1793,7 @@ function createJobService(config, onSettled) {
         model: c.batchModel,
         reasoningEffort: c.batchReasoningEffort || undefined,
         concurrency: c.maxConcurrency,
+        bigConcurrency: c.bigConcurrency, // 0 = 跟随默认档并发
         notes: job.notes,
         signal: ac.signal,
         onRequestStart: (t) => beginSessionRecord(job, t), // 会话内容记录（面板「会话」视图）
@@ -1804,8 +1837,10 @@ function createJobService(config, onSettled) {
       customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
       cwd: t.cwd, // 锚点自动修正的源码根（writeValidated 用 job.cwd，普通文章直写用 t.cwd）
       batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
-      // 大档任务：记录它该用哪个模型跑，重启接管后按同档重派（否则会掉回普通档装不下）
-      ...(t.bigTier ? { provider: t.provider, model: t.model, ...(t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}) } : {}),
+      // 大档任务：记录它该用哪个模型跑，重启接管后按同档重派（否则会掉回普通档装不下）。
+      // bigTier: true 必须一起持久化——它是并发分池的唯一依据，丢了会让重跑的请求
+      // 全部挤进默认档池，把默认档配额吃光。
+      ...(t.bigTier ? { bigTier: true, provider: t.provider, model: t.model, ...(t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}) } : {}),
       // 分割观察任务（#obs）的合成重建元数据：splitFor 指向所属文章 name，
       // composePlan 携带 mission/articlePath/prevArticlePath——收割时从持久化快照重建合成任务
       ...(t.splitFor ? { splitFor: t.splitFor, composePlan: t.composePlan } : {}),
@@ -1818,7 +1853,11 @@ function createJobService(config, onSettled) {
     const modelText = bigCount
       ? `${c.batchProvider}/${c.batchModel} + 大档 ${c.bigProvider}/${c.bigModel}（${bigCount} 个）`
       : `${c.batchProvider}/${c.batchModel}`
-    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${modelText}，并发 ${c.maxConcurrency}）`)
+    // 并发文案：有大档任务时把两档上限都写清楚（大档 0 = 跟随默认档）
+    const concurrencyText = bigCount
+      ? `${c.maxConcurrency} + 大档 ${c.bigConcurrency || c.maxConcurrency}`
+      : `${c.maxConcurrency}`
+    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${modelText}，并发 ${concurrencyText}）`)
     touch(job)
   }
 
@@ -2115,6 +2154,7 @@ function createJobService(config, onSettled) {
             t.provider = bigTier.provider
             t.model = bigTier.model
             if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
+            t.bigTier = true // 分池依据：进大档并发池，不吃默认档配额
           }
         }
         await submitBatchFor(job, tasks)
@@ -2239,6 +2279,7 @@ function createJobService(config, onSettled) {
         t.provider = bigTier.provider
         t.model = bigTier.model
         if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
+        t.bigTier = true // 分池依据：进大档并发池
       }
       let i = 0
       const submitGroup = (group) => {

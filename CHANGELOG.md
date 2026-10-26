@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.2 — 2026-10-26
+
+### 新增：编译并发按「大档 / 默认档」分开设置
+
+- 背景（用户需求）：「编译并发的设置，大档和默认档位分开设置」。0.12.1 及以前只有一个 `maxConcurrency`，普通档任务（`batchModel`，免费 hy3）与大档任务（`bigModel`，`volces-ark/glm-5.3-flash`）在**同一个 worker 池**里抢同一个名额：一批请求里只要有 2 个大档任务在飞，默认档就被完全堵住；反过来把并发调大让默认档跑满，又会把付费长上下文的大档一起放出去。两档的额度、单价、上游限流特性本就无关，共用一个数字无法同时满足。
+
+- 分池执行器（`index.js`，`runRealtimeTasks`）：把原来的单一 cursor/worker 组拆成两个**独立池**——`bigTier === true` 的任务进大档池（`bigConcurrency`），其余进默认档池（`concurrency`）；两个池各自维护 cursor 与 worker 数量，用 `Promise.all` 同时推进，互不阻塞。判定只看任务装填时打的 `bigTier` 标记，**不按 provider 猜**——用户完全可能把默认档也配成同一个 provider。`bigConcurrency` 为 `0`/未传时回落到 `concurrency`，与 0.12.1 的单一池行为完全等价（向后兼容）。
+
+- 新配置项（`index.js`）：`bigConcurrency`（默认 `0`），`liveConfig` 里钳到 `1–8`（`CONCURRENCY_HARD_CAP`），`0`/非数字保持 `0` 表示「跟随默认档」。`maxConcurrency` 的描述同步收窄为「默认档并发上限」。
+
+- 补齐两处**漏打 `bigTier` 标记**的大档任务（分池能生效的前提）：横切单批直出（`index.js` 的 `submitBatchFor` 前，原来只设 `t.provider`/`t.model`/`t.reasoningEffort`）与批量校对的 `markBigTask`。漏了标记的后果不只是「没进大档池」——它会以默认档身份占一个默认档名额，同时用大档模型发请求，池子语义与统计全错。`job.tasks` 持久化也补上 `bigTier: true`：宿主重启按 prompt 快照重跑时，否则所有请求都会掉进默认档池。
+
+- 启动日志（`index.js`）：有大档任务时并发文案写全两档（`并发 2 + 大档 3`），大档跟随默认档时显示为 `并发 2 + 大档 2`，不再只报一个数字。
+
+- 设置页（`client.js`）：`maxConcurrency` 标签改为「默认档并发上限」，新增「大档并发上限」数字输入（`min: 0`、`max: 8`、`placeholder: 0`，空输入归一为 `0`）。保存校验对 `bigConcurrency` 单独把关：`0` 是合法语义不报错，负值/小数/超硬顶一律拦下并提示 `invalidConcurrency`。新增 `bigConcurrency` 的中英 i18n 词条（标签 + 说明）。
+
+- 测试（`test-batch.mjs`）：新增「大档与默认档并发分池」段 5 条，用 30ms 延迟的 mock llm 统计在飞峰值——`concurrency=2 / bigConcurrency=1` 下 7 个任务（4 默认 + 3 大档）全部完成、默认档峰值恰为 2、大档峰值恰为 1、总峰值 3（证明两池同时推进）；另一组只给大档任务、不传 `bigConcurrency`，峰值 2（证明「跟随默认档」语义）。`test-batch.mjs` 128 条全过。
+
+- 文档：`README.md` 的并发条目拆成 `maxConcurrency`（默认档）与 `bigConcurrency`（大档）两条并写明「总在飞为两者之和」的代价；`cordis.patch.yml` 顶部配置注释同步拆行。
+
+- 版本 0.12.1 → 0.12.2。
+
 ## 0.12.1 — 2026-10-26
 
 ### 修复：worktree / 空壳目录彻底不出现在面板与调度里

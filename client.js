@@ -45,8 +45,10 @@ window.__ModuleLoader__.load({
       autoCommitHint: '开启后编译完成由插件自己提交产物：先在主题分支 codewiki/wiki-<任务id> 上提交 .codewiki/ 与 CodeWiki.md 这两个路径（建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动），再合并回原分支并删除主题分支；无法走分支时（detached HEAD 等）降级为直接提交。会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒；合并冲突时产物保留在主题分支，等手动合并；产物本来就没有改动（重编译无变化）时既不提交也不提醒。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
-      maxConcurrency: '编译并发上限',
-      maxConcurrencyHint: '1–8；硬顶 8。插件内并发池的请求数（默认 2，适合免费 hy3 档）。',
+      maxConcurrency: '默认档并发上限',
+      maxConcurrencyHint: '1–8；硬顶 8。默认档（batchModel，如免费 hy3）的请求并发数，默认 2。',
+      bigConcurrency: '大档并发上限',
+      bigConcurrencyHint: '1–8；硬顶 8。大档（bigModel）的请求并发数，留空=跟随默认档。两档各自独立限流、同时推进，总在飞为两者之和。',
       serialProjects: '单项目串行',
       serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。关闭后按「并行项目上限」同时推进多个仓库。',
       parallelProjects: '并行项目上限',
@@ -204,8 +206,10 @@ window.__ModuleLoader__.load({
       autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes: it commits .codewiki/ and CodeWiki.md on a topic branch codewiki/wiki-<jobId> (docs(wiki) prefix suggested, no repo hooks, your other changes untouched), then merges it back into the original branch and deletes it; when a branch workflow is impossible (detached HEAD, …) it falls back to a direct commit. The session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder; on merge conflicts the artifacts stay on the topic branch for manual merging; when the artifacts have no changes at all (recompile without diffs) it neither commits nor reminds.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
-      maxConcurrency: 'Compile concurrency',
-      maxConcurrencyHint: '1–8; hard cap 8. Requests in the in-plugin pool (default 2, suited to the free hy3 tier).',
+      maxConcurrency: 'Default-tier concurrency',
+      maxConcurrencyHint: '1–8; hard cap 8. In-flight requests for the default tier (batchModel, e.g. the free hy3), default 2.',
+      bigConcurrency: 'Big-tier concurrency',
+      bigConcurrencyHint: '1–8; hard cap 8. In-flight requests for the big tier (bigModel); leave empty to follow the default-tier value. The two tiers are limited separately and progress at the same time, so total in-flight is the sum.',
       serialProjects: 'One project at a time',
       serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects. Turn off to compile several repos in parallel up to the parallel limit.',
       parallelProjects: 'Parallel repo limit',
@@ -736,9 +740,15 @@ window.__ModuleLoader__.load({
               setError(t('invalidConcurrency'))
               return
             }
+            // 大档并发：0 = 跟随默认档；负值/小数/超硬顶一律拦下（0 留给「跟随」语义，不报错）
+            const bigConc = Number(draft?.bigConcurrency)
+            if (Number.isFinite(bigConc) && bigConc !== 0 && (bigConc < 1 || bigConc > 8 || !Number.isInteger(bigConc))) {
+              setError(t('invalidConcurrency'))
+              return
+            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -813,6 +823,16 @@ window.__ModuleLoader__.load({
                     placeholder: '2',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('maxConcurrencyHint')),
+                ),
+                el('label', null, t('bigConcurrency')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 0, max: 8, step: 1,
+                    value: String(draft.bigConcurrency ?? 0),
+                    onChange: (e) => setPath('bigConcurrency', e.target.value === '' ? 0 : Number(e.target.value)),
+                    placeholder: '0',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('bigConcurrencyHint')),
                 ),
                 el('label', null, t('serialProjects')),
                 el('div', { 'data-dscw-field': '' },
