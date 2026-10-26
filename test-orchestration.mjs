@@ -1404,6 +1404,57 @@ console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
   try { fs.rmSync(SESSIONS_DIR, { recursive: true, force: true }) } catch { /* tmp 句柄延迟释放 */ }
 }
 
+// ==================== 空壳目录闸门 + 面板过滤（0.12.1） ====================
+console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列表/仓库总览不显示 ==')
+{
+  // 造一个「只剩 .codewiki 骨架」的空壳目录：真实的残留形态——worktree 被删掉后留下的目录
+  const shellRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-shell-'))
+  const shell = path.join(shellRoot, 'shell-repo')
+  fs.mkdirSync(path.join(shell, '.codewiki'), { recursive: true })
+  fs.writeFileSync(path.join(shell, '.codewiki', '_meta.yaml'), 'commit: abc\n')
+  try {
+    // a) 提交闸门：手动路径报错、auto 路径静默跳过（不产生 job）
+    let shErr = null
+    try { await gen.execute({ cwd: shell }, { agent: 'test-agent' }) } catch (e) { shErr = e }
+    check(String(shErr?.message ?? '').includes('没有可编译的源码文件'), `空壳目录提交 → 报错（${String(shErr?.message ?? '未报错').slice(0, 50)}…）`)
+    const shAuto = await gen.execute({ cwd: shell, scope: 'auto', auto: true }, {})
+    check(shAuto.submitted !== true, 'auto 调度扫到空壳目录 → 不提交')
+
+    // b) 面板过滤：往 jobs 文件里塞一条空壳目录任务 + 一条正常任务，新实例读取后
+    //    jobs 端点不得返回前者、必须返回后者，仓库总览同理。
+    //    正常任务的 cwd 用仓库自身（here）而不是 tmp 里的 fixture——tmp 目录的终态任务
+    //    会被 0.4.6 的「Temp 残留清理」先一步移走，那样就测不到本次的过滤逻辑了。
+    const iso = new Date().toISOString()
+    const mkJob = (id, cwd) => ({ id, cwd, kind: 'full', scope: 'auto', stage: 'failed', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso })
+    const prev = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+    prev.jobs = [...(prev.jobs ?? []), mkJob('job-shell-dead', shell), mkJob('job-ws-live', here)]
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(prev), 'utf8')
+
+    const cc2 = makeCtx()
+    apply(cc2.ctx, batchCfg())
+    await new Promise((r) => setTimeout(r, 300))
+    const jobsEp = cc2.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    check(!!jobsEp, 'jobs 端点已注册')
+    const rJ = fakeRes()
+    await jobsEp.handler(fakeReq({}, '127.0.0.1', 'GET'), rJ)
+    check(rJ.code === 200, `jobs 端点返回 200（实际 ${rJ.code}）`)
+    const ids2 = (JSON.parse(rJ.out).jobs ?? []).map((j) => j.id)
+    check(!ids2.includes('job-shell-dead'), '空壳目录任务被面板过滤掉')
+    check(ids2.includes('job-ws-live'), '正常仓库任务仍在面板上')
+
+    const reposEp = cc2.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    if (reposEp) {
+      const rR = fakeRes()
+      await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), rR)
+      const repoCwds = (JSON.parse(rR.out).repos ?? []).map((x) => String(x.cwd ?? '')).map((p) => p.replace(/[\\/]+$/, '').toLowerCase())
+      const shellKey = shell.replace(/[\\/]+$/, '').toLowerCase()
+      check(!repoCwds.includes(shellKey), '空壳目录不进仓库总览')
+    }
+  } finally {
+    fs.rmSync(shellRoot, { recursive: true, force: true })
+  }
+}
+
 // ============================ 编译模型缺失诚实报错（0.10.1） ============================
 console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理、不静默跑空 ==')
 {

@@ -298,6 +298,67 @@ export function detectLinkedWorktree(cwd) {
   return { gitDir, commonDir }
 }
 
+// worktree 判定的带缓存版本：/api/codewiki/jobs 是 2s 轮询端点，逐任务 spawnSync git
+// 会把宿主事件循环拖住（每次 git 冷启动数十毫秒 × N 任务 × 每 2 秒）。缓存 60s：
+// 新建/删除 worktree 在面板上最多延迟一分钟才反映，可以接受。
+const WORKTREE_CACHE_TTL_MS = 60000
+const worktreeCache = new Map() // normKey → { wt, at }
+const normPathKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
+export function isWorktreeCwd(cwd) {
+  const dir = String(cwd ?? '').trim()
+  if (!dir) return false
+  const key = normPathKey(dir)
+  const hit = worktreeCache.get(key)
+  const now = Date.now()
+  if (hit && now - hit.at < WORKTREE_CACHE_TTL_MS) return hit.wt
+  let wt = false
+  try { wt = detectLinkedWorktree(dir) !== null } catch { wt = false }
+  worktreeCache.set(key, { wt, at: now })
+  return wt
+}
+
+// 目录是否还有可编译的源码：扫不出任何源文件（空目录、只剩 .codewiki 骨架、全是黑名单
+// 目录如 node_modules 的残留）就没必要提交编译——本地规划阶段的 `仓库没有可编译的源码文件`
+// 失败会每分钟由自动调度重试一次，留下满屏同样的失败任务。
+// 带 10 分钟缓存：autoScan 每轮对每个历史仓库调用，大仓库文件树遍历不该每分钟重跑。
+const SOURCE_PROBE_TTL_MS = 10 * 60 * 1000
+const sourceProbeCache = new Map() // normKey → { has, at }
+export function hasCompilableSources(cwd) {
+  const dir = String(cwd ?? '').trim()
+  if (!dir) return false
+  let st
+  try { st = fs.statSync(dir) } catch { return false } // 目录都没了，当然没源码
+  if (!st.isDirectory()) return false
+  const key = normPathKey(dir)
+  const now = Date.now()
+  const hit = sourceProbeCache.get(key)
+  if (hit && now - hit.at < SOURCE_PROBE_TTL_MS) return hit.has
+  let has = false
+  try { has = scanRepoFiles(dir).length > 0 } catch { has = false }
+  sourceProbeCache.set(key, { has, at: now })
+  return has
+}
+// 手动编译/目录内容变化后清掉探测缓存，别让 10 分钟前的空判定挡住真实提交
+export function clearSourceProbeCache(cwd) {
+  if (!cwd) return sourceProbeCache.clear()
+  sourceProbeCache.delete(normPathKey(String(cwd)))
+}
+
+// 「这个目录根本不是有效的编译对象」的统一判定（面板任务列表 / 仓库总览共用）：
+//   · linked worktree            → 编译它只会和主仓库产物打架（1.2.0 起 submit 直接拒绝）
+//   · 目录在、但扫不出可编译源码  → 空壳/只剩 node_modules 的残留，编译必然失败（1.2.1 起拒绝）
+// 目录已不存在时不算 dead：那是「历史任务的目录后来被删了」，历史记录仍有查看价值，
+// 不能因为 statSync 失败就把用户的历史数据从面板上抹掉。
+export function isDeadCompileTarget(cwd) {
+  const dir = String(cwd ?? '').trim()
+  if (!dir) return false
+  if (isWorktreeCwd(dir)) return true
+  let exists = false
+  try { exists = fs.statSync(dir).isDirectory() } catch { exists = false }
+  if (!exists) return false
+  return !hasCompilableSources(dir)
+}
+
 // ---------------------------------------------------------------------------
 // Token 预算与输入装填
 // ---------------------------------------------------------------------------
@@ -1278,6 +1339,18 @@ function rememberRepo(cwd) {
   list.push(dir)
   try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: list }, null, 2), 'utf8') } catch { /* 不可写则放弃 */ }
 }
+// 反登记（1.2.1）：worktree 目录与彻底空掉的目录不该占着仓库总览——一次性从已知仓库清单里摘掉。
+// 只改 REPOS_FILE（插件自己的登记），不碰用户磁盘上的任何目录。
+export function forgetRepo(cwd) {
+  const dir = String(cwd ?? '').trim()
+  if (!dir) return false
+  const key = (p) => path.normalize(p).replace(/[\\/]+$/, '').toLowerCase()
+  const list = loadKnownRepos()
+  const kept = list.filter((p) => key(p) !== key(dir))
+  if (kept.length === list.length) return false
+  try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: kept }, null, 2), 'utf8') } catch { return false }
+  return true
+}
 const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])
 
 // 仓库源码扫描（本地规划输入）：黑名单目录 + 二进制后缀 + 单文件 256KB + 总数 2000
@@ -1461,6 +1534,28 @@ function createJobService(config, onSettled) {
       jobs.length = 0
       jobs.push(...kept)
       saveJobs(jobs) // 立即落盘：仅 persist 标脏的话，tick 的 mergeFromDisk 会把磁盘残留吸回内存
+    }
+  }
+  // 编译对象残留清理（1.2.1）：worktree 目录与「没有可编译源码」的空壳目录上的历史任务
+  // 是 0.12.0 之前的噪音——同一个空壳目录能攒出十几条一模一样的「仓库没有可编译的源码文件」
+  // 失败记录，还占着面板任务列表。启动时一次性从作业历史里移除，并摘出已知仓库登记，
+  // 仓库总览与任务列表同时干净。只在启动时做一次，判定缓存 10 分钟，不给启动路径加压。
+  // 注意：这里删的是插件自己的作业记录（%TEMP%/dsh-codewiki-jobs.json），不碰用户磁盘上的目录。
+  // 目录不存在时不动（移动硬盘/网络盘临时不可访问不该被当成空壳删掉历史）。
+  {
+    const gone = new Map() // normKey → cwd
+    for (const j of jobs) {
+      const dir = String(j.cwd ?? '')
+      if (dir && isDeadCompileTarget(dir)) gone.set(normPathKey(dir), dir)
+    }
+    if (gone.size) {
+      const kept = jobs.filter((j) => !gone.has(normPathKey(String(j.cwd ?? ''))))
+      if (kept.length !== jobs.length) {
+        jobs.length = 0
+        jobs.push(...kept)
+        saveJobs(jobs)
+      }
+      for (const dir of gone.values()) forgetRepo(dir)
     }
   }
   // 磁盘吸收：另一实例新增的 job、或同 id 但磁盘更新且本实例没动过的 job，并回内存——
@@ -2367,6 +2462,16 @@ function createJobService(config, onSettled) {
       if (auto) return { skipped: 'worktree', reason: msg }
       throw new Error(msg)
     }
+    // 空仓库闸门（1.2.1）：目录里扫不出任何可编译源文件（空壳、只剩 .codewiki 骨架、
+    // 只剩 node_modules 的残留）就不提交——否则本地规划必然以「仓库没有可编译的源码文件」
+    // 失败，而自动调度下一轮又把它扫回来，攒出一屏同样的失败任务。
+    // 手动路径清一次探测缓存再判（刚 clone / 刚 checkout 完的目录不该被 10 分钟前的空判定挡住）。
+    if (!auto) clearSourceProbeCache(cwd)
+    if (!hasCompilableSources(cwd)) {
+      const msg = `该目录没有可编译的源码文件（空目录或只剩 .codewiki / node_modules 等黑名单目录），不编译：${cwd}`
+      if (auto) return { skipped: 'no-source', reason: msg }
+      throw new Error(msg)
+    }
     rememberRepo(cwd)
     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
@@ -2527,6 +2632,18 @@ function generateToolDefinition(cfg, svc) {
         }
       }
       const scope = ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto'
+      // 空壳目录闸门（1.2.1）：同样在跑 cw status 之前就拦——残留目录里的 .codewiki/_meta.yaml
+      // 往往本身也是残缺的（主仓库被删后只剩骨架），先让 cw status 跑起来只会抛
+      // 「Failed to parse _meta.yaml: missing field `project`」这种对用户毫无意义的解析错。
+      // 手动路径清一次探测缓存（刚 clone / 刚 checkout 不该被 10 分钟前的空判定挡住）。
+      if (!auto0) clearSourceProbeCache(cwd)
+      if (!hasCompilableSources(cwd)) {
+        const shMsg = `该目录没有可编译的源码文件（空目录或只剩 .codewiki / node_modules 等黑名单目录），不编译：${cwd}`
+        if (!auto0) throw new Error(shMsg)
+        return {
+          cwd, scope, wikiPath: '', state: 'no-source', submitted: false, notes: [shMsg],
+        }
+      }
       const auto = auto0
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
@@ -2970,6 +3087,10 @@ export function installWebServer(ctx, service, extra = {}) {
           // 清单里的项目（如 worktree）占住，藏掉它用户既看不到谁在编译也无法取消。
           const wsPaths = wsFilterPaths()
           if (wsPaths) list = list.filter((j) => !JOB_TERMINAL.has(j.stage) || isExcluded(j.cwd, wsPaths))
+          // 编译对象闸门（1.2.1）：worktree 目录与无可编译源码的空壳目录的任务一律不出现在
+          // 任务列表——这类任务本身就不该存在（submit 闸门已拦），历史遗留条目只会在面板上
+          // 占位并干扰「在等谁」的队列可见性判断。判定带 60s/10min 缓存，2s 轮询不会打爆 git。
+          list = list.filter((j) => !isDeadCompileTarget(j.cwd))
           // 排队可见性：queued 任务标注「在等谁」——正在跑的项目 + 排在它前面的 queued
           //（按提交顺序，jobs 列表本身已按 createdAt 升序）。面板直接渲染，不再让用户猜。
           const running = list.filter((j) => !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
@@ -3014,6 +3135,9 @@ export function installWebServer(ctx, service, extra = {}) {
           const lastByCwd = new Map()
           const putCwd = (dir, last) => {
             if (!dir) return
+            // 编译对象闸门（1.2.1）：worktree 目录与无可编译源码的空壳目录不进仓库总览——
+            // 它们永远编译不出东西，出现在总览里只会诱导用户反复手动提交。
+            if (isDeadCompileTarget(dir)) return
             const k = normKey(dir)
             if (seen.has(k)) {
               if (last && !lastByCwd.get(seen.get(k))) lastByCwd.set(seen.get(k), last)
@@ -3428,7 +3552,10 @@ export function apply(ctx, config) {
       for (const cwd of cwds) {
         if (isExcluded(cwd, c.excludePaths)) continue
         // worktree 目录静默跳过（1.2.0）：历史任务里可能留着 worktree 路径，不编译也不记错误
-        if (detectLinkedWorktree(cwd)) continue
+        if (isWorktreeCwd(cwd)) continue
+        // 空壳目录静默跳过（1.2.1）：扫不出源码的目录永远编译不出东西，submit 闸门虽也会拦，
+        // 但在这里先跳掉更省事——不产生 job、不进 queueAhead 的「在等谁」名单。
+        if (!hasCompilableSources(cwd)) continue
         schedState.lastScanRepos++
         try {
           const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})

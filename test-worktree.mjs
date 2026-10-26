@@ -1,4 +1,5 @@
-// test-worktree.mjs — linked worktree 闸门（1.2.0）：detectLinkedWorktree 三态。
+// test-worktree.mjs — worktree / 空壳目录闸门：0.12.0 的 detectLinkedWorktree 三态，
+// 以及 0.12.1 的 isWorktreeCwd / hasCompilableSources / isDeadCompileTarget 统一判定。
 // 用真实 git 命令建临时仓库 + linked worktree，保证判据来自 git 本身而不是目录命名。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -7,7 +8,7 @@ import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `cw-wt-test-${process.pid}-${crypto.randomBytes(3).toString('hex')}.json`)
-const { detectLinkedWorktree } = await import('./index.js')
+const { detectLinkedWorktree, isWorktreeCwd, hasCompilableSources, isDeadCompileTarget } = await import('./index.js')
 
 let failures = 0
 const check = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { failures++; console.error(`  ✗ ${msg}`) } }
@@ -50,6 +51,30 @@ const plain = path.join(root, 'plain')
 fs.mkdirSync(plain, { recursive: true })
 check(detectLinkedWorktree(plain) === null, '非 git 目录 → null（放行）')
 check(detectLinkedWorktree('') === null && detectLinkedWorktree(null) === null, '空/空值输入 → null')
+
+// ── 0.12.1：isWorktreeCwd 布尔封装（面板 2s 轮询用的带缓存版）与空壳目录判定 ──
+check(isWorktreeCwd(main) === false, 'isWorktreeCwd(主工作区) === false')
+check(isWorktreeCwd(linked) === true, 'isWorktreeCwd(linked worktree) === true')
+check(isWorktreeCwd(path.join(linked, 'sub')) === true, 'isWorktreeCwd(worktree 子目录) === true')
+check(isWorktreeCwd(plain) === false, 'isWorktreeCwd(非 git 目录) === false')
+check(isWorktreeCwd('') === false && isWorktreeCwd(null) === false, 'isWorktreeCwd 空值 → false')
+// 缓存：同一路径连查两次结果必须一致（第二次走缓存）
+check(isWorktreeCwd(linked) === true && isWorktreeCwd(linked) === true, 'isWorktreeCwd 缓存命中后结果一致')
+
+// 空壳目录：只有 .codewiki 骨架（. 开头目录本就进扫描黑名单）→ 无源码
+const shell = path.join(root, 'shell')
+fs.mkdirSync(path.join(shell, '.codewiki'), { recursive: true })
+fs.writeFileSync(path.join(shell, '.codewiki', '_meta.yaml'), 'commit: x\n')
+check(hasCompilableSources(main) === true, 'hasCompilableSources(有 a.txt 的仓库) === true')
+check(hasCompilableSources(shell) === false, 'hasCompilableSources(只剩 .codewiki) === false')
+check(hasCompilableSources(path.join(root, 'missing')) === false, 'hasCompilableSources(不存在路径) === false')
+
+// isDeadCompileTarget：worktree 与空壳都算 dead；不存在的目录不算（保留历史记录）
+check(isDeadCompileTarget(main) === false, 'isDeadCompileTarget(主工作区) === false')
+check(isDeadCompileTarget(linked) === true, 'isDeadCompileTarget(linked worktree) === true')
+check(isDeadCompileTarget(shell) === true, 'isDeadCompileTarget(空壳目录) === true')
+check(isDeadCompileTarget(path.join(root, 'gone-dir')) === false, 'isDeadCompileTarget(目录不存在) === false（历史保留）')
+check(isDeadCompileTarget('') === false && isDeadCompileTarget(null) === false, 'isDeadCompileTarget 空值 → false')
 
 git('-C', main, 'worktree', 'remove', '--force', linked)
 fs.rmSync(root, { recursive: true, force: true })

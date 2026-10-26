@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.1 — 2026-10-26
+
+### 修复：worktree / 空壳目录彻底不出现在面板与调度里
+
+- 背景（用户需求）：「全部执行，确保 worktree 目录不会出现在任务列表中」。0.12.0 只拦住了**提交**这条路径，面板仍会显示这些目录的**历史任务**：用户截图里 `Wxxy-CampusLogin` 出现在「总览」两条相邻条目中——一条是真仓库（273 篇，增量已完成），另一条 `Wxxy-CampusLogin/adapter-switch-login-check-20261025`（未编译，排队中·自动）。后者是 worktree 删除后留下的空壳：`git rev-parse` 报 `fatal: not a git repository`（所以 `detectLinkedWorktree` 抓不到），目录里只剩 `.codewiki/_meta.yaml` 一个文件加空的 `node_modules` 骨架，`scanRepoFiles` 返回 `[]`，于是每轮自动调度都提交、每次都在本地规划阶段 fail `仓库没有可编译的源码文件`，在 `%TEMP%/dsh-codewiki-jobs.json` 里攒出了 14 条任务（13 failed + 1 queued）。
+
+- 统一判定 `isDeadCompileTarget(cwd)`（index.js）：`isWorktreeCwd(cwd)` 或［目录存在且 `!hasCompilableSources(cwd)`］。**目录已不存在时不算 dead**——那是「历史任务的目录后来被删了」，历史记录仍有查看价值，不因 `statSync` 失败就抹掉用户数据（移动硬盘/网络盘临时不可访问同理）。面板任务列表、仓库总览、启动清理三处共用这一个判据，避免三套条件各自漂移。
+
+- 三个带缓存的判定（index.js）：`isWorktreeCwd(cwd)`（60s 缓存，包 `detectLinkedWorktree` 返回布尔）、`hasCompilableSources(cwd)`（10min 缓存，`scanRepoFiles(dir).length > 0`）、`clearSourceProbeCache(cwd)`（手动提交前清缓存，刚 clone / 刚 checkout 不被 10 分钟前的空判定挡住）。加缓存的原因：`/api/codewiki/jobs` 是 2s 轮询端点，逐任务 `spawnSync git` 会把宿主事件循环拖住（git 冷启动数十毫秒 × N 任务 × 每 2 秒），大仓库的文件树遍历也不该每分钟重跑。
+
+- 空壳目录闸门（index.js，`svc.submit` 与 `codewiki_generate` 双处）：`auto` 返回 `{skipped:'no-source'}` / `state:'no-source'` 静默跳过，手动抛 `该目录没有可编译的源码文件（空目录或只剩 .codewiki / node_modules 等黑名单目录），不编译：<cwd>`。**闸门放在跑 `cw status` 之前**——空壳目录里的 `_meta.yaml` 往往本身也残缺（主仓库被删后只剩骨架），先让 `cw status` 跑只会抛 `Failed to parse _meta.yaml: missing field project` 这种对用户毫无意义的解析错。
+
+- 启动清理（index.js，`createJobService`）：遍历 jobs，`isDeadCompileTarget` 命中的 cwd 全部历史任务从 `JOBS_FILE` 移除并对每个 `forgetRepo(dir)`（新增导出，从已知仓库登记里摘掉，只改插件自己的 `%TEMP%/dsh-codewiki-repos.json`，不碰用户磁盘目录）。只在启动时跑一次。
+
+- 面板过滤（index.js）：`/api/codewiki/jobs` 的 `list = list.filter((j) => !isDeadCompileTarget(j.cwd))`；`/api/codewiki/repos` 的 `putCwd()` 开头 `if (isDeadCompileTarget(dir)) return`；`autoScan` 里 `detectLinkedWorktree(cwd)` 换成带缓存的 `isWorktreeCwd(cwd)`，其后新增 `if (!hasCompilableSources(cwd)) continue`（不产生 job、不进 `queueAhead` 的「在等谁」名单）。
+
+- 测试：`test-worktree.mjs` 从 8 条扩到 22 条（新增 `isWorktreeCwd` 布尔封装与缓存一致性、`hasCompilableSources` 有源码/只剩 .codewiki/不存在路径、`isDeadCompileTarget` 主工作区/worktree/空壳/目录不存在/空值五态）全过；`test-orchestration.mjs` 新增「空壳目录」段 7 条（提交报错、auto 不提交、jobs 端点过滤掉空壳任务且保留正常任务、仓库总览不含空壳目录）全过，其余 `test-batch`（123）、`test-cwd-paths`、`test-sessions`、`test-wiki-entry` 全过。修正一处测试自身的问题：面板过滤段的「正常任务」cwd 原用 tmp 里的 fixture，会被 0.4.6 的 Temp 残留清理先一步移走，改用仓库自身路径。
+
+- 已知边界：`isDeadCompileTarget` 对**已删除的目录**返回 `false`，所以「目录已被用户删掉」的历史任务仍留在面板（有意为之，见上）；空壳判定依赖 `scanRepoFiles` 的 2000 文件上限与黑名单目录，全部源码都落在 `node_modules` / `.next` / `dist` 这类黑名单里的极端仓库会被误判为空壳——正常仓库不受影响。
+
+- 版本 0.12.0 → 0.12.1。
+
 ## 0.12.0 — 2026-10-26
 
 ### 新增：全局「会话」Tab + worktree 拒绝编译 + 会话记录定时清理确认
