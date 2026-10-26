@@ -14,7 +14,6 @@
 ## Learning
 
 - [[learnings/cw-binary-source-lost|cw-binary-source-lost]]
-- [[learnings/update-reminder-entry-gap|update-reminder-entry-gap]]
 ## Module
 
 - [[modules/batch-tests|batch-tests]]

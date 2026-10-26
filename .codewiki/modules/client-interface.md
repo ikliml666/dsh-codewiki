@@ -83,7 +83,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
   - `secSchedule` 调度与排除区（第 994-1026 行）：`autoUpdate` 自动更新开关（第 997-1005 行）、`autoUpdateMin` 扫描间隔分钟输入（第 1006-1014 行）、`excludePaths` 排除清单多行文本域（换行/分号/逗号分隔绝对路径，第 1015-1024 行）。
   - 保存条（第 1028-1034 行）：放弃/保存按钮按 `dirty`/`snapshot.writable` 禁用；error 红字或干净态 notice Tag。
 
-### 面板辅助函数与小组件（client.js 1042-1156）
+### 面板辅助函数与小组件（client.js 1042-1174）
 
 - `stageLabel(stage)`（第 1042 行）/`stateLabel(st)`（第 1043 行）/`kindLabelOf(t, kind)`（第 1044 行）：拼接 `stage*`/`state*`/`kind*` 键取翻译。
 - `progressBar(done, total)`（第 1045-1048 行）：total>0 时渲染 `data-dscw-p-bar` 进度条（宽度取完成比）。

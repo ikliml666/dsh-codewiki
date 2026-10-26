@@ -14,7 +14,7 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 
 `test-scripts` 模块是本仓库的端到端测试套件集合，由五个独立的 `.mjs` 脚本组成，覆盖编译执行链纯函数、宿主 llm 服务 mock、工作目录路径归一化、服务化编排阶段机、wiki 行号锚点校验以及入口文件生成等核心业务逻辑。
 
-所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`，见 `test-orchestration.mjs` 行279）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 至 1.2.0 系列特性：大档模型接管超长输入（见 `test-batch.mjs` 行107-131）、插件自动提交编译产物（见 `test-orchestration.mjs` 行412-513）、会话通道 steer 档位钉死（行151-167）、并行项目上限（行791-820）、孤儿任务接管（行1307-1339）、worktree 闸门（行1341-1412）、空壳目录闸门（行1414-1463）等。
+所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`，见 `test-orchestration.mjs` 行279）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 至 1.2.0 系列特性：大档模型接管超长输入（见 `test-batch.mjs` 行107-131）、插件自动提交编译产物（见 `test-orchestration.mjs` 行412-513）、会话通道 steer 档位钉死（见 `test-batch.mjs` 行151-167）、并行项目上限（见 `test-orchestration.mjs` 行791-820）、孤儿任务接管（见 `test-orchestration.mjs` 行1307-1339）、worktree 闸门（见 `test-orchestration.mjs` 行1341-1412）、空壳目录闸门（见 `test-orchestration.mjs` 行1414-1463）等。
 
 ## Key Components
 
@@ -22,7 +22,7 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 
 编译执行链自检脚本，验证纯函数与 mock 宿主 llm 通道。
 
-- `import { ... } from './index.js'` — 行7-12：导入被测函数（collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer）。
+- `import { ... } from './index.js'` — 行1-12：导入被测函数（collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer）。
 - `let passed` / `const failures` / `function check(cond, msg)` — 行14-19：断言辅助（成功计数 `passed` 印 `✓`，失败压入 `failures` 印 `✗`）。
 - `function section(name)` — 行20：分段打印 `== name ==`。
 - `const mockJson = (obj, status = 200) => ...` — 行21：构造类 fetch 响应对象（含 `ok`/`status`/`text()`）。
@@ -33,10 +33,11 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 - 测试块 `prepareArticleTasks` 大档模型接管 — 行107-131：超长输入改用 `bigProvider`/`bigModel`/`bigReasoningEffort`/`bigBudget` 大档单请求（不再交会话模型）。
 - 测试块 `classifySessionTask` — 行133-149：会话通道收割三态（`timeout`/`harvest`/`wait`）。
 - 测试块 `buildSessionSteerText` — 行151-167：steer 文本档位钉死（`tier: "codeiwiki"`）与阶段文案（articles/review/resend）。
-- `function makeLlm(reply)` / `const promptOf` — 行173-189：构造假 llm 服务（按 stream 协议吐块；reply 可为字符串、函数或 Error）；从 `opts.messages[0].content[0].text` 提取 prompt。
+- `function makeLlm(reply)` — 行173-188：构造假 llm 服务（按 stream 协议吐块；reply 可为字符串、函数或 Error）。
+- `const promptOf` — 行189：从 `opts.messages[0].content[0].text` 提取 prompt。
 - 测试块 `runRealtimeTasks` 宿主通道 — 行169-205：含上述 `makeLlm`/`promptOf`、`kmTasks`（行190-193）与 `runRealtimeTasks` 调用（行195-205），验证请求体（provider/model/reasoningEffort/temperature）与落盘。
 - 测试块 `runRealtimeTasks` 混合池大档分派 — 行207-227：同一池里大档任务按自带 provider/model/档位路由。
-- 测试块 `runRealtimeTasks` 大档与默认档并发分池 — 行229-296：分池限流（0.12.2），`makeSlowLlm`（行232-242）延时吐块、`poolProbe`（行243-258）统计在飞峰值、`mk`（行259-262）构造任务；默认档并发打满 2 且大档独立限 1 两池并行（行263-282），`bigConcurrency` 缺省跟随默认档（行283-296）。
+- 测试块 `runRealtimeTasks` 大档与默认档并发分池 — 行229-296：`makeSlowLlm`（行232-242）延时吐块、`poolProbe`（行243-258）统计在飞峰值、`mk`（行259-262）构造任务；默认档并发打满 2 且大档独立限 1 两池并行（行263-282），`bigConcurrency` 缺省跟随默认档（行283-296）。
 - 测试块 `runRealtimeTasks` tps 采样与取消信号 — 行298-308：onTaskDone 上报与未配置思考档位不下发。
 - 测试块 `runRealtimeTasks` 外部 signal 中止 — 行310-320：已 abort 的 signal 使池不消费任务。
 - 测试块 `runRealtimeTasks` 并发池失败记账 — 行322-344：失败记账进 notes，不中断其他任务。
@@ -171,10 +172,10 @@ wiki 文章行号锚点自动校验脚本，拦截幻觉锚点。
 
 ## Known Issues
 
-- `test-cwd-paths.mjs` 行25-28：注释明确：捆绑副本一致性校验交由外部 sha256 完成，测试内不再重复验证 `resolveBinary` 内部细节，仅通过 MSYS 路径跑通间接证明归一化生效。
+- `test-cwd-paths.mjs` 行26：`cfgProbe` 注释明确：捆绑副本一致性校验交由外部 sha256 完成，测试内不再重复验证 `resolveBinary` 内部细节，仅通过 MSYS 路径跑通间接证明归一化生效。
 - `test-cwd-paths.mjs` 行59：注释声明 `wikiPathFor` 兜底路径未直接导出，契约由 `cw path` 成功路径覆盖。
 - `test-orchestration.mjs` 行1021：并发块清理使用 `fs.rmSync(concRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })`，注释指出 Windows 句柄延迟释放可能导致异常，留待 tmp 自清。
 - `test-batch.mjs` 行517-520：断言 `mod.resolveBatchApiKey === undefined`，标记 0.10.1 起内置百炼直连通道与凭证解析链整体删除，插件不再触碰任何密钥。
 - `test-orchestration.mjs` 行515-525：`autoCommitState` 三态判定与 `wakeCompileSession` 块（行527-563）依赖 `autoCommit` 字段存在，自动提交成功则零唤醒，失败才降级提醒。
-- `test-orchestration.mjs` 行1341-1412：会话全局 Tab 聚合接口与 worktree 闸门测试中，worktree 目录提交报错文案要求说明「等合并回主仓库后再编译」，主工作区对照不受影响。
 - `test-orchestration.mjs` 行44：`LEGACY_CHANNEL` 显式关掉三档新通道（语义规划/agentic 写作/符号级增量），以守护旧通道断言；新通道验证见其他专用测试文件（未在本文覆盖）。
+- `test-orchestration.mjs` 行1341-1412：会话全局 Tab 聚合接口与 worktree 闸门测试中，worktree 目录提交报错文案要求说明「等合并回主仓库后再编译」，主工作区对照不受影响。
