@@ -13,6 +13,15 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
+import { extractRepoGraph, resolveImportEdges } from './lib/symbols.js'
+import { clusterComponents, toPlanModules } from './lib/cluster.js'
+import { diffGraphs, isDiffEmpty, serializeDiff, changedIds } from './lib/graph-diff.js'
+import {
+  slimGraph, graphFromSnapshot, loadSnapshot, saveSnapshot,
+  filterStaleTasks, describeChange, sameSnapshotContent,
+} from './lib/incremental.js'
+import { runAgenticArticles } from './lib/articles-agentic.js'
+import { buildOpeningPrompt, TOOL_SCHEMAS } from './lib/agentic.js'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -64,6 +73,10 @@ export const Config = z.object({
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
+  planMode: z.string().default('auto').volatile().description('模块划分方式：auto=AST 符号提取 + LLM 语义聚类（吸收自 FSoft CodeWiki，失败自动降级为目录分组）；dirs=只按顶层目录分组（旧行为）'),
+  agenticArticles: z.boolean().default(true).volatile().description('文章写作走 agentic 工具循环（模型自己 read_code/list_files 读源码、edit_article 增量写，不再把源码整包内联进 prompt）：关闭则走单轮整包装填的旧通道'),
+  agenticMaxSteps: z.number().default(30).volatile().description('agentic 写作单篇最大步数（工具调用轮次），硬顶 100；步数越多越细致也越慢'),
+  symbolIncremental: z.boolean().default(true).volatile().description('stale 增量编译按 AST 符号级判定变更（只重写签名/正文/接口真变了的模块，吸收自 FSoft CodeWiki）：关闭则按文件级 mtime/hash 判定'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
   autoCommit: z.boolean().default(true).volatile().description('编译完成后由插件自己在主题分支上提交产物再合并回原分支（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀；不动其它改动）：会话模型因此无需等待编译完成、也无需提交；非 git 仓库或提交失败时降级为提醒会话模型提交'),
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
@@ -105,6 +118,13 @@ function liveConfig(config) {
       return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), 4) : 2
     })(),
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
+    planMode: ['auto', 'dirs'].includes(String(val(c.planMode) ?? '').trim()) ? String(val(c.planMode)).trim() : 'auto',
+    agenticArticles: val(c.agenticArticles) !== false,
+    agenticMaxSteps: (() => {
+      const n = Number(val(c.agenticMaxSteps))
+      return Number.isFinite(n) && n >= 1 ? Math.min(Math.round(n), 100) : 30
+    })(),
+    symbolIncremental: val(c.symbolIncremental) !== false,
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
     autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
@@ -829,6 +849,16 @@ function articleFormatSection() {
 // 本地规划：按顶层目录分组生成模块清单（0.10.7 起是唯一规划路径——模型勘探的单独
 // 规划阶段已删，编译模型上下文足够大，模块划分不再值得一次独立请求）。
 // 宁可粗也不中断整条流水线。
+// agentic 通道退回判定（模块级导出便于单测）：本批 agentic 结果里失败过半才算「系统性失败」。
+// 一两篇失败是模型偶发（步数用尽 / 空文章），整批重跑的代价大于收益；单篇失败已由 tally 记账。
+// 调用方另需守 job.agenticRetried —— 只退一次，否则退回后仍失败会每 tick 重新提交成死循环。
+export function shouldFallBackFromAgentic(results) {
+  const relevant = Array.isArray(results) ? results : []
+  if (!relevant.length) return false
+  const failed = relevant.filter((r) => !r.ok).length
+  return failed * 2 > relevant.length
+}
+
 export function localPlan(files) {
   const groups = new Map()
   for (const f of files) {
@@ -842,6 +872,96 @@ export function localPlan(files) {
     modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
     concepts: [],
   }
+}
+
+// 语义规划（吸收自 FSoft-AI4Code/CodeWiki 的 module analysis + cluster_modules）：
+//   1. tree-sitter AST 提取全仓库符号（函数/类/方法/import）与依赖图；
+//   2. 把组件清单交给模型做语义聚类（不是按目录切），得到按职责划分的模块树；
+//   3. 超大模块递归下钻，顶层过多时超级分组。
+// 与原 localPlan 的区别：模块边界来自「代码实际调用/导入关系 + 模型对职责的判断」，
+// 而不是目录名——同一目录里两套互不相干的东西会被拆开，跨目录的同一功能会被并到一起。
+// 任何环节失败都返回 fallback=true，由调用方退回 localPlan（宁可粗也不中断流水线）。
+export async function semanticPlan(files, { cwd, llm, provider, model, reasoningEffort, signal, notes = [] } = {}) {
+  const startedAt = Date.now()
+  // scanRepoFiles 只给 {path, bytes}，不读正文；extractRepoGraph 要 f.content。
+  // 先统一读一遍正文（提取与建边共用，不读两遍）。
+  const textByFile = new Map()
+  const filesWithText = []
+  for (const f of files) {
+    const rel = typeof f === 'string' ? f : f.path
+    let text = typeof f === 'object' && typeof f.content === 'string' ? f.content : null
+    if (text === null) {
+      try { text = fs.readFileSync(path.resolve(cwd ?? '.', rel), 'utf8') } catch { text = '' }
+    }
+    textByFile.set(rel, text)
+    filesWithText.push({ path: rel, content: text })
+  }
+
+  // 组件提取不需要模型，先跑；解析不了的文件（无对应语法）跳过并记账
+  let graph, byFile
+  try {
+    const ex = await extractRepoGraph(filesWithText, { cwd, rootDir: cwd })
+    if (!ex.ready) {
+      notes.push(`符号提取不可用（${ex.extractor?.initError ?? 'tree-sitter 未就绪'}），退回目录分组`)
+      return { plan: null, fallback: true, reason: 'extractor-unavailable' }
+    }
+    graph = ex.graph
+    byFile = ex.byFile
+  } catch (err) {
+    notes.push(`符号提取失败，退回目录分组 —— ${String(err?.message ?? err).slice(0, 200)}`)
+    return { plan: null, fallback: true, reason: 'extract-failed' }
+  }
+  const components = [...graph.values()]
+  if (!components.length) {
+    notes.push('符号提取未得到任何组件（仓库无受支持语言的源码），退回目录分组')
+    return { plan: null, fallback: true, reason: 'no-components' }
+  }
+  let edges = []
+  try { edges = resolveImportEdges(graph, byFile, textByFile) } catch { /* 依赖边失败不影响聚类 */ }
+
+  const llmCall = llm && (provider || model)
+    ? async (prompt) => {
+      const { content } = await llmChat({ llm, provider, model, reasoningEffort, prompt, signal })
+      return content
+    }
+    : null
+
+  let result
+  try {
+    result = await clusterComponents({ components, llmCall, signal })
+  } catch (err) {
+    notes.push(`语义聚类失败，退回目录分组 —— ${String(err?.message ?? err).slice(0, 200)}`)
+    return { plan: null, fallback: true, reason: 'cluster-failed' }
+  }
+  for (const w of result.warnings ?? []) notes.push(`规划：${w}`)
+
+  // 没有模型参与时聚类只是目录启发式——与 localPlan 等价，如实标注
+  const plan = {
+    project: result.stats?.llm
+      ? '（语义规划：AST 符号聚类）'
+      : '（语义规划不可用，已降级为目录聚类）',
+    modules: toPlanModules(result),
+    concepts: result.concepts ?? [],
+    // 模块树与符号图随 plan 持久化：stale 增量要用组件粒度判定「哪些真的变了」
+    tree: result.tree ?? null,
+    graph: {
+      components: components.map((c) => ({
+        id: c.id, name: c.name, kind: c.kind, relativePath: c.relativePath,
+        parameters: c.parameters ?? [],
+        baseClasses: c.baseClasses ?? [],
+        dependsOn: c.dependsOn ?? [],
+        sourceCode: c.sourceCode ?? '',
+        docstring: c.docstring ?? '',
+      })),
+      edges,
+    },
+    stats: { ...result.stats, durationMs: Date.now() - startedAt, components: components.length },
+  }
+  if (!plan.modules.length) {
+    notes.push('语义聚类没有产出任何模块，退回目录分组')
+    return { plan: null, fallback: true, reason: 'empty-plan' }
+  }
+  return { plan, fallback: false, result }
 }
 
 // 横切输入装配：整篇装填成功文章；装不下的装头部（frontmatter + Overview 段）并标注截断。
@@ -1137,6 +1257,16 @@ function readSourceFiles(articlePath) {
   }
 }
 
+// 当前 HEAD 短 sha（快照里记一下「这份图对应哪个提交」）；非 git 仓库返回 null。
+export function currentCommit(cwd) {
+  try {
+    const r = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd, encoding: 'utf8', timeout: 10000, windowsHide: true })
+    return r.status === 0 ? String(r.stdout ?? '').trim() || null : null
+  } catch {
+    return null
+  }
+}
+
 async function wikiPathFor(cwd, binary, signal) {
   const r = await runCw(binary, cwd, ['path'], 30000, signal)
   const p = (r.stdout ?? '').trim().split(/\r?\n/).filter(Boolean).pop()
@@ -1425,6 +1555,28 @@ export function scanRepoFiles(cwd) {
   return out
 }
 
+// 当前代码的符号图（stale 增量与 index 快照共用）。返回 { graph, byFile, ready, reason }；
+// 任何失败都返回 graph=null，由调用方退回文件级判定——符号级永远只是「更准的一档」，
+// 不是必需品。
+export async function extractCurrentGraph(cwd) {
+  const files = scanRepoFiles(cwd)
+  if (!files.length) return { graph: null, byFile: null, ready: false, reason: 'no-files' }
+  const inputs = []
+  for (const f of files) {
+    let content = ''
+    try { content = fs.readFileSync(path.resolve(cwd, f.path), 'utf8') } catch { continue }
+    inputs.push({ path: f.path, content })
+  }
+  try {
+    const ex = await extractRepoGraph(inputs, { cwd })
+    if (!ex.ready) return { graph: null, byFile: null, ready: false, reason: ex.extractor?.initError ?? 'tree-sitter 未就绪' }
+    if (!ex.graph.size) return { graph: null, byFile: null, ready: false, reason: 'no-components' }
+    return { graph: ex.graph, byFile: ex.byFile, ready: true, skipped: ex.skipped }
+  } catch (err) {
+    return { graph: null, byFile: null, ready: false, reason: String(err?.message ?? err).slice(0, 200) }
+  }
+}
+
 function loadJobs() {
   const j = readJsonFile(JOBS_FILE)
   return Array.isArray(j?.jobs) ? j.jobs : []
@@ -1687,6 +1839,15 @@ function createJobService(config, onSettled) {
       return rs ?? []
     }
     if (batchRuns.has(job.id)) return null // 执行器在跑
+    // agentic 任务没有 batchPrompt 快照（源码是模型现场读的），重跑依据是任务本身
+    // （mission + articlePath + sources）。宿主重启后按 agentic 通道整批重跑一次。
+    const agenticTasks = (job.tasks ?? []).filter((t) => t.agentic === true && t.mission && t.articlePath)
+    if (agenticTasks.length) {
+      note(job, `执行器丢失（宿主重启），按 agentic 通道重跑阶段 ${job.stage}（${agenticTasks.length} 篇）`)
+      job.batchProgress = { completed: 0, total: agenticTasks.length }
+      startAgenticRun(job, agenticTasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` })))
+      return null
+    }
     // 执行器丢失（宿主重启）：请求随连接生死，无法续查——按 job.tasks
     // 持久化的 batchPrompt 快照重跑本阶段，是唯一恢复路径（幂等：文章重写覆盖）。
     const tasks = job.tasks ?? []
@@ -1734,16 +1895,38 @@ function createJobService(config, onSettled) {
         entry = { name: r.name, ok: r.ok === true, stopReason: r.stopReason }
       }
       const rec = { name: entry.name, ok: entry.ok, stopReason: entry.stopReason, path: t?.articlePath ?? null }
-      const prev = replace ? job.articles.find((a) => a.name === rec.name) : null
+      // 按名字去重（不看 replace 参数）：文章名就是落盘路径，天然唯一。
+      // 这条在「重跑同一篇」时必须成立——agentic 通道失败退回单轮重跑、宿主重启整批重跑，
+      // 都会第二次收到同一个 name；按名字更新才不会把 writtenCount 重复累加、
+      // 也不会在 job.articles 里留下两条同名记录（面板上会显示成两篇）。
+      const prev = job.articles.find((a) => a.name === rec.name) ?? null
       if (prev) {
-        if (!rec.ok && prev.ok) rec.ok = true
+        const wasOk = prev.ok
+        if (!rec.ok && wasOk) rec.ok = true // 曾经的成就不被后续失败抹掉
+        const wasPath = prev.path
         Object.assign(prev, rec)
+        if (!wasPath && rec.path) prev.path = rec.path
+        if (!wasOk && prev.ok) {
+          job.writtenCount += 1
+          job.failedCount = Math.max(0, job.failedCount - 1)
+        }
       } else {
         job.articles.push(rec)
         if (rec.ok) job.writtenCount += 1
         else job.failedCount += 1
       }
     }
+  }
+
+  // agentic 通道是否要退回单轮通道：只在「本批过半失败」且「本 job 还没退回过」时重跑。
+  // 判定逻辑见模块级 shouldFallBackFromAgentic（导出以便单测）。
+  function shouldFallBackHere(job, results, tasks) {
+    if (job.agenticRetried) return false
+    const list = Array.isArray(tasks) ? tasks : []
+    const agenticList = list.filter((t) => t?.agentic === true)
+    if (!agenticList.length) return false
+    const isAgentic = (r) => agenticList.some((t) => t.name === r.name)
+    return shouldFallBackFromAgentic(results.filter(isAgentic))
   }
 
   // 批量校对收割：一个结果覆盖多篇——按「@@@article: 名 / @@@end」标记拆回逐篇，
@@ -1823,6 +2006,84 @@ function createJobService(config, onSettled) {
       })
     batchRuns.set(job.id, run)
     return run
+  }
+
+  // agentic 写作执行器：与 startBatchChatRun 并列的第二条通道。
+  // 结果同样进 batchResults，由 settleJob 统一收割；区别是任务里没有 batchPrompt——
+  // settleJob 的「执行器丢失重跑」分支需要认 agentic 标记（见 settleJob）。
+  function startAgenticRun(job, tasks) {
+    const c = liveConfig(config)
+    const ac = new AbortController()
+    batchAborters.set(job.id, ac)
+    let doneCount = 0
+    const run = Promise.resolve()
+      .then(() => runAgenticArticles(tasks, {
+        llm: llmRef,
+        provider: c.batchProvider,
+        model: c.batchModel,
+        reasoningEffort: c.batchReasoningEffort || '',
+        concurrency: c.maxConcurrency,
+        cwd: job.cwd,
+        language: job.language,
+        articleFormat: articleFormatSection(),
+        maxSteps: c.agenticMaxSteps,
+        fixAnchors,
+        notes: job.notes,
+        signal: ac.signal,
+        onRequestStart: (t) => beginSessionRecord(job, t),
+        onTaskDone: (s) => {
+          doneCount += 1
+          job.batchProgress = { completed: doneCount, total: tasks.length }
+          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
+          addUsage(job, { outputTok: s.outputTokens ?? 0 })
+          touch(job)
+        },
+      }))
+      .then(
+        (rs) => batchResults.set(job.id, [...rs.values()]),
+        (err) => {
+          batchResults.set(job.id, null)
+          if (!JOB_TERMINAL.has(job.stage)) {
+            const msg = `agentic 阶段执行失败 —— ${String(err?.message ?? err)}`
+            note(job, msg)
+            fail(job, msg)
+          }
+        },
+      )
+      .finally(() => {
+        batchRuns.delete(job.id); batchAborters.delete(job.id)
+        if (JOB_TERMINAL.has(job.stage)) batchResults.delete(job.id)
+        touch(job)
+      })
+    batchRuns.set(job.id, run)
+    return run
+  }
+
+  // 规划：语义规划（AST 聚类）优先，失败退回目录分组。两条路径都写 job.plan，
+  // 并记一条 note 说清本次用的是哪条——面板/日志里能直接看出规划质量。
+  async function buildPlan(job, files) {
+    const c = liveConfig(config)
+    if (c.planMode === 'dirs') {
+      const plan = localPlan(files)
+      note(job, `规划：${plan.modules.length} 个模块（按顶层目录分组，planMode=dirs）`)
+      return plan
+    }
+    const r = await semanticPlan(files, {
+      cwd: job.cwd,
+      llm: llmRef,
+      provider: c.batchProvider,
+      model: c.batchModel,
+      reasoningEffort: c.batchReasoningEffort || undefined,
+      notes: job.notes,
+    })
+    if (r.plan) {
+      const st = r.plan.stats ?? {}
+      note(job, `规划：${r.plan.modules.length} 个模块（AST 符号聚类：${st.components ?? '?'} 个组件、${st.requests ?? 0} 次模型请求、${st.fallbacks ?? 0} 次降级、${Math.round((st.durationMs ?? 0) / 1000)}s）`)
+      return r.plan
+    }
+    const plan = localPlan(files)
+    note(job, `规划：${plan.modules.length} 个模块（语义规划不可用 ${r.reason}，已退回顶层目录分组）`)
+    return plan
   }
 
   function submitBatchFor(job, prepared) {
@@ -2014,6 +2275,45 @@ function createJobService(config, onSettled) {
           setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
           return
         }
+      } else if (shouldFallBackHere(job, results, tasks)) {
+        // agentic 通道大面积失败：本批里失败的篇目退回单轮整包装填通道再跑一次。
+        // 只重排失败篇——已经写成功的文章不再重写（重复写同一路径既费 token 又会
+        // 覆盖掉 agentic 在场读代码后写出的更好版本）。
+        const failedNames = new Set(results.filter((r) => !r.ok).map((r) => r.name))
+        const okResults = results.filter((r) => r.ok)
+        if (okResults.length) tally(job, okResults, tasks)
+        const retryTasks = tasks
+          .filter((t) => failedNames.has(t.name) && t.mission && t.articlePath)
+          .map((t, i) => ({
+            customId: `${t.customId ?? 'a'}r${i}`,
+            name: t.name, mission: t.mission, sources: t.sources, cwd: t.cwd ?? job.cwd,
+            articlePath: t.articlePath, prevArticlePath: t.prevArticlePath ?? null,
+          }))
+        const cF = liveConfig(config)
+        const { prepared, sessionTasks } = prepareArticleTasks(retryTasks, {
+          cwd: job.cwd, language: job.language,
+          bigProvider: cF.bigProvider, bigModel: cF.bigModel,
+          bigReasoningEffort: cF.bigReasoningEffort, bigBudget: cF.bigTokenBudget,
+        })
+        job.agenticRetried = true
+        if (sessionTasks.length) {
+          const snap = dispatchSessionTasks(job, sessionTasks)
+          if (!snap) return
+          job.sessionTasks = snap
+        }
+        if (prepared.length) {
+          try {
+            note(job, `agentic 写作失败 ${failedNames.size}/${results.length} 篇，已退回单轮通道重跑 ${prepared.length} 篇`)
+            await submitBatchFor(job, prepared)
+            return
+          } catch (err) {
+            fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
+            return
+          }
+        }
+        if (!job.sessionTasks?.length) {
+          note(job, `agentic 写作失败 ${failedNames.size} 篇，退回单轮通道也无可装填内容`)
+        }
       } else {
         tally(job, results, tasks)
       }
@@ -2025,8 +2325,7 @@ function createJobService(config, onSettled) {
         if (!job.plan) {
           const files = scanRepoFiles(job.cwd)
           if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
-          job.plan = localPlan(files)
-          note(job, `规划：${job.plan.modules.length} 个模块（本地顶层目录分组，规划阶段已移除）`)
+          job.plan = await buildPlan(job, files)
         }
         const plan = job.plan
         if (!plan?.modules?.length) { fail(job, '仓库没有可编译的源码文件'); return }
@@ -2043,6 +2342,25 @@ function createJobService(config, onSettled) {
         })
       }
       const c0 = liveConfig(config)
+      // agentic 写作通道（吸收自 FSoft CodeWiki 的 module agent）：模型自己读源码、增量写文章。
+      // 它不需要「源码整包内联 → 超预算拆观察批 → 合成」这套装填，因此没有 sessionTasks。
+      // 单篇失败只记账；失败率过半且旧通道可用时退回单轮通道重跑一次（见下）。
+      if (c0.agenticArticles && tasks.length) {
+        const agenticTasks = tasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` }))
+        job.tasks = agenticTasks.map((t) => ({
+          customId: t.customId, name: t.name, articlePath: t.articlePath,
+          mission: t.mission, sources: t.sources, cwd: t.cwd,
+          prevArticlePath: t.prevArticlePath ?? null,
+          agentic: true, // 宿主重启重跑时按 agentic 通道重跑，而不是找 batchPrompt
+        }))
+        job.batchRef = { batchId: `stage-${job.id}` }
+        job.batchSubmittedAt = new Date().toISOString()
+        job.batchProgress = { completed: 0, total: agenticTasks.length }
+        startAgenticRun(job, agenticTasks)
+        note(job, `阶段已启动：${agenticTasks.length} 篇 agentic 写作（模型 ${c0.batchProvider}/${c0.batchModel}，并发 ${c0.maxConcurrency}，单篇≤${c0.agenticMaxSteps} 步）`)
+        touch(job)
+        return
+      }
       const { prepared, sessionTasks } = prepareArticleTasks(tasks, {
         cwd: job.cwd, language: job.language,
         bigProvider: c0.bigProvider, bigModel: c0.bigModel,
@@ -2353,6 +2671,31 @@ function createJobService(config, onSettled) {
         if (idx.exitCode === 0 && normalizeIndexLinks(job.cwd)) note(job, '_index.md 链接路径已规范化（\\ → /）')
       } catch (err) {
         note(job, `cw index/meta 执行异常 —— ${String(err?.message ?? err)}`)
+      }
+      // 符号快照（吸收自 FSoft updater）：记下本次编译所依据的代码形态，
+      // 下次 stale 用它做组件级比对。快照存 .codewiki/temp/，随产物一起入库，
+      // 换会话/换机器仍能判。写失败不影响编译结果，只是下次退化成文件级判定。
+      if (liveConfig(config).symbolIncremental) {
+        try {
+          const cur = await extractCurrentGraph(job.cwd)
+          if (cur.ready) {
+            const next = slimGraph(cur.graph, { commit: currentCommit(job.cwd) })
+            // 内容没变就不覆盖：快照里有 generatedAt/commit，无脑重写会让 autoCommit
+            // 每次编译都产出「只改了一个时间戳」的空转提交。
+            const prev = loadSnapshot(job.wikiPath)
+            if (prev && sameSnapshotContent(prev, next)) {
+              note(job, `符号快照无变化（${cur.graph.size} 个组件），跳过写入`)
+            } else {
+              const r = saveSnapshot(job.wikiPath, next)
+              if (r.ok) note(job, `符号快照已写入（${cur.graph.size} 个组件），下次增量按组件级判定`)
+              else note(job, `符号快照写入失败（${r.reason}），下次增量将退回文件级`)
+            }
+          } else {
+            note(job, `符号快照跳过：${cur.reason}`)
+          }
+        } catch (err) {
+          note(job, `符号快照异常（忽略）—— ${String(err?.message ?? err).slice(0, 200)}`)
+        }
       }
       try {
         if (ensureWikiEntry(job.cwd, job.language)) note(job, '仓库根缺 CodeWiki.md 入口，已自动生成（已有入口不覆盖）')
@@ -2728,7 +3071,7 @@ function generateToolDefinition(cfg, svc) {
 
       // stale / auto 逐篇更新：任务在提交时预构建（服务直接进 articles 阶段）
       if (!needsFullCompile && status.state === 'stale' && status.staleArticles.length) {
-        const tasks = status.staleArticles.map((articleRel) => {
+        let tasks = status.staleArticles.map((articleRel) => {
           const articlePath = path.join(wikiPath, articleRel.replace(/\\/g, '/'))
           const sourceFiles = readSourceFiles(articlePath)
           if (!sourceFiles.length) {
@@ -2744,6 +3087,33 @@ function generateToolDefinition(cfg, svc) {
             prevArticlePath: articlePath,
           }
         }).filter(Boolean)
+
+        // 符号级过滤（吸收自 FSoft updater）：cw status 只到文件级，一次改动里
+        // 大量是「注释/空白/局部实现」——模块接口与职责没变，文章重写是白花钱。
+        // 拿上一次成功编译留下的符号快照与当前代码比组件级变更，只留真受影响的文章。
+        // 拿不到快照（首次/换机器/版本不符）就原样往下走，等于文件级判定，不阻断。
+        const cInf = liveConfig(cfg)
+        if (cInf.symbolIncremental && tasks.length) {
+          const snap = loadSnapshot(wikiPath)
+          if (!snap) {
+            notes.push(`符号级增量：无历史符号快照，本次按文件级判定（${tasks.length} 篇）；编译成功后会写入快照供下次比对`)
+          } else {
+            const cur = await extractCurrentGraph(cwd)
+            if (!cur.ready) {
+              notes.push(`符号级增量：当前代码符号提取不可用（${cur.reason}），退回文件级判定（${tasks.length} 篇）`)
+            } else {
+              const oldGraph = graphFromSnapshot(snap)
+              const r = filterStaleTasks(tasks, oldGraph, cur.graph)
+              if (r.dropped.length) {
+                notes.push(`符号级增量：${describeChange(r.counts)}；判定 ${r.dropped.length}/${tasks.length} 篇无需重写（${r.dropped.map((t) => t.name).join('、')}）`)
+                tasks = r.keep
+              } else {
+                notes.push(`符号级增量：${describeChange(r.counts)}；${tasks.length} 篇全部需要重写`)
+              }
+            }
+          }
+        }
+
         if (tasks.length) {
           const sub = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, prebuiltTasks: tasks, auto, sessionId })
           if (sub.skipped) { notes.push(sub.reason); return result } // worktree 闸门静默跳过
@@ -2752,6 +3122,13 @@ function generateToolDefinition(cfg, svc) {
           result.jobId = job.id
           result.stage = job.stage
           result.submitted = true
+          return result
+        }
+        // 符号级判定把全部文章滤掉了：代码确实变了但只动了实现细节，
+        // 架构描述仍然成立。刷新编译基线让 cw status 回到 clean，不提交空任务。
+        if (status.staleArticles.length) {
+          const meta = await runCw(binary, cwd, ['meta', 'update'], 120000, exec?.signal)
+          notes.push(`符号级增量为全部 ${status.staleArticles.length} 篇判定了「无实质变更」，已刷新编译基线（meta update exit ${meta.exitCode}），未重写任何文章`)
           return result
         }
         notes.push('没有可更新的过期文章，改走全量编译')
