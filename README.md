@@ -31,10 +31,12 @@
 |----|----------|-----------|----------|
 | 符号提取 | `tree-sitter` 原生绑定，逐语言 analyzer 提取函数/类/方法 + 调用关系（约 800 行/语言） | `lib/symbols.js`：**表驱动** `LANG_RULES`，web-tree-sitter + WASM 语法，16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name,kind,parameters,baseClasses,dependsOn,bodyHash,sourceCode}>` | 该语言退回正则级符号（见 `lib/symbols.js` 的 fallback 分支），不影响其它语言 |
 | 模块划分 | `cluster_modules.py`：LLM 两阶段聚类 + 递归下钻 + super-group 合并 | `lib/cluster.js`：同样的两阶段（先按组件职责聚类，再对超大模块递归下钻）+ `heuristicCluster` 兜底（单顶层目录时自动下探到第二层） | 模型请求失败 → 直接退回 `localPlan` 顶层目录分组，并记 note |
-| 写文章 | module agent 工具循环：模型自己 `read_code`/`list_files`/`edit_article`，多轮增量写作 | `lib/agentic.js`（纯逻辑循环）+ `lib/agentic-host.js`（接宿主 llm）+ `lib/articles-agentic.js`（接 job 生命周期）：工具 `read_code`/`list_files`/`edit_article`（insert/replace/str_replace/delete），单篇步数上限 `agenticMaxSteps` | 单篇失败只记账；失败率过半时自动退回单轮整包装填通道重跑 |
+| 写文章 | module agent 工具循环：模型自己 `read_code`/`list_files`/`edit_article`/`generate_sub_module`，多轮增量写作 | `lib/agentic.js`（纯逻辑循环）+ `lib/agentic-host.js`（接宿主 llm）+ `lib/articles-agentic.js`（接 job 生命周期）：工具 `read_code`/`list_files`/`edit_article`（insert/replace/str_replace/delete）/`generate_sub_module`（递归派生子模块成文），单篇步数上限 `agenticMaxSteps` | 单篇失败只记账；失败率过半时自动退回单轮整包装填通道重跑 |
 | 增量判定 | `updater/graph_diff.py`：组件级 hash + 签名比对，区分 interface/added/deleted/renamed/body/edge | `lib/graph-diff.js`（逐位移植，含 78 条与 Python 原版的黄金对拍）+ `lib/incremental.js`（快照存取、文件级→组件级折算、按 frontmatter `source_files` 过滤文章） | 无快照/版本不符/提取失败 → 退回文件级 mtime/hash 判定，并记 note |
 
 三个开关（设置页「编译流程（吸收自 FSoft CodeWiki）」一节，也可在 `cordis.patch.yml`/profile patch 里改）：`planMode`（`auto`/`dirs`）、`agenticArticles`（+ `agenticMaxSteps`）、`symbolIncremental`。**默认全开**；想要 0.12.x 的旧行为，把三者分别设成 `dirs`/`false`/`false`。
+
+子模块成文（0.13.1 起真的生效）：模型写作时若发现模块内有一整块子能力值得单独成文（通常 ≥3 个组件、有自己的职责边界），可调 `generate_sub_module` 把它派出去，插件递归跑一次写作并落到 `<wiki>/modules/<父模块>/<子模块>.md`，父文章里只留概述与链接。递归深度默认封顶 2 层（`subDepth`），子模块名全局去重（重名加父前缀，仍重则跳过），子模块失败只记账、不影响父文章。
 
 AST 能力依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`，56MB，独立于插件根 `node_modules`——后者是宿主注入的，在那装包会顶掉宿主依赖）。`vendor/tree-sitter/node_modules/` 按 `.gitignore` 的 `node_modules/` 规则不入库，新机器上按需 `cd vendor/tree-sitter && npm i`；没装时插件照常启动，只是没有 AST 能力、三层全部降级。
 

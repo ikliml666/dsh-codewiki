@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.1 — 2026-10-27
+
+### 修复：`generate_sub_module` 在生产链路上是空转的
+
+- 背景（自查发现）：0.13.0 宣传「`generate_sub_module`（委派子模块成文）」，`lib/agentic.js` 也确实实现了该工具的调度与 `onSubModule` 回调，但 `index.js` 的 `startAgenticRun` 调 `runAgenticArticles` 时**没有传 `onSubModule`**，`lib/articles-agentic.js` 也没把这个参数往下接。结果是模型调这个工具只得到一句「已记录子模块 X（本模式下不递归成文）」——目标里「派子模块」这条能力事实上没生效，是诚实性问题而非优化项。
+
+- **递归派发接线（`lib/articles-agentic.js`）**：`runOneArticle` 现在自带 `dispatchSub`，模型调 `generate_sub_module` 时就地递归跑一次 `runOneArticle` 写子模块文章：
+  - 落盘路径 `<wiki>/modules/<父模块>/<子模块>.md`，父文章在 `<wiki>/modules/<父模块>.md`，父子分开写、互不覆盖；
+  - `subDepth`（默认 2）封顶递归深度，防止模型无限往下拆；`_depth`/`_takenNames` 为内部递归参数；
+  - 子模块**全局重名保护**（上游 issue #76/#113 的教训）：重名先加父模块名前缀重试，仍重则跳过并在工具结果里说明；
+  - 子模块失败只记账、不拖垮父文章：工具返回里会告诉模型「把它当普通章节描述」，父文章照常算成功；
+  - 返回值新增 `subModules: [{name, path, ok, stopReason}]`，`runAgenticArticles` 汇总进结果并写 job note（「X 派生出 N 个子模块文章：…」），面板可见。
+  - `streamFn` 改为可注入（`streamFn` 参数优先，缺省才走宿主 `llm`），这样递归子任务在离线测试里也能用假模型驱动。
+
+- **提示词（`lib/agentic.js`）**：`buildOpeningPrompt` 只在 `generate_sub_module` 真的出现在工具表里时才追加「拆分（可选，只在确实必要时）」一节，并写明滥用代价（拆太碎让读者在文章间跳转）与小模块阈值（<3 个组件自己写完）。工具不存在时不出现这段话，避免模型被提示去调一个不存在的工具。
+
+- **测试（`test-articles-agentic.mjs`，7 条）**：写出文章并落盘、`generate_sub_module` 真的递归写出子文章（断言子文章路径与内容、父文章里的链接）、重名不互相覆盖、`subDepth=0` 时派发被禁用、子模块失败被记账而父文章仍成功、`runAgenticArticles` 汇总 `subModules` 并记 note、单任务抛错不影响其它任务。全部注入假 `streamFn`、走真实临时目录，离线可跑。
+
+- 全套回归：`test-agentic` 39、`test-agentic-host` 15、`test-agentic-fallback` 10、`test-articles-agentic` 7、`test-cluster` 28、`test-symbols` 19、`test-incremental` 15、`test-incremental-e2e` 8、`test-semantic-plan` 10、`test-graphdiff` 全过、`test-batch` 128、`test-orchestration` 编排冒烟、`test-cwd-paths`/`test-sessions`/`test-wiki-entry`/`test-worktree` 全过。
+
+- 版本 0.13.0 → 0.13.1（patch：修一条已宣称但不生效的链路）。
+
 ## 0.13.0 — 2026-10-27
 
 ### 新增：吸收 FSoft-AI4Code/CodeWiki 的三层能力（AST 聚类 / agentic 写作 / 符号级增量）
