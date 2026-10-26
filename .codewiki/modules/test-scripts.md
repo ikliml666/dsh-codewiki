@@ -14,7 +14,7 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 
 `test-scripts` 模块是本仓库的端到端测试套件集合，由五个独立的 `.mjs` 脚本组成，覆盖编译执行链纯函数、宿主 llm 服务 mock、工作目录路径归一化、服务化编排阶段机、wiki 行号锚点校验以及入口文件生成等核心业务逻辑。
 
-所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 及 1.1.0 系列特性：大档模型接管超长输入、插件自动提交编译产物、会话通道 steer 档位钉死、并行项目上限、孤儿任务接管等。
+所有脚本均直接针对 `./index.js` 导出的插件主体（name 为 `dsh-codewiki`）进行集成与功能验证，通过临时文件系统（`fs.mkdtempSync`）构造边界场景（如超大文件、多批分割、Windows/MSYS 路径），并以轻量断言函数 `check` 落盘或抛错退出，确保重构与特性迭代不破坏既有契约。当前代码已涵盖 0.10.x 及 1.1.0 系列特性：大档模型接管超长输入、插件自动提交编译产物、会话通道 steer 档位钉死、并行项目上限、孤儿任务接管、worktree 闸门等。
 
 ## Key Components
 
@@ -27,7 +27,7 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 - 测试块 `estimateTokens` — `23-28|`：CJK 与 ASCII 粗算（每字 1 token、ASCII `ceil(n/3.5)`）。
 - 测试块 `collectSources` — `30-44|`：源码装填、缺失标注、token 预算溢出（`oversized`/`skipped`）、尾换行处理。
 - 测试块 `numberLines` — `46-51|`：行号前缀与尾换行处理（CRLF 剥离、双尾换行保留空行）。
-- 测试块 `prepareArticleTasks` — `53-105|`：prompt 装配、旧文上下文、单文件大档（`bigTier`）、超大会话通道兜底；`107-131|` 多文件观察批分割（`#obs` + `composePlan`）与大档模型接管超长输入（不再交会话模型，使用 `bigProvider`/`bigModel` 等）。
+- 测试块 `prepareArticleTasks` — `53-105|`：prompt 装配、旧文上下文、单文件大档（`bigTier`）、超大会话通道兜底、多文件观察批分割（`#obs` + `composePlan`）；`107-131|` 大档模型接管超长输入（不再交会话模型，使用 `bigProvider`/`bigModel` 等）。
 - 测试块 `classifySessionTask` — `133-149|`：会话通道收割三态（`timeout`/`harvest`/`wait`）。
 - 测试块 `buildSessionSteerText` — `151-167|`：steer 文本档位钉死（`tier: "codeiwiki"`）与阶段文案（articles/review/resend）。
 - `makeLlm(reply)` / `promptOf(opts)` — `173-189|`：构造假 llm 服务（按 stream 协议吐块；reply 可为字符串、函数或 Error）；从 `opts.messages[0].content[0].text` 提取 prompt。
@@ -88,9 +88,11 @@ tags: [测试, 集成验证, 批量处理, 路径规范化, 锚点校验, 任务
 - registry 异常防御块 — `1230-1258|`：workspaceRegistry.list() 抛错时降级不过滤。
 - 工具输出 schema 块 — `1260-1298|`：codewiki_generate 输出过 schema 校验。
 - 孤儿任务接管块 — `1300-1332|`：foreign 任务停更超时接管。
-- 编译模型缺失块 — `1334-1347|`：诚实报错。
-- 严格 cordis 语义块 — `1349-1371|`：未 inject 服务属性访问即抛。
-- Temp 残留清理块 — `1373-1390|`：Temp 目录终态任务自动移除。
+- 会话全局 Tab + worktree 闸门块 — `1334-1406|`：sessions 端点聚合接口、worktree 目录提交报错与 auto 调度跳过。
+- 空壳目录闸门块 — `1407-1456|`：扫不出源码的空壳目录（如被删 worktree 残留）手动提交报错、auto 调度静默跳过，且面板 jobs/repos 过滤掉此类终态任务。
+- 编译模型缺失块 — `1458-1471|`：provider 留空诚实报错并落 job failed 态。
+- 严格 cordis 语义块 — `1473-1495|`：未 inject 服务属性访问即抛，apply 不回滚。
+- Temp 残留清理块 — `1497-1514|`：Temp 目录终态任务自动移除，活动/工作区任务保留。
 
 ### test-wiki-anchors.mjs
 
@@ -158,3 +160,4 @@ wiki 文章行号锚点自动校验脚本，拦截幻觉锚点。
 - `test-orchestration.mjs` `1014|`：并发块清理使用 `fs.rmSync(concRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })`，注释指出 Windows 句柄延迟释放可能导致异常，留待 tmp 自清。
 - `test-batch.mjs` `448-451|`：断言 `mod.resolveBatchApiKey === undefined`，标记 0.10.1 起内置百炼直连通道与凭证解析链整体删除，插件不再触碰任何密钥。
 - `test-orchestration.mjs` `520-556|`：wakeCompileSession 场景下自动提交成功则零唤醒，若自动提交失败才降级提醒，该行为依赖 `autoCommit` 字段存在（见 `508-518|` 中 `autoCommitState` 三态判定与断言）。
+- `test-orchestration.mjs` `1334-1406|`：会话全局 Tab 聚合接口与 worktree 闸门测试中，worktree 目录提交报错文案要求说明「等合并回主仓库后再编译」，主工作区对照不受影响。

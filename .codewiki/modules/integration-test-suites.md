@@ -7,31 +7,34 @@ source_files:
   - test-wiki-entry.mjs
   - test-batch.mjs
   - test-cwd-paths.mjs
+  - index.js
+  - client.js
 tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 ---
 
 ## Overview
 
-本模块是一组 Node ESM 集成测试，覆盖 `dsh-codewiki` 服务的批量执行、工作目录路径解析、编排流程以及 wiki 锚点与入口生成。测试文件与运行期日志同名对应，构成可追溯的验证资产。包含五个测试脚本：`test-orchestration.mjs`（服务化编排冒烟测试，行1-1398）、`test-wiki-anchors.mjs`（wiki 行号锚点校验，行1-118）、`test-wiki-entry.mjs`（CodeWiki.md 入口生成与路径规范化，行1-76）、`test-batch.mjs`（编译执行链自检，行1-501）、`test-cwd-paths.mjs`（0.2.3 路径修复验证，行1-71）。当前代码基线强调 0.10.1 起插件不再直连任何端点、唯一通道为宿主 llm 服务（编译模型必须显式配置），0.10.4 起大档模型接管超长输入，1.1.0 起支持并行项目上限与队列前置信息。
+本模块是一组 Node ESM 集成测试，覆盖 `dsh-codewiki` 服务的批量执行、工作目录路径解析、编排流程以及 wiki 锚点与入口生成。测试文件与运行期日志同名对应，构成可追溯的验证资产。包含五个测试脚本：`test-orchestration.mjs`（服务化编排冒烟测试，行1-1522）、`test-wiki-anchors.mjs`（wiki 行号锚点校验，行1-118）、`test-wiki-entry.mjs`（CodeWiki.md 入口生成与路径规范化，行1-76）、`test-batch.mjs`（编译执行链自检，行1-501）、`test-cwd-paths.mjs`（0.2.3 路径修复验证，行1-71）。当前代码基线强调 0.10.1 起插件不再直连任何端点、唯一通道为宿主 llm 服务（编译模型必须显式配置），0.10.4 起大档模型接管超长输入，1.1.0 起支持并行项目上限与队列前置信息，1.2.0 起全局会话 Tab 与 worktree 闸门。
 
 ## Key Components
 
 ### test-orchestration.mjs
 
-- 环境加速与隔离：`process.env.DSH_CODEWIKI_TICK_MS = '300'`（行14-15，生产默认 10s）；`process.env.DSH_CODEWIKI_JOBS_FILE` 独立指向 tmp 防互洗（行17-23，含随机 token 防 pid 复用误读 fixture，行19-23）；`const { name, apply } = await import('./index.js')`（行24）。
+- 环境加速与隔离：`process.env.DSH_CODEWIKI_TICK_MS = '300'`（行14-15，生产默认 10s）；`process.env.DSH_CODEWIKI_JOBS_FILE` 独立指向 tmp 防互洗（行17-23，含随机 token 防 pid 复用误读 fixture，行19-23）；`const { name, apply, SESSIONS_DIR } = await import('./index.js')`（行24）。
 - 断言辅助：`let failures = 0`（行26），`function check(cond, msg)` 累计失败计数（行27-30）。
 - JOBS_FILE 常量：`const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE`（行32）。
 - 文章模板：`const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>`（行33-34）拼装带 frontmatter 的假文章。
-- 测试配置基线：`const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra })`（行36-38），0.10.1 起编译模型须显式指向设置里的 provider/model。
+- 测试配置基线：`const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra })`
+（行36-38），0.10.1 起编译模型须显式指向设置里的 provider/model。
 - Mock 宿主上下文：`function makeCtx({ agents = [], workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {})`（行44-84），返回 `{ ctx, registered, endpoints, listeners, disposers }`；`services` 含 `webServer.register`（行50）、`agents.list/get`（行51）、`tools.register`（行52）、`llm`（行53）、`workspaceRegistry.list`（行56 正常形态 / 行57-59 抛错形态）；`inject` 支持 cordis 回调与 promise 双风格（行62-72）；`on` 监听（行73）；`effect` 立即执行 body 并收集 disposer（行77-81）。
 - Mock Agent：`function makeMockAgent(cwd)`（行87-101）造 agent，`ctx.inject` 返回 `systemPrompt` 切片，`getSectionOrder` 对 `TOOL_REPORT` 返 2900（行94）。
-- Fixture 仓库：`function makeFixtureRepo()`（行103-120）建 git 仓库含 core/core.py、util/util.py，并自带 git identity（行111-118，0.10.9 起 autoCommitWiki 要求）。
+- Fixture 仓库：`function makeFixtureRepo()`（行103-120）建 git 仓库含 core/core.py、util/util.py，并自带 git identity（行115-116，0.10.9 起 autoCommitWiki 要求）。
 - LLM 代理与 Mock：`let activeLlm = null`（行125）与 `const llmProxy =`（行126-133）唯一通道转发，未接线抛错（行128）；`const promptOf = (opts) =>`（行134）取 `messages[0].content[0].text`。
 - 批量 Mock：`function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {})`（行138-202）假 llm 服务；`answerFor`（行140-170）按 prompt 关键词分发；`stream` 生成器按 block 协议 yield（行172-191），`stall` 时挂起至 abort（行177-184）；返回 `{ llm, llmCalls, batchPrompts, realtimePrompts, restore }`（行194-201）。
 - 轮询与 HTTP Mock：`async function waitJob(cwd, { timeout = 30000 } = {})`（行205-218）轮询 JOBS_FILE 找终态；`function fakeReq`（行220-229） / `function fakeRes`（行230-232） mock HTTP。
 - 动态导入符号：`const { commitHintText } = await import('./index.js')`（行297）、`const { autoCommitWiki } = await import('./index.js')`（行408）、`const { autoCommitState } = await import('./index.js')`（行511）、`const { wakeCompileSession } = await import('./index.js')`（行523）从 index.js 导入。
 - 同构校验器：`const validateOut = (schema, v) =>`（行1264-1279，位于行1260-1298 工具输出 schema 形态块）本地校验同构宿主 schema。
-- 测试块（直接执行断言）：系统提醒（行234-263）、注册（行265-277）、`cw` 工具（行279-283）、`codewiki_update`+`commitHintText`（行285-403）、`autoCommitWiki`（行405-506）、`autoCommitState`（行508-518）、`wakeCompileSession`（行520-556）、本地规划（行558-615）、全量编译（行617-658）、大 wiki 横切（行660-688）、大模块分割（行690-724）、单项目串行（行726-782）、并行项目上限（行784-813）、唯一通道（行815-847）、stale 更新（行849-870）、progress（行872-908）、重启重跑（行909-966）、并发占位（行968-1016）、面板端点（行1018-1070）、排除清单/repos 总览/compile 动作（行1072-1125）、knownRepos/refresh（行1127-1165）、工作区过滤（行1167-1228）、registry 异常（行1230-1258）、schema 校验（行1260-1298）、孤儿接管（行1300-1332）、模型缺失（行1334-1347）、严格 cordis（行1349-1371）、Temp 清理（行1373-1390）。
+- 测试块（直接执行断言）：系统提醒（行234-263）、注册（行265-277）、`cw` 工具（行279-283）、`codewiki_update`+`commitHintText`（行285-403）、`autoCommitWiki`（行405-506）、`autoCommitState`（行508-518）、`wakeCompileSession`（行520-556）、本地规划（行558-615）、全量编译（行617-658）、大 wiki 横切（行660-688）、大模块分割（行690-724）、单项目串行（行726-782）、并行项目上限（行784-813）、唯一通道（行815-847）、stale 更新（行849-870）、progress（行872-908）、重启重跑（行909-966）、并发占位（行968-1016）、面板端点（行1018-1070）、排除清单/repos 总览/compile 动作（行1072-1125）、knownRepos/refresh（行1127-1165）、工作区过滤（行1167-1228）、registry 异常（行1230-1258）、schema 校验（行1260-1298）、孤儿接管（行1300-1332）、全局会话 Tab/worktree 闸门（行1334-1405）、空壳目录闸门（行1407-1456）、模型缺失（行1458-1471）、严格 cordis（行1473-1495）、Temp 清理（行1497-1514）。
 - 持久化 job 对象字段示例（行916-925）：`id, cwd, kind, scope, language, stage, owner, wikiPath, plan{project, modules[], concepts[]}, batchRef{batchId}, tasks[{customId, name, articlePath, keepInMemory, batchPrompt}], articles[], writtenCount, failedCount, notes[], createdAt, updatedAt`，以及运行时扩展的 `autoCommit{committed, sha, mode, branch, noChanges, reason}`、`stageTimings`、`usage`、`queueAhead`、`batchProgress`、`taskList`、`progress`、`tps` 等。
 
 ### test-wiki-anchors.mjs
@@ -92,7 +95,7 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 ```text
 ┌────────────────────┐   ┌──────────────────┐   ┌─────────────────┐
 │ test-orchestration │   │ test-wiki-entry  │   │ test-wiki-anch  │
-│ .mjs (行1-1398)    │   │ .mjs (行1-76)    │   │ .mjs (行1-118)  │
+│ .mjs (行1-1522)    │   │ .mjs (行1-76)    │   │ .mjs (行1-118)  │
 └─────────┬──────────┘   └────────┬─────────┘   └────────┬────────┘
           │ import {name,apply}  │ import funcs         │ read src
           ▼                      ▼                      ▼
@@ -110,18 +113,23 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 ## Data Flow
 
 ### test-orchestration.mjs 数据流
+
 测试代码 → `makeCtx()`（行44-84）生成 ctx → `apply(ctx, config)`（行24）向 ctx 注册工具/端点（内部经 `ctx.inject` 取 services，含 `llm` 即 `llmProxy` 行126-133）→ 从 `registered` 取 `codewiki_generate`/`cw`/`codewiki_update`/`codewiki_progress` 调 `.execute(args, {agent})` → 工具内部经 `llmProxy.stream` 调 `activeLlm`（由 `makeBatchMock()` 设置，行138-202）→ 服务阶段机推进写 `JOBS_FILE` → `waitJob(cwd)`（行205-218）轮询得终态 job → 断言。面板端点经 `endpoints.find(e=>e.path===...).handler(fakeReq(...), fakeRes())`（行220-232）调用。
 
 ### test-batch.mjs 数据流
+
 用 `fs.mkdtempSync` 造临时目录，写入源码/文章；将路径与任务描述传入 `prepareArticleTasks`（行53-131）等，得到 `{prepared, sessionTasks}` 或 prompt 字符串，再喂给 `runRealtimeTasks(tasks, opts)`（行169-338）断言返回 `Map<customId, {ok, content?}>` 及磁盘落盘；`installWebServer`（行364-446）注入伪 `ctx` 得路由 handler，以伪 `req{url, socket.remoteAddress}`/`res{writeHead, end}` 调 handler 验 HTTP 行为。
 
 ### test-cwd-paths.mjs 数据流
+
 构造 `cwd`（MSYS/Windows/不存在）与 `args` 传入 `cw.execute`（行30-69），取回 `{exitCode, stdout}` 或异常 `message` 做断言。
 
 ### test-wiki-anchors.mjs 数据流
+
 读 `SOURCES` 源码行（行14-24）→ `walk(WIKI)`（行64-73）收集 md → 逐行正则提取锚点（行38-49, 86）→ 在源文件区间搜符号绑定（行105-112）。
 
 ### test-wiki-entry.mjs 数据流
+
 建临时 repo（行18-23）→ 调 `ensureWikiEntry`/`normalizeArticlePath` 等（行25-72）→ 检查返回布尔与文件内容。
 
 ## Connections
@@ -136,10 +144,11 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 以下条目实为测试固化的非显然语义与边界防御，并非模块缺陷：
 
 ### test-orchestration.mjs 边界
-- **cordis 语义**：`makeCtx` 的 `inject` 传 ctx 切片而非实例（行62-72）；`effect` 错写 `ctx.effect(()=>service.stop())` 会当场调用致 tick 停摆（行77-81）；严格语义下未 inject 访问 `ctx.agents` 抛错（`Object.defineProperty` 行1363-1365），但 `apply` 不抛且工具仍注册（行1349-1371）。
+
+- **cordis 语义**：`makeCtx` 的 `inject` 传 ctx 切片而非实例（行62-72）；`effect` 错写 `ctx.effect(()=>service.stop())` 会当场调用致 tick 停摆（行77-81）；严格语义下未 inject 访问 `ctx.agents` 抛错（`Object.defineProperty` 行1487-1489），但 `apply` 不抛且工具仍注册（行1490-1493）。
 - **LLM 接线**：`llmProxy.stream` 若 `activeLlm` 未接线抛 “测试未接线”（行128）；stall 模式挂起至 `opts.signal` abort（行177-184）。
 - **本地规划**：0.10.7 起删规划阶段，模块清单由 localPlan 按顶层目录分组生成（行558-615），fixture 结构直接决定模块名（行103-120）；无勘探员请求（行583, 628）。
-- **commitHintText 缓存**：缓存键为 cwd，编译早于 `.codewiki` 最后提交则静默；`writtenCount=0` 不提醒；测试用换仓库绕开 60s 缓存（行312-385）。
+- **commitHintText 缓存**：缓存键为 cwd，编译早于 `.codewiki` 最后提交则静默；`writtenCount=0` 不提醒；测试用换仓库绕开 60s 缓存（行312-402）。
 - **wakeCompileSession 静默**：autoCommit 成功 → done 完全不唤醒会话（行529-530）；无 sessionId、冷会话、registry.get 抛、steer 抛、缺省 agents 均不抛仅跳过（行547-555）。
 - **单项目串行**：A 用 stall 占推进权，B 提交进 `queued` 且排队期零请求；取消 A 后 B 自动轮到（行726-782）。
 - **并行项目上限**：`serialProjects:false, parallelProjects:3` 下 A/B 同时推进不排队（行784-813）。
@@ -149,18 +158,21 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - **knownRepos 独立**：job 历史清空后 knownRepos 仍让 repos 总览发现仓库（行1127-1165）。
 - **registry 异常**：`brokenRegistry` 使 `list()` 抛错，jobs/repos 端点降级不过滤仍 200（行57-59, 1230-1258）。
 - **孤儿接管**：foreign 任务停更 6 分钟被接管并响应 cancelRequested，新鲜 foreign 不被抢（行1300-1332）。
-- **模型缺失**：`batchProvider:''` 时 `codewiki_generate` 抛 “编译模型提供商为空”，且失败落 job.failed 留痕（行1334-1347）。
-- **Temp 清理**：启动 tick 移除 Temp 目录终态任务，保留活动/工作区终态（行1373-1390）。
+- **模型缺失**：`batchProvider:''` 时 `codewiki_generate` 抛 “编译模型提供商为空”，且失败落 job.failed 留痕（行1463-1470）。
+- **Temp 清理**：启动 tick 移除 Temp 目录终态任务，保留活动/工作区终态（行1501-1513）。
 - **错误前缀改写**：`codewiki_update` 包装 `generate` 错误，消息前缀改写为 `codewiki_update`（行307-309）。
 - **autoCommitWiki 安全边界**：只提交 `.codewiki/` 与 `CodeWiki.md`，非 git/被 gitignore/merge 进行中/缺 git identity 均拒绝（行405-506）。
 
 ### test-wiki-anchors.mjs 边界
+
 - **锚点校验边界**：仅行内单锚点且存在符号时才做符号绑定，多锚点行仅兜底行号范围（行101-105）；区间锚点在整个区间搜符号（行106-112）；`symbolsOnLine` 拒绝含冒号/斜杠/空格非符号（行38-49）。
 
 ### test-wiki-entry.mjs 边界
+
 - **入口生成边界**：`ensureWikiEntry('', lang)` 空 cwd 返回 false 不抛（行49）；`normalizeArticlePath(undefined)` 返回 `''`（行59）；`normalizeIndexLinks` 只改链接头反斜杠，正文反斜杠不受影响（行70）。
 
 ### test-batch.mjs 边界
+
 - **Token/预算边界**：`estimateTokens` 空串 0，混合分别计费（行23-28）；`collectSources` 首文件超预算即 `oversized` 兜底返回首文件（行40-41），后续装不下进 `skipped`；多文件超预算拆观察批且每批 ≤110k token（行87-105）；单文件超大走会话通道 128k 大档，再超则全长装填（行78-84）；大档模型接管超 128k 单文件（行107-131）。
 - **行号/格式**：`numberLines` 空文件输出 `1|`，双尾换行保留空行 `2| `，CRLF 剥离（行46-51）；`fixAnchors` 对未找到/歧义/不在清单/basename 歧义均不动并记 `unresolved`，区间尾部钳到文件尾，CRLF 保真（行453-495）。
 - **会话通道收割**：`classifySessionTask` 超时（30min）判定优先于已产出（行139-141）；旧文未更新（mtime 早于派发）判 `wait`（行146-148）。
@@ -171,4 +183,5 @@ tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
 - **scanRepoFiles 黑名单**：跳 node_modules/.git/二进制/超大(300*1024)/空（行303-318）。
 
 ### test-cwd-paths.mjs 边界
+
 - **路径归一化**：`cw.execute` 将 Windows 盘符路径（`E:/x`）转 MSYS（`/e/x`）并跑通（行10, 30-45），且 Windows 下 `status` 返回真实三态而非 "No wiki found"（行47-57），证明 `resolveBinary` 选 PATH 探测而非捆绑副本；不存在 cwd 抛 `cwd 不存在`（行61-69）。
