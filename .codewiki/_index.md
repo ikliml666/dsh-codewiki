@@ -19,7 +19,6 @@
 - [[modules/integration-test-suites|Integration Test Suites]]
 - [[modules/batch-tests|batch-tests]]
 - [[modules/client-interface|client-interface]]
-- [[modules/configuration-and-metadata|configuration-and-metadata]]
 - [[modules/core-and-config|core-and-config]]
 - [[modules/core-application|core-application]]
 - [[modules/cwd-path-tests|cwd-path-tests]]
@@ -34,3 +33,4 @@
 - [[modules/test-suite|test-suite]]
 - [[modules/testing-suite|testing-suite]]
 - [[modules/wiki-tests|wiki-tests]]
+- [[modules/configuration-and-metadata|配置与元数据（Configuration and Metadata）]]
