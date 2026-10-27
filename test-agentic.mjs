@@ -398,7 +398,7 @@ await check('子模块委派走 onSubModule 回调', async () => {
   assert.equal(r.stopReason, 'finished')
 })
 
-await check('无 onSubModule 时子模块调用不报错', async () => {
+await check('无 onSubModule 时子模块调用必须报错并说明原因（不能谎称已成文）', async () => {
   let step = 0
   let toolMsg = null
   await runAgenticArticle({
@@ -410,8 +410,29 @@ await check('无 onSubModule 时子模块调用不报错', async () => {
       return { blocks: [text('ok')] }
     },
   })
-  assert.equal(toolMsg.content[0].isError, false)
-  assert.match(toolMsg.content[0].content[0].text, /已记录/)
+  // 这里必须 isError=true：旧实现回「已记录子模块 x」且 isError=false，模型会以为
+  // 文章已生成、在父文里写下「详见 x.md」，而那个文件从未存在 —— 死链且无人察觉。
+  assert.equal(toolMsg.content[0].isError, true)
+  assert.match(toolMsg.content[0].content[0].text, /没有派出/)
+  assert.match(toolMsg.content[0].content[0].text, /不支持递归|嵌套上限/)
+  assert.doesNotMatch(toolMsg.content[0].content[0].text, /已记录子模块/)
+})
+
+await check('深度到顶时子模块调用报错并提示直接写成本文小节', async () => {
+  let step = 0
+  let toolMsg = null
+  await runAgenticArticle({
+    mission: 'm', workspace: makeWorkspace(), subModuleBlocked: 'max-depth',
+    streamFn: async ({ messages }) => {
+      step++
+      if (step === 1) return { blocks: [call('c1', 'generate_sub_module', { module_name: 'y', description: 'd' })] }
+      toolMsg = messages.find((m) => m.role === 'tool')
+      return { blocks: [text('ok')] }
+    },
+  })
+  assert.equal(toolMsg.content[0].isError, true)
+  assert.match(toolMsg.content[0].content[0].text, /嵌套上限/)
+  assert.match(toolMsg.content[0].content[0].text, /普通小节/)
 })
 
 await check('只有 3 个工具声明给模型（子模块按需）', async () => {
@@ -516,6 +537,61 @@ await check('read_code 不带 end_line 重复读同样命中', async () => {
   assert(!first.isError)
   const again = await tools.read_code({ path: 'a.js' })
   assert(again.text.includes('第 5 步读过'), `同段重复读要提示，实际：${again.text.slice(0, 60)}`)
+})
+
+await check('CRLF 文章里跨行 str_replace 能命中（行尾归一化）', async () => {
+  const ed = makeArticleEditor('# 标题\r\n\r\n第一段。\r\n\r\n第二段。\r\n')
+  const r = await ed.edit({ command: 'str_replace', old_str: '第一段。\n\n第二段。', new_str: '合并成一段。' })
+  assert(!r.isError, 'CRLF 跨行替换应命中，实际：' + r.text)
+  assert(ed.article.includes('合并成一段。'))
+  assert(!ed.article.includes('第一段。'), '旧内容应被替换掉')
+})
+
+await check('CRLF 文章替换后仍保持 CRLF 行尾（不悄悄改成 LF）', async () => {
+  const ed = makeArticleEditor('a\r\nb\r\nc\r\n')
+  await ed.edit({ command: 'str_replace', old_str: 'b', new_str: 'B' })
+  assert(ed.article.includes('\r\n'), '应保留 CRLF')
+  assert.equal(ed.article.split('\r\n').length - 1, 3, '换行符数量不变')
+})
+
+await check('LF 文章替换后仍是 LF（不被污染成 CRLF）', async () => {
+  const ed = makeArticleEditor('a\nb\n')
+  await ed.edit({ command: 'str_replace', old_str: 'b', new_str: 'B' })
+  assert(!ed.article.includes('\r'), '不应出现 CR')
+})
+
+await check('read_code 有字符上限，单行超长文件不会灌爆上下文', async () => {
+  const huge = 'x'.repeat(200000)
+  const ws = makeWorkspace({ async readFile() { return huge } })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => 0 })
+  const r = await tools.read_code({ path: 'min.js' })
+  assert(!r.isError)
+  assert(r.text.length < 45000, '返回长度应被字符上限截断，实际 ' + r.text.length)
+  assert(r.text.includes('字符上限'), '应提示被截断')
+})
+
+await check('list_files 隐藏 node_modules 与 .git', async () => {
+  const ws = makeWorkspace({
+    async listDir() {
+      return [
+        { path: 'node_modules', dir: true }, { path: '.git', dir: true },
+        { path: 'src', dir: true }, { path: 'index.js', dir: false },
+      ]
+    },
+  })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => 0 })
+  const r = await tools.list_files({ path: '.' })
+  assert(!r.text.includes('node_modules'), 'node_modules 应被隐藏')
+  assert(!r.text.includes('.git'), '.git 应被隐藏')
+  assert(r.text.includes('src/') && r.text.includes('index.js'), '真实源码要保留')
+})
+
+await check('insert 负数行号必须报错（不能静默插到最前）', async () => {
+  const ed = makeArticleEditor('# 原文件\n\n正文。')
+  const r = await ed.edit({ command: 'insert', line: -5, text: '不该插到最前' })
+  assert(r.isError, '负数行号应报错，实际：' + r.text)
+  assert.match(r.text, /不能为负/)
+  assert(!ed.article.startsWith('不该插到最前'), '文章内容不应被改动')
 })
 
 await check('buildToolset 暴露四个工具', async () => {

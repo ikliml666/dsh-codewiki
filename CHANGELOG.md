@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.4 — 2026-10-27
+
+### 修复：工具层的四个真实翻车点（独立核查 + 逐条实测复核后确认）
+
+背景：0.13.3 修完真实运行暴露的问题后，另派子代理对 agentic 工具层做了只读核查。报告列 6 条，我逐条实测复核，**5 条成立**（第 6 条「子模块重名产生丑陋路径」属设计取舍、未改），并按严重性重排——**封顶静默撒谎比 CRLF 更严重**，因为它产出死链且父任务仍报 `ok:true`，属于无人察觉的静默错误。
+
+- **`str_replace` 在 CRLF 文章里跨行必然失败（`lib/agentic.js`）**。原实现是纯字面 `indexOf`，不做行尾归一化。真实仓库 `core.autocrlf=true`、`.codewiki` 下 36 篇 md 里 28 篇是 CRLF；模型 `view` 看到的是 `7| 第一段正文。\r\n`（`\r` 不可见），它按看到的行写跨行 `old_str` 用 `\n`，永远匹配不上 → 收到「未找到」→ 换锚点再试 → 步数耗尽，文章没写完。这是增量改旧文的主路径，必踩。修法：匹配前把文章与 `old_str` 的行尾统一成 `\n`，命中后按原文风格写回（CRLF 文章仍写回 CRLF，不悄悄把整个文件改成 LF）。`insert` 同样处理。实测真实 CRLF 文章 `batch-tests.md`（118 行）跨行替换：命中、内容已变、行尾仍 CRLF。
+
+- **子模块封顶时静默撒谎，产出死链（`lib/agentic.js` + `lib/articles-agentic.js`）**。封顶逻辑本身正确（`_depth >= subDepth` 时为 `null`，递归时传 `onSubModule: null` 让子层重建判定），但工具层把「不可用」一律回成 `isError:false` + `「已记录子模块 X（本模式下不递归成文）」`。模型据此在父文里写「详见 xxx.md」，**而那个文件从未生成** —— 死链，且父任务仍记 `ok:true`，无人察觉。修法：`buildToolset` 新增 `subModuleBlocked`（`'max-depth'` / `'unsupported'`），两种情况分别返回 `isError:true` 并给出可执行指令（「已到嵌套上限，请在本文里作为普通小节直接写清楚，不要留下指向外部文件的死链」）。`runOneArticle` 逐层透传。
+
+- **`read_code` 只有行数上限、没有字符上限（`lib/agentic.js`）**。`MAX_READ_LINES = 2000` 挡不住压缩产物：实测单行 20 万字符的文件一次返回 200026 字符 ≈ 5.7 万 token（2000 行上限对它完全无效，因为它只有 1 行）。新增 `MAX_READ_CHARS = 40000`（≈11k token），超限截断并提示「请用更小的行范围读，不要整包读压缩产物/打包文件」。
+
+- **`list_files` 列出 `node_modules`/`.git`（`lib/agentic.js`）**。模型看到会当源码探索，白烧步数。新增 `IGNORED_DIRS`（node_modules/.git/dist/build/.next/target/vendor/__pycache__/.venv/venv），过滤后提示「已隐藏 N 个依赖/版本控制目录」。
+  - 注：核查报告另称「`list_files` 的 `depth` 参数完全无效」——这条我复核后**判为不准确**：`lib/agentic.js` 确实把 `depth` 传给了 `workspace.listDir(rel, depth)`，但适配层 `lib/agentic-host.js:125` 的签名是 `async listDir(rel)`，多传的实参被忽略。所以现象描述对（`depth=1/2/4` 返回条数相同）、但根因是**适配层不接**而非工具层不传。本次未改递归展开（`list_files` 定位是「看一眼有哪些文件」，深读靠 `read_code`），只修了忽略目录；若后续确有需要，应在 `makeFsWorkspace.listDir` 里实现深度递归。
+
+- **`insert` 负行号被静默吞掉（`lib/agentic.js`）**。原 `Math.max(0, Number(args?.line) || 0)` 把 `-5` 变成 `0`，内容被插到文件最前，模型还以为插到了指定位置。改为负数直接 `isError:true` 并说明「0 表示插到最前，1 表示第 1 行之后」。
+
+测试：`test-agentic.mjs` 48 → 55 条（新增 CRLF 跨行命中、CRLF 行尾保持、LF 不被污染、字符上限、忽略目录、负数行号 6 条；另把旧的「无 onSubModule 时子模块调用不报错」改为「必须报错并说明原因」+ 新增「深度到顶报错」）。全量 17 个测试文件回归全绿（`test-batch` 128、`test-symbols` 24、`test-cluster` 30、`test-agentic-host` 16、`test-articles-agentic` 16 等）。回退验证：四处劣化（去掉行尾归一化 / 关掉字符上限 / 关掉忽略目录 / 关掉负数检查）分别触发对应测试 FAIL，恢复后全过。
+
 ## 0.13.3 — 2026-10-27
 
 ### 修复：首次真实运行（真模型 + 真落盘）暴露的三个缺陷
