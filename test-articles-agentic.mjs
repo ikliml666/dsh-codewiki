@@ -396,6 +396,79 @@ await check('sourceTokensOf 按 CJK/非 CJK 口径估 token，读不到的文件
   fs.rmSync(cwd, { recursive: true, force: true })
 })
 
+await check('写集闸门：allowedWritePaths 之外的路径不落盘，返回 write-set 原因', async () => {
+  const cwd = makeTmp()
+  const allowed = path.join(cwd, '.codewiki', 'wiki', 'modules', 'cart.md')
+  const outside = path.join(cwd, '.codewiki', 'wiki', 'modules', 'other.md')
+  const stream = scripted([
+    [call('t1', 'edit_article', { command: 'insert', line: 0, text: FULL_ARTICLE })],
+    [text('已完成')],
+  ])
+  const out = await runOneArticle(
+    { name: 'modules/other.md', mission: '越界写', articlePath: outside, sources: [] },
+    { streamFn: stream, cwd, maxSteps: 5, allowedWritePaths: [allowed] },
+  )
+  assert.equal(out.ok, false, '越界写必须判失败')
+  assert.equal(out.stopReason, 'write-set')
+  assert.equal(fs.existsSync(outside), false, '越界目标文件不得落盘')
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('写集闸门：allowedWritePaths 之内正常落盘（子模块只写自己那条路径）', async () => {
+  const cwd = makeTmp()
+  const mine = path.join(cwd, '.codewiki', 'wiki', 'modules', 'cart.md')
+  const stream = scripted([
+    [call('t1', 'edit_article', { command: 'insert', line: 0, text: FULL_ARTICLE })],
+    [text('已完成')],
+  ])
+  const out = await runOneArticle(
+    { name: 'modules/cart.md', mission: '写自己', articlePath: mine, sources: [] },
+    { streamFn: stream, cwd, maxSteps: 5, allowedWritePaths: [mine] },
+  )
+  assert.equal(out.ok, true)
+  assert.equal(fs.readFileSync(mine, 'utf8'), FULL_ARTICLE)
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('写集闸门：不传 allowedWritePaths 时行为不变（旧调用方沿用）', async () => {
+  const cwd = makeTmp()
+  const anyPath = path.join(cwd, '.codewiki', 'wiki', 'modules', 'legacy.md')
+  const stream = scripted([
+    [call('t1', 'edit_article', { command: 'insert', line: 0, text: FULL_ARTICLE })],
+    [text('已完成')],
+  ])
+  const out = await runOneArticle(
+    { name: 'modules/legacy.md', mission: '旧调用', articlePath: anyPath, sources: [] },
+    { streamFn: stream, cwd, maxSteps: 5 },
+  )
+  assert.equal(out.ok, true, '不设限时不应拦截')
+  assert.equal(fs.existsSync(anyPath), true)
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('写集闸门：子模块递归时父任务写集会下传，子层越界写父文被拒', async () => {
+  const cwd = makeTmp()
+  const parentPath = path.join(cwd, '.codewiki', 'wiki', 'modules', 'shop.md')
+  const stream = scripted([
+    // 父层：先派子模块，子层尝试写父文（越界），父层再正常收尾
+    [call('p1', 'generate_sub_module', { module_name: 'cart', components: ['src/cart.js'], description: '购物车' })],
+    [call('p2', 'edit_article', { command: 'insert', line: 0, text: FULL_ARTICLE })],
+    [text('已完成')],
+  ])
+  const out = await runOneArticle(
+    { name: 'modules/shop.md', mission: '写 shop', articlePath: parentPath, sources: ['src/cart.js', 'src/order.js'] },
+    { streamFn: stream, cwd, maxSteps: 8, allowedWritePaths: [parentPath] },
+  )
+  // 子模块拿到的写集只有它自己那条路径（不是父文的），因此子层不会覆盖父文
+  assert.equal(out.ok, true, `父层应成功收尾（实际 ${out.ok}/${out.stopReason}）`)
+  const subs = out.subModules ?? []
+  assert.ok(subs.length >= 1, `应派生出子模块文章（实际 ${subs.length}）`)
+  for (const s of subs) {
+    assert.notEqual(path.resolve(s.path), path.resolve(parentPath), '子模块不得写父文章路径')
+  }
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
 // ---------------------------------------------------------------- 结果
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) process.exitCode = 1

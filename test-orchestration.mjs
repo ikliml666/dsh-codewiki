@@ -150,6 +150,24 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       return '观察：模块职责与关键实现（来自分批观察）。\n\n文件清单：见上文。\n'
     }
     if (prompt.includes('你是 CodeWiki 文章作者')) {
+      // stale 逐篇更新：目标文章名写在任务 mission 里。文章契约闸门（0.14.0）会校验
+      // type 与所在目录一致，所以 fixture 必须按目标位置给对类型——根目录 _architecture.md
+      // 是 architecture、concepts/ 是 concept，其余按 module。
+      const staleName = (prompt.match(/更新过期文章\s+(\S+?)：/) ?? [])[1]
+      if (staleName) {
+        const type = staleName === '_architecture.md' ? 'architecture'
+          : staleName === '_patterns.md' ? 'pattern'
+            : staleName.startsWith('concepts/') ? 'concept'
+              : staleName.startsWith('learnings/') ? 'learning' : 'module'
+        // 根级文章：_architecture.md 基于 core/core.py（随 core.py 变更过期），
+        // _patterns.md 基于 util/util.py（不被 core.py 变更波及，用来验证「未变更文章不动」）。
+        // 其余按 modules/<名>.md → <名>/<名>.py。契约闸门会校验 source_files 真实存在，
+        // 所以这里必须造出 fixture 里确实有的路径，不能凭空拼。
+        const src = staleName === '_architecture.md' ? 'core/core.py'
+          : staleName === '_patterns.md' ? 'util/util.py'
+            : staleName.replace(/^modules\//, '').replace(/\.md$/, '/') + `${staleName.replace(/^modules\//, '').replace(/\.md$/, '')}.py`
+        return articleMd(staleName, src, articleMarker, type)
+      }
       const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
       return articleMd(mn, `${mn}/${mn}.py`, articleMarker)
     }
@@ -1380,6 +1398,10 @@ console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
     try {
       fs.mkdirSync(path.join(wtMain, 'core'), { recursive: true })
       fs.writeFileSync(path.join(wtMain, 'core', 'core.py'), 'def run():\n    return 1\n')
+      // mock 生成的 _patterns.md 声明 util/util.py 为 source_files；契约闸门会校验它真实存在，
+      // 缺了这个文件整轮会因「存量文章 source_files 指向不存在的文件」降为 partial。
+      fs.mkdirSync(path.join(wtMain, 'util'), { recursive: true })
+      fs.writeFileSync(path.join(wtMain, 'util', 'util.py'), 'def fmt():\n    return "util"\n')
       execFileSync('git', ['init', '-q', wtMain])
       g('config', 'user.name', 'test')
       g('config', 'user.email', 'test@test')

@@ -194,7 +194,7 @@ const kmTasks = [
 ]
 const batchNotes = []
 const batchRes = await runRealtimeTasks(kmTasks, {
-  provider: 'workbuddy', llm: makeLlm('---\ntitle: B\n---\n批量结果'),
+  provider: 'workbuddy', llm: makeLlm('---\ntitle: B\ntype: module\ntags: []\nsource_files:\n  - src.ts\n---\n\n## Overview\n\n批量结果'),
   model: 'hy3', reasoningEffort: 'high', concurrency: 2, notes: batchNotes,
 })
 check(llmCalls.length === 2, '每任务一次流式调用（2 任务 2 次）')
@@ -334,7 +334,7 @@ section('runRealtimeTasks：并发池 + 失败记账')
     provider: 'workbuddy',
     llm: makeLlm((opts) => promptOf(opts).includes('boom')
       ? new Error('simulated network error')
-      : (promptOf(opts).includes('km') ? '内存结果' : '---\ntitle: R\n---\n实时结果')),
+      : (promptOf(opts).includes('km') ? '内存结果' : '---\ntitle: R\ntype: module\ntags: []\nsource_files:\n  - src.ts\n---\n\n## Overview\n\n实时结果')),
     model: 'hy3', concurrency: 2, notes: rtNotes,
   })
   check(rt.size === 3, '返回 3 条结果（Map）')

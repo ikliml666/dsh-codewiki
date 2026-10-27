@@ -132,6 +132,7 @@ window.__ModuleLoader__.load({
       stageIndex: '建索引中',
       stageCommit: '提交产物中',
       stageDone: '已完成',
+      stagePartial: '部分完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
       stepQueued: '排队',
@@ -308,6 +309,7 @@ window.__ModuleLoader__.load({
       stageCommit: 'Committing',
       stepQueued: 'Queue',
       stageDone: 'Done',
+      stagePartial: 'Partial',
       stageFailed: 'Failed',
       stageCancelled: 'Cancelled',
       kindFull: 'Full',
@@ -1100,10 +1102,13 @@ window.__ModuleLoader__.load({
         const stageBar = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           const terminal = idx < 0
-          const failIdx = terminal && job.stage !== 'done' ? ACTIVE_STAGES.indexOf(lastTimedStage(job)) : -1
+          // partial（部分完成）与 done 一样「所有阶段都跑过了」，区别只在终态标签与
+          // 未消化变化的提示——所以步骤条不该停在某个阶段标红，只有 failed/cancelled 才这样。
+          const cleanEnd = job.stage === 'done' || job.stage === 'partial'
+          const failIdx = terminal && !cleanEnd ? ACTIVE_STAGES.indexOf(lastTimedStage(job)) : -1
           return el('div', { 'data-dscw-p-steps': '' },
             ACTIVE_STAGES.map((s, i) => {
-              const done = terminal ? ((failIdx < 0 && job.stage === 'done') || i < failIdx) : i < idx
+              const done = terminal ? ((failIdx < 0 && cleanEnd) || i < failIdx) : i < idx
               const running = !terminal && i === idx
               const failedStep = terminal && failIdx >= 0 && i === failIdx
               const dur = job.stageTimings?.[s]
@@ -1124,7 +1129,9 @@ window.__ModuleLoader__.load({
         const STAGE_WEIGHTS = { queued: 0, articles: 0.63, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05, commit: 0.02 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
-          if (idx < 0) return job.stage === 'done' ? 100 : null
+          // partial 是所有阶段都跑完但完整性没成立：进度按 100 显示（活干完了），
+          // 由终态标签「部分完成」+ 阻塞原因说明为什么没算完整成功。
+          if (idx < 0) return (job.stage === 'done' || job.stage === 'partial') ? 100 : null
           let pct = 0
           for (let i = 0; i < idx; i++) pct += STAGE_WEIGHTS[ACTIVE_STAGES[i]] ?? 0
           const tl = Array.isArray(job.taskList) ? job.taskList : []
@@ -1291,7 +1298,8 @@ window.__ModuleLoader__.load({
                     ),
                     (() => {
                       const lj = r.lastJob
-                      const ljActive = lj && !['done', 'failed', 'cancelled'].includes(lj.stage)
+                      // partial 也是终态（不再推进），否则会把已结束的任务当成「在跑」继续显示进度条
+                      const ljActive = lj && !['done', 'partial', 'failed', 'cancelled'].includes(lj.stage)
                       const tl = ljActive && Array.isArray(lj.taskList) ? lj.taskList : []
                       const tlDone = tl.filter((x) => x.state === 'done').length
                       const barDone = ljActive && lj.batchProgress ? lj.batchProgress.completed : tlDone
@@ -1523,6 +1531,12 @@ window.__ModuleLoader__.load({
             if (total) meta.push(`${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`)
             else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
             if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
+            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
+            // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
+            const blockers = Array.isArray(job.blockers) ? job.blockers : []
+            if (!active && job.stage === 'partial' && blockers.length) {
+              meta.push(`未消化 ${blockers.length} 项`)
+            }
             if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
             // 已用时拆「排队 / 执行」：排队时长来自 stageTimings.queued（正在排队时实时算），
             // 执行 = 总时长 − 排队。不再让 2 小时排队被看成「编译跑了 2 小时」。
@@ -1552,7 +1566,16 @@ window.__ModuleLoader__.load({
                 if (ac.reason) acTitle = `${t('autoCommitPending')}：${ac.reason}`
               }
             }
-            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: acTitle ?? undefined },
+            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
+            // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
+            // 阻塞原因是几十字的中文句子，塞进 meta 会撑爆一行，所以放 title 悬停看。
+            let blockTitle = null
+            if (!active && job.stage === 'partial' && blockers.length) {
+              meta.push(`未消化 ${blockers.length} 项`)
+              blockTitle = blockers.slice(0, 3).map((b) => String(b.detail ?? b.kind)).join('；')
+            }
+            const jobTitle = [acTitle, blockTitle].filter(Boolean).join('\n') || undefined
+            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: jobTitle },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
                 el('span', {
