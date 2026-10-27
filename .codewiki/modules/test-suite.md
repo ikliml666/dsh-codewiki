@@ -86,7 +86,7 @@ tags: [testing, automation, orchestration, wiki-validation]
     *   英文文案特征：包含 `living wiki`，不包含 `活 wiki` [test-wiki-entry.mjs:45-46]。
 *   **`normalizeArticlePath` (index.js:199)**：将 Windows `\` 分隔路径统一为 POSIX `/`。
 *   **`parseStatus` (index.js:213-228)**：解析 `cw status` 输出，规范化 `changedFiles` 和 `staleArticles`。
-    *   `staleArticles` 中的 `\` 应被规范化为 `/` [test-wiki-entry.mjs:65]。
+    *   `staleArticles` 中的 `\` 应被规范化为 `/` [test-wiki-entry.mjs:62]。
 *   **`normalizeIndexLinks` (index.js:203-212)**：修正 `_index.md` 中的链接路径分隔符，不影响正文内容。
     *   核心难点在于区分“Markdown 链接语法中的路径”与“正文文本中的普通路径”。测试明确验证：`[[...\\...|...]]` 中的 `\` 被替换，但正文里的 `E:\ik\repo` 保持不变 [test-wiki-entry.mjs:74]。
 

@@ -21,10 +21,10 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 本模块是 dsh-codewiki 插件的「配置面」与「元数据面」，横跨三个正交职责：
 
 1. **插件配置（Configuration）**：整个插件的可调设置集合 `Config`（`index.js` 第 60–86 行，`@deepseek-ai/schemastery` 的 `z.object`）以及把原始配置归一化成运行态的 `liveConfig`（`index.js` 第 92–134 行）。所有并发上限、模型选择、规划/写作/增量开关最终都汇聚到这里。
-2. **文章 frontmatter 元数据（Metadata — 文章侧）**：wiki 文章的固定元数据契约由 `articleFormatSection`（`index.js` 第 897–926 行）定义；配套解析/生成工具 `slugify`（第 1311–1313 行）、`parseSourceFiles`（第 1317–1329 行）、`readSourceFiles`（第 1331–1339 行）、`numberLines`（第 597–599 行）负责把「模块名→文件名」「文章里列了哪些源文件」「行号前缀标注」这些元数据读出来、写出来、规范化。
+2. **文章 frontmatter 元数据（Metadata — 文章侧）**：wiki 文章的固定元数据契约由 `articleFormatSection`（`index.js` 第 1179–1208 行）定义；配套解析/生成工具 `slugify`（第 1593–1595 行）、`parseSourceFiles`（第 1599–1611 行）、`readSourceFiles`（第 1613–1621 行）、`numberLines`（第 602–604 行）负责把「模块名→文件名」「文章里列了哪些源文件」「行号前缀标注」这些元数据读出来，写出来、规范化。
 3. **符号图快照元数据（Metadata — 增量侧）**：增量编译依赖 `.codewiki/temp/symbol-graph.json` 这座「符号级快照」，由 `lib/incremental.js` 的 `slimGraph`/`saveSnapshot`/`loadSnapshot`/`graphFromSnapshot`/`filterStaleTasks` 管理，哈希计算（`bodyHash`/`codeHash`/`stripComments`）来自 `lib/graph-diff.js`。
 
-此外，设置页级联下拉（选编译模型、思考档位）的数据源 `listModelCatalog` / `resolveModelEfforts`（`index.js` 第 3516–3576 行）也归入本模块，因为它们是配置项的「可选值来源」。
+此外，设置页级联下拉（选编译模型、思考档位）的数据源 `listModelCatalog` / `resolveModelEfforts`（`index.js` 第 3796–3856 行）也归入本模块，因为它们是配置项的「可选值来源」。
 
 ## Key Components
 
@@ -34,8 +34,8 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 
 | 字段 | 默认（第 61–85 行） | 归一化（`liveConfig`）关键行为 | 用途 |
 |---|---|---|---|
-| `enabled` | `true`（61） | `?? true`（97） | 关闭后两个工具立即报错（第 1282、3123 行） |
-| `binaryPath` | `''`（62） | `String(...).trim()`（98） | 手动指定 `cw` 路径；留空走 PATH→捆绑副本（第 141–159 行 `resolveBinary`） |
+| `enabled` | `true`（61） | `?? true`（97） | 关闭后两个工具立即报错（第 1564、3403 行） |
+| `binaryPath` | `''`（62） | `String(...).trim()`（98） | 手动指定 `cw` 路径；留空走 PATH→捆绑副本（第 140–160 行 `resolveBinary`） |
 | `batchProvider` | `'workbuddy'`（63，常量第 35 行） | 原样（99） | 编译模型提供商，必须已在宿主模型设置注册 |
 | `batchModel` | `'hy3'`（64，常量第 36 行） | 空则回落默认（100） | 编译模型 id |
 | `batchReasoningEffort` | `''`（65） | 原样（101） | 思考档位；空=模型默认档 |
@@ -53,14 +53,14 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 | `agenticArticles` | `true`（77） | `!== false`（122） | 是否走 agentic 工具循环写作 |
 | `agenticMaxSteps` | `30`（78） | 夹 [1,100]（123–126） | 单篇 agentic 最大步数 |
 | `symbolIncremental` | `true`（79） | `!== false`（127） | 是否按 AST 符号级判定变更 |
-| `updateReminder` | `true`（80） | 由 `installUpdateReminder` 读取（第 4047 行） | 注入会话维护提醒 |
+| `updateReminder` | `true`（80） | 由 `installUpdateReminder` 读取（第 4314 行） | 注入会话维护提醒 |
 | `autoCommit` | `true`（81） | `!== false`（131） | 产物自动提交 |
-| `excludePaths` | `''`（82） | 原样（128） | 排除清单（第 324–336 行解析） |
+| `excludePaths` | `''`（82） | 原样（128） | 排除清单（第 329–341 行解析） |
 | `autoUpdate` | `false`（83） | `=== true`（129） | 定时自动增量编译 |
 | `autoUpdateMin` | `30`（84） | 下限 5（130） | 自动扫描间隔（分钟） |
 | `workspaceOnly` | `true`（85） | `!== false`（132） | 任务页只显示已添加工作区 |
 
-相关常量：`CONCURRENCY_HARD_CAP=8`（第 31 行）、`DEFAULT_CONCURRENCY=2`（33）、`DEFAULT_BATCH_PROVIDER='workbuddy'`（35）、`DEFAULT_BATCH_MODEL='hy3'`（36）、`DEFAULT_BIG_PROVIDER='volces-ark'`（39）、`DEFAULT_BIG_MODEL='glm-5.3-flash'`（40）、`DEFAULT_BIG_TOKEN_BUDGET=420000`（42）、`BATCH_TOKEN_BUDGET=110000`（581，单请求输入预算）、`BATCH_TOKEN_HARD_LIMIT=128000`（586，单文件硬上限）、`WIKI_PATHS=['.codewiki','CodeWiki.md']`（45，自动提交唯一 pathspec）。
+相关常量：`CONCURRENCY_HARD_CAP=8`（第 31 行）、`DEFAULT_CONCURRENCY=2`（33）、`DEFAULT_BATCH_PROVIDER='workbuddy'`（35）、`DEFAULT_BATCH_MODEL='hy3'`（36）、`DEFAULT_BIG_PROVIDER='volces-ark'`（39）、`DEFAULT_BIG_MODEL='glm-5.3-flash'`（40）、`DEFAULT_BIG_TOKEN_BUDGET=420000`（42）、`BATCH_TOKEN_BUDGET=110000`（586，单请求输入预算）、`BATCH_TOKEN_HARD_LIMIT=128000`（591，单文件硬上限）、`WIKI_PATHS=['.codewiki','CodeWiki.md']`（45，自动提交唯一 pathspec）。
 
 - `val(x)`（第 88–90 行）：若 `x` 是 schemastery 配置（带 `.get()`），取 `.get()`，否则原样返回——`liveConfig` 用它兼容「直接传普通对象」与「传配置代理」两种调用形态。
 - `liveConfig(config)`（第 92–134 行）：返回归一化对象，是**唯一**的配置出口；`config` 为 `null` 时全部走默认值（第 93–97 行）。`parallelLimit` 是派生字段（第 115–119 行），串行时恒为 1。
@@ -68,11 +68,11 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 
 ### 2. 文章 frontmatter 元数据格式与解析（`index.js`）
 
-- `articleFormatSection()`（第 897–926 行）：**全仓库 wiki 文章的元数据契约源头**。它把合法 frontmatter 与章节骨架硬编码成 prompt 条款——frontmatter 必须含 `title` / `type` / `source_files` / `tags`，章节固定为 `Overview / Key Components / Architecture / Data Flow / Connections / Known Issues`（第 900–916 行）；第 917–924 行是给写作模型看的硬约束（行号以「行号| 」前缀为准、source_files 必须列出每个读过的文件、禁用/注释处写明具体位置、架构框图放进 ```text 围栏、Obsidian 反链等）。批量单轮写作（`batchArticlePrompt` 第 766–793 行）、agentic 写作（`runAgenticArticles` 注入的 `articleFormat`）、横切/校对 prompt 都引用本函数，因此所有维基文章共享同一套元数据格式。
-- `slugify(name)`（第 1311–1313 行）：模块名 → 文件名 slug。`toLowerCase()` 后保留 CJK 字符（中文顶层目录名直接作 slug，避免塌缩成 `module`），其余非 `Han/a-z0-9-_` 清成 `-`；结果为空回落 `'module'`。`plan.modules[].name` 经它变成 `modules/${slug}.md`（第 2430–2436 行）。
-- `parseSourceFiles(fm)`（第 1317–1329 行）：从 frontmatter 文本解析 `source_files`，同时支持**行内数组** `source_files: [a, b]`（第 1318–1321 行）与**缩进块** `source_files:\n  - a`（第 1322–1327 行）两种写法，返回相对路径数组。`fixAnchors`（第 608–730 行）与 `readSourceFiles` 都依赖它。
-- `readSourceFiles(articlePath)`（第 1331–1339 行）：读文章文件 → 抽 frontmatter → 调 `parseSourceFiles`。stale 增量（`codewiki_generate` 第 3199 行预构建任务、第 2692 行校对装填、`localReview` 第 2653 行）用它取「这篇旧文引用了哪些源文件」。
-- `numberLines(content)`（第 597–599 行）：给源码每行加 `N| ` 前缀（尾部至多去一个换行），是**全仓行号引用约定**的权威实现（`collectSources` 第 746 行、`fixAnchors` 第 641 行、批/校对 prompt 都靠它）。注意：`lib/agentic.js` 第 101–106 行有一份**语义相同但独立**的 `numberLines`（agentic 工具返回的读码结果前缀），两处需保持一致。
+- `articleFormatSection()`（第 1179–1208 行）：**全仓库 wiki 文章的元数据契约源头**。它把合法 frontmatter 与章节骨架硬编码成 prompt 条款——frontmatter 必须含 `title` / `type` / `source_files` / `tags`，章节固定为 `Overview / Key Components / Architecture / Data Flow / Connections / Known Issues`（第 1184–1198 行）；第 1199–1206 行是给写作模型看的硬约束（行号以「行号| 」前缀为准、source_files 必须列出每个读过的文件、禁用/注释处写明具体位置、架构框图放进 ```text 围栏、Obsidian 反链等）。批量单轮写作（`batchArticlePrompt` 第 1048 行起）、agentic 写作（`runAgenticArticles` 注入的 `articleFormat`）、横切/校对 prompt 都引用本函数，因此所有维基文章共享同一套元数据格式。
+- `slugify(name)`（第 1593–1595 行）：模块名 → 文件名 slug。`toLowerCase()` 后保留 CJK 字符（中文顶层目录名直接作 slug，避免塌缩成 `module`），其余非 `Han/a-z0-9-_` 清成 `-`；结果为空回落 `'module'`。`plan.modules[].name` 经它变成 `modules/${slug}.md`（在 `tickArticles` 第 2705 行等处）。
+- `parseSourceFiles(fm)`（第 1599–1611 行）：从 frontmatter 文本解析 `source_files`，同时支持**行内数组** `source_files: [a, b]`（第 1600–1603 行）与**缩进块** `source_files:\n  - a`（第 1604–1609 行）两种写法，返回相对路径数组。`fixAnchors`（第 779 行起）与 `readSourceFiles` 都依赖它。
+- `readSourceFiles(articlePath)`（第 1613–1621 行）：读文章文件 → 抽 frontmatter → 调 `parseSourceFiles`。stale 增量（`codewiki_generate` 第 3479 行预构建任务读取、第 2967 行校对装填、`localReview` 第 2928 行）用它取「这篇旧文引用了哪些源文件」。
+- `numberLines(content)`（第 602–604 行）：给源码每行加 `N| ` 前缀（尾部至多去一个换行），是**全仓行号引用约定**的权威实现（`collectSources` 第 1028 行、`fixAnchors` 第 641 行、批/校对 prompt 都靠它）。注意：`lib/agentic.js` 第 101–106 行有一份**语义相同但独立**的 `numberLines`（agentic 工具返回的读码结果前缀），两处需保持一致。
 
 ### 3. 符号图快照与增量元数据（`lib/incremental.js` + `lib/graph-diff.js`）
 
@@ -86,9 +86,9 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 - `sameSnapshotContent(a, b)`（第 53–66 行）：忽略 `generatedAt`/`commit` 等每轮必变元数据，仅比 `SLIM_FIELDS`——用于收尾写快照前判断「代码没变就别覆盖」，避免 autoCommit 因只改时间戳而空转提交。
 - `graphFromSnapshot(snap)`（第 69–88 行）：快照 → `Map<id,node>`，补回 `sourceCode:''`/`docstring:''`（第 83–84 行），供 `graph-diff` 使用。
 - `loadSnapshot(wikiPath, fsImpl)`（第 94–104 行）/ `saveSnapshot(wikiPath, snap, fsImpl, pathImpl)`（第 106–115 行）：带目录自动创建的读写；版本不符/坏 JSON 返回 `null`（第 98–103 行）。`fsImpl`/`pathImpl` 可注入便于单测。
-- `normRel(p)`（第 118–120 行）：把 `.\src\a.js`、`./src/a.js` 都归一为 `src/a.js`，解决 frontmatter 与快照路径分隔符/前缀不一致（第 169–176 行 `filterStaleTasks` 用）。
+- `normRel(p)`（第 118–120 行）：把 `.\src\a.js`、`./src/a.js` 都归一为 `src/a.js`，解决 frontmatter 与快照路径分隔符/前缀不一致（第 177 行 `filterStaleTasks` 用）。
 - `componentsByFile(graph)`（第 123–132 行）：按文件聚合组件 id，增量判定时「这篇文章的源文件覆盖了哪些组件」。
-- `filterStaleTasks(tasks, oldGraph, newGraph, opts)`（第 140–194 行）：**增量核心判定（纯函数，不碰文件系统）**。输入 `tasks:[{name, articlePath, sources}]` 与新旧图，返回 `{keep, dropped, change, counts, cosmeticOnly}`。`keep[i].changedComponents` 带出真变组件供写作者参考（第 138 行）；`source_files` 里解析不出符号的文章保守 `keep` 并标 `symbolFallback`（第 179–183 行）；`ignoreCommentOnly !== false`（默认）下做**纯注释降级**（第 154–169 行）：`bodyHash` 变但 `codeHash` 没变且 docstring 没变 → 视为无实质变更。
+- `filterStaleTasks(tasks, oldGraph, newGraph, opts)`（第 140–194 行）：**增量核心判定（纯函数，不碰文件系统）**。输入 `tasks:[{name, articlePath, sources}]` 与新旧图，返回 `{keep, dropped, change, counts, cosmeticOnly}`。`keep[i].changedComponents` 带出真变组件供写作者参考（第 186 行）；`source_files` 里解析不出符号的文章保守 `keep` 并标 `symbolFallback`（第 179–183 行）；`ignoreCommentOnly !== false`（默认）下做**纯注释降级**（第 154–169 行）：`bodyHash` 变但 `codeHash` 没变且 docstring 没变 → 视为无实质变更。
 - `describeChange(counts)`（第 197–206 行）：把 `counts`（interface/added/deleted/renamed/body/edge）拼成中文摘要（如「接口变 1、实现变 2」），写进 job note。
 
 `lib/graph-diff.js` 提供哈希原语（被 `slimGraph`/`filterStaleTasks` 间接调用）：
@@ -100,9 +100,9 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 
 ### 4. 模型目录元数据（`index.js`）
 
-- `listModelCatalog(llm)`（第 3516–3537 行）：枚举宿主已注册 provider 及其 models，作为设置页「编译模型」级联下拉数据源；与配置项的 `batchProvider/batchModel/bigProvider/bigModel` 同源（`/api/codewiki/models` 端点第 3800–3815 行）。缺 llm 服务时整体降级 `ok:false`。
-- `resolveModelInfoOf(llm)`（第 3543–3548 行）：兼容 `resolveModelInfo`（新）与 `resolveModel`（旧宿主/测试桩）两种接口。
-- `resolveModelEfforts(llm, provider, model)`（第 3554–3576 行）：取单个 provider/model 的思考档位列表 `reasoning.efforts` 与 `defaultEffort`，驱动设置页 `batchReasoningEffort/bigReasoningEffort` 下拉（`/api/codewiki/model-efforts` 第 3819–3839 行）。
+- `listModelCatalog(llm)`（第 3796–3817 行）：枚举宿主已注册 provider 及其 models，作为设置页「编译模型」级联下拉数据源；与配置项的 `batchProvider/batchModel/bigProvider/bigModel` 同源（`/api/codewiki/models` 端点第 4082 行起注册）。缺 llm 服务时整体降级 `ok:false`。
+- `resolveModelInfoOf(llm)`（第 3823–3828 行）：兼容 `resolveModelInfo`（新）与 `resolveModel`（旧宿主/测试桩）两种接口。
+- `resolveModelEfforts(llm, provider, model)`（第 3834–3856 行）：取单个 provider/model 的思考档位列表 `reasoning.efforts` 与 `defaultEffort`，驱动设置页 `batchReasoningEffort/bigReasoningEffort` 下拉（`/api/codewiki/model-efforts` 第 4101 行起注册）。
 
 ## Architecture
 
@@ -110,17 +110,17 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │  设置 (schemastery)     │         │  文章 frontmatter 契约   │
 │  Config (index.js:60)   │──归一──▶│  articleFormatSection     │
-│  · batchProvider/Model  │  liveConfig                (index.js:897)  ◀── 所有文章格式
+│  · batchProvider/Model  │  liveConfig                (index.js:1179) ◀── 所有文章格式
 │  · bigProvider/Model    │  (index.js:92)            └────────────┬─────────┘
 │  · 并发/开关            │                                         │ 产出/解析
 └───────────┬─────────────┘                                         ▼
             │ 供全链路消费                                          ┌──────────────────────┐
             ▼                                                       │ slugify/parseSource  │
 ┌─────────────────────────┐          ┌──────────────────────┐      │ Files/readSourceFiles │
-│ 模型目录元数据          │          │ stale 增量任务构建    │─────▶│ (index.js:1311/1317)  │
-│ listModelCatalog (3516) │─────────▶│ codewiki_generate     │      └──────────────────────┘
-│ resolveModelEfforts     │ 下拉值   │ (:3199 预构建任务)    │
-│ (3554)                  │          └──────────┬───────────┘
+│ 模型目录元数据          │          │ stale 增量任务构建    │─────▶│ (index.js:1593/1599)  │
+│ listModelCatalog (3796) │─────────▶│ codewiki_generate     │      └──────────────────────┘
+│ resolveModelEfforts     │ 下拉值   │ (:3479 预构建任务)    │
+│ (3834)                  │          └──────────┬───────────┘
 └─────────────────────────┘                     │ 旧图 vs 新图
                                                   ▼
                                        ┌──────────────────────────┐
@@ -141,26 +141,26 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 
 ## Data Flow
 
-1. **配置流入**：宿主把 `Config` 注入插件 → `apply`（`index.js` 第 4068 行）持有原始配置 → 任意需要配置处先过 `liveConfig(config)`（第 92 行）拿归一对象。`cw`/`codewiki_generate` 工具入口各自 `liveConfig(cfg)` 先校验 `enabled`（第 1282、3123 行），关闭则直接抛错。
-2. **模型选项流出**：设置页前端经 `/api/codewiki/models`、`/api/codewiki/model-efforts`（`index.js` 第 3800、3819 行）调 `listModelCatalog`/`resolveModelEfforts`，把可选 provider/model/effort 回填到 `batchProvider/batchModel/batchReasoningEffort` 等配置字段。
-3. **frontmatter 在增量中的往返**：`codewiki_generate` 对 stale 文章先用 `readSourceFiles` 取旧文 `source_files`（第 3199 行）→ 作为预构建任务的 `sources` → 连同 `slugify` 出的文件名一起交给 job 服务写文章 → 新文章由 `articleFormatSection` 规定的格式产出，行号由 `numberLines`/`collectSources` 标注。
-4. **快照在增量中的往返**：全量编译收尾写 `saveSnapshot(wikiPath, slimGraph(graph, {commit}))`（`lib/incremental.js` 第 106、37 行）；下次 stale 编译用 `loadSnapshot` 回读旧图、`extractCurrentGraph`（`index.js` 第 1642 行）取新图 → `filterStaleTasks` 比组件级变更 → 决定 `keep`/`dropped`，并用 `describeChange` 写 note。
+1. **配置流入**：宿主把 `Config` 注入插件 → `apply`（`index.js` 第 4348 行）持有原始配置 → 任意需要配置处先过 `liveConfig(config)`（第 92 行）拿归一对象。`cw`/`codewiki_generate` 工具入口各自 `liveConfig(cfg)` 先校验 `enabled`（第 1564、3403 行），关闭则直接抛错。
+2. **模型选项流出**：设置页前端经 `/api/codewiki/models`、`/api/codewiki/model-efforts`（`index.js` 第 4082、4101 行）调 `listModelCatalog`/`resolveModelEfforts`，把可选 provider/model/effort 回填到 `batchProvider/batchModel/batchReasoningEffort` 等配置字段。
+3. **frontmatter 在增量中的往返**：`codewiki_generate` 对 stale 文章先用 `readSourceFiles` 取旧文 `source_files`（第 3479 行）→ 作为预构建任务的 `sources` → 连同 `slugify` 出的文件名一起交给 job 服务写文章 → 新文章由 `articleFormatSection` 规定的格式产出，行号由 `numberLines`/`collectSources` 标注。
+4. **快照在增量中的往返**：全量编译收尾写 `saveSnapshot(wikiPath, slimGraph(graph, {commit}))`（`lib/incremental.js` 第 106、37 行）；下次 stale 编译用 `loadSnapshot` 回读旧图、`extractCurrentGraph`（`index.js` 第 1924 行）取新图 → `filterStaleTasks` 比组件级变更 → 决定 `keep`/`dropped`，并用 `describeChange` 写 note。
 
 ## Connections
 
-- [[pipeline-orchestration]]：`createJobService`（`index.js` 第 1774 行起的 `submit`/`tick`）是配置与快照的**最大消费者**——它读 `liveConfig` 决定并发/模型/规划开关，调用 `filterStaleTasks` 做增量、`saveSnapshot` 落快照。
-- [[codewiki-cli-wrapper]]：`cw` 工具（`cwToolDefinition` 第 1240 行）与 `resolveBinary`（第 140 行）受 `binaryPath`/`enabled` 配置控制；`parseStatus`（第 213 行）判定 wiki 三态供增量分支使用。
-- [[agentic-article-writing]]：`lib/agentic.js` 的 `numberLines`（第 101 行）与本模块 `numberLines`（第 597 行）是同一行号约定；`TOOL_SCHEMAS`（第 27 行）定义工具的元数据描述。
-- [[semantic-planning]]：`semanticPlan`/`localPlan`（`index.js` 第 963、941 行）产出的 `plan.modules[].name` 经本模块 `slugify`（第 2430 行）变成文章文件名。
-- [[symbol-extraction]]：`extractRepoGraph`（`index.js` 第 16 行导入、`extractCurrentGraph` 第 1642 行调用）产出的图是 `slimGraph`/`filterStaleTasks` 的输入。
+- [[pipeline-orchestration]]：`createJobService`（`index.js` 第 2056 行起的 `submit`/`tick`）是配置与快照的**最大消费者**——它读 `liveConfig` 决定并发/模型/规划开关，调用 `filterStaleTasks` 做增量、`saveSnapshot` 落快照。
+- [[codewiki-cli-wrapper]]：`cw` 工具（`cwToolDefinition` 第 1522 行）与 `resolveBinary`（第 140 行）受 `binaryPath`/`enabled` 配置控制；`parseStatus`（第 213 行）判定 wiki 三态供增量分支使用。
+- [[agentic-article-writing]]：`lib/agentic.js` 的 `numberLines`（第 101 行）与本模块 `numberLines`（第 602 行）是同一行号约定；`TOOL_SCHEMAS`（第 27 行）定义工具的元数据描述。
+- [[semantic-planning]]：`semanticPlan`/`localPlan`（`index.js` 第 1245、1223 行）产出的 `plan.modules[].name` 经本模块 `slugify`（第 2705 行）变成文章文件名。
+- [[symbol-extraction]]：`extractRepoGraph`（`index.js` 第 16 行导入、`extractCurrentGraph` 第 1924 行调用）产出的图是 `slimGraph`/`filterStaleTasks` 的输入。
 
 ## Known Issues
 
 - **`liveConfig` 默认档并发与 `bigConcurrency` 易混**：`bigConcurrency` 为 0/未填时回落默认档（第 111–113 行），文档与面板需讲清「两池独立、大档 0=跟随默认」；旧 0.12.1 前是单一池，行为不同（第 110 行注释）。
-- **纯注释降级依赖 `codeHash` 字段**：若旧快照缺 `codeHash`（如从 `<version 1/SNAPSHOT_VERSION` 升级前），`filterStaleTasks` 会保守保留（第 109–118 行测试覆盖），即「降级失效」而非误删——是安全方向，但意味着存量快照第一次比对仍可能重写。
-- **frontmatter 解析是弱正则**：`parseSourceFiles` 只认 `source_files:` 后行内 `[...]` 或缩进 `- ...` 两种形态（第 1318–1327 行），其他写法（如 YAML 多行字符串）会解析为空数组 → stale 任务以 `symbolFallback` 保守保留（第 179–183 行），文章不会漏更但可能多写。
-- **两处 `numberLines` 需同步**：`index.js` 第 597 行（批量/校对装填）与 `lib/agentic.js` 第 101 行（agentic 读码前缀）是同一约定两份实现，改一处须同步另一处，否则模型在两种通道里看到不一致的行号前缀。
-- **`WIKI_PATHS` 只认两个路径**：`autoCommitWiki`（第 3906 行）只用 pathspec `.codewiki` 与 `CodeWiki.md`，不扩到 `-A`——若用户把 wiki 产物挪到别的路径会提交不到（第 43–45 行注释明确这是有意为之，避免卷入其它改动）。
+- **纯注释降级依赖 `codeHash` 字段**：若旧快照缺 `codeHash`（如从 `<version 1/SNAPSHOT_VERSION` 升级前），`filterStaleTasks` 会保守保留（test-incremental.mjs 第 109–118 行测试覆盖），即「降级失效」而非误删——是安全方向，但意味着存量快照第一次比对仍可能重写。
+- **frontmatter 解析是弱正则**：`parseSourceFiles` 只认 `source_files:` 后行内 `[...]` 或缩进 `- ...` 两种形态（第 1600–1609 行），其他写法（如 YAML 多行字符串）会解析为空数组 → stale 任务以 `symbolFallback` 保守保留（第 179–183 行），文章不会漏更但可能多写。
+- **两处 `numberLines` 需同步**：`index.js` 第 602 行（批量/校对装填）与 `lib/agentic.js` 第 101 行（agentic 读码前缀）是同一约定两份实现，改一处须同步另一处，否则模型在两种通道里看到不一致的行号前缀。
+- **`WIKI_PATHS` 只认两个路径**：`autoCommitWiki`（第 4186 行）只用 pathspec `.codewiki` 与 `CodeWiki.md`，不扩到 `-A`——若用户把 wiki 产物挪到别的路径会提交不到（第 43–45 行注释明确这是有意为之，避免卷入其它改动）。
 
 ## Overview
 
@@ -272,7 +272,7 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 - `bigConcurrency` 同样钳制到 8，0/未填回落 0（跟随默认档）（行111-113）。
 - `parallelLimit`（行115-119）：`serialProjects` 为真时恒为 `1`；关闭后取 `parallelProjects` 钳到 4，缺省回落 2。
 - `batchModel`/`bigModel`/`articleLanguage` 空串回落默认（行100、行103、行120）。
-- `planMode` 非 `auto`/`dirs` 回落 `auto`（行121）；`agenticMaxSteps` 钳到 100、缺省 30（行123-126）；`autoUpdateMin` 最小 5（行130）；`bigTokenBudget` 下限 `BATCH_TOKEN_BUDGET`（行581，=110000）（行105）。
+- `planMode` 非 `auto`/`dirs` 回落 `auto`（行121）；`agenticMaxSteps` 钳到 100、缺省 30（行123-126）；`autoUpdateMin` 最小 5（行130）；`bigTokenBudget` 下限 `BATCH_TOKEN_BUDGET`（行586，=110000）（行105）。
 
 ### .gitignore
 
@@ -348,7 +348,7 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
 3. **配置应用阶段**：
    - 当用户调用 CodeWiki 相关功能时，DSH 会从插件配置中读取 `codewiki` 命名空间下的设置。
    - 由于 `cordis.patch.yml` 中 `config: {}` 为空（行24），实际生效的配置来自插件 `index.js` 的 `Config` schema 默认值（行60-86）经 `liveConfig()`（行92-134）归一化后的结果，未填的项沿用 schema 默认，用户覆盖项通过 patch 注入。全量 25 个字段见上文「index.js — Config schema」表。其中与本阶段相关的默认行为：
-     - 若未设置 `binaryPath`，`resolveBinary()`（行140-160）搜索 `$PATH` 中的 `cw`，失败则使用内置 `bin/cw(.exe)`（注释见 `cordis.patch.yml` 行6）。
+     - 若未设置 `binaryPath`，`resolveBinary()`（第140-160行）搜索 `$PATH` 中的 `cw`，失败则使用内置 `bin/cw(.exe)`（注释见 `cordis.patch.yml` 行6）。
      - 若未设置 `batchProvider`/`batchModel`，默认 `workbuddy`/`hy3`。
      - `maxConcurrency` 默认 2，范围 1–8 硬顶 8（`liveConfig` 行107-109、常量行31/33）。
      - `bigConcurrency` 默认 0=跟随默认档，范围 1–8 硬顶 8（`liveConfig` 行111-113）。
@@ -356,7 +356,7 @@ tags: [配置, 元数据, 快照, frontmatter, schemastery, 增量编译]
      - `planMode` 默认 `auto`=AST 符号 + LLM 语义聚类（`liveConfig` 行121）。
      - `agenticArticles` 默认开启，`agenticMaxSteps` 默认 30、硬顶 100（行123-126）。
      - `symbolIncremental` 默认开启（行79）。
-     - `updateReminder` 默认开启，但仅在仓库根存在 `CodeWiki.md` 时注入提醒（行80；详见 `README.md` 行62）。
+     - `updateReminder` 默认开启，但仅在仓库根存在 `CodeWiki.md` 时注入提醒（行80；详见 `README.md` 行62），由 `installUpdateReminder`（第4314行）读取。
 
 4. **排除流程**：
    - Git 在提交前扫描工作区，匹配 `.gitignore` 规则（行1-12）。
