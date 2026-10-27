@@ -43,7 +43,7 @@ tags: [testing, integration, e2e, regression]
 ### test-agentic.mjs — agentic 工具循环（lib/agentic.js 自测）
 - 被测导出：`runAgenticArticle, makeArticleEditor, makeReadCodeTool, makeListFilesTool, buildToolset, buildOpeningPrompt, parseToolArgs, safeRelPath, numberLines, TOOL_SCHEMAS`（import 在 `test-agentic.mjs:4`）。
 - 基础工具：`numberLines` 行号前缀（`test-agentic.mjs:76`）、`safeRelPath` 越界/绝对路径拒绝（`test-agentic.mjs:80`）。
-- `read_code`：`makeReadCodeTool` 带行号全文（`test-agentic.mjs:89`）、行范围（`test-agentic.mjs:98`）、文件不存在 `isError`（`test-agentic.mjs:105`）、缺 path（`test-agentic.mjs:112`）、越界路径（`test-agentic.mjs:117`）、行号越界（`test-agentic.mjs:124`）、超大单行字符上限截断（`test-agentic.mjs:563`）、重复读去重只提示第几步（`test-agentic.mjs:501`）。
+- `read_code：`makeReadCodeTool` 带行号全文（`test-agentic.mjs:89`）、行范围（`test-agentic.mjs:98`）、文件不存在 `isError`（`test-agentic.mjs:105`）、缺 path（`test-agentic.mjs:112`）、越界路径（`test-agentic.mjs:117`）、行号越界（`test-agentic.mjs:124`）、超大单行字符上限截断（`test-agentic.mjs:563`）、重复读去重只提示第几步（`test-agentic.mjs:501`）。
 - `list_files`：根/子目录列目录（`test-agentic.mjs:131`/`:138`）、空目录说明（`test-agentic.mjs:144`）、隐藏 `node_modules`/`.git`（`test-agentic.mjs:573`）。
 - `edit_article`：`makeArticleEditor` 的 `insert`（`test-agentic.mjs:151`/`:157`）、`str_replace` 唯一匹配（`test-agentic.mjs:163`）、多处匹配被拒（`test-agentic.mjs:170`）、未匹配提示（`test-agentic.mjs:178`）、`view` 带行号（`test-agentic.mjs:185`）、行号越界（`test-agentic.mjs:196`）、负数行号报错（`test-agentic.mjs:589`）、CRLF 跨行替换与行尾保真（`test-agentic.mjs:542`/`:550`/`:557`）。
 - 循环本体：`runAgenticArticle` 单轮无工具直接收正文（`test-agentic.mjs:210`）、读→写两轮（`test-agentic.mjs:221`）、tool 结果回灌（`test-agentic.mjs:237`）、未知工具回灌不中断（`test-agentic.mjs:276`）、坏 JSON 记警告（`test-agentic.mjs:293`）、工具抛错捕获为 `isError`（`test-agentic.mjs:307`）、`maxSteps`（`test-agentic.mjs:324`）、`stream-error`（`test-agentic.mjs:337`）、空响应（`test-agentic.mjs:347`）、`abort`（`test-agentic.mjs:355`）、`finish` 前文章不被正文覆盖（`test-agentic.mjs:365`）、`generate_sub_module` 走 `onSubModule` 回调（`test-agentic.mjs:380`）、无 `onSubModule` 必须 `isError`（`test-agentic.mjs:401`）、深度到顶报错（`test-agentic.mjs:421`）、工具声明数（4 个，`test-agentic.mjs:438`/`:597`）。
@@ -109,9 +109,9 @@ tags: [testing, integration, e2e, regression]
 - 真实目录：`extractCurrentGraph` 提取当前符号图（`test-incremental-e2e.mjs:61`）、快照落盘 `.codewiki/temp/symbol-graph.json`（`test-incremental-e2e.mjs:52`）、只改函数体实现 → 重写记 `body`（`test-incremental-e2e.mjs:61`）、只改空白/注释全跳过（`test-incremental-e2e.mjs:78`）、签名加参数 `interface`（`test-incremental-e2e.mjs:97`）、新增文件必写（`test-incremental-e2e.mjs:112`）、删文件 `deleted`（`test-incremental-e2e.mjs:125`）、无 `.codewiki` 目录 `loadSnapshot` 返回 `null`（`test-incremental-e2e.mjs:139`）。
 
 ### test-orchestration.mjs — dsh-codewiki 服务化编排冒烟（最大文件）
-- 被测导出：`name, apply, SESSIONS_DIR, commitHintText, autoCommitWiki, autoCommitState, wakeCompileSession`（动态 `import`，如 `test-orchestration.mjs:24`/`:304`/`:415`/`:518`/`:530`）。
+- 被测导出：`name, apply, SESSIONS_DIR, commitHintText, autoCommitWiki, autoCommitState, wakeCompileSession`（动态 `import`，如 `test-orchestration.mjs:24`/`:322`/`:433`/`:536`/`:548`）。
 - 运行：`node test-orchestration.mjs`，tick 间隔压到 300ms（`test-orchestration.mjs:32`），独立 `JOBS_FILE` 防互相洗写（`test-orchestration.mjs:22`）。基线 `LEGACY_CHANNEL = { planMode:'dirs', agenticArticles:false, symbolIncremental:false }`（`test-orchestration.mjs:44`）守护旧单轮通道。
-- 覆盖：系统提示 wiki 维护提醒（`test-orchestration.mjs:242`）、注册与 `cw` 工具（`test-orchestration.mjs:272`）、`codewiki_update` scope 强制 auto + commitHint（`test-orchestration.mjs:292`，`commitHintText` 多分支：待提交/已提交静默/自动提交失败原因/`writtenCount=0` 静默/`test-orchestration.mjs:319` 起）、`autoCommitWiki` 安全边界（`test-orchestration.mjs:412`：分支合并式、非 git/`.gitignore`/merge 进行中/缺 identity/detached HEAD/主题分支占用降级）、`autoCommitState` 三态（`test-orchestration.mjs:516`）、`wakeCompileSession` 终态唤醒（`test-orchestration.mjs:527`，自动提交成功零唤醒、noChanges 零唤醒、失败降级提醒、冷会话/异常静默）、本地规划零独立规划请求（`test-orchestration.mjs:565`）、全量编译阶段机（`test-orchestration.mjs:624`，articles→crosscut→review→index→commit，自动提交产物）、大 wiki 横切精准拆分（`test-orchestration.mjs:667`）等。文件共 1530 行，其余段落在超大/并发/取消/面板端点等场景继续展开。
+- 覆盖：系统提示 wiki 维护提醒（`test-orchestration.mjs:275`）、注册与 `cw` 工具（`test-orchestration.mjs:298`）、`codewiki_update` scope 强制 auto + commitHint（`test-orchestration.mjs:292`，`commitHintText` 多分支：待提交/已提交静默/自动提交失败原因/`writtenCount=0` 静默/`test-orchestration.mjs:319` 起）、`autoCommitWiki` 安全边界（`test-orchestration.mjs:431`：分支合并式、非 git/`.gitignore`/merge 进行中/缺 identity/detached HEAD/主题分支占用降级）、`autoCommitState` 三态（`test-orchestration.mjs:537`）、`wakeCompileSession` 终态唤醒（`test-orchestration.mjs:554`，自动提交成功零唤醒、noChanges 零唤醒、失败降级提醒、冷会话/异常静默）、本地规划零独立规划请求（`test-orchestration.mjs:609`）、全量编译阶段机（`test-orchestration.mjs:642`，articles→crosscut→review→index→commit，自动提交产物）、大 wiki 横切精准拆分（`test-orchestration.mjs:685`）等。文件共 1530 行，其余段落在超大/并发/取消/面板端点等场景继续展开。
 
 ### test-prune-orphans.mjs — pruneOrphanModules 安全边界（会删文件）
 - 被测导出：`pruneOrphanModules`（来自 `index.js`，`test-prune-orphans.mjs:10`）。
@@ -211,7 +211,7 @@ tags: [testing, integration, e2e, regression]
 - **服务化 e2e 链路（test-orchestration.mjs / test-sessions.mjs / test-prune-orphans.mjs / test-wiki-entry.mjs / test-worktree.mjs / test-cwd-paths.mjs）**
   1. `makeCtx`（`test-orchestration.mjs:51`）mock 宿主 `inject`/`webServer`/`tools`/`llm`/`agents`；`makeFixtureRepo`（`test-orchestration.mjs:110`）建真实 git 仓库含 `core.py`/`util.py`。
   2. `apply(ctx, config)` 注册插件（`test-orchestration.mjs:278`）；经 `codewiki_generate.execute`/`cw.execute` 提交任务。
-  3. `waitJob`（`test-orchestration.mjs:212`）轮询独立 `JOBS_FILE` 等终态 `done/failed/cancelled`；再校验落盘文件（`modules/*.md`、`_architecture.md`、`_patterns.md`、`git` 自动提交记录）。
+  3. `waitJob`（`test-orchestration.mjs:230`）轮询独立 `JOBS_FILE` 等终态 `done/failed/cancelled`；再校验落盘文件（`modules/*.md`、`_architecture.md`、`_patterns.md`、`git` 自动提交记录）。
   4. 路径/闸门类用真实 git 建 linked worktree（`test-worktree.mjs:27`）或真实 `cw` CLI（`test-cwd-paths.mjs:34`）验证。
 
 - **产物质量门禁链路（test-wiki-anchors.mjs）**

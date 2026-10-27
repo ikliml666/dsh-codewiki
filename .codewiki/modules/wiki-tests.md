@@ -6,7 +6,7 @@ source_files:
   - test-wiki-anchors.mjs
   - index.js
   - client.js
-  - README.md
+  - test-batch.mjs
 tags: [测试, wiki, 锚点, 入口, 质量保障]
 ---
 
@@ -14,7 +14,7 @@ tags: [测试, wiki, 锚点, 入口, 质量保障]
 
 `wiki-tests` 模块是 CodeWiki 项目零依赖（直接 `node <file>`，无测试框架）的自动化测试套件，覆盖 Wiki 产物正确性的两个独立测试面：
 
-1. **entry 侧**（`test-wiki-entry.mjs`）：黑盒调用 `index.js` 导出的 `ensureWikiEntry` 与 Windows 路径规范化函数（`normalizeArticlePath` / `parseStatus` / `normalizeIndexLinks`），在 `os.tmpdir()` 下的隔离沙箱里验证入口文件生成（含 `.codewiki` 绝对路径、`codewiki_generate` 收尾指引、`_architecture.md` 架构指引、不覆盖人工入口声明）、已有入口绝不覆盖、中英双语文案、空 `cwd` 安全返回，以及 cw 在 Windows 输出 `\` 分隔路径时的规范化。
+1. **entry 侧**（`test-wiki-entry.mjs`）：黑盒调用 `index.js` 导出的 `ensureWikiEntry` 与 Windows 路径规范化函数（`normalizeArticlePath` / `parseStatus` / `normalizeIndexLinks`），在 `os.tmpdir()` 下的隔离沙箱里验证入口文件生成（含 `.codewiki` 绝对路径、`codewiki_generate` 收尾指引、`_architecture.md` 架构指引、不覆盖人工入口）、已有入口绝不覆盖、中英双语文案、空 `cwd` 安全返回，以及 cw 在 Windows 输出 `\` 分隔路径时的规范化。
 2. **anchors 侧**（`test-wiki-anchors.mjs`）：扫描 `.codewiki/` 下全部文章，把其中的 `file:行号`（含区间 `N-M`）锚点对照真实源码逐条核对，制度化拦截 LLM 幻觉锚点。校验基准为「编译基线版 ∪ 工作区源码 ∪ 已提交 HEAD 版」三取一即有效；结构事实（越界/区间倒序）永远硬断言，同步事实（空行/符号绑定/CHANGELOG 版本节）按源文件相对编译基线的新鲜度分档——滞后时降级为软报告（记为「待重编译」）而非失败。
 
 两个脚本断言失败均以 `process.exit(1)` 退出，结果直接打到 stdout（用 `console.log`/`console.error`）；**不落盘任何日志文件**（旧文档提到的 `.tmp-test-wiki-entry.log` / `.tmp-test-wiki-anchors.log` 已不存在）。
@@ -25,16 +25,16 @@ tags: [测试, wiki, 锚点, 入口, 质量保障]
 
 - **`check(cond, msg)`** (13-16行)：断言辅助函数，成功打印 `✓`；失败打印 `✗` 并 `failures += 1`。通过副作用与退出码体现，返回值未使用。
 - **`tmp` / `repo(name)`** (18-23行)：用 `fs.mkdtempSync` 在 `os.tmpdir()` 下创建前缀 `dsh-codewiki-entry-` 的隔离测试仓库根 `tmp`；`repo(name)` 在其下再建子目录供各用例独立使用（`repo1`~`repo6`）。
-- **`ensureWikiEntry(cwd, lang)` 用例** (26-54行，函数定义见 `index.js` 291-324行)：
+- **`ensureWikiEntry(cwd, lang)` 用例** (26-54行，函数定义见 `index.js` 301-334行)：
   - 缺失时生成（27-32行）：验证返回 `true`，生成的 `CodeWiki.md` 包含 `.codewiki` 绝对路径、`codewiki_generate` 收尾工具名、`_architecture.md` 架构指引及不覆盖人工入口声明（`不会覆盖`）。
   - 已有入口不覆盖（35-39行）：预写 `# My custom entry\n手写速查。\n`，验证返回 `false` 且文件内容未被覆盖。
   - 英文语言分支（42-46行）：传入 `'English'`，验证生成文件使用英文文案（含 `living wiki`，不含中文「活 wiki」）。
-  - 空 `cwd` 安全（49行）：传入 `''` 返回 `false` 不抛错（对应 `index.js` 292行 `if (!cwd) return false`）。
+  - 空 `cwd` 安全（49行）：传入 `''` 返回 `false` 不抛错（对应 `index.js` 302行 `if (!cwd) return false`）。
   - 重复调用幂等（52-54行）：第二次调用返回 `false` 且文件内容不变。
 - **Windows 路径规范化用例** (56-72行)：
-  - `normalizeArticlePath`（57-59行，定义见 `index.js` 199行）：`\` 转 `/`、正斜杠原样保留、`undefined` 安全返回空串。
-  - `parseStatus`（60-62行，定义见 `index.js` 213-226行）：解析 `Changed since last compile` 与 `Stale articles:` 清单，把 `\` 规范化为 `/`，返回 `{ state, changedFiles, staleArticles }`。
-  - `normalizeIndexLinks`（63-72行，定义见 `index.js` 203-211行）：仅把 `.codewiki/_index.md` 里 `[[link|title]]` 链接头的 `\` 改成 `/`，保留正文 `E:\ik\repo` 反斜杠；有改动返回 `true`、再次调用幂等返回 `false`、缺 `_index.md` 静默返回 `false`。
+  - `normalizeArticlePath`（57-59行，定义见 `index.js` 209行）：`\` 转 `/`、正斜杠原样保留、`undefined` 安全返回空串。
+  - `parseStatus`（60-62行，定义见 `index.js` 223-236行）：解析 `Changed since last compile` 与 `Stale articles:` 清单，把 `\` 规范化为 `/`，返回 `{ state, changedFiles, staleArticles }`。
+  - `normalizeIndexLinks`（63-72行，定义见 `index.js` 213-221行）：仅把 `.codewiki/_index.md` 里 `[[link|title]]` 链接头的 `\` 改成 `/`，保留正文 `E:\ik\repo` 反斜杠；有改动返回 `true`、再次调用幂等返回 `false`、缺 `_index.md` 静默返回 `false`。
 - **清理与汇总** (74-76行)：`fs.rmSync(tmp, { recursive: true, force: true })` 清理沙箱（74行）；打印断言汇总，`process.exit(failures ? 1 : 0)`（75-76行）。
 
 ### `test-wiki-anchors.mjs` 测试组件
@@ -58,7 +58,7 @@ tags: [测试, wiki, 锚点, 入口, 质量保障]
   - 末尾汇总 `锚点校验：X 过 / Y 败 / Z 待重编译`（402行），`process.exit(failures > 0 ? 1 : 0)`（403行）。
 - **`describeOk(a, views)`** (280-288行)：通过时写明是哪个基准解释了这个锚点，避免「过了但不知道为什么」。
 - **`judgeAnchor({ a, src, syms, allFileAnchors, line, label, srcName })`** (293-394行)：在单个基准视图下判定锚点是否成立，返回 `{ ok, msg, kind }`（`kind ∈ {struct, sync, changelog}`）：
-  - **struct 类**（293-309行）：起始行越界（`< 1` 或 `> total`）、单行锚点指向空行且区间内也无代码、区间 `start > end`（起止无序）、区间 `end > total`（终点越界）——与源码变动无关，永远硬失败。
+  - **struct 类**（293-310行）：起始行越界（`< 1` 或 `> total`）、单行锚点指向空行且区间内也无代码、区间 `start > end`（起止无序）、区间 `end > total`（终点越界）——与源码变动无关，永远硬失败。
   - **changelog 类**（321-334行）：仅当 `srcName === 'CHANGELOG.md'` 时，要求锚点落在行内左侧版本号所对应的 `## V` 版本节区间内；此判据永远软报告（发版会让上一批锚点失效）。
   - **sync 类·符号绑定**（358-392行）：仅当本行文件锚点数 `allFileAnchors.length === 1` 时校验；先用分句分隔符 `CLAUSE_SEP`（358-363行，`[。；;，,|\n]`）取锚点左侧分句内的符号，再在区间 `[start-1, end]`（或首行）内搜索该符号或其尾段。未命中时分两种：符号在文件中**完全不存在** → `kind='struct'`（铁证真错，硬失败）；符号存在但不在区间 → `kind='sync'`（可能漂移，滞后时软报告）。
 
