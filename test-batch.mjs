@@ -547,6 +547,13 @@ const fa = (body) => faFm + body
   check(rg.fixed === 1 && rg.text.includes('`a.js:5-5`'), '区间锚点 → 起点对齐符号、尾部钳到文件尾（delta 在文件末行）')
   const clamp = fixAnchors(fa('`gamma`（`a.js:1-99`）钳制。'), faRoot)
   check(clamp.fixed === 1 && clamp.text.includes('`a.js:3-5`'), '区间修正尾越界 → 钳到文件尾')
+  // 倒序区间：原文 `a.js:9-7`（起点大于终点）。旧实现按 end2-start 平移尾行会算出
+  // R + (7-9) = R-2，产出 `5-3` 这种起点大于终点的区间，校验永远报「区间起止有序」失败。
+  // 实测 .codewiki/concepts/test-log-pairing.md 里就有一条 `index.js:902-901` 卡了很多轮编译。
+  const rev = fixAnchors(fa('`delta`（`a.js:9-7`）倒序。'), faRoot)
+  check(rev.fixed === 1 && /`a\.js:5-5`/.test(rev.text), '倒序区间 → 尾行按跨度翻正，起点不大于终点')
+  const rev2 = fixAnchors(fa('`gamma`（`a.js:8-2`）倒序且跨多行。'), faRoot)
+  check(rev2.fixed === 1 && /`a\.js:3-5`/.test(rev2.text), '倒序多行区间 → 跨度取绝对值后不越界（a.js 仅 5 行，尾钳到 5）')
   const bb = fixAnchors(fa('见 `omega` (`b.js:1`)。'), faRoot)
   check(bb.fixed === 0, 'basename 多段路径匹配（src/b.js 唯一）→ 不动因已正确')
   const bbFix = fixAnchors(fa('见 `omega` (`b.js:9`)。'), faRoot)
@@ -560,6 +567,16 @@ const fa = (body) => faFm + body
   fs.writeFileSync(path.join(faRoot, 'sub', 'dup.js'), 'y')
   const amb2 = fixAnchors('---\nsource_files: [dup.js, sub/dup.js]\n---\n\n见 `y` (`dup.js:1`)。', faRoot)
   check(amb2.fixed === 0, 'basename 歧义（根与子目录同名）→ 不碰')
+  // 一行并列多个「符号 + 锚点」：每个锚点必须各自绑定离它最近的符号，绝不能把整行拉平成
+  // 同一个行号。旧实现从 syms[0] 起找第一个能解析的符号，命中后整行锚点全用它，于是
+  // `alpha (a.js:1)、delta (a.js:99)` 会被改写成两处 `a.js:1`——锚点看起来都指向非空代码行，
+  // 能骗过校验器，却是比原文更坏的数据（本仓 _patterns.md 曾出现同行 15 处 index.js:49）。
+  const multi = fixAnchors(fa('`alpha` (`a.js:99`)、`delta` (`a.js:98`)。'), faRoot)
+  check(multi.text.includes('`alpha` (`a.js:1`)') && multi.text.includes('`delta` (`a.js:5`)'),
+    '一行两个锚点 → 各自绑定离自己最近的符号，不拉平成同一个行号')
+  const multiOk = fixAnchors(fa('`alpha` (`a.js:1`)、`delta` (`a.js:5`)。'), faRoot)
+  check(multiOk.fixed === 0 && /`alpha` \(`a\.js:1`\)、`delta` \(`a\.js:5`\)/.test(multiOk.text),
+    '一行两个已正确的锚点 → 互不干扰原样保留')
   fs.rmSync(faRoot, { recursive: true, force: true })
 }
 

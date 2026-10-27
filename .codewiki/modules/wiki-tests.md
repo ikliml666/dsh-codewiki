@@ -14,7 +14,7 @@ tags: [测试, wiki, 锚点, 入口, 质量保障]
 `wiki-tests` 模块是 CodeWiki 项目的自动化测试套件，围绕 Wiki 能力的两个独立测试面进行验证：
 
 1. **entry 侧**（`test-wiki-entry.mjs`）：验证 `CodeWiki.md` 入口文件的自动生成与写入、已有入口不覆盖策略、中英双语文案、空 `cwd` 安全返回，以及 Windows 路径规范化（`normalizeArticlePath` / `parseStatus` / `normalizeIndexLinks`）。
-2. **anchors 侧**（`test-wiki-anchors.mjs`）：验证 `.codewiki/` 下生成的文章中的行号锚点（如 `index.js:1042`）是否指向真实存在的源码行，并且锚点附近的反引号代码标识符（如 `createJobService`）是否确实出现在对应源码行/区间内，从而制度化拦截 LLM 幻觉锚点。
+2. **anchors 侧**（`test-wiki-anchors.mjs`）：验证 `.codewiki/` 下生成的文章中的行号锚点（如 `index.js:1774`）是否指向真实存在的源码行，并且锚点附近的反引号代码标识符（如 `createJobService`）是否确实出现在对应源码行/区间内，从而制度化拦截 LLM 幻觉锚点。
 
 每个脚本执行时都会生成一份同名的临时日志（`.tmp-test-wiki-entry.log` 和 `.tmp-test-wiki-anchors.log`）作为执行证据。
 
@@ -99,7 +99,7 @@ tags: [测试, wiki, 锚点, 入口, 质量保障]
 ## Known Issues
 
 1. **anchors 测试存在系统性符号绑定失败**
-   根据 `.tmp-test-wiki-anchors.log` 的执行记录（第 4、7、10、13、16、19、22、25 等行），大量 `符号绑定` 断言失败（总计 122 过 / 36 败）。失败集中在 `cw-binary-source-lost.md` 与 `update-reminder-entry-gap.md` 等文章，表明生成文章引用的行号（如 `index.js:126`、`index.js:137`）虽然落在文件行数内且非空，但对应行并未包含行内反引号标注的符号（如 `normalizeArticlePath`、`parseStatus`）。这说明流水线产物仍存在锚点与符号不匹配的幻觉，测试已成功将其拦截，但源码生成侧（见 `test-wiki-anchors.mjs` 第 1-8 行注释）仍需修复偏移问题。
+   根据 `.tmp-test-wiki-anchors.log` 的执行记录（第 4、7、10、13、16、19、22、25 等行），大量 `符号绑定` 断言失败（总计 122 过 / 36 败）。失败集中在 `cw-binary-source-lost.md` 与 `update-reminder-entry-gap.md` 等文章，表明生成文章引用的行号（如 `index.js:199`、`index.js:199`）虽然落在文件行数内且非空，但对应行并未包含行内反引号标注的符号（如 `normalizeArticlePath`、`parseStatus`）。这说明流水线产物仍存在锚点与符号不匹配的幻觉，测试已成功将其拦截，但源码生成侧（见 `test-wiki-anchors.mjs` 第 1-8 行注释）仍需修复偏移问题。
 2. **单锚点限制导致多锚点行跳过符号绑定**
    在 `test-wiki-anchors.mjs` 第 101-103 行明确注释：当一行存在多个锚点时（如表格一行多列），无法可靠判断符号归属，强行绑定会误判，因此仅做“行号在范围内 + 指向非空行”的兜底，放弃符号绑定校验。
 3. **`nearestSymbol` 就近绑定可能误绑**

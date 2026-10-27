@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.5 — 2026-10-27
+
+### 修复：孤儿文章清理 + `fixAnchors` 锚点归属（一行多锚点不再被拉平）
+
+背景：`test-wiki-anchors` 报 251~375 处失败，逐条查下来是**两类互相掩盖**的问题——孤儿文章（占了 169 处）与 `fixAnchors` 自身的锚点归属错误。先前几轮手改修到 0 败过，但那是把锚点硬改成「能过校验」的值，掩盖了根因。
+
+- **新增 `pruneOrphanModules(job)`（`index.js:240-282`）**。模块划分随聚类结果变化：上一次编译产出 `modules/plugin-core.md`，下次同样的代码被切成 `core-and-config.md` + `core-application.md`，旧的两篇再没人重写也没人删除，成了「被 `_index.md` 遗漏、内容永久过期」的死文章，还让锚点校验一直拿过期行号去校验已挪位的源码。安全边界写进注释与测试：① 只在全量编译（`kind==='full'` 且 `plan.modules` 完整）时动手——增量编译只重写变化模块，拿它当全集会把「本次没变的模块」全删；② 只删 `.codewiki/modules/*.md`，`concepts/`、`learnings/`、`decisions/`、`_architecture.md` 等横切产物一律不碰；③ 本次 job 写过的（含失败）保留，失败可能是暂时的，不顺手删证据；④ 删除失败只记账不中断。本次实际清掉 5 篇孤儿（`docs-and-meta`、`documentation-and-config`、`plugin-core`、`plugin-runtime`、`project-docs`）。
+
+- **`fixAnchors` 锚点归属改为「就近绑定」（`index.js:625-730`）**。原实现把行内所有反引号符号收集成数组，对同一行的**每个**锚点都用这一整组符号去查唯一出现——一旦命中就把该锚点改成那个符号的位置。后果是一行里并列多个锚点（表格一行多列、一句话串多个符号，实测 `_patterns.md` 单行有 15 个）会被逐个改写成**同一个行号**（拉平），`configuration-management.md:227` 里 5 个不同常量被压成 5 个 `index.js:1572`、`test-log-pairing.md:24` 四处 `createUserMessage` 被压成 4 个 `index.js:15`。修法：`symbolsOnLine` 改为 `symbolsWithPos`，返回每个符号在行内的字符位置；按锚点在行内的位置取**最近**的符号（同距取左侧，符合中文「符号（`file:NNN`）」的行文习惯）再定位，一行多个锚点各自绑定正确的符号。
+
+- **顺带修掉的四个连带缺陷**：`writeValidated` 增加 frontmatter 闭合校验（`---` 缺结束符时不落盘——`documentation-and-config.md` 就是开头多了个空 `---` 对，导致 frontmatter 解析失败、被索引归进 `Unknown` 段）；`fixAnchors` 倒序区间（`9-7`）原会算出负跨度，改为 `Math.abs(end-start)` 并夹到行数内；`test-wiki-anchors.mjs` 的符号绑定判定由「本行 index/client 锚点数 === 1」改为「本行**全部文件**锚点数 === 1」，避免一行串 `test-orchestration.mjs:94` 与 `index.js:114` 时把属于另一个文件的符号强行要求出现在 index.js 区间内；`documentation-and-config.md` 的 `source_files` 去掉 `modules/` 前缀。
+
+测试：新增 `test-prune-orphans.mjs`（9 条：非全量跳过、无清单跳过、删孤儿、保计划内、保已写过、保横切目录、只删 .md、删除失败不中断、返回清单）；`test-batch.mjs` 128 → 132 条（新增倒序区间 `a.js:9-7`→`a.js:5-5`、`a.js:8-2`→`a.js:3-5` 与一行多锚点归属不拉平）；`test-wiki-anchors.mjs` 由 375 败 → **0 败**（10356 处锚点全过）。全量 16 个测试文件回归全绿。
+
+### 说明：本轮锚点修复的方法与教训
+
+第一版修法是「按符号全仓唯一出现定位」，遇到 `plan`/`fail`/`fixAnchors` 这类同名多次的直接跳过（剩 75 处）；第二版改成「行内第一个有唯一声明行的符号」，与校验器判据不一致（校验器取离锚点最近的符号）导致修好的行仍判失败（剩 7 处）。第三版才与校验器严格对齐。中途还试过「按 `git diff` 行号偏移整体换算」的方案，实测反而变差（93→104 败）——行号偏移对所有约定成立，但对「本来该指向哪个符号」无信息量，且会把末尾行算到 `total+1`。教训：**锚点必须按符号语义定位，不能按位置偏移推算**。
+
 ## 0.13.4 — 2026-10-27
 
 ### 修复：工具层的四个真实翻车点（独立核查 + 逐条实测复核后确认）

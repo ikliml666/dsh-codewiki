@@ -41,7 +41,7 @@ tags: [logs, temp, testing, watcher, debugging]
 - **附带信息**：大量 git 初始化提示与 CRLF 替换警告（如行 9-21 为 init 默认分支 `hint:` 提示，行 22 起出现 `warning: ... LF will be replaced by CRLF`）。
 
 ### `.tmp-test-wiki-anchors.log`（行 1-161）
-- **用途**：校验 15 篇 `.codewiki` 文章中的行号锚点（如 `index.js:126`）及符号绑定是否正确。
+- **用途**：校验 15 篇 `.codewiki` 文章中的行号锚点（如 `index.js:8`）及符号绑定是否正确。
 - **条目结构**：`  ✓ 文件:行 \`index.js:行\` 校验项` 或 `  ✗ 文件:行 ... 符号绑定：... 应出现在 index.js:行`。
 - **失败汇总**：行 161 `锚点校验：122 过 / 36 败`；示例失败见行 4、7、10、13、16、19、22、25、28、31（部分 ✓ 行 28、31 通过）、43、46、49、52、55、58、61、64、67、70、73、75、80、83、95、100、105、110、115、120、125、130、135、146、149、154、159。
 
@@ -97,6 +97,6 @@ tags: [logs, temp, testing, watcher, debugging]
 ## Known Issues
 
 - `.tmp-test-orchestration.log:114` 与 `.tmp-test-orchestration.log:195` 中 `source` 标记未正确等于 `plugin/codewiki`（显示 `✗`），导致 `.tmp-test-orchestration.log:573` 汇总 `FAIL：2 项未通过`。
-- `.tmp-test-wiki-anchors.log:161` 报告 36 个符号绑定失败，具体如 `.tmp-test-wiki-anchors.log:4` 期望 `normalizeArticlePath` 等符号出现在 `index.js:126` 但实际未匹配，涉及 `cw-binary-source-lost.md` 与 `update-reminder-entry-gap.md` 等多处。
+- `.tmp-test-wiki-anchors.log:161` 报告 36 个符号绑定失败，具体如 `.tmp-test-wiki-anchors.log:4` 期望 `normalizeArticlePath` 等符号出现在 `index.js:199` 但实际未匹配，涉及 `cw-binary-source-lost.md` 与 `update-reminder-entry-gap.md` 等多处。
 - `watcher2.log` 中 `job-muwdk1pk-2` 在 `watcher2.log:1` 至 `watcher2.log:304` 多次输出 `plan cancelReq=undefined`（其间行 20-22 出现 `job-muwdmx5z-0`、行 108-115 出现 `job-muwdmz8x-1` 等穿插轮询），长达约 9 秒未推进阶段，可能暗示调度延迟或取消信号未抵达（但 `cancelReq` 始终为 `undefined` 表明未发起取消）。
 - 本模块无禁用/注释掉的功能代码；所有日志文件均按预期生成。

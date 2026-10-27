@@ -240,6 +240,46 @@ function countWikiArticles(wikiPath) {
   } catch { return null }
 }
 
+// 清理「成为孤儿」的模块文章。
+//
+// 背景（真实缺陷）：模块划分会随聚类结果变化——上一次编译产出 modules/plugin-core.md，
+// 下一次同样的代码被切成 modules/core-and-config.md + modules/core-application.md，
+// 旧的两篇就再也没人重写、也没人删除。它们留在 .codewiki/modules/ 下成为死文章：
+// 被 _index.md 遗漏、内容永久过期，还会让 test-wiki-anchors 一直拿过期的行号去校验
+// 已经挪位的源码（实测 251 处失败里有 169 处来自这类孤儿）。
+//
+// 安全边界（宁可留着也不能误删）：
+//   1. 只在**全量编译**（kind=full 且本次 modules 清单完整）时动手。增量编译只重写
+//      变化模块，拿它的清单当全集会把「本次没变的模块」全删掉。
+//   2. 只删 .codewiki/modules/*.md —— concepts/、learnings/、decisions/、_architecture.md
+//      等横切产物不归模块规划管，一律不碰。
+//   3. 只删「本次 modules 清单里没有、且不在本次 job.articles 里」的文件；本次写过但
+//      失败的也保留（失败可能是暂时的，不该顺手删证据）。
+//   4. 删前把文件名记进 note，便于事后核对；删除失败只记账不中断。
+export function pruneOrphanModules(job) {
+  const removed = []
+  if (job?.kind !== 'full') return { removed, skipped: '非全量编译，跳过孤儿清理' }
+  const modules = job.plan?.modules
+  if (!Array.isArray(modules) || !modules.length) return { removed, skipped: '无完整模块清单，跳过孤儿清理' }
+  const dir = path.join(job.wikiPath, 'modules')
+  if (!fs.existsSync(dir)) return { removed }
+  // 本次规划出的模块文章名（与组装任务的 slugify 规则保持一致）
+  const planned = new Set(modules.map((m) => `${slugify(m.name)}.md`))
+  // 本次 job 写过的（含失败）也保留：失败不该顺手删证据
+  const touched = new Set((job.articles ?? []).map((a) => path.basename(String(a.name ?? ''))))
+  let entries = []
+  try { entries = fs.readdirSync(dir) } catch { return { removed } }
+  for (const name of entries) {
+    if (!name.endsWith('.md')) continue
+    if (planned.has(name) || touched.has(name)) continue
+    try {
+      fs.rmSync(path.join(dir, name), { force: true })
+      removed.push(name)
+    } catch { /* 删不掉的留给下次，不影响编译 */ }
+  }
+  return { removed }
+}
+
 // CodeWiki.md 入口：编译收尾时若仓库根缺失则自动生成。139052c 把收尾提醒门控收紧到入口文件，
 // 但流水线此前从未创建它——「编译过但无入口」的仓库永远收不到收尾提醒（不变量缺口）。
 // 已有入口（人工/模型速查手册）绝不覆盖；生成失败只影响入口存在性，不应让编译任务失败。
@@ -585,16 +625,18 @@ export function fixAnchors(content, cwd) {
     }
     return cache.get(rel)
   }
-  const symbolsOnLine = (line) => {
+  // 返回 [{sym, at}]：带上反引号符号在行内的字符位置，供锚点就近绑定用。
+  const symbolsWithPos = (line) => {
     const out = []
     for (const m of line.matchAll(/`([^`\n]+)`/g)) {
       const sym = m[1].trim().replace(/\(.*\)$/, '').trim()
       if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(sym)) continue
       if (sym.length < 3 || sym.split('.').pop().length < 3) continue
-      out.push(sym)
+      out.push({ sym, at: m.index + 1 + m[1].indexOf(m[1].trim()) })
     }
     return out
   }
+  const symbolsOnLine = (line) => symbolsWithPos(line).map((s) => s.sym)
   const hasSym = (srcLine, s) => srcLine.includes(s) || srcLine.includes(s.split('.').pop())
   const bodyStart = fmMatch[0].split(/\r?\n/).length // 正文首行（1-based 行号 ≤ bodyStart 是 frontmatter）
   const crlf = /\r\n/.test(content)
@@ -603,49 +645,86 @@ export function fixAnchors(content, cwd) {
   const anchorRe = /([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g
   const text = lines.map((line, idx) => {
     if (idx + 1 <= bodyStart) return line
-    const syms = symbolsOnLine(line)
+    const syms = symbolsWithPos(line)
     if (!syms.length) return line
-    return line.replace(anchorRe, (whole, f, n1, n2) => {
+    const anchors = [...line.matchAll(anchorRe)]
+    if (!anchors.length) return line
+    // 逐锚点定位：一行里有 N 个锚点时必须各自绑定「离它最近的可解析符号」。
+    // 旧实现从 syms[0] 起找第一个能解析的符号，命中后把**整行所有锚点**都改成那一个行号，
+    // 于是 `A (index.js:11)、B (index.js:22)` 这种并列描述被拉平成 `A (index.js:11)、B (index.js:11)`
+    // （本仓 _patterns.md 曾出现同一行 15 处 index.js:49）。宁可不动也不能拉平——
+    // 拉平的锚点看起来「都指向非空代码行」，能把校验骗过去，却是更坏的数据。
+    const used = new Set()
+    const out = []
+    let cursor = 0
+    for (const a of anchors) {
+      const whole = a[0]
+      const f = a[1]
+      const n1 = a[2]
+      const n2 = a[3]
+      const atPos = a.index
+      out.push(line.slice(cursor, atPos))
+      cursor = atPos + whole.length
       const rel = resolveFile(f)
-      if (!rel) return whole
+      if (!rel) { out.push(whole); continue }
       const src = loadSource(rel)
-      if (!src) return whole
+      if (!src) { out.push(whole); continue }
       const start = Number(n1)
       const at = `${rel}:${start}${n2 ? `-${n2}` : ''}`
-      if (src[start - 1] && syms.some((s) => hasSym(src[start - 1], s))) return whole // 已正确
+      // 已正确（锚点起始行含有本行某个尚未被别的锚点用掉的符号）→ 原样保留
+      if (src[start - 1]) {
+        const hitSym = syms.find((s) => !used.has(s.sym) && hasSym(src[start - 1], s.sym))
+        if (hitSym) { used.add(hitSym.sym); out.push(whole); continue }
+      }
+      // 按与锚点的字符距离由近到远试，最近的优先；已被前面的锚点占用的符号跳过
+      const order = syms
+        .filter((s) => !used.has(s.sym))
+        .sort((p, q) => Math.abs(p.at - atPos) - Math.abs(q.at - atPos))
       let R = null
+      let picked = null
       let ambiguous = false
-      for (const s0 of syms) {
+      for (const cand of order) {
         // 点分符号（如 Config.articleLanguage）歧义时退试首段——首段才是可声明的部分
-        const cands = s0.includes('.') ? [s0, s0.split('.')[0]] : [s0]
-        for (const s of cands) {
-        const hits = []
-        src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
-        if (hits.length === 1) { R = hits[0]; break }
-        if (hits.length > 1) {
-          // 声明形态：符号是本行声明的目标（const gamma = beta() 这种「别的符号的声明」不算——
-          // function/class 直接跟符号；const/let 要求符号后跟 =，排除赋值右侧引用）
-          const tail = s.split('.').pop().replace(/[$]/g, '\\$')
-          const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
-          const defs = hits.filter((n) => defRe.test(src[n - 1]))
-          if (defs.length === 1) { R = defs[0]; break }
-          ambiguous = true // 试下一个候选
-        }
+        const variants = cand.sym.includes('.') ? [cand.sym, cand.sym.split('.')[0]] : [cand.sym]
+        for (const s of variants) {
+          const hits = []
+          src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
+          if (hits.length === 1) { R = hits[0]; picked = cand.sym; break }
+          if (hits.length > 1) {
+            // 声明形态：符号是本行声明的目标（const gamma = beta() 这种「别的符号的声明」不算——
+            // function/class 直接跟符号；const/let 要求符号后跟 =，排除赋值右侧引用）
+            const tail = s.split('.').pop().replace(/[$]/g, '\\$')
+            const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
+            const defs = hits.filter((n) => defRe.test(src[n - 1]))
+            if (defs.length === 1) { R = defs[0]; picked = cand.sym; break }
+            ambiguous = true // 试下一个候选
+          }
         }
         if (R !== null) break
       }
       if (R === null) {
         unresolved.push(`${at} ${ambiguous ? '符号歧义' : '符号未找到'}未改`)
-        return whole
+        out.push(whole)
+        continue
       }
+      used.add(picked)
       if (n2) {
         const end2 = Number(n2)
+        // 原文区间可能本身就是倒序（如 `index.js:902-901`，作者手误或前后行号写反）。
+        // 旧实现用 `R + (end2 - start)` 平移尾行，倒序时算出 R-1 → 产出 `902-901` 这种
+        // 起点大于终点的区间，校验必然报「区间起止有序」失败，且每轮编译都修不掉。
+        // 这里把倒序区间按「原文长度」翻正：先求区间跨度的绝对值，再保证终点 >= 起点。
+        const span = Math.abs(end2 - start)
+        const tail = Math.min(R + span, src.length)
         fixed += 1
-        return `${f}:${R}-${Math.min(R + (end2 - start), src.length)}` // 区间尾越界钳到文件尾（修正起点是净改善）
+        out.push(`${f}:${R}-${Math.max(R, tail)}`) // 区间尾越界钳到文件尾（修正起点是净改善）
+      } else {
+        fixed += 1
+        out.push(`${f}:${R}`)
       }
-      fixed += 1
-      return `${f}:${R}`
-    })
+    }
+    out.push(line.slice(cursor))
+    return out.join('')
   }).join(crlf ? '\r\n' : '\n') // 混合行尾按整文主风格规范化
   return { text, fixed, unresolved }
 }
@@ -1872,6 +1951,14 @@ function createJobService(config, onSettled) {
       note(job, `${task.name}：模型输出缺 frontmatter，不落盘（原文件保留）`)
       return { name: task.name, ok: false, stopReason: 'invalid' }
     }
+    // frontmatter 必须闭合（开头 --- 与结束 --- 成对）。只查开头不查闭合会放过半截
+    // frontmatter 的文章：它们能落盘，但 fixAnchors 的 /^---\n([\s\S]*?)\n---/ 匹配不上，
+    // 于是整篇的行号锚点一次都不会被校正——实测 .codewiki/learnings/update-reminder-entry-gap.md
+    // 就是这样积了 19 处失效锚点，且每次编译都「成功」、失败不可见。
+    if (!/^---\r?\n[\s\S]*?\r?\n---/.test(content.trimStart())) {
+      note(job, `${task.name}：frontmatter 未闭合（缺结束 ---），不落盘（原文件保留）`)
+      return { name: task.name, ok: false, stopReason: 'invalid' }
+    }
     try {
       fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
       const fx = fixAnchors(content, job.cwd)
@@ -2686,6 +2773,18 @@ function createJobService(config, onSettled) {
 
   async function tickIndex(job) {
     if (job.writtenCount > 0) {
+      // 清理模块改名后的孤儿文章。必须放在 cw index 之前：cw index 扫描 modules/ 生成
+      // _index.md，先删掉死文章，重建的索引才不会再收录它们。
+      try {
+        const pr = pruneOrphanModules(job)
+        if (pr.removed.length) {
+          note(job, `清理孤儿模块文章 ${pr.removed.length} 篇（模块划分已变，旧文件无人重写）—— ${pr.removed.slice(0, 5).join('、')}${pr.removed.length > 5 ? ' 等' : ''}`)
+        } else if (pr.skipped && job.kind === 'full') {
+          note(job, `孤儿清理跳过：${pr.skipped}`)
+        }
+      } catch (err) {
+        note(job, `孤儿清理异常（忽略，不影响编译）—— ${String(err?.message ?? err).slice(0, 200)}`)
+      }
       const binary = resolveBinary(liveConfig(config))
       try {
         const idx = await runCw(binary, job.cwd, ['index'], 120000)

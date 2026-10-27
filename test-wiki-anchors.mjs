@@ -98,11 +98,15 @@ for (const file of articles) {
         check(start <= end, `${at} 区间起止有序`)
         check(end <= src.total, `${at} 区间终点在行数范围内`)
       }
-      // 符号绑定只在「本行只有一个锚点」时校验：一行并列多个锚点（表格一行多列、
+      // 符号绑定只在「本行锚点唯一」时校验：一行并列多个锚点（表格一行多列、
       // 一句话串多个文件）时无法可靠判断某符号属于哪个锚点，强行绑定会系统性误判。
-      // 多锚点行的价值由「行号在范围内 + 指向非空行」兜底。
+      // 这里统计的是**本行全部文件锚点**（不只 index.js/client.js）——像
+      // 「`makeMockAgent` (test-orchestration.mjs:94-108) ... (index.js:114-115)」这种
+      // 一行串两个文件的句子，index.js 锚点只有一个，但反引号里的符号属于另一个文件，
+      // 只按 index/client 计数会误判成「唯一锚点」进而要求 index.js 区间包含这些符号。
+      const allFileAnchors = [...line.matchAll(/[A-Za-z0-9_\-./]+\.(?:js|mjs|ts|md|json|yml|yaml|txt|log)[:：]\d+(?:-\d+)?/g)]
       // 区间锚点（NNN-MMM）在整个区间内搜符号——语义就是「这段代码」，不是首行。
-      if (syms.length > 0 && anchors.length === 1) {
+      if (syms.length > 0 && allFileAnchors.length === 1) {
         const span = src.lines.slice(start - 1, end !== null ? end : start).join('\n')
         const hit = syms.some((s) => {
           const tail = s.sym.split('.').pop()
