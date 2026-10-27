@@ -33,4 +33,4 @@
 - [[modules/test-suite|test-suite]]
 - [[modules/testing-suite|testing-suite]]
 - [[modules/wiki-tests|wiki-tests]]
-- [[modules/configuration-and-metadata|配置与元数据（Configuration and Metadata）]]
+- [[modules/configuration-and-metadata|配置与元数据]]
