@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import {
   SymbolExtractor, extractRepoGraph, resolveImportEdges,
   extractImportSpecs, resolveSpec, LANG_RULES, SUPPORTED_EXTS,
+  regexExtract,
 } from './lib/symbols.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -282,6 +283,71 @@ await checkAsync('本插件自身源码可被完整提取', async () => {
     assert.ok(node.sourceCode.length > 0, `${id} 源码为空`)
   }
   console.log(`      · 提取 ${graph.size} 个组件，语言 ${JSON.stringify(stats.languages)}`)
+})
+
+// ---------------------------------------------------------------- 正则降级
+// AST 不可用时（WASM 没装/ABI 不匹配/语法细则没覆盖）必须退到正则兜底，
+// 不能静默返回空 —— 那会让整块语言的模块凭空消失，且日志上只看到 skipped +N。
+
+check('regexExtract：JS 认出函数/类/箭头函数', () => {
+  const src = [
+    '// 注释里的 function fake() 不该被认成定义',
+    'export function addItem(a, b) {',
+    '  return a + b',
+    '}',
+    'export class Cart {',
+    '  checkout() {}',
+    '}',
+    'const helper = (x) => x * 2',
+  ].join('\n')
+  const recs = regexExtract('src/a.js', src, 'javascript')
+  const names = recs.map((r) => r.name).sort()
+  assert.ok(names.includes('addItem'), `未认出 addItem：${names}`)
+  assert.ok(names.includes('Cart'), `未认出 Cart：${names}`)
+  assert.ok(names.includes('helper'), `未认出箭头函数 helper：${names}`)
+  assert.ok(!names.includes('fake'), '注释里的假函数不该被认出')
+  // 记录形状必须与 AST 路径一致（同一个 consumer：graph-diff / cluster）
+  const add = recs.find((r) => r.name === 'addItem')
+  assert.equal(add.id, 'src/a.js#addItem')
+  assert.equal(add.kind, 'function')
+  assert.deepEqual(add.parameters, ['a', 'b'])
+  assert.ok(add.sourceCode.includes('return a + b'), '源码区间应覆盖实现')
+  assert.deepEqual(add.dependsOn, [])
+  assert.deepEqual(add.baseClasses, [])
+})
+
+check('regexExtract：Python/Go/Rust 各自认出定义', () => {
+  const py = regexExtract('a.py', 'class Store:\n    pass\n\nasync def load_items(limit):\n    pass\n', 'python')
+  assert.deepEqual(py.map((r) => r.name).sort(), ['Store', 'load_items'])
+  const go = regexExtract('a.go', 'func (s *Server) Start(addr string) {\n}\n', 'go')
+  assert.ok(go.some((r) => r.name === 'Start'), `Go 方法未认出：${go.map((r) => r.name)}`)
+  const rs = regexExtract('a.rs', 'pub async fn fetch_all(ids: Vec<u32>) {\n}\n', 'rust')
+  assert.ok(rs.some((r) => r.name === 'fetch_all'), `Rust fn 未认出：${rs.map((r) => r.name)}`)
+})
+
+check('regexExtract：无规则的语言返回空且不抛错', () => {
+  assert.deepEqual(regexExtract('a.xyz', 'foo()', 'unknown-lang'), [])
+  assert.deepEqual(regexExtract('a.js', '', 'javascript'), [])
+})
+
+await checkAsync('WASM 不可用时 extractFile 自动走正则（不再静默丢符号）', async () => {
+  // 指向一个不存在的 vendor 目录，逼 getParser 全部失败
+  const broken = new SymbolExtractor({ vendorDir: path.join(here, '.no-such-vendor') })
+  const src = 'export function addItem(a) {\n  return a\n}\n'
+  const recs = await broken.extractFile('src/a.js', src)
+  assert.ok(recs.length >= 1, 'WASM 不可用时应当由正则兜底出符号')
+  assert.equal(recs[0].name, 'addItem')
+  assert.equal(broken.stats.regex, 1, '降级次数应被记账')
+  assert.equal(broken.stats.regexLanguages.javascript, 1)
+})
+
+await checkAsync('WASM 可用时不走正则（stats.regex 为 0）', async () => {
+  const ext = new SymbolExtractor()
+  await ext.init()
+  if (!(await ext.getParser('javascript'))) return // 环境里没有语法，跳过
+  await ext.extractFile('src/a.js', 'export function addItem(a) {\n  return a\n}\n')
+  assert.ok(!ext.stats.regex, `AST 正常时不该记降级，实际 ${ext.stats.regex}`)
+  assert.ok(ext.stats.parsed >= 1)
 })
 
 check('语言表覆盖常见扩展名', () => {

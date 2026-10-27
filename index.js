@@ -15,12 +15,12 @@ import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { extractRepoGraph, resolveImportEdges } from './lib/symbols.js'
 import { clusterComponents, toPlanModules } from './lib/cluster.js'
-import { diffGraphs, isDiffEmpty, serializeDiff, changedIds } from './lib/graph-diff.js'
+import { diffGraphs } from './lib/graph-diff.js'
 import {
   slimGraph, graphFromSnapshot, loadSnapshot, saveSnapshot,
   filterStaleTasks, describeChange, sameSnapshotContent,
 } from './lib/incremental.js'
-import { runAgenticArticles } from './lib/articles-agentic.js'
+import { runAgenticArticles, markBigAgenticTasks, sourceTokensOf } from './lib/articles-agentic.js'
 import { buildOpeningPrompt, TOOL_SCHEMAS } from './lib/agentic.js'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
@@ -900,7 +900,7 @@ export async function semanticPlan(files, { cwd, llm, provider, model, reasoning
   // 组件提取不需要模型，先跑；解析不了的文件（无对应语法）跳过并记账
   let graph, byFile
   try {
-    const ex = await extractRepoGraph(filesWithText, { cwd, rootDir: cwd })
+    const ex = await extractRepoGraph(filesWithText, { cwd })
     if (!ex.ready) {
       notes.push(`符号提取不可用（${ex.extractor?.initError ?? 'tree-sitter 未就绪'}），退回目录分组`)
       return { plan: null, fallback: true, reason: 'extractor-unavailable' }
@@ -944,13 +944,15 @@ export async function semanticPlan(files, { cwd, llm, provider, model, reasoning
     concepts: result.concepts ?? [],
     // 模块树与符号图随 plan 持久化：stale 增量要用组件粒度判定「哪些真的变了」
     tree: result.tree ?? null,
+    // 但这里**不**带 sourceCode：plan 会随 job 整体写进 JOBS_FILE，全量源码进来后
+    // 一份 job 就多几百 KB 到几 MB（本仓 341 组件约 347KB），而判变更只用
+    // bodyHash/签名/依赖（见 lib/incremental.js），源码没有任何消费者。
     graph: {
       components: components.map((c) => ({
         id: c.id, name: c.name, kind: c.kind, relativePath: c.relativePath,
         parameters: c.parameters ?? [],
         baseClasses: c.baseClasses ?? [],
         dependsOn: c.dependsOn ?? [],
-        sourceCode: c.sourceCode ?? '',
         docstring: c.docstring ?? '',
       })),
       edges,
@@ -1883,8 +1885,16 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // 结果记账；replace=true 时校对结果覆盖同名文章条目（校对失败不推翻已写成功的原文）
-  function tally(job, results, tasks, { replace = false } = {}) {
+  // 结果记账。两个开关各管一件事，互不重叠：
+  //   replace=true（校对阶段）：同名条目一律覆盖——校对结果代表该文章的最终状态，
+  //     校对失败不推翻已写成功的原文（rec.ok 会被 prev 的 ok 兜住）。
+  //   mergeByName=true（文章/观察/合成的重跑路径）：同名条目合并而不是再 push 一条。
+  //     正常首次 tally 时 job.articles 里还没有同名条目，所以这个开关只在**真的重跑**
+  //     时起作用：· agentic 失败退回单轮重跑（shouldFallBackHere 分支）
+  //             · 宿主重启后 settleJob 的「执行器丢失」整批重跑
+  //     这两种情况不合并的话，writtenCount 会重复累加、job.articles 里留两条同名记录
+  //     （面板显示成两篇），进度也就对不上了。
+  function tally(job, results, tasks, { replace = false, mergeByName = false } = {}) {
     const byName = new Map((tasks ?? job.tasks ?? []).map((t) => [t.name, t]))
     for (const r of results) {
       const t = byName.get(r.name)
@@ -1895,17 +1905,16 @@ function createJobService(config, onSettled) {
         entry = { name: r.name, ok: r.ok === true, stopReason: r.stopReason }
       }
       const rec = { name: entry.name, ok: entry.ok, stopReason: entry.stopReason, path: t?.articlePath ?? null }
-      // 按名字去重（不看 replace 参数）：文章名就是落盘路径，天然唯一。
-      // 这条在「重跑同一篇」时必须成立——agentic 通道失败退回单轮重跑、宿主重启整批重跑，
-      // 都会第二次收到同一个 name；按名字更新才不会把 writtenCount 重复累加、
-      // 也不会在 job.articles 里留下两条同名记录（面板上会显示成两篇）。
-      const prev = job.articles.find((a) => a.name === rec.name) ?? null
+      const prev = (replace || mergeByName)
+        ? (job.articles.find((a) => a.name === rec.name) ?? null)
+        : null
       if (prev) {
         const wasOk = prev.ok
         if (!rec.ok && wasOk) rec.ok = true // 曾经的成就不被后续失败抹掉
         const wasPath = prev.path
         Object.assign(prev, rec)
         if (!wasPath && rec.path) prev.path = rec.path
+        // 失败 -> 成功：计入写成功、从失败里减掉
         if (!wasOk && prev.ok) {
           job.writtenCount += 1
           job.failedCount = Math.max(0, job.failedCount - 1)
@@ -2023,6 +2032,7 @@ function createJobService(config, onSettled) {
         model: c.batchModel,
         reasoningEffort: c.batchReasoningEffort || '',
         concurrency: c.maxConcurrency,
+        bigConcurrency: c.bigConcurrency, // 0 = 跟随默认档并发
         cwd: job.cwd,
         language: job.language,
         articleFormat: articleFormatSection(),
@@ -2281,7 +2291,7 @@ function createJobService(config, onSettled) {
         // 覆盖掉 agentic 在场读代码后写出的更好版本）。
         const failedNames = new Set(results.filter((r) => !r.ok).map((r) => r.name))
         const okResults = results.filter((r) => r.ok)
-        if (okResults.length) tally(job, okResults, tasks)
+        if (okResults.length) tally(job, okResults, tasks, { mergeByName: true })
         const retryTasks = tasks
           .filter((t) => failedNames.has(t.name) && t.mission && t.articlePath)
           .map((t, i) => ({
@@ -2315,7 +2325,7 @@ function createJobService(config, onSettled) {
           note(job, `agentic 写作失败 ${failedNames.size} 篇，退回单轮通道也无可装填内容`)
         }
       } else {
-        tally(job, results, tasks)
+        tally(job, results, tasks, { mergeByName: true })
       }
     } else if (!job.sessionTasks?.length) {
       // 组装文章任务并提交：stale 用预构建任务；full 就地本地规划生成清单；resume 不经此处（batchRef 已设）
@@ -2346,7 +2356,21 @@ function createJobService(config, onSettled) {
       // 它不需要「源码整包内联 → 超预算拆观察批 → 合成」这套装填，因此没有 sessionTasks。
       // 单篇失败只记账；失败率过半且旧通道可用时退回单轮通道重跑一次（见下）。
       if (c0.agenticArticles && tasks.length) {
-        const agenticTasks = tasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` }))
+        // 按模块源文本量给超大模块打大档标记（与单轮通道 markBig 同语义：吃不下就换大上下文模型），
+        // 再交给双池执行器——大档任务走 bigProvider，其余走默认档，两池独立限流。
+        // 大档未配置（bigProvider 留空）时 markBigAgenticTasks 原样返回。
+        const agenticTasks = markBigAgenticTasks(
+          tasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` })),
+          {
+            bigTier: {
+              provider: c0.bigProvider,
+              model: c0.bigModel,
+              reasoningEffort: c0.bigReasoningEffort,
+              budget: c0.bigTokenBudget,
+            },
+            sizeOf: (t) => sourceTokensOf(t, job.cwd),
+          },
+        )
         job.tasks = agenticTasks.map((t) => ({
           customId: t.customId, name: t.name, articlePath: t.articlePath,
           mission: t.mission, sources: t.sources, cwd: t.cwd,
@@ -2438,7 +2462,7 @@ function createJobService(config, onSettled) {
         await submitComposeBatch(job, pack)
         return
       }
-      tally(job, results, tasks)
+      tally(job, results, tasks, { mergeByName: true })
       setStage(job, 'review')
       return
     }
@@ -2502,7 +2526,7 @@ function createJobService(config, onSettled) {
     if (job.batchRef) {
       const results = await settleJob(job)
       if (results === null) return
-      tally(job, results, job.tasks)
+      tally(job, results, job.tasks, { mergeByName: true })
       job.batchRef = null
       job.tasks = []
     } else {

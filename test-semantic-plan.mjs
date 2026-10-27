@@ -159,6 +159,18 @@ await check('plan.graph 可序列化且含组件与边', async () => {
   assert.equal(round.graph.components.length, g.components.length)
 })
 
+await check('plan.graph 不携带源码（判变更只用 hash/签名/依赖）', async () => {
+  const r = await semanticPlan(scanned, { cwd: tmp, llm: null })
+  for (const c of r.plan.graph.components) {
+    assert.ok(!('sourceCode' in c), `${c.id} 不应带 sourceCode：plan 会整包写进 JOBS_FILE`)
+    // 判变更真正需要的字段必须还在
+    assert.ok('dependsOn' in c && 'parameters' in c && 'relativePath' in c, `${c.id} 缺判定字段`)
+  }
+  // 体积防线：plan 序列化后应远小于源码总量，避免回归时悄悄又塞回去
+  const size = JSON.stringify(r.plan).length
+  assert.ok(size < 400_000, `plan 序列化体积异常（${size} 字节），疑似又把源码塞回来了`)
+})
+
 await check('localPlan 对同一批文件仍可用（降级路径保活）', async () => {
   const plan = localPlan(scanned)
   assert.ok(plan.modules.length >= 2)

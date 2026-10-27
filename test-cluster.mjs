@@ -266,6 +266,82 @@ await check('下钻只返回一个子模块时视为不可再分', async () => {
   assert.ok(r.modules.some((m) => m.name === 'big'), '单子模块时不应拆开')
 })
 
+// ---------------------------------------------------------------- 多层递归下钻
+// maxDepth 必须真的生效：旧实现只对顶层做一次 for、subdivide 内部不再递归，
+// maxDepth 仅被当成 `> 1` 的布尔开关，配 2 与配 3 行为完全相同（都是两层）。
+// 下面用「按提示词里的模块名决定拆几份」的桩模型，验证层数可配。
+
+function makeDeepComponents() {
+  const out = []
+  const add = (file, name) =>
+    out.push({ id: `${file}#${name}`, name, kind: 'function', relativePath: file, parameters: [], sourceCode: `function ${name}(){}`, dependsOn: [] })
+  // 单一大模块，分三层才能散尽：72 = 3 × 4 × 6
+  for (let i = 0; i < 72; i++) add('src/deep/a.js', `deep${i}`)
+  for (let i = 0; i < 3; i++) add('src/other/x.js', `other${i}`)
+  return out
+}
+
+// 桩模型：任何人来问都拆成 2 份（名字带层级），保证「只要允许就还能继续拆」
+// pool 是该次测试的组件 id 全集，显式传进来（模块级函数看不到 check 回调里的局部变量）
+function deepLlm(pool) {
+  return async (prompt) => {
+    if (prompt.includes('共 ') && !prompt.includes('模块「')) {
+      // 顶层
+      const ids = pool.filter((i) => i.includes('/deep/'))
+      return JSON.stringify({
+        modules: [
+          { name: 'deep', path: 'src/deep', components: ids },
+          { name: 'other', path: 'src/other', components: pool.filter((i) => i.includes('/other/')) },
+        ],
+      })
+    }
+    // 任意下钻请求：拿到哪些 id 就拆两半，名字加后缀区分层
+    const m = /模块「([^」]+)」/.exec(prompt)
+    const parent = m ? m[1] : 'deep'
+    const ids = pool.filter((id) => prompt.includes(id))
+    if (ids.length < 2) return JSON.stringify({ modules: [{ name: parent, components: ids }] })
+    const half = Math.ceil(ids.length / 2)
+    return JSON.stringify({
+      modules: [
+        { name: `${parent}_a`, components: ids.slice(0, half) },
+        { name: `${parent}_b`, components: ids.slice(half) },
+      ],
+    })
+  }
+}
+
+await check('maxDepth=2 时只下钻一层（子模块不再往下拆）', async () => {
+  const deepComponents = makeDeepComponents()
+  const pool = deepComponents.map((c) => c.id)
+  const r = await clusterComponents({
+    components: deepComponents,
+    llmCall: deepLlm(pool),
+    splitThreshold: 2, // 阈值放到最小，只要允许就会继续拆
+    maxDepth: 2,
+  })
+  assert.equal(r.stats.levels, 2, `层数应为 2，实际 ${r.stats.levels}`)
+  const allNodes = []
+  const walk = (m) => { for (const k of m.children ?? []) { allNodes.push(k); walk(k) } }
+  for (const m of r.tree) walk(m)
+  assert.ok(allNodes.every((n) => !n.children || !n.children.length), '不应出现第三层')
+})
+
+await check('maxDepth=3 时下钻两层（出现孙模块）', async () => {
+  const deepComponents = makeDeepComponents()
+  const pool = deepComponents.map((c) => c.id)
+  const r = await clusterComponents({
+    components: deepComponents,
+    llmCall: deepLlm(pool),
+    splitThreshold: 2,
+    maxDepth: 3,
+  })
+  assert.equal(r.stats.levels, 3, `层数应为 3，实际 ${r.stats.levels}`)
+  let maxSeen = 0
+  const walk = (m, d) => { maxSeen = Math.max(maxSeen, d); for (const k of m.children ?? []) walk(k, d + 1) }
+  for (const m of r.tree) walk(m, 1)
+  assert.ok(maxSeen >= 3, `树深度应达到 3，实际 ${maxSeen}`)
+})
+
 await check('下钻抛错不影响整体结果', async () => {
   const llmCall = async (prompt) => {
     if (prompt.includes('模块「big」')) throw new Error('boom')

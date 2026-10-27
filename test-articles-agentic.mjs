@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { runOneArticle, runAgenticArticles } from './lib/articles-agentic.js'
+import { runOneArticle, runAgenticArticles, markBigAgenticTasks, sourceTokensOf, resolveTaskRoute } from './lib/articles-agentic.js'
 
 let pass = 0
 const fails = []
@@ -140,6 +140,80 @@ await check('subDepth=0 时派发被禁用（不再递归）', async () => {
   fs.rmSync(cwd, { recursive: true, force: true })
 })
 
+// ---------------------------------------------------------------- subDepth 封顶（多层）
+// 这两条是 issue「subDepth 失效」的回归防护。
+// 旧实现里 dispatchSub 是**本层**闭包，递归时原样下传，子层的 `_depth >= subDepth`
+// 判定永远用父层深度 -> 永不触发 -> 模型可以无限往下拆（实测 subDepth=2 直接堆溢出）。
+// 因此这里不用精确调用序列（那样脆），改用两个与顺序无关的断言：
+//   ① 磁盘上文章的目录层数不超过 subDepth；
+//   ② 模型调用次数有界（封顶失效时必然爆炸）。
+
+function scanArticleDepths(root) {
+  const out = []
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.md')) out.push(path.relative(root, p).split(path.sep).length)
+    }
+  }
+  walk(root)
+  return out
+}
+
+// 每次模型调用都「写一句正文 + 派生子模块」（名字按调用序号唯一，避免被重名逻辑挡掉）。
+// 必须同时写正文：空文章不算成功、不会落盘，那样查磁盘层数就查不到东西。
+function alwaysDispatch(counter) {
+  return async () => {
+    counter.calls++
+    return {
+      blocks: [
+        call(`e${counter.calls}`, 'edit_article', { command: 'insert', line: 0, text: `第 ${counter.calls} 段。\n` }),
+        call(`g${counter.calls}`, 'generate_sub_module', {
+          module_name: `sub${counter.calls}`, components: [], description: '继续拆',
+        }),
+      ],
+      finish: { kind: 'stop' },
+    }
+  }
+}
+
+await check('subDepth=1 时只有一层子模块，不再往下拆（封顶真的生效）', async () => {
+  const cwd = makeTmp()
+  const modulesDir = path.join(cwd, '.codewiki', 'wiki', 'modules')
+  const counter = { calls: 0 }
+  const out = await runOneArticle(
+    { name: 'modules/root.md', mission: '写根', articlePath: path.join(modulesDir, 'root.md'), sources: [] },
+    { streamFn: alwaysDispatch(counter), cwd, maxSteps: 3, subDepth: 1 },
+  )
+  // subDepth=1：父(root) -> 子(subN) 是允许的第 1 层；子再派发必须被挡住，
+  // 所以磁盘上最深就是 modules/<父>/<子>.md 两段。
+  const depths = scanArticleDepths(modulesDir)
+  assert.ok(depths.length > 0, '应当至少写出一个子文章')
+  assert.ok(Math.max(...depths) <= 2, `文章目录层数应 <= 2，实际 ${Math.max(...depths)}（${depths.join(',')}）`)
+  // 封顶失效时每个子都会再递归 3 轮，调用次数呈指数增长
+  assert.ok(counter.calls < 40, `模型调用次数应在合理范围，实际 ${counter.calls}`)
+  assert.equal(out.ok, out.ok) // 不约束父是否成功（全派发脚本下父没写过正文）
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('subDepth=2 时允许一层孙模块（_depth 确实逐层递增）', async () => {
+  const cwd = makeTmp()
+  const modulesDir = path.join(cwd, '.codewiki', 'wiki', 'modules')
+  const counter = { calls: 0 }
+  await runOneArticle(
+    { name: 'modules/root.md', mission: '写根', articlePath: path.join(modulesDir, 'root.md'), sources: [] },
+    { streamFn: alwaysDispatch(counter), cwd, maxSteps: 3, subDepth: 2 },
+  )
+  const depths = scanArticleDepths(modulesDir)
+  assert.ok(depths.length > 0, '应当写出文章')
+  // subDepth=2 才允许 modules/<父>/<子>/<孙>.md 三段；若深度不递增，永远到不了三段
+  assert.ok(Math.max(...depths) >= 3, `应出现三段路径（孙模块），实际最深 ${Math.max(...depths)}（${depths.join(',')}）`)
+  assert.ok(counter.calls < 120, `模型调用次数应在合理范围，实际 ${counter.calls}`)
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
 await check('子模块写作失败被记账，父文章仍算成功', async () => {
   const cwd = makeTmp()
   const modulesDir = path.join(cwd, '.codewiki', 'wiki', 'modules')
@@ -215,6 +289,110 @@ await check('任务抛错不影响其它任务，计入 notes', async () => {
   assert.equal(vals.filter((v) => !v.ok).length, 1, '应有一个失败')
   // 流抛错被 agentic 循环收敛为 stopReason='error'（不向外炸），落成「未产出正文」的 note
   assert.ok(notes.some((s) => /未产出正文|请求失败/.test(s)), `notes 应记录失败：${notes.join(' | ')}`)
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------- 双池与大档标记
+// 背景：agentic 通道原本是单池（concurrency），绕过了单轮通道 0.12.2 起的大档/默认档
+// 分离限流。这里补上，并按模块体量打大档标记（agentic 不装填源码，判据换成源文本量）。
+
+await check('markBigAgenticTasks：超预算的模块打上大档 provider/model', async () => {
+  const tasks = [
+    { customId: 'a', name: 'modules/a.md', sources: [] },
+    { customId: 'b', name: 'modules/b.md', sources: [] },
+  ]
+  const bigTier = { provider: 'big-p', model: 'big-m', reasoningEffort: 'high', budget: 1000 }
+  const out = markBigAgenticTasks(tasks, { bigTier, sizeOf: (t) => (t.customId === 'b' ? 5000 : 10) })
+  assert.equal(out[0].bigTier, undefined, '小模块不该打大档')
+  assert.equal(out[1].bigTier, true, '超预算模块应打大档')
+  assert.equal(out[1].provider, 'big-p')
+  assert.equal(out[1].model, 'big-m')
+  assert.equal(out[1].reasoningEffort, 'high')
+  // 不改原对象（纯函数）
+  assert.equal(tasks[1].bigTier, undefined)
+})
+
+await check('markBigAgenticTasks：大档未配置时原样返回（不误打标记）', async () => {
+  const tasks = [{ customId: 'a', sources: [] }]
+  assert.equal(markBigAgenticTasks(tasks, { bigTier: { provider: '', model: 'x', budget: 1 } })[0].bigTier, undefined)
+  assert.equal(markBigAgenticTasks(tasks, {})[0].bigTier, undefined)
+  assert.equal(markBigAgenticTasks(tasks, { bigTier: { provider: 'p', model: 'm', budget: 0 } })[0].bigTier, undefined)
+})
+
+await check('markBigAgenticTasks：不传 reasoningEffort 时任务上不出现该字段', async () => {
+  const out = markBigAgenticTasks([{ customId: 'a' }], {
+    bigTier: { provider: 'p', model: 'm', budget: 1 },
+    sizeOf: () => 999,
+  })
+  assert.equal(out[0].bigTier, true)
+  assert.equal('reasoningEffort' in out[0], false)
+})
+
+await check('双池：大档任务与默认档任务都能跑完并各自落盘', async () => {
+  const cwd = makeTmp()
+  const modulesDir = path.join(cwd, '.codewiki', 'wiki', 'modules')
+  const stream = async () => ({ blocks: [{ type: 'text', text: FULL_ARTICLE }], finish: { kind: 'stop' } })
+  const tasks = [
+    { customId: 'n0', name: 'modules/n0.md', mission: 'm', articlePath: path.join(modulesDir, 'n0.md'), sources: [] },
+    { customId: 'b0', name: 'modules/b0.md', mission: 'm', articlePath: path.join(modulesDir, 'b0.md'), sources: [], provider: 'big-p', model: 'big-m', bigTier: true },
+  ]
+  const rs = await runAgenticArticles(tasks, {
+    streamFn: stream, cwd, concurrency: 1, bigConcurrency: 1,
+    provider: 'norm-p', model: 'norm-m', maxSteps: 3,
+  })
+  assert.equal(rs.size, 2, '两篇都要跑完')
+  assert.ok(fs.existsSync(path.join(modulesDir, 'n0.md')), '默认档任务应写出')
+  assert.ok(fs.existsSync(path.join(modulesDir, 'b0.md')), '大档任务应写出')
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('resolveTaskRoute：任务自带 provider/model 时覆盖默认档，effort 也以任务为准', async () => {
+  const def = { provider: 'norm-p', model: 'norm-m', reasoningEffort: 'off' }
+  // 大档任务：task 上的三件套全生效
+  assert.deepEqual(
+    resolveTaskRoute({ provider: 'big-p', model: 'big-m', reasoningEffort: 'high' }, def),
+    { provider: 'big-p', model: 'big-m', reasoningEffort: 'high' },
+  )
+  // 大档任务没写 effort：用空（模型默认档），绝不回落默认档的 'off'
+  assert.deepEqual(
+    resolveTaskRoute({ provider: 'big-p', model: 'big-m' }, def),
+    { provider: 'big-p', model: 'big-m', reasoningEffort: '' },
+  )
+  // 普通任务：全用默认档
+  assert.deepEqual(resolveTaskRoute({}, def), { provider: 'norm-p', model: 'norm-m', reasoningEffort: 'off' })
+  // 只写一半（缺 model）不算自带：回落默认档，避免 provider/model 错配
+  assert.deepEqual(resolveTaskRoute({ provider: 'big-p' }, def), { provider: 'norm-p', model: 'norm-m', reasoningEffort: 'off' })
+})
+
+await check('双池：bigConcurrency=0 时回落到 concurrency（行为与单池一致）', async () => {
+  const cwd = makeTmp()
+  const modulesDir = path.join(cwd, '.codewiki', 'wiki', 'modules')
+  let inFlight = 0
+  let peak = 0
+  const stream = async () => {
+    inFlight++; peak = Math.max(peak, inFlight)
+    await new Promise((r) => setTimeout(r, 20))
+    inFlight--
+    return { blocks: [call('a', 'edit_article', { command: 'insert', line: 0, text: FULL_ARTICLE })], finish: { kind: 'stop' } }
+  }
+  const mk = (i, big) => ({
+    customId: `b${i}`, name: `modules/b${i}.md`, mission: 'm',
+    articlePath: path.join(modulesDir, `b${i}.md`), sources: [],
+    ...(big ? { provider: 'p', model: 'm', bigTier: true } : {}),
+  })
+  const tasks = [mk(0, true), mk(1, true), mk(2, true)]
+  await runAgenticArticles(tasks, { streamFn: stream, cwd, concurrency: 2, bigConcurrency: 0, maxSteps: 3 })
+  assert.equal(peak, 2, `bigConcurrency=0 时大档池应用 concurrency=2，实测峰值 ${peak}`)
+  fs.rmSync(cwd, { recursive: true, force: true })
+})
+
+await check('sourceTokensOf 按 CJK/非 CJK 口径估 token，读不到的文件跳过', async () => {
+  const cwd = makeTmp()
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(cwd, 'src', 'a.js'), '中'.repeat(100), 'utf8')
+  const n = sourceTokensOf({ sources: ['src/a.js', 'src/missing.js'] }, cwd)
+  assert.equal(n, 100, `100 个 CJK 字符应估 100 token，实际 ${n}`)
+  assert.equal(sourceTokensOf({ sources: [] }, cwd), 0)
   fs.rmSync(cwd, { recursive: true, force: true })
 })
 

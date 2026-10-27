@@ -9,7 +9,7 @@ import {
   filterStaleTasks, describeChange, normRel, componentsByFile, SNAPSHOT_VERSION, sameSnapshotContent,
 } from './lib/incremental.js'
 import { extractRepoGraph } from './lib/symbols.js'
-import { bodyHash } from './lib/graph-diff.js'
+import { bodyHash, stripComments } from './lib/graph-diff.js'
 
 let pass = 0
 const fails = []
@@ -64,6 +64,65 @@ await check('签名变更记为 interface（架构描述必须重写）', async 
   const r = filterStaleTasks([{ name: 'a', articlePath: '/x/a.md', sources: ['src/a.js'] }], g1, g2)
   assert.equal(r.counts.interface, 1, `应记 interface，实际 ${JSON.stringify(r.counts)}`)
   assert.match(describeChange(r.counts), /接口变/)
+})
+
+// ---------------------------------------------------------------- 纯注释改动降级
+// 这是 README/CHANGELOG 承诺过的「注释改动不重写」。旧实现只比 bodyHash，
+// 注释一改 bodyHash 就变、文章照旧重写，与承诺相反（且与上游 Python 行为一致，
+// 所以不是移植错，是哈希粒度问题）。现在在判定层用 codeHash 降级。
+
+const A_COMMENT_ONLY = `export function calcTax(amount, rate) {\n  // 新加的一行注释\n  return amount * rate\n}\n`
+const A_CODE_CHANGED = `export function calcTax(amount, rate) {\n  return amount * rate * 2\n}\n`
+
+await check('只改注释：body 类变更被降级，文章不重写', async () => {
+  const g1 = await graphOf({ 'src/a.js': A })
+  const g2 = await graphOf({ 'src/a.js': A_COMMENT_ONLY })
+  const tasks = [{ name: 'modules/a.md', articlePath: '/x/a.md', sources: ['src/a.js'] }]
+  const r = filterStaleTasks(tasks, g1, g2)
+  // 先确认这确实是「body 哈希变了」的场景，否则测试没意义
+  assert.equal(r.counts.body, 1, '前提：bodyHash 应当变了')
+  assert.equal(r.keep.length, 0, '纯注释改动不该重写文章')
+  assert.equal(r.dropped.length, 1)
+  assert.ok(r.cosmeticOnly.length === 1, '应识别出 1 个纯注释改动组件')
+  assert.ok(Array.isArray(r.dropped[0].cosmeticOnlyComponents), '被跳过的任务应带出原因')
+})
+
+await check('改代码：仍然是 body 类变更，文章必须重写', async () => {
+  const g1 = await graphOf({ 'src/a.js': A })
+  const g2 = await graphOf({ 'src/a.js': A_CODE_CHANGED })
+  const r = filterStaleTasks([{ name: 'a', articlePath: '/x/a.md', sources: ['src/a.js'] }], g1, g2)
+  assert.equal(r.counts.body, 1)
+  assert.equal(r.keep.length, 1, '实现真变了必须重写')
+  assert.equal(r.cosmeticOnly.length, 0, '不该误判为纯注释改动')
+})
+
+await check('改签名 + 改注释：interface 优先，不因注释降级被跳过', async () => {
+  const withBoth = `export function calcTax(amount, rate, currency) {\n  // 注释也改了\n  return amount * rate\n}\n`
+  const g1 = await graphOf({ 'src/a.js': A })
+  const g2 = await graphOf({ 'src/a.js': withBoth })
+  const r = filterStaleTasks([{ name: 'a', articlePath: '/x/a.md', sources: ['src/a.js'] }], g1, g2)
+  assert.equal(r.counts.interface, 1)
+  assert.equal(r.keep.length, 1, '接口变了必须重写，注释降级不能放行')
+  assert.equal(r.cosmeticOnly.length, 0)
+})
+
+await check('老快照没有 codeHash 时退回原行为（不因缺字段误跳过）', async () => {
+  const g1 = await graphOf({ 'src/a.js': A })
+  const g2 = await graphOf({ 'src/a.js': A_COMMENT_ONLY })
+  // 模拟旧格式快照：走一遍 slimGraph→graphFromSnapshot（节点无 sourceCode），再抹掉 codeHash
+  const old = graphFromSnapshot(slimGraph(g1))
+  for (const n of old.values()) { delete n.codeHash; delete n.sourceCode }
+  const r = filterStaleTasks([{ name: 'a', articlePath: '/x/a.md', sources: ['src/a.js'] }], old, g2)
+  assert.equal(r.keep.length, 1, '拿不到 codeHash 时应保守保留（旧行为）')
+  assert.equal(r.cosmeticOnly.length, 0)
+})
+
+await check('stripComments 去掉行注释/块注释，保留代码', async () => {
+  assert.equal(stripComments('const a = 1 // 尾注'), stripComments('const a = 1'))
+  assert.equal(stripComments('/* 块 */ const b = 2'), stripComments('const b = 2'))
+  assert.equal(stripComments('# py 注释\nx = 1'), stripComments('x = 1'))
+  // 代码本身不同必须区分开
+  assert.notEqual(stripComments('const a = 1'), stripComments('const a = 2'))
 })
 
 await check('文件内容变了但符号完全没变 → 跳过该文章', async () => {
