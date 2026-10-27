@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 — 2026-10-27
+
+### 修复：增量漏检、部分失败仍报成功、坏文章入库（融合 FSoft 的 updater/质量门）
+
+一轮审计确认了三类缺陷，共同后果是「wiki 看起来编译完了，但库里的文章与代码对不上」。本轮按 P0 顺序逐项修，每项都有回归测试。
+
+- **增量漏检（最严重：工作区改动永远不被看见）**。过期判定只跑 `git diff <last_compiled_commit>..HEAD`，**未提交、已暂存、未跟踪的改动完全不参与**——改完源码不 commit 就编译，`cw status` 报「最新」，这些改动从此永久失明；删除与改名也认不出。新增 `lib/change-set.js`：`collectChangeSet()` 一次采集四路（`<base>..HEAD` / `--cached HEAD` / 工作区 / `ls-files --others`），识别 `D` 与 `R`，路径规范化成仓库相对 POSIX，`.codewiki/` 自身产物排除在源码变更之外（README/CHANGELOG/CodeWiki.md 仍是合法 source）。基线不可达/非 git 仓库时**明确退回全量并记原因**，不再假装干净。`test-change-set.mjs` 15 条覆盖仅未提交/仅暂存/未跟踪/删除/改名/去重/排除/降级。
+- **把没被理解的变化基线化**。旧代码在 `changedFiles` 有内容但**没有任何文章命中** `source_files` 时照样 `meta update`，等于宣布「这些变化已经消化」，下次增量再也不会看它们。新增 `lib/update-planner.js`：`planUpdate()` 纯函数，以文章 `source_files` 为初始 ownership，用当前依赖图做**反向依赖闭包**（接口级变更连带重写使用方文章，函数体实现细节变更不波及依赖方），新文件按最长公共目录归给最匹配的文章、无法归属的源码文件让规划退回全量，未重写页做 stale scan（引用已删/改名组件、内部死链）。每篇 `write`/`keep`/`review` 都带**可机读原因**；关系存版本化 `.codewiki/temp/module-map.json`（老 wiki 从 frontmatter 保守迁移）。纯注释改动仍按 `codeHash` 跳过（0.13.2 行为不变）。`test-update-planner.mjs` 20 条覆盖反向依赖、新文件路由、未映射、缺 source_files、stale scan、文件级降级。顺带修掉一个真问题：`extractCurrentGraph()` 原先只调 `extractRepoGraph()` **从不建依赖边**，增量侧根本没有 `dependsOn`，反向依赖影响不可能生效（只有语义聚类路径建边）；现在两条路径都建。
+- **部分失败仍报 `done`**。旧判定只有 `writtenCount === 0` 才算失败，**1 篇成功 + 19 篇失败照样 `done` 并推进基线**。新增终态 `partial`（`JOB_TERMINAL` 与面板/`codewiki_progress` 文案同步），`done` 只表示完整成功。硬不变量：计划内必需文章缺失/失败、有未映射变更、质量闸门拦下文章、存量文章体检不过 → `partial`（附 `blockers` 逐条原因）；`partial`/`failed` **不执行 `meta update`**，下次编译还会重新处理这些变化。每次编译写 `.codewiki/temp/update-record.json`（基线/HEAD、每篇 action+原因、变更统计、未映射变更、质量问题、最终结果），job 只存摘要与记录路径。`test-update-record.mjs` 18 条覆盖终态判定矩阵与记录可序列化。
+- **坏文章能入库**。旧闸门只查 frontmatter 开合；重复 frontmatter、空必需章节、指向不存在文件的 `source_files`、坏链接全都能写进 wiki 再被 `cw index` 收进索引（已提交的 `.codewiki/concepts/wiki-generation-flow.md` 就有第二份 frontmatter + 重复正文）。新增 `lib/article-contract.js`：`inspectArticle()` 纯函数，检查 frontmatter 唯一闭合、必填字段、`type` 与目录一致、正文非空、必需章节非空、正文不重复 frontmatter、围栏闭合、`source_files` 真实存在且来自本次读取证据、内部链接目标存在、重复章节/正文块拒绝；按文章类型配置必需章节。接在**所有写盘点**（单轮通道、校对回写、agentic 通道）。agentic 通道另加 write-set 闸门（父文只准写自己那篇、子模块只准写调度器分配路径，越界 `stopReason='write-set'` 且不落盘）。`test-article-contract.mjs` 29 条。
+- **文档口径同步**：README 新增「增量与质量保证（0.14.0）」一节，改掉「零子代理」这类与实现不符的整体化表述；`symbolIncremental`/`agenticArticles`/增量判定三处描述补上 0.14.0 行为。
+
+**验证**：新增 4 套测试（`test-change-set` 15 / `test-update-planner` 20 / `test-update-record` 18 / `test-article-contract` 29）全绿；既有 20 套测试全部保持通过（含 `test-orchestration` 编排冒烟、`test-batch` 148、`test-agentic` 55、`test-articles-agentic` 20、`test-incremental*`、`test-graphdiff`）；`node --check` 全部通过。
+
 ## 0.13.7 — 2026-10-27
 
 ### 修复：锚点测试补「编译基线版」第三基准，消除提交前后的结果跳变

@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.13.7",
+  "version": "0.14.0",
   "description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (in-plugin, default workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k for oversized input, zero subagents, single-project serial) with a sidebar panel. Since 0.13.0 absorbs FSoft-AI4Code/CodeWiki's AST symbol extraction + LLM semantic clustering, agentic tool-loop article writing, and symbol-level incremental updates, implemented with Node + tree-sitter WASM (no Python runtime).",
   "private": true,
   "type": "module",

@@ -4,24 +4,73 @@
 
 **0.13.0 起吸入了 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（MIT，ACL 2026）的三层能力**：AST 符号提取 + LLM 语义聚类（`planMode=auto`）、agentic 工具循环写作（`agenticArticles`）、符号级增量判定（`symbolIncremental`）。全部用 Node + tree-sitter WASM 在本插件内实现，不引入 Python 运行时，任一环节不可用都自动降级回旧行为。详见下文「编译流水线：吸收自 FSoft CodeWiki」。
 
+**0.14.0 起补上「增量不丢、结果诚实、坏文章不入库」三层质量保证**（对应上游的 updater/ownership/完整性终态/write-set 与文章质量门）：变更采集覆盖工作区（未提交/已暂存/未跟踪/删除/改名），增量规划带反向依赖闭包与新文件 ownership，终态新增 `partial` 且只有完整成功才推进基线，所有写盘点统一走文章契约闸门。详见下文「增量与质量保证（0.14.0）」。
+
 ## 提供
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
-| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），零子代理，不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
+| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
-| `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务 |
+| `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled` |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
 
 `codewiki_generate` 关键行为：
 
 - `scope=auto`（默认）：无 wiki / 未编译 → 全量；有变更 → 逐篇更新过期文章；最新 → 直接报告。
 - 全部模型环节（写文章/横切/审校）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型；不再委托发起会话的主模型。
-- 单篇文章失败只记账不中断；全部失败则不刷新编译基线（`meta update` 不执行，可安全重试）。
+- 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**，此时不刷新编译基线（`meta update` 不执行，可安全重试）；只有「所有变更都已被解释 + 所有必需文章都成功 + 索引与质量检查全过」才 `done` 并推进基线。
 - 请求并发分两档独立限流：默认档 `maxConcurrency` 默认 2（硬顶 8），大档 `bigConcurrency` 默认跟随默认档（`0`）；两池同时推进，总在飞为两者之和。
 - `serialProjects` 默认开：同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued` 排队，前一个收尾后自动轮到。
 - `scope=full`：跳过 clean 短路，即使 wiki 最新也强制全量重编。
+
+## 增量与质量保证（0.14.0）
+
+这一层是「修复已审计确认的三类缺陷」的直接产物，全部在本插件内用 Node 实现，不引入 Python。
+
+### 变更采集：不再只看提交
+
+旧实现的过期判定只跑 `git diff <last_compiled_commit>..HEAD`，**工作区里没提交的改动完全不参与**——改完源码没 commit 就编译，wiki 会报「最新」并把这些改动永久漏掉。
+
+现在 `lib/change-set.js` 的 `collectChangeSet(cwd, baseCommit)` 一次采集四路：`git diff <base>..<HEAD>`（已提交）、`git diff --cached HEAD`（已暂存）、`git diff`（未暂存）、`git ls-files --others --exclude-standard`（未跟踪），并识别 `D` 删除与 `R` 改名。规范化成仓库相对 POSIX 路径，`.codewiki/` 自身产物不计入源码变更（但 `README.md`/`CHANGELOG.md`/`CodeWiki.md` 这些被文章引用的文档仍是合法 source）。
+
+取不到基线（非 git 仓库、基线 commit 不可达、git 出错）时**明确退回全量**并记原因，不会假装「干净」。
+
+### 增量规划：依赖影响与 ownership
+
+`lib/update-planner.js` 的 `planUpdate({changeSet, oldGraph, newGraph, articles, moduleMap})` 是纯函数（可离线单测），产出每篇文章的 `write`/`keep`/`review` 与**逐条原因**：
+
+- **反向依赖闭包**：接口级变更（签名/新增/删除/改名/导入边）会连带重写「使用方」的文章，不再只更新 source_files 里直接命中那一篇。函数体内部的实现细节变更只重写自身文章，不波及依赖方。
+- **纯注释仍跳过**：`codeHash`（剥离注释后的哈希）不变即视为纯注释改动，`keep`，与 0.13.2 行为一致。
+- **新文件 ownership**：新增文件按最长公共目录归给最匹配的文章（该篇升级为 write）；完全无法归属的**源码**文件会让规划退回全量并记 warning；非源码文件（笔记、数据）无归属只记 warning，不拖累增量。
+- **未重写页 stale scan**：保留下来的文章会检查正文是否引用了已删除/已改名的组件、内部链接是否指向已不存在的文章，命中则升级为 write 或 review。
+- **缺 `source_files`** 的文章不再静默跳过，而是 `review` + 要求全量重编。
+- 规划关系存 `.codewiki/temp/module-map.json`（版本化，随 wiki 入库）；老 wiki 没有该文件时从 frontmatter 保守迁移。
+
+### 终态诚实：`partial` 不是 `done`
+
+`done` 现在只表示「完整成功」。以下任一情况终态为 `partial`（附 `blockers` 逐条原因），并且**不执行 `meta update`**，下次编译还会重新处理这些变化：
+
+- 计划内必需的文章缺失或写作失败（旧实现只看 `writtenCount === 0`，1 篇成功 + 19 篇失败照样 `done` + 推进基线）；
+- 有变更没被任何文章解释（未映射）；
+- 文章质量闸门拦下文章；
+- 存量文章体检发现坏文章。
+
+每次编译都写 `.codewiki/temp/update-record.json`：基线/HEAD、每篇 action + 原因、变更统计、未映射变更、质量问题、最终结果。job 只存摘要与该记录路径，不把整张图塞进 jobs 文件。
+
+### 文章契约闸门
+
+`lib/article-contract.js` 的 `inspectArticle()` 是纯函数，接在**所有写盘点**上（单轮通道、校对回写、agentic 通道），不再只查 frontmatter 开合：
+
+- frontmatter 必须唯一且闭合，`title`/`type`/`source_files`/`tags` 齐全，`type` 与所在目录一致；
+- 正文不能再次出现 frontmatter，代码围栏必须闭合，不允许重复章节/重复正文块；
+- 必需章节不能是空标题；
+- `source_files` 必须是仓库内真实存在、且来自本次实际读取证据的文件；
+- 内部 wiki 链接必须指向存在的文章。
+
+`error` 级问题一律不落盘（记 note 并计入终态阻塞）；`warning` 级（缺非必需章节）放行但记账。agentic 通道另有 **write-set 闸门**：父任务只能写自己那一篇、子模块只能写调度器分配的那条路径，越界返回 `stopReason='write-set'` 且不落盘。
+
 
 ## 编译流水线：吸收自 FSoft CodeWiki（0.13.0）
 
@@ -31,8 +80,8 @@
 |----|----------|-----------|----------|
 | 符号提取 | `tree-sitter` 原生绑定，逐语言 analyzer 提取函数/类/方法 + 调用关系（约 800 行/语言） | `lib/symbols.js`：**表驱动** `LANG_RULES`，web-tree-sitter + WASM 语法，16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name,kind,parameters,baseClasses,dependsOn,bodyHash,sourceCode}>` | 该语言退回正则级符号（`REGEX_RULES` + `regexExtract`，16 种语言表驱动，命中数记 `stats.regex`），不影响其它语言 |
 | 模块划分 | `cluster_modules.py`：LLM 两阶段聚类 + 递归下钻 + super-group 合并 | `lib/cluster.js`：同样的两阶段（先按组件职责聚类，再对超大模块递归下钻）+ `heuristicCluster` 兜底（单顶层目录时自动下探到第二层） | 模型请求失败 → 直接退回 `localPlan` 顶层目录分组，并记 note |
-| 写文章 | module agent 工具循环：模型自己 `read_code`/`list_files`/`edit_article`/`generate_sub_module`，多轮增量写作 | `lib/agentic.js`（纯逻辑循环）+ `lib/agentic-host.js`（接宿主 llm）+ `lib/articles-agentic.js`（接 job 生命周期）：工具 `read_code`/`list_files`/`edit_article`（`view`/`str_replace`/`insert` 三种命令）/`generate_sub_module`（递归派生子模块成文），单篇步数上限 `agenticMaxSteps` | 单篇失败只记账；失败率过半时自动退回单轮整包装填通道重跑 |
-| 增量判定 | `updater/graph_diff.py`：组件级 hash + 签名比对，区分 interface/added/deleted/renamed/body/edge | `lib/graph-diff.js`（逐位移植，含 78 条与 Python 原版的黄金对拍；0.13.2 另加 `codeHash`＝剥离注释后的哈希）+ `lib/incremental.js`（快照存取、文件级→组件级折算、按 frontmatter `source_files` 过滤文章、「`bodyHash` 变但 `codeHash` 没变」判为纯注释改动不重写） | 无快照/版本不符/提取失败 → 退回文件级 mtime/hash 判定，并记 note |
+| 写文章 | module agent 工具循环：模型自己 `read_code`/`list_files`/`edit_article`/`generate_sub_module`，多轮增量写作 | `lib/agentic.js`（纯逻辑循环）+ `lib/agentic-host.js`（接宿主 llm）+ `lib/articles-agentic.js`（接 job 生命周期）：工具 `read_code`/`list_files`/`edit_article`（`view`/`str_replace`/`insert` 三种命令）/`generate_sub_module`（递归派生子模块成文），单篇步数上限 `agenticMaxSteps`；0.14.0 起带 write-set 闸门（父文只准写自己那篇、子模块只准写调度器分配的路径） | 单篇失败只记账；失败率过半时自动退回单轮整包装填通道重跑 |
+| 增量判定 | `updater/graph_diff.py`：组件级 hash + 签名比对，区分 interface/added/deleted/renamed/body/edge；updater 另有 ownership/stale scan/update record | `lib/graph-diff.js`（逐位移植，含 78 条与 Python 原版的黄金对拍；0.13.2 另加 `codeHash`＝剥离注释后的哈希）+ `lib/incremental.js`（快照存取、文件级→组件级折算、「`bodyHash` 变但 `codeHash` 没变」判为纯注释改动不重写）+ 0.14.0 的 `lib/change-set.js`（工作区/暂存/未跟踪/删除/改名四路采集）、`lib/update-planner.js`（反向依赖闭包 + 新文件 ownership + stale scan + module-map）、`lib/update-record.js`（可机读更新记录） | 无快照/版本不符/提取失败 → 退回文件级判定（仍含工作区与新增文件），并记 note |
 
 三个开关（设置页「编译流程（吸收自 FSoft CodeWiki）」一节，也可在 `cordis.patch.yml`/profile patch 里改）：`planMode`（`auto`/`dirs`）、`agenticArticles`（+ `agenticMaxSteps`）、`symbolIncremental`。**默认全开**；想要 0.12.x 的旧行为，把三者分别设成 `dirs`/`false`/`false`。
 
@@ -58,7 +107,7 @@ AST 能力依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`
 - `planMode`（0.13.0）：模块划分方式。`auto`（默认）= tree-sitter 提取全仓符号 → 模型按职责聚成层级模块树（单文件目录会细分、跨目录同一职能会合并）；`dirs` = 只按顶层目录分组（0.12.x 旧行为）。模型请求失败或 AST 不可用时自动退回 `dirs` 并在任务 note 里写明原因。
 - `agenticArticles`（0.13.0，默认开）：文章写作走 agentic 工具循环——模型在写作过程中自己 `read_code` 读指定文件的指定行、`list_files` 找文件、`edit_article` 增量改写，不再把整个模块源码内联进单个 prompt。好处：prompt 小（不再触发 110k/420k 装填分级）、可以多轮回看精修、大文件不必拆观察批。0.13.2 起该通道也走双池并发：模块源文本量超 `bigTokenBudget` 的任务打 `bigTier` 标记走大档（`bigProvider`/`bigModel`），其余走默认档。关闭则走单轮整包装填的旧通道。0.13.3 起 `read_code` 带重复读抑制：模型反复读同一段（真实运行里出现过同一文件读 13 次）时不再回吐正文，只提示「你已经在第 N 步读过这段」，去重判定发生在读盘之前；同一探针实测重复读 12 → 5 次、上下文 2144 → 1413KB、步数 45 → 17，`stopReason` 由 `max-steps` 变为 `finished`。0.13.4 起工具层补齐四个翻车点：`str_replace`/`insert` 按行尾归一化匹配（仓库 `core.autocrlf=true`，`.codewiki` 下 28/36 篇是 CRLF，跨行替换原先必然失败且模型会反复重试到步数耗尽）；子模块到嵌套上限时不再谎称「已记录」而是报错并要求写成普通小节（原先会产出指向不存在文件的死链、父任务仍记 `ok:true`）；`read_code` 加 40000 字符上限（原先单行超长文件一次可灌 5.7 万 token）；`list_files` 隐藏 `node_modules`/`.git` 等目录。
 - `agenticMaxSteps`（0.13.0，默认 30，1–100）：单篇文章最多允许几轮「读源码 → 改文章」。到上限会强制收尾（写回当前文章并记 note）。
-- `symbolIncremental`（0.13.0，默认开；0.13.2 起注释改动判定生效）：增量编译按 AST 符号级判定——只重写「函数签名/类结构/导出接口/导入边/函数体」真变了的模块；纯注释、空白、格式化改动直接跳过（0.13.2 前只跳过空白，注释改动仍会触发重写；现按 `codeHash`＝剥离注释后的哈希判定，文档注释/docstring 改动仍算真改动）。快照存 `.codewiki/temp/symbol-graph.json`（随 wiki 入库，换机器/换会话仍有效）；快照缺失或版本不符时退回文件级 mtime/hash 判定。
+- `symbolIncremental`（0.13.0，默认开；0.13.2 起注释改动判定生效；0.14.0 起接上反向依赖）：增量编译按 AST 符号级判定——只重写「函数签名/类结构/导出接口/导入边/函数体」真变了的模块；纯注释、空白、格式化改动直接跳过（0.13.2 前只跳过空白，注释改动仍会触发重写；现按 `codeHash`＝剥离注释后的哈希判定，文档注释/docstring 改动仍算真改动）。快照存 `.codewiki/temp/symbol-graph.json`（随 wiki 入库，换机器/换会话仍有效）；快照缺失或版本不符时退回文件级判定（**仍覆盖工作区变更与新增文件**，并照常做完整性检查）。0.14.0 起增量判定由 `lib/update-planner.js` 统一负责，`scope=stale` 与 `scope=auto` 走同一套规划；关闭本开关只是从符号级降为文件级，不会绕过完整性检查。
 - `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
 - `autoCommit`（0.10.9，0.10.10 修正文档与三态）：编译产物自动提交，默认开。编译终态（done 且有文章写成功）后由插件自己 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`，带任务 id 与篇数），把「等编译完成 → 会话模型代跑 git」这件事彻底收回插件侧——会话模型因此不必等待编译、不必轮询、不必提交。安全边界：改动由 pathspec 限定在这两个路径（不是 `-A`/`--all`/`.`，因此不会卷进工作区其它改动）、不 amend/push/改写历史、不跑仓库钩子；以下情形一律**拒绝并降级**为一次性「产物待提交」提醒（不会半个提交、不会静默丢产物）：非 git 仓库、仓库无 HEAD、merge/rebase/cherry-pick 进行中、目标路径存在未解决冲突、`.codewiki/`（或未 tracked 的 `CodeWiki.md`）被 `.gitignore` 忽略、缺 `user.name`/`user.email`、`git add`/`git commit` 失败（含 `index.lock` 被并发占用）。结果写入 job 的 `autoCommit`（`committed`/`sha`/`message`/`reason`/`noChanges`），`codewiki_progress` 输出与侧边栏任务卡直接显示；三条通道（唤醒、系统提示提醒、面板）统一按 `autoCommitState()` 判定三态：已提交 → 静默、产物无改动 → 静默不催、未提交 → 才提醒一次。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
