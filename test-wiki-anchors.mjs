@@ -38,7 +38,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const WIKI = path.join(ROOT, '.codewiki')
 const FORCE_STRICT = process.argv.includes('--strict')
 
-// 校验基准：**工作区源码 ∪ 已提交源码（HEAD）**，任一视为有效即通过。
+// 校验基准：**编译基线版 ∪ 工作区源码 ∪ 已提交源码（HEAD）**，任一视为有效即通过。
 //
 // 这不是放水，而是修正此前的系统性误报。wiki 锚点是流水线在**编译当时**按工作区文件
 // 写的；而人改代码与跑本测试之间必然存在一个「已改未提交」的窗口。实测：`index.js` 未提交
@@ -47,9 +47,23 @@ const FORCE_STRICT = process.argv.includes('--strict')
 // 「每次改源码都必须先提交才能跑测试」，这与日常开发顺序冲突，且会把真错误淹没在噪声里。
 //
 // 反向也成立：若有人先改文档、源码后提交，工作区基准同样救不了——所以是**并集**而非替换。
-// 只有当「工作区」与「HEAD」两版源码都解释不了该锚点时，才判定文档真的错了。
+// 只有当三版源码都解释不了该锚点时，才判定文档真的错了。
+//
+// 第三个基准（编译基线版）是后来补的，因为它才是语义上最正的那一个：文档就写在它上面。
+// 只留工作区 ∪ HEAD 时有个隐蔽的窗口——**提交之后** HEAD 立刻变成新源码，兜底消失，
+// 同一份文档的 --strict 败数从 18 跳到 111（全部是「锚点写在编译基线那版，而基线那版
+// 已不在任何基准里」）。补上它，提交前后结果就一致了。
 const sourceCache = new Map()
-function readSourceFile(rel, { head = false } = {}) {
+function readSourceFile(rel, { head = false, ref = null } = {}) {
+  if (ref) {
+    // 编译基线版：文档就是在这版源码上写成的，它能解释的锚点一律算有效。
+    try {
+      const text = execFileSync('git', ['show', `${ref}:${rel}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 })
+      const lines = text.split(/\r?\n/)
+      if (lines.length && lines[lines.length - 1] === '') lines.pop()
+      return lines
+    } catch { return null } // 基线里没有该文件（本轮新增）→ 无该基准
+  }
   if (head) {
     try {
       const text = execFileSync('git', ['show', `HEAD:${rel}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
@@ -63,16 +77,41 @@ function readSourceFile(rel, { head = false } = {}) {
   } catch { return null } // 文件不存在（如已删的临时脚本、外部路径）→ null，跳过该锚点
 }
 
+// 编译基线（`.codewiki/_meta.yaml` 的 last_compiled_commit）——第三个基准，
+// 也是**语义上最该有的那一个**：文档就是流水线在这版源码上写的。
+// 为什么必须补它：双基准（工作区 ∪ HEAD）在「改完代码还没提交」时有 HEAD 兜底，
+// 但一旦提交，HEAD 立刻变成新源码，兜底消失——实测提交前后同一份文档的 --strict
+// 败数从 18 跳到 111，全部是「文档写在编译基线那版、而基线那版已不在任何基准里」。
+// 工作区与 HEAD 都解释不了的锚点，在编译基线版里往往正中目标。
+const compiledCommitForViews = (() => {
+  try {
+    return fs.readFileSync(path.join(WIKI, '_meta.yaml'), 'utf8')
+      .match(/^last_compiled_commit:\s*([0-9a-f]{7,40})\s*$/m)?.[1] ?? null
+  } catch { return null }
+})()
+
 // 返回该锚点所有可用基准下的「源码视图」数组：工作区版在前（更可能是文档想指的那版），
-// HEAD 版在后。调用方逐版校验，任一通过即算通过。空数组 = 文件根本不存在，跳过校验。
+// HEAD 版其次，编译基线版最后。调用方逐版校验，任一通过即算通过。
+// 空数组 = 文件根本不存在，跳过校验。
 function loadSource(rel, preferHead = false) {
   const key = `${preferHead ? 'H:' : 'W:'}${rel}`
   if (sourceCache.has(key)) return sourceCache.get(key)
   const views = []
-  const order = preferHead ? [{ head: true }, { head: false }] : [{ head: false }, { head: true }]
+  const seen = new Set()
+  const order = preferHead
+    ? [{ head: true }, { head: false }, { ref: compiledCommitForViews }]
+    : [{ head: false }, { head: true }, { ref: compiledCommitForViews }]
   for (const opt of order) {
+    if (opt.ref === null) continue // 无编译基线 → 该基准不可用
     const lines = readSourceFile(rel, opt)
-    if (lines) views.push({ lines, total: lines.length, head: opt.head })
+    if (!lines) continue
+    // 同一份内容只保留一次：编译基线常常就等于工作区，去重避免重复校验同一版。
+    // 必须按**全文**比对，不能取首行/中间行做签名——两个不同版本的首行与中间行
+    // 完全可能相同（都在文件开头的注释里），那会把本该独立的一版错误丢掉。
+    const body = lines.join('\n')
+    if (seen.has(body)) continue
+    seen.add(body)
+    views.push({ lines, total: lines.length, head: !!opt.head, base: !!opt.ref })
   }
   sourceCache.set(key, views)
   return views
@@ -187,8 +226,8 @@ if (articles.length === 0) {
   console.error('  ✗ .codewiki/ 下没有找到任何 .md 文章——wiki 未编译？')
   process.exit(1)
 }
-const mainTxt = SOURCES['index.js'].map((v) => `${v.head ? 'HEAD' : '工作区'} ${v.total} 行`).join(' / ')
-console.log(`校验 ${articles.length} 篇文章的行号锚点（index.js ${mainTxt}，其余引用文件按需加载；工作区与 HEAD 双基准任一有效即通过）`)
+const mainTxt = SOURCES['index.js'].map((v) => `${v.base ? '编译基线' : v.head ? 'HEAD' : '工作区'} ${v.total} 行`).join(' / ')
+console.log(`校验 ${articles.length} 篇文章的行号锚点（index.js ${mainTxt}，其余引用文件按需加载；编译基线 ∪ 工作区 ∪ HEAD 三基准任一有效即通过）`)
 
 for (const file of articles) {
   const rel = path.relative(ROOT, file).replaceAll('\\', '/')
@@ -217,7 +256,7 @@ for (const file of articles) {
       let firstMsg = ''
       let firstKind = 'struct' // 首个失败若为同步类（sync）且文件滞后，则降级软报告
       for (const src of views) {
-        const label = `${src.head ? 'HEAD 版' : '工作区'} ${srcName}`
+        const label = `${src.base ? '编译基线版' : src.head ? 'HEAD 版' : '工作区'} ${srcName}`
         const r = judgeAnchor({ a, src, syms, allFileAnchors, line, label, srcName })
         if (r.ok) { ok = true; break }
         if (!firstMsg) { firstMsg = r.msg; firstKind = r.kind ?? 'struct' }
@@ -243,7 +282,8 @@ function describeOk(a, views) {
   const start = Number(a[2])
   const end = a[3] ? Number(a[3]) : null
   const tail = end !== null ? `-${end}` : ''
-  if (views.length === 1) return `锚点在 ${srcName}:${start}${tail} 有效（单基准：${views[0].head ? 'HEAD 版' : '工作区'}）`
+  const nameOf = (v) => (v.base ? '编译基线版' : v.head ? 'HEAD 版' : '工作区')
+  if (views.length === 1) return `锚点在 ${srcName}:${start}${tail} 有效（单基准：${nameOf(views[0])}）`
   return `锚点在 ${srcName}:${start}${tail} 有效`
 }
 
