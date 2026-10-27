@@ -3,12 +3,14 @@ title: client-interface
 type: module
 source_files:
   - client.js
+  - index.js
+  - .codewiki/modules/core-and-config.md
 tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 ---
 
 ## Overview
 
-`client-interface` 是 CodeWiki 插件的前端半侧（实现于仓库根 `client.js`，文件头标注 v0.4.1，第 1 行），经 `window.__ModuleLoader__.load` 由宿主插件系统加载，模块 id 为 `@local/dsh-codewiki`（第 10-11 行），`factory(require)` 内引入 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`（解构 `Switch`/`Button`/`Input`/`Tag`，第 13-15 行）。它承担三类职责：
+`client-interface` 是 CodeWiki 插件的浏览器半侧（实现于仓库根 `client.js`，文件头标注 v0.4.1，第 1 行），经 `window.__ModuleLoader__.load` 由宿主插件系统加载，模块 id 为 `@local/dsh-codewiki`（第 10-11 行），`factory(require)` 内引入 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`（解构 `Switch`/`Button`/`Input`/`Tag`，第 13-15 行）。它承担三类职责：
 
 1. **插件设置页**：向宿主 `plugins.item` 槽位注入设置卡片 `CodewikiCard`（id = NS = `'codewiki'`，order 30，第 518-525 行），设置读写走宿主 `configForms` 服务命名空间 `'codewiki'`（第 17、515 行），热生效无需重启。
 2. **侧边栏面板**：向 `main` 与 `sidebar.panellist` 两个槽位注册 `CodewikiPanel`/`PanelIcon`（第 533-544 行），面板内含「总览 / 任务 / 会话 / 设置」四个标签页（第 1645-1652 行），轮询宿主半侧 webServer 端点渲染编译任务进度、仓库总览与编译会话记录，并提供取消、编译、排除等控制操作。
@@ -35,7 +37,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 - `EFFORTS_PATH = '/api/codewiki/model-efforts'`（第 27 行）：模型思考档位端点（按 provider+model 查询）。
 - `GENERIC_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']`（第 30 行）：目录未声明 efforts 的模型在设置页展示的通用思考档位；选了模型不支持的值由 llmChat 兜底剥档重试，不会失败。
 - `REPOS_POLL_MS = 10000`（第 31 行）：仓库列表轮询间隔。
-- `ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']`（第 33 行）：活跃阶段列表（queued 单列最前——单项目串行时后提交的项目在此等待，第 32 行注释）；用于步骤条、总体进度与焦点判断。
+- `ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']`（第 33 行）：活跃阶段列表（queued 单列最前——单项目串行时后提交的项目在此等待，第 32 行注释）；用于步骤条、总体进度与焦点判断。终态阶段（`done`/`failed`/`cancelled`/`partial`，均不在该数组内）由 `lastTimedStage`/`overallPct`/`stageBar` 单独处理（`partial` 表示「写成了部分文章但有变化没被消化」，仍是终态，见数据模型小节）。
 
 ### 词典与国际化（client.js 35-210、211-386）
 
@@ -91,9 +93,9 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 - `fmtMs(ms)`（第 1055-1061 行）：`HH:MM:SS`/`MM:SS`；`fmtTok(n)`（第 1062-1067 行）：token 数 k/M 缩写；`fmtDur(ms)`（第 1068-1073 行）：`X min`/`X h Y min`；`fmtAgo(iso)`（第 1074-1077 行）：相对时间 + agoSuffix。
 - `Spark({ values, width = 56, height = 16 })`（第 1079-1091 行）：纯 SVG path 微趋势线，过滤非正数，少于 2 点返回 null。
 - `stepName(s)`（第 1095 行）；`lastTimedStage(job)`（第 1098-1101 行）：返回 `stageTimings` 中最后一个属于 ACTIVE_STAGES 的键。
-- `stageBar(job)`（第 1102-1127 行）：七阶段（含 queued 与 commit）步骤条——已完成绿点（title 带各阶段耗时）、当前阶段实心点 + 实时计时（第 1115 行）、失败/取消在最后计时段标红/黄（failIdx 逻辑第 1108 行，标记第 1121-1122 行），终态 done 全绿。
+- `stageBar(job)`（第 1102-1127 行）：七阶段（含 queued 与 commit）步骤条——已完成绿点（title 带各阶段耗时）、当前阶段实心点 + 实时计时（第 1115 行）、失败/取消在最后计时段标红/黄（failIdx 逻辑第 1108 行，标记第 1121-1122 行）；`partial` 与 `done` 一样视作「所有阶段都跑过」而全绿（第 1107 行 `cleanEnd`），只有 `failed`/`cancelled` 才在末尾标红/黄。
 - `STAGE_WEIGHTS = { queued: 0, articles: 0.63, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05, commit: 0.02 }`（第 1129 行）：各阶段在总体进度中的定权，供 `overallPct` 使用。
-- `overallPct(job)`（第 1130-1140 行）：按 `STAGE_WEIGHTS` 累计已完成阶段权重，阶段内按 `taskList` 完成数折算（第 1138 行），封顶 99、done 才 100（第 1134、1139 行）。
+- `overallPct(job)`（第 1130-1140 行）：按 `STAGE_WEIGHTS` 累计已完成阶段权重，阶段内按 `taskList` 完成数折算（第 1138 行）；终态时 `done` 或 `partial` 均显示 100（第 1134 行，活干完了，由终态标签区分是否完整），非 done/partial 的终态（failed/cancelled）返回 null（不显示进度条）；活动阶段封顶 99（第 1139 行）。
 - `throughputBadge(job, sparkOf, rateOf)`（第 1143-1163 行）：非活动阶段返回 null（第 1144 行）；`job.tps > 0` 时显示 tok/s + Spark（实时通道，第 1146-1148 行）；否则批量通道按 `rateOf` 速率与 `batchProgress` 显示 篇/分 + ETA（第 1150-1158 行），无完成样本时显示自 `batchSubmittedAt` 起的执行时长（第 1159-1161 行）。
 - `usageLine(job)`（第 1165-1181 行）：输入（提交时估算）/输出（响应实测）token（第 1168-1171 行）、请求数（批量/实时拆分，第 1172-1177 行）；`u.overTier2` 个超单请求预算（按大档装填）请求数红字提示（第 1180 行）。
 
@@ -161,7 +163,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
   - `id`（string，第 1578 行引用）：任务唯一标识。
   - `cwd`（string，第 1513 行分组用）：仓库工作区路径。
   - `kind`（`full`/`stale`/`resume`，第 1580 行）：编译类型。
-  - `stage`（string，见 ACTIVE_STAGES 及终态 `done`/`failed`/`cancelled`，第 1582 行）：当前阶段。
+  - `stage`（string，见 ACTIVE_STAGES 及终态 `done`/`failed`/`cancelled`/`partial`，第 1582 行）：当前阶段。`partial` 是终态（写成了部分文章但有变化没被消化），不推进基线，但允许产物入库。
   - `createdAt`（ISO 时间戳，第 1543-1555 行引用）：任务创建时间。
   - `updatedAt`（ISO 时间戳，第 1519 行）：任务更新时间。
   - `finishedAt`（ISO 时间戳，终态时间戳，第 1552-1554 行）：任务结束时间。
@@ -179,6 +181,7 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
   - `stageTimings`（对象，阶段名→耗时 ms，第 1098-1101 行）：各阶段计时。
   - `stageStartedAt`（ISO，当前阶段开始，第 1115 行）：阶段起始时间。
   - `cancelRequested`（bool，第 1594 行）：取消请求已发。
+  - `blockers`（数组，元素 `{kind, detail}`，第 1536 行引用）：终态 `partial` 时未消化变化的阻塞原因清单；任务行展示「未消化 N 项」（第 1537-1539、1573-1576 行），前 3 条并入任务行 title 悬停查看。
   - `autoCommit`（对象，含 `committed`/`sha`/`noChanges`/`reason`/`branch`，第 1559-1568 行）：自动提交结果。
   - `auto`（bool，自动调度触发，于 ReposTab 第 1311 行消费）：是否自动更新任务。
   - `queueAhead`（string 数组，第 1601 行）：排队时前方任务标识。
@@ -222,9 +225,9 @@ tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
 
 ## Connections
 
-- [[plugin-runtime]]：本模块消费的 `/api/codewiki/jobs|control|repos|models|model-efforts|sessions|sessions/item` 七个回环端点由宿主半侧 `installWebServer` 注册（`index.js` 的 `installWebServer` 位于 `3479-3530+` 行，含 `GET /api/codewiki/jobs`/`repos`/`models`/`model-efforts`、`POST /api/codewiki/control`；`listModelCatalog` 第 3417 行、`resolveModelEfforts` 第 3455 行为设置卡模型目录/档位的数据源）；任务对象字段（stage/taskList/batchProgress/usage/notes/stageTimings/tps 等，见数据模型小节）的语义在此半侧被生产、在本模块被消费。
-- [[core-and-config]]：宿主半侧 `Config` schema（25 个 `.volatile()` 字段，`index.js` 第 60-86 行）与 `liveConfig` 规范化（第 92-134 行）才是设置的唯一权威定义；本模块的 `CodewikiCard` 仅是同一命名空间 `codewiki` 的可视编辑前端。
-- [[configuration-and-metadata]]：设置键全集的语义、默认值与 volatile 热生效规则（对照本模块 `save()` 差量键全集第 792 行、模型目录不可用时的手填回退第 669-673 行）。
+- [[core-application]] / [[core-and-config]]：本模块消费的 `/api/codewiki/jobs|control|repos|models|model-efforts|sessions|sessions/item` 七个回环端点由宿主半侧 `installWebServer`（`index.js` 第 4327 行）注册，含 `GET /api/codewiki/jobs`（第 4368-4404 行）、`GET /api/codewiki/repos`（第 4408-4497 行）、`GET /api/codewiki/sessions`（第 4503-4524 行）、`GET /api/codewiki/sessions/item`（第 4525-4542 行）、`GET /api/codewiki/models`（第 4549-4564 行）、`GET /api/codewiki/model-efforts`（第 4568-4588 行）、`POST /api/codewiki/control`（第 4589-4620 行，支持 `cancel`/`refresh`/`compile`）；设置卡模型目录/档位的数据源分别是 `listModelCatalog`（`index.js` 第 4265 行）与 `resolveModelEfforts`（第 4303 行）。任务对象字段（stage/taskList/batchProgress/usage/notes/stageTimings/tps/blockers 等，见数据模型小节）的语义在此半侧被生产、在本模块被消费（`repos` 端点构造的 `lastJob` 快照第 4452-4458 行只暴露部分字段）。
+- [[core-and-config]]：宿主半侧 `Config` schema（25 个 `.volatile()` 字段，`index.js` 第 70-96 行）与 `liveConfig` 规范化（第 102-144 行）才是设置的唯一权威定义；本模块的 `CodewikiCard` 仅是同一命名空间 `codewiki` 的可视编辑前端。
+- [[configuration-and-metadata]]：设置键全集的语义、默认值与 volatile 热生效规则（对照本模块 `save()` 差量键全集第 792 行、模型目录不可用时的手填回退第 668-673 行）。
 
 ## Known Issues
 

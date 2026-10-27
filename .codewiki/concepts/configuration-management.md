@@ -2,9 +2,9 @@
 title: configuration-management
 type: concept
 source_files:
+  - cordis.patch.yml
   - index.js
   - client.js
-  - cordis.patch.yml
 tags: [configuration, settings, plugin-system, configForms, patch]
 ---
 
@@ -18,7 +18,7 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 
 核心设计取向：**插件没有自己的配置文件**。配置的权威副本在宿主的 Config 服务里，插件侧只声明 schema、并在每次使用时现场调一次 `liveConfig(config)`。因此不存在「改了设置要重启」的问题 —— 这条承诺写在客户端词典的 `intro` 文案里（zh 版 `client.js:38`「此处设置经 configForms 热生效，无需重启」，en 版 `client.js:214` 'Settings here apply hot via configForms — no restart needed'）。
 
-一致性的另一条主线：**全部字段都带 `.volatile()`**（`Config` 声明里每个字段链尾都是 `.volatile()`，`index.js:70-94`），即配置不落持久化快照、读取永远取当前值。这也是 `liveConfig` 可以在各条边界反复调用的前提。
+一致性的另一条主线：**全部字段都带 `.volatile()`**（`Config` 声明里每个字段链尾都是 `.volatile()`，`index.js:70-95`），即配置不落持久化快照、读取永远取当前值。这也是 `liveConfig` 可以在各条边界反复调用的前提。
 
 第三个取向是**默认值双保险**：`cordis.patch.yml` 的初值是空对象 `{}`（`cordis.patch.yml:3`），所以所有默认值必须由 `Config` 的 `.default()`（`index.js:70-96`）与 `liveConfig` 的回落表达式（`index.js:102-144`）共同兜住；两处任一缺失都会让字段变成 `undefined` 并向下游传播。
 
@@ -37,7 +37,7 @@ id 对齐关系：cordis 挂载 id 是 `codewiki`（`cordis.patch.yml:20`），�
 | `CONCURRENCY_HARD_CAP` | `index.js:41` | 值 `8`；`maxConcurrency`/`bigConcurrency` 的运行期硬顶（`liveConfig` 钳制在 `index.js:117-119`、`index.js:121-123`） |
 | `DEFAULT_CONCURRENCY` | `index.js:43` | 值 `2`；默认档并发默认值（`liveConfig` 回落在 `index.js:102`） |
 | `DEFAULT_BATCH_PROVIDER` / `DEFAULT_BATCH_MODEL` | `index.js:45-46` | 值 `'workbuddy'` / `'hy3'`；编译模型默认值（`Config` 默认与 `liveConfig` 空串回落都引用，见 `index.js:102-103`、`index.js:110`） |
-| `DEFAULT_BIG_PROVIDER` / `DEFAULT_BIG_MODEL` | `index.js:49-50` | 值 `'volces-ark'` / `'glm-5.3-flash'`；大档模型默认值（`index.js:50-51`、`index.js:113`） |
+| `DEFAULT_BIG_PROVIDER` / `DEFAULT_BIG_MODEL` | `index.js:49-50` | 值 `'volces-ark'` / `'glm-5.3-flash'`；大档模型默认值（`index.js:50`、`index.js:113`） |
 | `DEFAULT_BIG_TOKEN_BUDGET` | `index.js:52` | 值 `420000`；大档单请求输入预算默认值（`index.js:79`、`index.js:115`） |
 | `WIKI_PATHS` | `index.js:55` | `['.codewiki', 'CodeWiki.md']`；`autoCommitWiki` / `commitHintText` 固定 pathspec（`index.js:4739`、`index.js:4655`） |
 | `BATCH_TOKEN_BUDGET` | `index.js:663` | 值 `110000`；普通档单请求输入预算，同时是 `bigTokenBudget` 的下限（`liveConfig` 在 `index.js:115`） |
@@ -119,7 +119,7 @@ function val(x) {
 配置不集中在一处读，而是在**每条边界现场调一次 `liveConfig`**：
 
 - 工具 execute 的 `enabled` 门禁：`cwToolDefinition`（`liveConfig` 在 `index.js:1640`、抛错在 `index.js:1641`）；`generateToolDefinition`（`liveConfig` 在 `index.js:3714`、抛错在 `index.js:4119`，同函数里排除清单判定在 `index.js:4048-4049`、文章语言解析在 `index.js:4825`）；`progressToolDefinition`（`liveConfig` 在 `index.js:1599`、抛错在 `index.js:4210`）；`updateToolDefinition` 复用 `generateDef.execute({ ...args, scope: 'auto' }, exec)`（`index.js:4090`）并只替换错误文案里的工具名（`index.js:4096`），因此继承同一道门禁。
-- 提交闸门 `submit()`（`index.js:3579-3680`）：先 `excludedItem` 拦排除目录（`index.js:3581-3584`，错误文案带命中的排除项与编辑指引）；worktree 闸门（`index.js:2263-2268`）与空壳目录闸门（`index.js:2424-2430`）跟配置无关但共用同一入口；再校验编译模型三元组——`batchProvider` 非空（`index.js:3649`）、`batchModel` 非空（`index.js:3650`）、`llmRef.stream` 可用（`index.js:3505`），失败即 `fail` 并抛错；解析结果写进 `job.credentialSource = llm(...)`（`index.js:3662`）。项目闸门读 `c1.parallelLimit` 与 `c1.serialProjects`（`index.js:3662-3671`），排队文案区分「单项目串行 / 并行上限 N」（`index.js:3669`）。
+- 提交闸门 `submit()`（`index.js:3579-3680`）：先 `excludedItem` 拦排除目录（`index.js:3581-3584`，错误文案带命中的排除项与编辑指引）；worktree 闸门（检测函数 `detectLinkedWorktree` 在 `index.js:364`，在 `submit` 内调用位于 `index.js:407`）与空壳目录闸门（`hasCompilableSources` 在 `index.js:2263`，在 `submit` 内调用位于 `index.js:2424`）跟配置无关但共用同一入口；再校验编译模型三元组——`batchProvider` 非空（`index.js:3649`）、`batchModel` 非空（`index.js:3650`）、`llmRef.stream` 可用（`index.js:3505`），失败即 `fail` 并抛错；解析结果写进 `job.credentialSource = llm(...)`（`index.js:3662`）。项目闸门读 `c1.parallelLimit` 与 `c1.serialProjects`（`index.js:3662-3671`），排队文案区分「单项目串行 / 并行上限 N」（`index.js:3669`）。
 - 阶段执行器：`startBatchChatRun`（`index.js:2629-2671`）每次取 `liveConfig(config)`（`index.js:2630`）决定 provider/model/reasoningEffort/maxConcurrency/bigConcurrency（`index.js:2676-2681`）；`startAgenticRun`（`index.js:2879-2929`）同样取值（`index.js:2755`、`index.js:2758-2763`）并传 `maxSteps: c.agenticMaxSteps`（`index.js:2692`；agentic 通道由 `tickArticles` 在 `index.js:3017-3045` 启动）。`submitBatchFor` 在提交时按 `liveConfig` 统计大档请求数（`tier2`，`index.js:2758`）与并发/模型文案（`index.js:2779-2787`）。
 - 规划：`buildPlan` 按 `c.planMode === 'dirs'` 走目录分组（`index.js:2730-2733`），否则语义聚类并把 `batchProvider/batchModel/batchReasoningEffort` 传给 `semanticPlan`（`index.js:2737-2744`）。
 - 文章阶段：`tickArticles` 按 `c0.agenticArticles` 决定走 agentic 通道（`index.js:3017`）还是装填通道，装填时把 `bigProvider/bigModel/bigReasoningEffort/bigTokenBudget` 传给 `prepareArticleTasks`（`index.js:3047-3051`）。大档档位对象（`bigTier`）在文章装填（`index.js:1169-1176`）、横切（`index.js:3139-3146`）与校对（`index.js:2879-2886`）各构造一次，统一以 `bigProvider` 非空为启用条件、`bigTokenBudget` 为预算下限钳制；agentic 通道则通过 `markBigAgenticTasks` 按 `sourceTokensOf` 给超大模块打大档标记（`index.js:3021-3032`）。
@@ -138,7 +138,7 @@ function val(x) {
 - 挂载与门控：`inject: ['slots', 'locale', 'configForms']`（`client.js:518`）、`form = ctx.configForms.get(NS)`（`client.js:515`）；设置卡片经 `ctx.configForms.whileServed([NS], mount)` 只在宿主服务该命名空间时出现（`client.js:526-530`，无该 API 时直接 `mount()`）；侧边栏面板挂载在 `client.js:533-544`（`main` + `sidebar.panellist`）。
 - `CodewikiCard(props)`（`client.js:550-1038`）：设置 UI 主体。
   - state：`snapshot`/`draft`/`notice`/`error`/`catalog`/`catalogError`（`client.js:553-560`）；模型目录经 `apiGet(MODELS_PATH)` 拉取（`client.js:564-572`），`ok === false` 或请求失败时置 `catalogError` 退回手填形态（`apiGet`/`apiPost` 在 `client.js:497-512`）。
-  - 快照订阅：`pull()` 按 `snap.revision` 变化才用 `structuredClone` 覆盖草稿，`form.subscribe(pull)` 清理时释放（`client.js:591-608`）；summary 视图一行简介（`client.js:596`）。
+  - 快照订阅：`pull()` 按 `snap.revision` 变化才用 `structuredClone` 覆盖草稿，`form.subscribe(pull)` 清理时释放（`client.js:591-608`）；summary 视图一行简介（`client.js:591`）。
   - `setPath`（`client.js:598-605`）不可变更新草稿；`dirty` 用 `JSON.stringify` 比较（`client.js:607-610`）；`selectedProvider` 在目录里找条目，找不到即手填形态（`client.js:613-617`）。
   - `useEfforts`（`client.js:622-653`）：选中 provider/model 后二次拉取 `/api/codewiki/model-efforts`，普通档与大档各一份实例（`client.js:654-655`）。
   - `modelTrio`（`client.js:660-764`）：提供商/模型/思考程度三字段共用渲染与目录联动；换提供商时清空模型与旧档位（`client.js:677-684`）；大档额外给「（未启用）」空选项（`allowEmptyProvider`，`client.js:686`）。

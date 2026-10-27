@@ -132,7 +132,7 @@ tags:
 - 两个写盘出口统一过锚点修正：普通文章直写 `applyTaskResult`（`index.js:553` 调用）与 keepInMemory 闸门 `writeValidated`（`index.js:2522` 调用）都先跑 `fixAnchors`，修正数与存疑项写入 notes。
 - agentic 通道同享修正：agentic 写作执行器把 `fixAnchors` 注入文章循环 (`index.js:856`)，模型现场读代码写出的文章同样在服务侧落盘前校正。
 - 测试三重断言守护锚点：`test-wiki-anchors.mjs:232-277` 主循环对每个锚点校验——行号在文件行数内且指向非空行 (`test-wiki-anchors.mjs:297、304`)、区间起止有序且终点在范围内 (`test-wiki-anchors.mjs:307-309`)、单锚点行的反引号符号至少一个出现在目标行或区间内 (`test-wiki-anchors.mjs:369-389`)；一行并列多个锚点时不做符号绑定（无法可靠归属），由「行号在范围内 + 指向非空行」兜底 (`test-wiki-anchors.mjs:204-211`)。
-- 符号提取两处同源：`symbolsOnLine` (`test-wiki-anchors.mjs:187-198`) 的提取规则被 fixAnchors 复制——同源声明在 `index.js:639-641`、本地实现在 `index.js:629-639`（改一处须同步另一处）；`nearestSymbol`（index.js 中）实现了「按离锚点最近选符号」的备选辅助逻辑。
+- 符号提取两处同源：`symbolsOnLine` (`test-wiki-anchors.mjs:187-202`) 的提取规则被 fixAnchors 复制——同源声明在 `index.js:639-641`、本地实现在 `index.js:629-639`（改一处须同步另一处）；`nearestSymbol`（index.js 中）实现了「按离锚点最近选符号」的备选辅助逻辑。
 - Obsidian 反链接连接模块：格式条款要求 Connections 用 Obsidian [[backlinks]]（[[other-module]]）连接相关模块（条款在 `index.js:923`）。
 - Windows 反斜杠路径收口：`parseStatus` (`index.js:213-226`) 把 cw 输出的文章路径统一正斜杠化（`normalizeArticlePath` (`index.js:209`)），`normalizeIndexLinks` (`index.js:223-231`) 只修索引文件链接头、不碰正文——对旧二进制反斜杠输出的纵深防御。
 - 入口文件缺失自动生成：`ensureWikiEntry` (`index.js:301-334`) 编译收尾按文章语言生成中/英双语入口（含 .codewiki 绝对路径与收尾工具指引），已有入口绝不覆盖。

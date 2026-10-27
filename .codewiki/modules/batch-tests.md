@@ -9,7 +9,7 @@ tags: [测试, 批量处理, 回归, 编译执行链]
 
 ## Overview
 
-`batch-tests` 模块由批量编译执行链的自检脚本 `test-batch.mjs` 构成（当前源码至 test-batch.mjs:521）。它覆盖编译主链上的一批纯函数与宿主 llm 通道 mock：源码装填 `collectSources`、token 估算 `estimateTokens`、行号前缀 `numberLines`、任务装配 `prepareArticleTasks`（含 128k 大档单请求、420k 大档模型接管 bigTier、多文件观察批拆分、会话通道兜底）、本地规划 `localPlan`、横切装填 `packArticles`、仓库勘探 `scanRepoFiles`、会话通道收割判定 `classifySessionTask`、锚点修正 `fixAnchors`、frontmatter 信封校验 `validateArticleEnvelope`；mock 宿主 llm 服务的并发池 `runRealtimeTasks`（普通档/大档分池限流、tps 采样、外部 signal 中止、失败记账、错误码透传、思考档位下发）、会话通道 steer 文本钉死 `buildSessionSteerText`、模型目录 `listModelCatalog` 与思考程度解析 `resolveModelEfforts`、Web 端点（`/api/codewiki/models`、`/api/codewiki/model-efforts`）回环校验；以及 0.10.1 起内置百炼直连通道的整体移除验证（断言 `resolveBatchApiKey` 未导出，见 test-batch.mjs:518-521）。
+`batch-tests` 模块由批量编译执行链的自检脚本 `test-batch.mjs` 构成（当前源码 test-batch.mjs 共 643 行）。它覆盖编译主链上的一批纯函数与宿主 llm 通道 mock：源码装填 `collectSources`、token 估算 `estimateTokens`、行号前缀 `numberLines`、任务装配 `prepareArticleTasks`（含 128k 大档单请求、420k 大档模型接管 bigTier、多文件观察批拆分、会话通道兜底）、本地规划 `localPlan`、横切装填 `packArticles`、仓库勘探 `scanRepoFiles`、会话通道收割判定 `classifySessionTask`、锚点修正 `fixAnchors`、frontmatter 信封校验 `validateArticleEnvelope`；mock 宿主 llm 服务的并发池 `runRealtimeTasks`（普通档/大档分池限流、tps 采样、外部 signal 中止、失败记账、错误码透传、思考档位下发）、会话通道 steer 文本钉死 `buildSessionSteerText`、模型目录 `listModelCatalog` 与思考程度解析 `resolveModelEfforts`、Web 端点（`/api/codewiki/models`、`/api/codewiki/model-efforts`）回环校验；以及 0.10.1 起内置百炼直连通道的整体移除验证（断言 `resolveBatchApiKey` 未导出，见 test-batch.mjs:521-524）。
 
 注意：旧文章曾引用一个历史运行日志 `.tmp-test-batch.log`，该文件在当前仓库中已不存在（读取返回 ENOENT），故本文仅描述 `test-batch.mjs` 这一个真实存在的 source file，不再保留过期日志的回溯段落。
 
@@ -39,7 +39,7 @@ import {
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
   validateArticleEnvelope,
-} from './index.js'
+} from './index.js'  // 导入块位于 test-batch.mjs:7-13
 ```
 
 注意：当前导入列表**不包含** `resolveBatchApiKey`（该符号已在 0.10.1 移除，见 test-batch.mjs:521-524 断言 `mod.resolveBatchApiKey === undefined`）。另较旧文章多导入了 `validateArticleEnvelope`（test-batch.mjs:12），对应新增的 frontmatter 信封校验测试段（test-batch.mjs:605-636）。

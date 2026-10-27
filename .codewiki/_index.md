@@ -16,7 +16,7 @@
 - [[learnings/cw-binary-source-lost|cw-binary-source-lost]]
 ## Module
 
-- [[modules/integration-test-suites|Integration Test Suites]]
+- [[modules/test-scripts|Test Scripts]]
 - [[modules/batch-tests|batch-tests]]
 - [[modules/client-interface|client-interface]]
 - [[modules/core-and-config|core-and-config]]
@@ -29,8 +29,8 @@
 - [[modules/observability|observability]]
 - [[modules/orchestration-tests|orchestration-tests]]
 - [[modules/runtime-artifacts|runtime-artifacts]]
-- [[modules/test-scripts|test-scripts]]
 - [[modules/test-suite|test-suite]]
 - [[modules/testing-suite|testing-suite]]
 - [[modules/wiki-tests|wiki-tests]]
 - [[modules/configuration-and-metadata|配置与元数据]]
+- [[modules/integration-test-suites|集成测试套件]]

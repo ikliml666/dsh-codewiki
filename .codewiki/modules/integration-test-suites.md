@@ -1,4 +1,299 @@
 ---
+title: 集成测试套件
+type: module
+source_files:
+  - test-agentic.mjs
+  - test-agentic-host.mjs
+  - test-agentic-fallback.mjs
+  - test-articles-agentic.mjs
+  - test-incremental.mjs
+  - test-incremental-e2e.mjs
+  - test-graphdiff.mjs
+  - test-orchestration.mjs
+  - test-update-planner.mjs
+  - test-change-set.mjs
+  - test-cluster.mjs
+  - test-batch.mjs
+  - test-semantic-plan.mjs
+  - test-sessions.mjs
+  - test-symbols.mjs
+  - test-worktree.mjs
+  - test-cwd-paths.mjs
+  - test-prune-orphans.mjs
+  - test-article-contract.mjs
+  - test-wiki-anchors.mjs
+  - test-wiki-entry.mjs
+  - test-update-record.mjs
+  - package.json
+  - README.md
+tags: [测试, 集成测试, e2e, 质量保障]
+---
+
+## Overview
+
+本插件（`@local/dsh-codewiki` v0.14.0，见 `package.json:1-29`）的集成测试是一组**与源码同仓、零外部依赖、可离线运行**的 Node ≥20 ESM 脚本（`package.json:14` 要求 `node >=20`）。它们不是黑盒 UI 测试，而是「单元 + 链路 + 服务编排冒烟」的混合体：直接 `import` 应用层函数与库模块，用假 `llm`、`假 streamFn`、`假 cwd`、临时 git 仓库与内存 stub 把模型与网络彻底换掉，钉死真实代码路径的每一种行为分支。
+
+22 个测试脚本按职责分成四组：
+
+- **agentic 写作链路**（`test-agentic.mjs`、`test-agentic-host.mjs`、`test-agentic-fallback.mjs`、`test-articles-agentic.mjs`）：验证 `lib/agentic.js` 的工具循环、`lib/agentic-host.js` 的宿主消息适配、`lib/articles-agentic.js` 的执行器与子模块递归派发、`index.js` 的退回判定。
+- **符号增量/规划链路**（`test-incremental.mjs`、`test-incremental-e2e.mjs`、`test-graphdiff.mjs`、`test-update-planner.mjs`、`test-change-set.mjs`、`test-symbols.mjs`、`test-cluster.mjs`、`test-semantic-plan.mjs`、`test-update-record.mjs`）：验证符号图提取、组件级 diff、快照、stale 判定、`lib/cluster.js` 的三段式聚类、`index.js` 的 `semanticPlan`，以及 0.14.0 的「增量不丢、结果诚实、坏文章不入库」三层质量门。
+- **编译执行链/装填/契约闸门**（`test-batch.mjs`、`test-article-contract.mjs`、`test-prune-orphans.mjs`）：验证 `index.js` 的纯函数（源码装填、token 估算、任务装配、横切装填、写集闸门、文章契约校验、孤儿清理）。
+- **服务编排冒烟/路径/面板**（`test-orchestration.mjs`、`test-sessions.mjs`、`test-worktree.mjs`、`test-cwd-paths.mjs`、`test-wiki-anchors.mjs`、`test-wiki-entry.mjs`）：用 mock 宿主 `llm` 服务 + 真实 `cw` 子命令（`bin/cw.exe`）驱动真实服务阶段机，验证提交制、重启重跑、单项目串行、面板端点、worktree/空壳闸门、锚点校验与 CodeWiki.md 入口生成。
+
+通用约定：
+- 绝大多数脚本用 `check(cond, msg)` / `async function check(label, fn)` 自强断言，末尾打印 `N passed, M failed` 并在有失败时 `process.exit(1)`（如 `test-agentic.mjs:12-21`、`test-incremental.mjs:241-241`）。
+- `test-orchestration.mjs`、`test-worktree.mjs`、`test-cwd-paths.mjs`、`test-sessions.mjs` 用 `failures++` 计数 + `process.exit(failures ? 1 : 0)`（如 `test-orchestration.mjs:27-30`、`test-worktree.mjs:14`）。
+- 需要真实 git 的脚本（change-set / worktree / incremental-e2e / orchestration）用 `makeRepo()` 式脚手架 `git init` + 基线提交；找不到 git 时显式 `SKIP`（如 `test-worktree.mjs:32-38`、`test-symbols.mjs:42-45` 在 `web-tree-sitter` 缺失时整文件跳过 AST 用例）。
+- 上下文无关的唯一均值：所有 mock 模型都按 prompt 首行/特征串分发应答，与 `index.js` 真实 prompt 模板一一对应（见 `test-orchestration.mjs:147-195` 的 `answerFor`）。
+
+## Key Components
+
+每个测试脚本都是一个**顶层 ESM 文件**，直接 `import` 被测库并自执行。以下按组列出各文件、其导入的核心被测函数，以及它钉死的关键行为（行号指向测试脚本中定义/使用的位置）。
+
+### 一、agentic 写作链路
+
+**`test-agentic.mjs`（605 行）** — `lib/agentic.js` 工具循环离线测试。
+导入：`runAgenticArticle, makeArticleEditor, makeReadCodeTool, makeListFilesTool, buildToolset, buildOpeningPrompt, parseToolArgs, safeRelPath, numberLines, TOOL_SCHEMAS`（`test-agentic.mjs:4-8`）。
+覆盖：
+- `numberLines` 行号前缀（`test-agentic.mjs:76-78`）、`safeRelPath` 越界拦截（`test-agentic.mjs:80-87`）。
+- `makeReadCodeTool` 全文/行范围/不存在/越界/字符上限（`test-agentic.mjs:89-129`），以及**重复读去重**只认同一段、不同文件互不影响（`test-agentic.mjs:501-540`）。
+- `makeListFilesTool` 列目录、隐藏 `node_modules`/`git`（`test-agentic.mjs:131-148`、`test-agentic.mjs:573-587`）。
+- `makeArticleEditor` 的 `insert`/`str_replace`/`view` 三种命令，含多处匹配被拒、CRLF 行尾保真、负数行号报错（`test-agentic.mjs:151-207`、`test-agentic.mjs:542-595`）。
+- `runAgenticArticle` 的两轮读→写、tool 消息回灌、未知工具、坏 JSON、max-steps、abort、子模块委派（`onSubModule`）、无回调时子模块必须 `isError`（不能谎称已成文）（`test-agentic.mjs:210-449`）。
+- `buildOpeningPrompt` 禁用项、提示词（`test-agentic.mjs:456-462`）、`parseToolArgs` 剥围栏/截 JSON/坏 JSON（`test-agentic.mjs:464-499`）、`buildToolset` 暴露四个工具（`test-agentic.mjs:597-600`）。
+
+**`test-agentic-host.mjs`（191 行）** — `lib/agentic-host.js` 适配层。
+导入：`toRequestMessages, makeHostStream, makeFsWorkspace`（`test-agentic-host.mjs:6`）。
+覆盖：`toRequestMessages` 把裸 `user`/`assistant`/`tool` 消息转宿主 `UserMessage`/`ToolResultMessage`（`test-agentic-host.mjs:18-64`），多条 tool-result 展开成多条（`test-agentic-host.mjs:38-53`），MessageId 跨转换稳定（`test-agentic-host.mjs:38-51`）；`makeHostStream` 收 chunk 成 blocks、透传 `tools`/`temperature=0`/`reasoningEffort`、finish=error 抛错（`test-agentic-host.mjs:79-134`）；`makeFsWorkspace` 真实 FS 读写与越界拦截（`test-agentic-host.mjs:142-168`）。
+
+**`test-agentic-fallback.mjs`（127 行）** — agentic 通道失败退回单轮通道。
+导入：`shouldFallBackFromAgentic, prepareArticleTasks`（来自 `index.js`）、`runAgenticArticles`（来自 `lib/articles-agentic.js`）（`test-agentic-fallback.mjs:13-14`）。
+覆盖：① `shouldFallBackFromAgentic` 严格过半才退回（`test-agentic-fallback.mjs:27-51`）；② 重排任务字段能被 `prepareArticleTasks` 装填（缺字段不静默丢篇、源码缺失退化为空装填）（`test-agentic-fallback.mjs:53-98`）；③ `runAgenticArticles` 分批失败时逐篇 `ok:false` 返回 Map，不整体抛错（`test-agentic-fallback.mjs:100-120`）。
+
+**`test-articles-agentic.mjs`（475 行）** — `lib/articles-agentic.js` 执行器与子模块递归。
+导入：`runOneArticle, runAgenticArticles, markBigAgenticTasks, sourceTokensOf, resolveTaskRoute`（`test-articles-agentic.mjs:7`）。
+覆盖：`runOneArticle` 落盘（`test-articles-agentic.mjs:48-63`）、`generate_sub_module` 真递归写子文章、重名加父前缀、子层越界写父文被拒（`test-articles-agentic.mjs:66-98`、`test-articles-agentic.mjs:100-124`）；`subDepth` 封顶真的逐层递增（`test-articles-agentic.mjs:126-215`）；子模块失败记账父文章仍成功（`test-articles-agentic.mjs:217-245`）；双池 `markBigAgenticTasks`/`resolveTaskRoute`/`bigConcurrency=0` 回落（`test-articles-agentic.mjs:299-387`）；`sourceTokensOf` CJK/非 CJK 估 token（`test-articles-agentic.mjs:389-397`）；**写集闸门 `allowedWritePaths`** 越界不落盘、子模块只写自己那条路径（`test-articles-agentic.mjs:399-470`）。
+
+### 二、符号增量/规划链路
+
+**`test-incremental.mjs`（242 行）** — `lib/incremental.js` 符号级增量。
+导入：`slimGraph, graphFromSnapshot, snapshotPath, loadSnapshot, saveSnapshot, filterStaleTasks, describeChange, normRel, componentsByFile, SNAPSHOT_VERSION, sameSnapshotContent`（来自 `lib/incremental.js`）、`extractRepoGraph`（来自 `lib/symbols.js`）、`bodyHash, stripComments`（来自 `lib/graph-diff.js`）（`test-incremental.mjs:7-12`）。
+覆盖：快照不带源码但带固化 `bodyHash`（`test-incremental.mjs:31-47`）、**纯注释改动降级**（body 哈希变但 `codeHash` 不变 → keep，老快照缺 `codeHash` 保守回旧行为）（`test-incremental.mjs:49-118`）、改名归到 `renamed`、快照内容比较忽略 `generatedAt/commit`（`test-incremental.mjs:216-237`）。
+
+**`test-incremental-e2e.mjs`（145 行）** — 端到端 stale 链路。
+导入：`extractCurrentGraph, currentCommit`（来自 `index.js`）、`slimGraph, loadSnapshot, saveSnapshot, filterStaleTasks, describeChange`（来自 `lib/incremental.js`）（`test-incremental-e2e.mjs:7-8`）。
+覆盖：真实目录提取符号图、快照落盘到 `.codewiki/temp/symbol-graph.json`、`只改实现细节→body`/`只改空白注释→两篇都跳过`/`签名加参→interface`/`新增文件→added`/`删文件→deleted`（`test-incremental-e2e.mjs:43-141`）。
+
+**`test-graphdiff.mjs`（108 行）** — `lib/graph-diff.js` 与 FSoft Python 上游逐位对拍。
+导入：`bodySimilarity, bodyHash, unifiedDiff, diffGraphs, serializeDiff, sequenceRatio, normalizeBody, documentedSource, truncateToTokens`（来自 `lib/graph-diff.js`）（`test-graphdiff.mjs:7-10`）。
+覆盖：基准由 `test-fixtures/gen-graphdiff-golden.py` 生成、缺失则 `process.exit(1)`（`test-graphdiff.mjs:13-17`）；`diffGraphs` 的 body/edge/interface/renamed/added 分类与序列化往返（`test-graphdiff.mjs:55-107`）。
+
+**`test-update-planner.mjs`（300 行）** — `lib/update-planner.js` 增量计划器（P0-3）。
+导入：`planUpdate, realChangedIds, dependentsOf, scanStaleArticle, buildModuleMap, migrateModuleMap, sameModuleMap, isSourcePath, MODULE_MODULE_MAP_VERSION`（`test-update-planner.mjs:7-10`）。
+覆盖：接口变更反向依赖文章也写、纯注释降级、`新文件无归属→同模块路由`/`完全无归属→needsFull`、缺 `source_files→review`、`stale scan` 升级 write/review（`test-update-planner.mjs:47-211`）、`buildModuleMap`/`migrateModuleMap`/`sameModuleMap`（`test-update-planner.mjs:256-280`）。
+
+**`test-change-set.mjs`（210 行）** — `lib/change-set.js` 变更采集（P0-1）。
+导入：`collectChangeSet`（来自 `lib/change-set.js`）（`test-change-set.mjs:11`）。
+覆盖：四路采集（`git diff <base>..HEAD`、`--cached`、`git diff`、`ls-files --others`）与降级语义（no-git / missing-base / unreachable-base / clean）、`.codewiki/` 自身产物排除、可注入 `execFile` 离线（`test-change-set.mjs:47-203`）。
+
+**`test-symbols.mjs`（363 行）** — `lib/symbols.js` 多语言 AST + import 边。
+导入：`SymbolExtractor, extractRepoGraph, resolveImportEdges, extractImportSpecs, resolveSpec, LANG_RULES, SUPPORTED_EXTS, regexExtract`（`test-symbols.mjs:8-12`）。
+覆盖：JS/TS/Python/Go/Rust/Java/C#/C 的符号与参数切片、import 边解析、`regexExtract` 兜底（WASM 不可用时由正则出符号而非静默丢）（`test-symbols.mjs:63-342`）、语言表覆盖（`test-symbols.mjs:353-359`）。
+
+**`test-cluster.mjs`（421 行）** — `lib/cluster.js` LLM 三段式聚类与全部降级。
+导入：`clusterComponents, heuristicCluster, fillMissing, moduleFiles, formatComponents, clusterPrompt, subClusterPrompt, superGroupPrompt, parseJsonLoose, parseClusterResponse, parseSuperGroups, normalizeModuleName, toPlanModules`（`test-cluster.mjs:4-9`）。
+覆盖：`parseJsonLoose` 抢救、`parseClusterResponse` 丢不存在 id、`heuristicCluster` 目录分组、`clusterComponents` 无 LLM/抛错/垃圾文本降级、`splitThreshold` 下钻父不单独成文、`maxDepth` 真正逐层生效（`test-cluster.mjs:65-359`）、超级分组 `parseSuperGroups`（`test-cluster.mjs:362-402`）。
+
+**`test-semantic-plan.mjs`（190 行）** — `index.js` 的 `semanticPlan` / `localPlan` / `scanRepoFiles` 端到端。
+覆盖：无模型降级目录聚类、LLM 聚类按返回分组、坏 JSON/抛错降级、`plan.graph` 不携带源码（体积 <400KB）、`localPlan` 保活、模块名 slug 不冲突（`test-semantic-plan.mjs:175-189`）。
+
+**`test-update-record.mjs`（219 行）** — `lib/update-record.js` 终态判定（P0-2）。
+导入：`judgeOutcome, buildUpdateRecord, saveUpdateRecord, loadUpdateRecord, recordPath, describeOutcome, isTerminalStage, TERMINAL, UPDATE_RECORD_VERSION`（`test-update-record.mjs:11-14`）。
+覆盖：**1 成功 19 失败 → `partial` 不推进基线**（旧实现是 done）、缺页/未映射/缺 source_files/质量闸门/索引校验/取消全部降 `partial`、`TERMINAL` 含 `partial`、`buildUpdateRecord` 不把整图塞进记录（`test-update-record.mjs:47-212`）。
+
+### 三、编译执行链/装填/契约闸门
+
+**`test-batch.mjs`（643 行）** — `index.js` 编译执行链自检。
+导入：`collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer, validateArticleEnvelope`（`test-batch.mjs:7-13`）。
+覆盖：`estimateTokens` CJK/ASCII 粗算、`collectSources` token 预算/缺失/超大、`prepareArticleTasks` oversized 拆分与**观察→合成分割**、`classifySessionTask` 三态、`runRealtimeTasks` 并发池/分池/失败记账/取消、`packArticles`、`scanRepoFiles` 黑名单、**`fixAnchors` 行号锚点确定性修正**（含倒序区间/多锚点行/歧义）、`validateArticleEnvelope` frontmatter 信封校验、`listModelCatalog`/`resolveModelEfforts` 端点、`resolveBatchApiKey` 整体移除（`test-batch.mjs:25-637`）。
+
+**`test-article-contract.mjs`（239 行）** — `lib/article-contract.js` 文章契约（P0-4）。
+导入：`inspectArticle, parseFrontmatter, parseYamlLite, extractSections, fencesBalanced, collectWikiLinks, hasDuplicateFrontmatter, issueSummary, REQUIRED_SECTIONS, TYPE_BY_DIR, hasBlockingIssue, makeWriteSet, isWritable, normalizeWritePath, SEVERITY`（`test-article-contract.mjs:12-16`）。
+覆盖：frontmatter 缺失/未闭合、必填字段、`type` 与目录不匹配、重复 frontmatter/章节、必需章节缺失/空、`bad-source`/`missing-source`/`source-not-evidence`、`dead-link`、分级（结构破坏 error 拒写、章节缺失 warning 放行）、**写集闸门** `makeWriteSet`/`isWritable`（`test-article-contract.mjs:36-232`）。
+
+**`test-prune-orphans.mjs`（200 行）** — `index.js` 的 `pruneOrphanModules` 安全边界（会删文件）。
+覆盖：全量删孤儿保留规划内、失败文章不删、增量一律不动、空清单/无 plan 不删、`concepts/`/`_architecture.md` 永不被碰、slugify 匹配、删除失败记账不中断（`test-prune-orphans.mjs:33-195`）。
+
+### 四、服务编排冒烟/路径/面板
+
+**`test-orchestration.mjs`（1552 行）** — 服务化编排冒烟（最大单测）。
+导入：`name, apply, SESSIONS_DIR`（来自 `index.js`）（`test-orchestration.mjs:24`）。
+自建 mock 宿主：`makeCtx`（cordis 风格 `inject`/`effect`）、`makeMockAgent`（systemPrompt section）、`makeFixtureRepo`（core/util 双目录 + git init）、`makeBatchMock`（按 prompt 特征分发、统一 `llmProxy` 转发到 `activeLlm`）、`waitJob`、`fakeReq`/`fakeRes`（HTTP 端点）（`test-orchestration.mjs:51-257`）。
+基线 `LEGACY_CHANNEL = { planMode: 'dirs', agenticArticles: false, symbolIncremental: false }`（`test-orchestration.mjs:44-45`）——绝大多数断言钉旧通道，新通道由 `test-agentic-host.mjs`/`test-semantic-plan.mjs`/`test-incremental*.mjs` 守护。
+覆盖：系统提示提醒、`codewiki_update` scope 强制 auto、`commitHintText`、`autoCommitWiki`（分支合并式/各类拒绝）、`autoCommitState` 三态、`wakeCompileSession` 唤醒、本地规划零规划请求、全量编译阶段机、大 wiki 横切拆分、大模块观察→合成、单项目串行、`queued`/`queueAhead`、并行项目上限、stale 逐篇更新、面板端点与取消、重启重跑、并发提交占位与 flush 合并（`test-orchestration.mjs:259-1095`）。
+
+**`test-sessions.mjs`（69 行）** — 会话记录存储冒烟（1.1.0）。
+导入：`SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords`（`test-sessions.mjs:8`）。
+覆盖：列表倒序、`readSessionRecord` 全文读、跨任务聚合 `listAllSessionRecords`、`pruneSessionRecords` TTL 清理与目录移除（`test-sessions.mjs:15-66`）。
+
+**`test-worktree.mjs`（84 行）** — `index.js` 的 `detectLinkedWorktree`/`isWorktreeCwd`/`hasCompilableSources`/`isDeadCompileTarget` 闸门（0.12.0/0.12.1）。
+覆盖：linked worktree 命中、子目录命中、空壳/不存在目录判定、缓存一致性（`test-worktree.mjs:38-77`）。
+
+**`test-cwd-paths.mjs`（72 行）** — 路径修复（0.2.3）。
+导入：`plugin.apply`/`registered.cw`（`test-cwd-paths.mjs:20`、`test-cwd-paths.mjs:20-23`）。
+覆盖：MSYS 路径（`/e/x`）归一化后跑通 `cw path`、Windows 路径 `cw status` 三态、不存在路径干净报错（`test-cwd-paths.mjs:31-69`）。
+
+**`test-wiki-anchors.mjs`（404 行）** — wiki 文章行号锚点自动校验（非出口码阻断式，软报告机制）。
+覆盖：三基准（编译基线 ∪ 工作区 ∪ HEAD）任一有效即通过、新鲜度感知的硬断言/软报告两档、`CHANGELOG.md` 追加式漂移、`judgeAnchor` 结构事实永远硬失败/同步事实滞后降级（`test-wiki-anchors.mjs:293-403`）。
+
+**`test-wiki-entry.mjs`（77 行）** — `index.js` 的 `ensureWikiEntry` / `normalizeArticlePath` / `normalizeIndexLinks` / `parseStatus`。
+覆盖：缺失生成入口（含绝对路径/收尾指引/双语）、已有绝不覆盖、空 cwd 安全、Windows 路径 `\`→`/` 规范化（`test-wiki-entry.mjs:27-72`）。
+
+## Architecture
+
+测试分四组，但围绕同一套「被测源码 → mock 模型 → 真实执行 → 断言」骨架。下图标注各组对应的被测库/应用层与 mock 手段。
+
+```text
+                         代码仓库（真实文件系统 + 临时 git 仓库）
+                                   │
+        ┌──────────────────────────┼──────────────────────────────────────┐
+        │  agentic 写作链路         │ 符号增量/规划链路       编译执行链/闸门      │ 服务编排冒烟
+        ▼                          ▼                          ▼              ▼
+ lib/agentic.js             lib/symbols.js            index.js 纯函数       index.js apply(ctx,cfg)
+ lib/agentic-host.js   ───► lib/graph-diff.js  ───► collectSources      + 真实 cw CLI (bin/cw.exe)
+ lib/articles-agentic.js     lib/incremental.js       prepareArticleTasks  + mock 宿主 llm 服务
+ index.js                   lib/cluster.js           fixAnchors           + 真实服务阶段机
+ shouldFallBackFromAgentic  lib/update-planner.js    validateArticle-     + JOBS_FILE 轮询
+                             lib/change-set.js        Envelope/prune-      + 面板端点 HTTP 请求
+                             lib/update-record.js     OrphanModules
+        │                          │                          │              │
+        ▼                          ▼                          ▼              ▼
+ 假 streamFn                extractRepoGraph 真   makeLlm(reply)    makeBatchMock(answerFor)
+ (按脚本返回 blocks)         AST 提取 + 真图     (按 prompt 特征    (按 prompt 首行特征
+ 如 test-agentic.mjs:37     如 test-symbols     :197-215 吐块)       分发，test-orchestration
+    test-articles-agentic   .mjs:38)            runRealtimeTasks    .mjs:145-227)
+   .mjs:37                  ▲                    并发池/分池          │
+        │                   │                    (test-batch.mjs     ▼
+        └──────────►   fakeLlm/completer  ◄──── .mjs:174-297)    waitJob / fakeReq
+ 所有模型交互都被替换                │                          │            (test-orchestration
+ (零网络、零凭证)            parseJsonLoose 抢        inject 的 execFile      .mjs:230/245)
+                                救坏 JSON             (test-change-set
+                                (test-cluster         .mjs:177-194)
+                                 .mjs:65-82)
+```
+
+关键复用约定：
+- **mock 模型按 prompt 特征应答**：`test-orchestration.mjs:147-195` 的 `answerFor` 按「你是 CodeWiki 文章观察员 / 文章作者 / 架构观察员…」首句分发；`makeLlm`（`test-batch.mjs:174-189`）则按 `opts.messages` 透传字符串/函数/Error。两者都是「与 `index.js` 真实 prompt 模板一一对应」的契约测试。
+- **agentic 链路用 `scripted`/`alwaysDispatch` 假 streamFn**（`test-agentic.mjs:62-73`、`test-articles-agentic.mjs:34-40`）：按调用顺序吐 `tool-call`/`text` block，完全离线。
+- **服务编排用单 `llmProxy` 转发到 `activeLlm`**（`test-orchestration.mjs:133-140`），每个测试块只需 `makeBatchMock()` 一处接线，避免给每次 `apply` 重复补 llm。
+- **降级路径不依赖网络**：`index.js` 的 `semanticPlan`/`clusterComponents`/`collectChangeSet` 在 llm=null、抛错、坏 JSON 时退回目录聚类/全量，测试用 `fakeLlm` 与注入 `execFile` 显式触发。
+
+## Data Flow
+
+以两条最完整的链路说明数据如何从被测函数流到断言。
+
+### 链路 A：agentic 写作 → 落盘（`test-articles-agentic.mjs`）
+
+```text
+假 streamFn(scripted/alwaysDispatch)
+   │ 返回 { blocks:[tool-call|text], finish:{kind:'stop'} }
+   ▼
+runOneArticle({name, mission, articlePath, sources}, {streamFn, cwd, maxSteps, subDepth})
+   │ ├─ buildToolset → 注入 makeReadCodeTool/makeListFilesTool/makeArticleEditor
+   │ ├─ runAgenticArticle 循环：把 blocks 当 tool 调用，结果回灌为 tool 消息
+   │ └─ 命中 generate_sub_module → 递归 runOneArticle（子文章落 <modules>/<父>/<子>.md）
+   ▼
+out = { ok, article, subModules[], stopReason, steps[] }
+   │ 写集闸门 allowedWritePaths 校验 articlePath 是否被允许落盘（越界→stopReason:'write-set'）
+   ▼
+fs.readFileSync(articlePath) 断言落盘内容 == FULL_ARTICLE / 子路径存在
+```
+
+要点：子模块递归时父任务的写集下传，子层拿到的 `allowedWritePaths` 只是它自己那条路径，因此子模块越界写父文会被 `isWritable` 拒（`test-articles-agentic.mjs:449-470`）；`subDepth=0` 时 `generate_sub_module` 被禁用不再递归（`test-articles-agentic.mjs:126-141`）。
+
+### 链路 B：变更采集 → 增量规划 → 终态诚实（`test-change-set.mjs` → `test-update-planner.mjs` → `test-update-record.mjs`）
+
+```text
+collectChangeSet(cwd, baseCommit)              [lib/change-set.js]
+   │ 四路 git：diff <base>..HEAD / --cached / 未提交 / ls-files --others
+   │ 规范化 POSIX、排除 .codewiki/、state 降级（no-git/missing-base/unreachable-base→full）
+   ▼
+ChangeSet { ok, state, all[], committed[], staged[], unstaged[], untracked[], deleted[], renamed[] }
+   │
+   ▼
+planUpdate({changeSet, oldGraph, newGraph, articles, moduleMap})  [lib/update-planner.js]
+   │ 反向依赖闭包 + 纯注释降级 + 新文件 ownership + stale scan
+   ▼
+Plan { summary{write,keep,delete,review}, actions[{name,action,reason,changedComponents,impactedBy}],
+       unmappedChanges[], needsFull, missingSources[], warnings[] }
+   │
+   ▼
+judgeOutcome({plan, results, options})         [lib/update-record.js]
+   │ 任何未消化项 ⇒ partial/failed（绝不再 done 推进基线）
+   ▼
+Outcome { outcome:'done'|'partial'|'failed'|'cancelled', canAdvanceBaseline, writtenCount, failedCount, blockers[] }
+   │
+   ▼
+buildUpdateRecord + saveUpdateRecord → .codewiki/temp/update-record.json
+```
+
+要点：旧实现（`index.js:2775-2776`，见 `test-update-record.mjs:3-6`）只有 `writtenCount===0` 才失败，于是「1 成功 19 失败」也 `done` 且推进基线；新 `judgeOutcome` 要求完整成功才 `done`，否则 `partial` 且 `canAdvanceBaseline=false`（`test-update-record.mjs:62-76`）。
+
+### 链路 C：服务编排冒烟（`test-orchestration.mjs`）
+
+```text
+makeFixtureRepo() → 真实 .codewiki 仓库 + git init + 基线提交
+   │
+   ▼
+gen.execute({cwd}, {agent})                   [codewiki_generate 工具]
+   │ 立即返回 {submitted:true, jobId, stage:'articles'}
+   ▼
+后台常驻服务 tick（DSH_CODEWIKI_TICK_MS=300）→ 阶段机 articles→crosscut→review→index→commit
+   │ 每个阶段向 makeBatchMock 注入的 activeLlm 发策略 prompt
+   │ llmCalls 记录 provider/model/reasoningEffort/prompt
+   ▼
+waitJob(cwd) 轮询 JOBS_FILE 直到 stage ∈ {done,failed,cancelled}
+   │
+   ▼
+断言 job.writtenCount / failedCount / autoCommit / 落盘文件 / 面板端点响应
+```
+
+要点：`LEGACY_CHANNEL` 关掉三档新能力（`test-orchestration.mjs:44-45`），让本文件继续守护旧通道的请求次数与落盘时序；新通道由 `test-agentic-host.mjs`/`test-semantic-plan.mjs`/`test-incremental*.mjs` 单独守护，避免「通道换了」而非「功能坏了」导致误报。
+
+## Connections
+
+这些测试文件是被测源码的**消费者与契约守护**，彼此之间很少交叉，主要通过被测库相互关联。相关模块（用 Obsidian 链接指回本文档体系中的对应模块文章）：
+
+- [[lib/agentic]] — `test-agentic.mjs`、`test-articles-agentic.mjs` 的被测主体（工具循环与执行器）。
+- [[lib/agentic-host]] — `test-agentic-host.mjs` 的被测主体（裸消息 ↔ 宿主 Message 适配）。
+- [[lib/articles-agentic]] — `test-articles-agentic.mjs`、`test-agentic-fallback.mjs` 的被测主体（agentic 执行器与双池）。
+- [[index.js]] — 最大被引用方：`test-orchestration.mjs`、`test-batch.mjs`、`test-agentic-fallback.mjs`、`test-semantic-plan.mjs`、`test-worktree.mjs`、`test-cwd-paths.mjs`、`test-prune-orphans.mjs`、`test-wiki-entry.mjs`、`test-sessions.mjs` 都直接 import 它的纯函数、工具与配置。
+- [[lib/symbols]] — `test-symbols.mjs`、`test-incremental.mjs`、`test-update-planner.mjs` 的 AST 符号提取来源。
+- [[lib/graph-diff]] — `test-graphdiff.mjs`、`test-incremental.mjs` 的组件级 diff 与对拍基准来源。
+- [[lib/incremental]] — `test-incremental.mjs`、`test-incremental-e2e.mjs` 的 stale 判定来源。
+- [[lib/cluster]] — `test-cluster.mjs` 的 LLM 三段式聚类来源。
+- [[lib/update-planner]] — `test-update-planner.mjs` 的反向依赖/ownership/ownership 增量计划来源。
+- [[lib/change-set]] — `test-change-set.mjs` 的四路变更采集来源。
+- [[lib/update-record]] — `test-update-record.mjs` 的终态诚实判定来源。
+- [[lib/article-contract]] — `test-article-contract.mjs` 的文章质量闸门来源。
+- 共享夹具：`test-fixtures/gen-graphdiff-golden.py` 与 `test-fixtures/graphdiff-golden.json` 被 `test-graphdiff.mjs:13-18` 读取作为 Python 上游对拍基准；`bin/cw.exe` 被 `test-orchestration.mjs`/`test-cwd-paths.mjs` 当作真实子命令驱动。
+
+跨测试被反复钉死的同一组契约：0.14.0 的「增量不丢 + 结果诚实（partial 不推进基线）+ 坏文章不入库」三层质量门，分别由 `test-change-set.mjs`、`test-update-planner.mjs`、`test-update-record.mjs`、`test-article-contract.mjs`、`test-prune-orphans.mjs` 共同守护；「唯一通道是宿主 llm 服务、插件零直连」由 `test-orchestration.mjs`、`test-batch.mjs`、`test-agentic-host.mjs` 共同守护（`resolveBatchApiKey` 整体移除见 `test-batch.mjs:521-524`）。
+
+## Known Issues
+
+测试套件本身已知的脆弱点与范围边界（不是被测代码的 bug，而是测试设计约束）：
+
+- **`test-symbols.mjs` 在无 `web-tree-sitter` 时整文件 `SKIP`**（`test-symbols.mjs:43-46`）：AST 用例依赖 WASM 语法；缺失时脚本 `process.exit(0)` 跳过，不报失败也不报通过——CI 必须确认「SKIP」而非「PASS」被当作真通过。正则兜底用例（`regexExtract`、`WASM 不可用时 extractFile 走正则`）不依赖 WASM，始终运行。
+- **`test-worktree.mjs` 在缺 git 或 hooks 干扰时 `SKIP`**（`test-worktree.mjs:32-38`）：依赖 `git worktree add` 真实搭建 linked worktree；环境无 git 则跳过。
+- **`test-orchestration.mjs` 是长时集成测试**（1552 行、真 `cw` 子命令 + 真服务 tick，`DSH_CODEWIKI_TICK_MS=300`）：独立 `JOBS_FILE` 用 pid+随机串隔离（`test-orchestration.mjs:32-33`），每次跑完收尾删除；若存在历史残留同名 job 文件会让「单项目串行」误判为已有项目在跑，表现为偶发 20 项失败（注释已记录此坑）。
+- **`test-wiki-anchors.mjs` 不是失败即阻断**（`test-wiki-anchors.mjs:31`）：它跑在**已编译的 `.codewiki/` 产物**上（依赖 `ROOT/.codewiki/`，`test-wiki-anchors.mjs:37-38`），「文档滞后」类问题降级为软报告、不改 exit code；只有行号越界/区间无序/符号不存在等结构性错误才 exit 1。所以它只应在「刚编译完、基线新鲜」时跑才有意义。
+- **`test-cwd-paths.mjs` 需要真实仓库路径参数**（`test-cwd-paths.mjs:22`）：默认指向一个 Windows 绝对路径（测试本地仓库），跨平台需传参；它直接 `cw.execute` 调真 `bin/cw.exe`，依赖 PATH 探测与归一化生效。
+- **部分断言钉的是 prompt 模板文案**：`test-orchestration.mjs:147-195` 的 `answerFor` 与 `makeBatchMock` 强依赖 `index.js` 真实 prompt 首句（如「你是 CodeWiki 文章观察员」）。若模板措辞大改，这些分发分支会失配——这是有意为之的契约锁，但意味着改 prompt 文案时要同步更新 mock 与断言。
+- **并行/取消类断言依赖 tick 时序**：`test-orchestration.mjs` 的 `waitJob` 用 150ms 轮询 + 30s 超时（`test-orchestration.mjs:230-243`），在极慢 CI 上偶尔触顶超时；被 stall 挂起的 job 用来稳定占用推进权（`test-orchestration.mjs:756`）。
+- **`test-agentic-fallback.mjs` 第三段「收割计入 tally」未直接覆盖**（`test-agentic-fallback.mjs:8-14`）：退回任务走旧通道后结果按 name 收敛进 `job.articles` 的逻辑，由 `test-orchestration.mjs` 的旧通道断言与 tally 去重间接守护，本文件只覆盖前两段（判定 + 可装填）。
+
+---
 title: Integration Test Suites
 type: module
 source_files:
@@ -119,7 +414,7 @@ tags: [testing, integration, e2e, regression]
 
 ### test-semantic-plan.mjs — semanticPlan 端到端
 - 被测导出：`semanticPlan, localPlan, scanRepoFiles`（来自 `index.js`，`test-semantic-plan.mjs:7`）。
-- 无模型降级目录聚类（`test-semantic-plan.mjs:52`，`stats.llm=false`、project 标降级）、每模块非空 `source_files`（`test-semantic-plan.mjs:175`）、模块文件并集=全部源码（`test-semantic-plan.mjs:60`）、有模型走 LLM 聚类（`test-semantic-plan.mjs:71`）、坏 JSON/抛错降级（`test-semantic-plan.mjs:114`/`:130`）、空仓库 `fallback`（`test-semantic-plan.mjs:142`）、`plan.graph` 可序列化不含源码（`test-semantic-plan.mjs:151`/`:162`）、`localPlan` 保活（`test-semantic-plan.mjs:174`）、模块名 slug 不冲突（`test-semantic-plan.mjs:180`）。
+- 无模型降级目录聚类（`test-semantic-plan.mjs:52`，`stats.llm=false`、project 标降级）、每模块非空 `source_files`（`test-semantic-plan.mjs:175`）、模块文件并集=全部源码（`test-semantic-plan.mjs:175`）、有模型走 LLM 聚类（`test-semantic-plan.mjs:71`）、坏 JSON/抛错降级（`test-semantic-plan.mjs:114`/`:130`）、空仓库 `fallback`（`test-semantic-plan.mjs:142`）、`plan.graph` 可序列化不含源码（`test-semantic-plan.mjs:151`/`:162`）、`localPlan` 保活（`test-semantic-plan.mjs:174`）、模块名 slug 不冲突（`test-semantic-plan.mjs:180`）。
 
 ### test-sessions.mjs — 会话记录存储冒烟（SESSIONS_DIR 三导出）
 - 被测导出：`SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords`（来自 `index.js`，`test-sessions.mjs:8`）。
