@@ -1,16 +1,218 @@
 ---
-title: integration-test-suites
+title: Integration Test Suites
 type: module
 source_files:
   - test-orchestration.mjs
-  - test-wiki-anchors.mjs
-  - test-wiki-entry.mjs
   - test-batch.mjs
+  - test-agentic.mjs
+  - test-agentic-host.mjs
+  - test-articles-agentic.mjs
+  - test-cluster.mjs
+  - test-symbols.mjs
+  - test-graphdiff.mjs
+  - test-incremental.mjs
+  - test-incremental-e2e.mjs
+  - test-semantic-plan.mjs
+  - test-sessions.mjs
+  - test-worktree.mjs
+  - test-wiki-entry.mjs
+  - test-wiki-anchors.mjs
   - test-cwd-paths.mjs
-  - index.js
-  - client.js
-tags: [integration-test, node-esm, codewiki, validation-assets, cordis]
+  - test-fixtures/gen-graphdiff-golden.py
+tags: [testing, integration, orchestration, mock, harness]
 ---
+
+## Overview
+
+`dsh-codewiki` 没有用任何测试运行器 / 框架：仓库根目录下的 `test-*.mjs` 文件（外加 `test-fixtures/` 基准生成器）就是整套测试套件。每个文件都是自包含脚本——直接 `node test-<name>.mjs` 运行，自己打印 `PASS`/`FAIL`/`ALL PASS`，并在有失败时 `process.exit(1)`（少数文件用 `process.exitCode = 1`）。它们共同守护插件入口 `index.js` 与 `lib/*.js` 的行为。
+
+按职责可分成两类：
+
+- **服务化编排冒烟**（`test-orchestration.mjs`）：唯一的端到端套件，mock 宿主 `llm.stream`、真实拉起 `apply()` 注册的 `codewiki_generate` 工具、真实跑 `JobService` 的 `tick` 阶段机与真实 `cw` CLI，覆盖从提交到自动提交的全链路。
+- **纯逻辑单测**（`test-batch.mjs`、`test-*-agentic*.mjs`、`test-cluster.mjs`、`test-symbols.mjs`、`test-graphdiff.mjs`、`test-incremental*.mjs`、`test-semantic-plan.mjs`、`test-sessions.mjs`、`test-worktree.mjs`、`test-wiki-entry.mjs`）：从 `index.js` / `lib/*.js` 直接 import 纯函数，注入假模型或假 streamFn，断言输入/输出。
+
+另有两类**守门测试**只针对产物质量：`test-wiki-anchors.mjs`（校验已编译 wiki 里 `index.js:NN` / `client.js:NN` 行号锚点的真实性，不 import 插件代码）；`test-cwd-paths.mjs`（针对真实 Windows/MSYS 仓库目录验证 `cw` 工具的路径归一化，需要命令行参数）。
+
+## Key Components
+
+下面按文件列出每个套件：导入行、覆盖的被测试函数、关键场景所在行号。
+
+### test-orchestration.mjs（服务化编排冒烟，1530 行）
+
+仓库内最重的套件。开头把 `DSH_CODEWIKI_TICK_MS` 压到下限 300ms（`test-orchestration.mjs:15`），并用带随机 token 的 `DSH_CODEWIKI_JOBS_FILE` 与真实宿主服务实例（`os.tmpdir()` 共享默认路径）隔离（`test-orchestration.mjs:15-16`）。它通过 `import('./index.js')` 拿到 `{ name, apply, SESSIONS_DIR }` 等导出（`test-orchestration.mjs:24`）。
+
+共享测试设施（模块级 helper）：
+
+- `makeCtx({ agents, workspaces, brokenRegistry, agentGet, llm })`（`test-orchestration.mjs:51-91`）：构造一个与 cordis 同构的假 ctx——`inject(deps, fn)` 按依赖名返回服务切片（`tools.register` / `agents.list` / `webServer.register` / `llm`），`on(event, fn)` 收集 `agent/created` 监听，`effect(fn)` 立即执行并收集 disposer。这是「把插件 apply 进去、再从 registered 里抓出 cw / codewiki_generate 工具来 execute」的唯一接线点。
+- `makeMockAgent(cwd)`（`test-orchestration.mjs:94-108`）：构造带 `ctx.inject` 的假 agent，可捕获 systemPrompt section 注册（`codewiki:update-reminder` 提醒测试用）。
+- `makeFixtureRepo()`（`test-orchestration.mjs:110-127`）：临时目录里造 `core/` + `util/` 两个顶层目录（决定 localPlan 模块名）、写 `core.py`/`util.py`、初始化 git 并配 `user.name`/`user.email`（autoCommitWiki 安全边界需要）。
+- `makeBatchMock({ modules, articleMarker, stall, bigArticle })`（`test-orchestration.mjs:145-209`）：构造假 `llm` 服务，按 prompt 首行特征分发应答（`你是 CodeWiki 文章观察员` → 观察文本；`你是 CodeWiki 文章作者` → 合成文章；`你是 CodeWiki 架构观察员` → 架构观察；`写系统总览` / `总结仓库反复出现的模式` / `写跨模块概念` → 架构/模式/概念文章；`你是 CodeWiki 审校员` → 按 `@@@article:` 标记回写校对稿）。`stall:true` 让请求挂起不返回（用于单项目串行 / 取消 / 在途请求中断语义）；`bigArticle:true` 让文章作者响应追加 70000 个「长」字（超预算触发观察批分割）。返回的 `llmCalls` / `batchPrompts` / `realtimePrompts` / `restore` 供断言。
+- `waitJob(cwd, { timeout })`（`test-orchestration.mjs:212-225`）：轮询 `JOBS_FILE` 等某 cwd 的最新 job 进入 `done`/`failed`/`cancelled`。
+- `fakeReq` / `fakeRes`（`test-orchestration.mjs:227-239`）：模拟 webServer 端点请求/响应（回环地址 `127.0.0.1` vs 外部地址 403 守卫）。
+- `LEGACY_CHANNEL = { planMode:'dirs', agenticArticles:false, symbolIncremental:false }` 与 `batchCfg(extra)`（`test-orchestration.mjs:45-46`）：基线配置显式关掉三档「吸收自 FSoft CodeWiki」的能力（语义规划/agentic 写作/符号级增量），以继续守护旧（批量单轮）通道的请求次数、装填方式与落盘时序。
+
+覆盖的场景（每个 `console.log('== ... ==')` 段即一组断言）：
+
+- 系统提示 wiki 维护提醒（`test-orchestration.mjs:242-270`）：`agent/created` 监听布线、`codewiki:update-reminder` section 注入条件（有 `.codewiki` 且仓库根有 `CodeWiki.md`、否则空串）、`updateReminder=false` 运行时开关。
+- 注册与 `cw` 工具（`test-orchestration.mjs:273-290`）：`name==='dsh-codewiki'`、`cw`/`codewiki_generate`/`codewiki_progress` 三个工具注册、`cw status` 判 `missing` 态。
+- `codewiki_update` + `commitHintText`（`test-orchestration.mjs:293-410`）：scope 强制为 `auto`、提交后追加「继续下一项」note、错误前缀改写；`commitHintText` 的「产物待提交」提醒触发条件（无 `.codewiki` 提交史 / 编译晚于 wiki 提交 / 自动提交失败原因）与静默条件（已提交 `committed` / 无改动 `noChanges` / `writtenCount=0`）。
+- `autoCommitWiki`（`test-orchestration.mjs:412-513`）：分支合并式提交（提交后主题分支删除、只含 `.codewiki/` 与 `CodeWiki.md`、源码改动留工作区）、非 git 目录/`.gitignore` 忽略/merge 进行中/缺 git identity/ detached HEAD 降级直接提交/分支名被占用降级直接提交的安全边界。
+- `autoCommitState` 三态（`test-orchestration.mjs:515-525`）：`committed` / `no-changes` / `pending`（`committed` 优先于 `noChanges`）。
+- `wakeCompileSession`（`test-orchestration.mjs:527-563`）：`committed`/`noChanges` → 零唤醒；失败/拒绝 → 唤醒一次并带失败原因；缺 sessionId / 冷会话 / registry 抛错 / steer 抛错 → 静默不抛。
+- 本地规划（`test-orchestration.mjs:565-622`）：零规划请求、模块清单由 `localPlan` 顶层目录分组生成、`concepts` 为空数组。
+- 全量编译（`test-orchestration.mjs:625-665`）：提交即返回、`articles→…→done`、插件自动提交（分支合并式）、落盘核查（`modules/core.md`、`_architecture.md`、`_patterns.md`、校对回写 `PROOFED`）。
+- 大 wiki 横切精准拆分（`test-orchestration.mjs:667-695`）：观察批 `map` + 合成批 `reduce`、合成请求只吃观察包。
+- 文章阶段分割（`test-orchestration.mjs:697-731`）：模块源码超 420k 大档预算才触发 10 个观察批 + 2 个合成请求。
+- 单项目串行（`test-orchestration.mjs:755-811`）：已有项目占 `articles` 推进权时新提交进 `queued`、`pendingStage` 预置、排队期零请求、取消后自动轮到；`queueAhead` 字段。
+- 并行项目上限（`test-orchestration.mjs:791-820`）：`serialProjects:false` + `parallelProjects:3` 时多仓库不再排队各自推进。
+- 唯一通道（`test-orchestration.mjs:822-854`）：全程经设置里的 `workbuddy`/`hy3`，未配 `reasoningEffort` 不下发、面板 `tps`/`stageTimings`/`usage` 透出。
+- stale 逐篇更新（`test-orchestration.mjs:856-877`）：`scope:'stale'` 直达 `articles`、`kind==='stale'`、只重写声明了变更文件的文章。
+- `codewiki_progress`（`test-orchestration.mjs:879-915`）：cwd/jobId 过滤、百分比、taskList、render。
+- 0.6.0 重启重跑（`test-orchestration.mjs:916-973`）：阶段任务按持久化 prompt 快照重跑；旧 `plan` 阶段任务迁移到 `articles` 并作废勘探员快照。
+- 并发提交占位 + 多实例合并（`test-orchestration.mjs:975-1023`）：并发提交共享同一 job、flush 合并不丢另一实例 job。
+- 面板端点与取消（`test-orchestration.mjs:1025-1077`）：`GET /api/codewiki/jobs` / `POST /api/codewiki/control` 的 loopback 守卫、batchProgress/taskList 透出、取消 → `cancelled` 且中断在途请求。
+- 排除清单 / repos 总览 / compile 动作（`test-orchestration.mjs:1080-1132`）：`excludePaths` 拒绝（报错含命中排除项）、auto 直调幂等、`repos` 总览 scheduler 块。
+- knownRepos 登记 / refresh（`test-orchestration.mjs:1134-1172`）：提交即登记 knownRepos、job 历史丢失后仍能被总览发现。
+- 工作区任务过滤（`test-orchestration.mjs:1174-1235`）：`workspaceOnly` 下工作区外**非终态**任务仍显示（编译中仓库可见）、registry 异常时降级不过滤（`test-orchestration.mjs:1237-1265`）。
+- 工具输出 schema 校验（`test-orchestration.mjs:1267-1305`）、孤儿任务接管（`test-orchestration.mjs:1307-1339`：foreign job 按停更超时接管 / 新鲜 job 让路）、全局会话 Tab + worktree 闸门（`test-orchestration.mjs:1341-1412`）、空壳目录闸门 + 面板过滤（`test-orchestration.mjs:1414-1463`）、编译模型缺失诚实报错（`test-orchestration.mjs:1465-1478`：provider 留空 → 报错且 job 落 `failed`）、严格 cordis 语义（`test-orchestration.mjs:1480-1502`：未 inject 的服务属性访问即抛，apply 不回滚）、Temp 残留清理（`test-orchestration.mjs:1504-1521`：Temp 目录终态任务移除、活动/工作区任务保留）。
+
+### test-batch.mjs（编译执行链自检，571 行）
+
+直接从 `./index.js` 导入纯函数（`test-batch.mjs:7-12`）：`collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines, buildSessionSteerText, prepareArticleTasks, runRealtimeTasks, localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer`。
+
+- `estimateTokens`（`test-batch.mjs:24-28`）：CJK 每字 1 token、ASCII 每 3.5 字符 ceil。
+- `collectSources`（`test-batch.mjs:31-44`）：行号前缀内联、缺失文件标注、`oversized` / `skipped` 预算判定、`numberLines` 尾换行处理（`test-batch.mjs:46-51`）。
+- `prepareArticleTasks`（`test-batch.mjs:54-131`）：prompt 装配、`customId` 分配、旧文作上下文、大档单请求（超 110k 装进 128k 不转会话通道）、超大文件（连 128k 都装不下 → 会话通道）、多文件超预算 → 观察批分割（`keepInMemory`、`splitFor`、`composePlan`）、大档模型接管（`bigTier` 标记、自带 provider/model/`reasoningEffort`、关大档退回会话通道）。
+- `classifySessionTask`（`test-batch.mjs:134-148`）：`timeout`/`harvest`/`wait` 三态（超时优先、frontmatter 开头判 harvest、早于派发时间判 wait）。
+- `buildSessionSteerText`（`test-batch.mjs:152-167`）：`sessionTier` 钉死档位（禁止自动选路）、review 阶段文案、重发文案。
+- `runRealtimeTasks`（`test-batch.mjs:170-344`）：宿主 llm 通道路由、`temperature=0`、思考档位下发、大档与默认档混合池分派、分池限流（`concurrency` / `bigConcurrency`，`test-batch.mjs:231-296`）、tps 采样、`signal` 中止、失败记账（不中断其它任务）、错误码透传（finish kind=error）。
+- `localPlan`（`test-batch.mjs:347-357`）、`packArticles` 整篇装填与头部截断（`test-batch.mjs:360-370`）、`scanRepoFiles` 黑名单/后缀/大小上限（`test-batch.mjs:373-386`）。
+- `listModelCatalog`（`test-batch.mjs:410-431`）、`resolveModelEfforts` + `/api/codewiki/model-efforts` 端点（`test-batch.mjs:464-515`）。
+- 0.10.1 删除内置百炼直连通道：`resolveBatchApiKey` 不再导出（`test-batch.mjs:520-523`）。
+- `fixAnchors`（`test-batch.mjs:522-564`）：行号锚点确定性修正（错行号修正、声明形态取声明行、区间钳制、basename 多段/歧义不碰、CRLF 保真）。
+
+### test-agentic.mjs（agentic 工具循环，605 行）
+
+导入（`test-agentic.mjs:4-8`）：`runAgenticArticle, makeArticleEditor, makeReadCodeTool, makeListFilesTool, buildToolset, buildOpeningPrompt, parseToolArgs, safeRelPath, numberLines, TOOL_SCHEMAS`。用假 `streamFn` 模拟模型，完全离线。覆盖 `read_code`（`test-agentic.mjs:89-129`：行号全文、行范围、不存在/缺 path/越界/行号越界）、`list_files`（`test-agentic.mjs:131-148`：隐藏 node_modules/.git）、`edit_article`（`test-agentic.mjs:151-207`：insert/str_replace/view、唯一匹配、多处匹配拒绝、负数行号报错）、循环本体（`test-agentic.mjs:210-363`：单轮收正文、读→写两轮、工具结果回灌、未知工具/坏 JSON/工具抛错/空响应/abort/maxSteps 停止）、子模块委派（`test-agentic.mjs:380-449`：无 `onSubModule` 时必 `isError`、深度到顶报错）、提示词 `buildOpeningPrompt`（`test-agentic.mjs:456-462`）、`parseToolArgs` 围栏剥离与平衡括号（`test-agentic.mjs:464-499`）、`read_code` 重复读去重（`test-agentic.mjs:501-540`）、CRLF 归一化（`test-agentic.mjs:542-561`）、字符上限截断（`test-agentic.mjs:563-571`）、`buildToolset` 四个工具（`test-agentic.mjs:597-600`）。
+
+### test-agentic-host.mjs（agentic-host 适配层，191 行）
+
+导入（`test-agentic-host.mjs:6`）：`toRequestMessages, makeHostStream, makeFsWorkspace`。覆盖：裸消息 ↔ 宿主 Message 转换（`test-agentic-host.mjs:18-59`：user/assistant/tool 多结果展开、id 稳定、未知 role 忽略）、`makeHostStream` 把 chunk 收成 blocks 透传 tools / reasoningEffort（`test-agentic-host.mjs:79-134`：finish=error 抛错、缺 llm 抛错）、`makeFsWorkspace` 读文件/列目录/越界拒绝（`test-agentic-host.mjs:142-168`）。
+
+### test-articles-agentic.mjs（articles-agentic 执行器，402 行）
+
+导入（`test-articles-agentic.mjs:7`）：`runOneArticle, runAgenticArticles, markBigAgenticTasks, sourceTokensOf, resolveTaskRoute`。覆盖：单篇写作落盘（`test-articles-agentic.mjs:48-63`）、`generate_sub_module` 递归派发（`test-articles-agentic.mjs:66-98`：子文章落在 `<modules>/<父>/<子>.md`）、重名加父前缀（`test-articles-agentic.mjs:100-124`）、`subDepth=0` 禁用递归（`test-articles-agentic.mjs:126-141`）、`subDepth` 封顶多层（`test-articles-agentic.mjs:182-215`：目录层数 ≤ subDepth、调用次数有界）、子模块写作失败记账父文章仍成功（`test-articles-agentic.mjs:217-245`）、`runAgenticArticles` 池化与失败隔离（`test-articles-agentic.mjs:248-293`）、双池与大档标记 `markBigAgenticTasks`（`test-articles-agentic.mjs:299-387`）、`resolveTaskRoute` 任务自带 provider/model 覆盖默认档（`test-articles-agentic.mjs:349-365`）、`sourceTokensOf` CJK 估算（`test-articles-agentic.mjs:389-397`）。
+
+### test-cluster.mjs（LLM 聚类，421 行）
+
+导入（`test-cluster.mjs:4-9`）：`clusterComponents, heuristicCluster, fillMissing, moduleFiles, formatComponents, clusterPrompt, subClusterPrompt, superGroupPrompt, parseJsonLoose, parseClusterResponse, parseSuperGroups, normalizeModuleName, toPlanModules`。覆盖：提示词 `clusterPrompt`/`formatComponents`/`subClusterPrompt`/`superGroupPrompt`（`test-cluster.mjs:44-62`）、`parseJsonLoose` 剥围栏/修尾逗号（`test-cluster.mjs:65-82`）、`parseClusterResponse` 丢弃不存在 id / 去重复 / 缺 modules（`test-cluster.mjs:85-111`）、`normalizeModuleName`（`test-cluster.mjs:113-118`）、`heuristicCluster` 目录分组（`test-cluster.mjs:121-128`）、`fillMissing` 补挂/建 misc（`test-cluster.mjs:130-144`）、`moduleFiles` 汇总（`test-cluster.mjs:146-150`）、无 LLM 降级（`test-cluster.mjs:153-165`）、LLM 正常分组与漏组件补齐（`test-cluster.mjs:168-199`）、LLM 抛错/垃圾文本降级（`test-cluster.mjs:201-216`）、大模块下钻（`test-cluster.mjs:219-267`：父节点不成文、`maxDepth` 真生效，`test-cluster.mjs:313-343`）、超级分组 `parseSuperGroups`（`test-cluster.mjs:362-402`）、`toPlanModules` 输出形状（`test-cluster.mjs:405-414`）。
+
+### test-symbols.mjs（AST 符号提取，363 行）
+
+导入（`test-symbols.mjs:38-42`）：`SymbolExtractor, extractRepoGraph, resolveImportEdges, extractImportSpecs, resolveSpec, LANG_RULES, SUPPORTED_EXTS, regexExtract`。先 `ex.init()`，web-tree-sitter 不可用时整体 `SKIP`（`test-symbols.mjs:38-45`）。覆盖：多语言（JS/TS/Python/Go/Rust/Java/C#/C）函数/类/方法/箭头函数/参数去默认值与类型/基类/docstring（`test-symbols.mjs:38-186`）、边界（未知扩展名/语法错误/空文件不抛，`test-symbols.mjs:38-51`）、`extractImportSpecs`/`resolveSpec`/`resolveImportEdges`（`test-symbols.mjs:229-269`）、本插件自身源码完整提取（`test-symbols.mjs:38-52`）、正则降级 `regexExtract`（`test-symbols.mjs:292-342`：WASM 不可用时自动走正则、不静默丢符号）、语言表覆盖（`test-symbols.mjs:38-44`）。
+
+### test-graphdiff.mjs（对拍 FSoft 上游，108 行）
+
+导入（`test-graphdiff.mjs:2-5`）：`bodySimilarity, bodyHash, unifiedDiff, diffGraphs, serializeDiff, sequenceRatio, normalizeBody, documentedSource, truncateToTokens`。基准来自 `test-fixtures/gen-graphdiff-golden.py`（Python 原生 `difflib`/`hashlib` 生成 `test-fixtures/graphdiff-golden.json`，见 `test-graphdiff.mjs:2-18`）。覆盖：`similarity`/`hash`/`unified` 逐位对拍（`test-graphdiff.mjs:2-16`），以及组件级 diff：body/edge/interface 分类、改名配对、added/deleted、counts 自洽、序列化往返（`test-graphdiff.mjs:2-54`）。
+
+### test-incremental.mjs（符号级增量，242 行）
+
+导入（`test-incremental.mjs:7-10`）：`slimGraph, graphFromSnapshot, snapshotPath, loadSnapshot, saveSnapshot, filterStaleTasks, describeChange, normRel, componentsByFile, SNAPSHOT_VERSION, sameSnapshotContent`（来自 `lib/incremental.js` 与 `lib/graph-diff.js`）。覆盖：快照往返 bodyHash 一致（`test-incremental.mjs:42-47`）、body 类变更保留（`test-incremental.mjs:49-59`）、interface 变更重写（`test-incremental.mjs:61-67`）、纯注释改动降级不重写 + 老快照无 codeHash 退回原行为（`test-incremental.mjs:77-118`）、`stripComments`（`test-incremental.mjs:120-126`）、白空格/新增/删除/改名/新增文件（`test-incremental.mjs:128-225`）、快照落盘回读与坏 JSON（`test-incremental.mjs:193-214`）、`sameSnapshotContent` 忽略元数据（`test-incremental.mjs:227-237`）。
+
+### test-incremental-e2e.mjs（stale 符号级链路端到端，145 行）
+
+导入（`test-incremental-e2e.mjs:7-8`）：`extractCurrentGraph, currentCommit`（`index.js`）；`slimGraph, loadSnapshot, saveSnapshot, filterStaleTasks, describeChange`（`lib/incremental.js`）。用真实仓库目录验证「只改实现细节不重写文章」主收益：当前图提取（`test-incremental-e2e.mjs:43-50`）、快照落盘到 `.codewiki/temp/symbol-graph.json`（`test-incremental-e2e.mjs:52-59`）、body/白空格注释/interface/新增/删除/无 .codewiki 各场景（`test-incremental-e2e.mjs:61-141`）。
+
+### test-semantic-plan.mjs（语义规划端到端，190 行）
+
+导入（`test-semantic-plan.mjs:7`）：`semanticPlan, localPlan, scanRepoFiles`（`index.js`）。造「目录划分与职责划分不一致」的仓库，覆盖：无模型降级目录聚类（`test-semantic-plan.mjs:175-189`）、有模型走 LLM 聚类（`test-semantic-plan.mjs:175-189`）、模型坏 JSON/抛错降级（`test-semantic-plan.mjs:175-189`）、空仓库 fallback（`test-semantic-plan.mjs:175-182`）、`plan.graph` 可序列化且不携带源码（`test-semantic-plan.mjs:151-172`）、`localPlan` 保活（`test-semantic-plan.mjs:174-178`）、模块名 slug 不冲突（`test-semantic-plan.mjs:175-179`）。
+
+### test-sessions.mjs（会话记录存储，69 行）
+
+导入（`test-sessions.mjs:8`）：`SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords`（`index.js`）。覆盖：列表按 n 倒序（`test-sessions.mjs:40-50`）、单条全文读取/不存在返回 null（`test-sessions.mjs:40-42`）、全局聚合 `listAllSessionRecords` 带 jobId/`limit`/`jobIds` 过滤（`test-sessions.mjs:40-51`）、TTL 清理（25h 过期删除、幂等、全空目录移除，`test-sessions.mjs:40-58`）。
+
+### test-worktree.mjs（worktree / 空壳闸门，84 行）
+
+导入（`test-worktree.mjs:11`）：`detectLinkedWorktree, isWorktreeCwd, hasCompilableSources, isDeadCompileTarget`（`index.js`）。用真实 git 建 linked worktree（`test-worktree.mjs:19-27`，无 git 时 SKIP）。覆盖：`detectLinkedWorktree` 三态（主/linked/非 git/不存在，`test-worktree.mjs:38-52`）、`isWorktreeCwd` 布尔封装与缓存（`test-worktree.mjs:56-62`）、`hasCompilableSources` 空壳判定（`test-worktree.mjs:64-70`）、`isDeadCompileTarget`（worktree/空壳算 dead、不存在不算，`test-worktree.mjs:72-77`）。
+
+### test-wiki-entry.mjs（CodeWiki.md 入口 + Windows 路径，77 行）
+
+导入（`test-wiki-entry.mjs:10`）：`ensureWikiEntry, normalizeArticlePath, normalizeIndexLinks, parseStatus`（`index.js`）。覆盖：入口缺失生成（含 `.codewiki` 绝对路径、收尾工具名、双语、`test-wiki-entry.mjs:25-46`）、已有入口绝不覆盖（`test-wiki-entry.mjs:34-39`）、空 cwd 安全返回（`test-wiki-entry.mjs:48-49`）、重复调用幂等（`test-wiki-entry.mjs:51-54`）、Windows 路径规范化（`test-wiki-entry.mjs:56-72`：`normalizeArticlePath` 反斜杠转斜杠、`parseStatus` stale 清单 `\`→`/`、`normalizeIndexLinks` 链接头归一但正文反斜杠不受影响）。
+
+### test-wiki-anchors.mjs（行号锚点守门，119 行）
+
+**不 import 任何插件代码**：直接读仓库内 `.codewiki/` 下所有 `.md`（`test-wiki-anchors.mjs:14-15,64-75`）与 `index.js`/`client.js` 的行内容（`test-wiki-anchors.mjs:16-24`）。对每个 `index.js:NN` / `client.js:NN`（含区间 `NNN-MMM`，`test-wiki-anchors.mjs:86`）做三类断言：起始行在文件行数内且非空（`test-wiki-anchors.mjs:95-96`）、区间有序（`test-wiki-anchors.mjs:97-100`）、单锚点行且含反引号符号时该符号须出现在对应区间（`test-wiki-anchors.mjs:105-112`）。任一失败 `exit 1`（`test-wiki-anchors.mjs:117-118`）。
+
+### test-cwd-paths.mjs（cw 路径修复，72 行）
+
+导入（`test-cwd-paths.mjs:20`）：`import * as plugin from './index.js'`，`plugin.apply(ctx, {})` 后用 `ctx.inject` 抓出 `cw` 工具（`test-cwd-paths.mjs:20-31`）。**需要命令行参数**传入真实仓库的 Windows 形式路径（默认 `E:/ik/Documents/trae_projects/1/Wxxy-CampusLogin`，`test-cwd-paths.mjs:20`），验证：MSYS 路径（`E:/x`→`/e/x`）归一后 `cw path` 跑通（`test-cwd-paths.mjs:20-35`，证明 resolveBinary 选 PATH 而非捆绑副本）、Windows 路径 `cw status` 返回真实三态而非 "No wiki found"（`test-cwd-paths.mjs:20-30`）、不存在路径干净报错（`test-cwd-paths.mjs:20-28`）。
+
+### test-fixtures/gen-graphdiff-golden.py（对拍基准生成器，149 行）
+
+由 `test-graphdiff.mjs` 引用（`test-graphdiff.mjs:2-18`）。调用 Python 原生 `difflib.SequenceMatcher` + `hashlib` 实现 `normalize_body`/`documented_source`/`body_hash`/`sequence_ratio` 等（`test-fixtures/gen-graphdiff-golden.py:19-30` 起），喂同一批输入产出 `test-fixtures/graphdiff-golden.json`，供 Node 侧 `lib/graph-diff.js` 逐位比对。运行方式：`python test-fixtures/gen-graphdiff-golden.py > test-fixtures/graphdiff-golden.json`。
+
+## Architecture
+
+```text
+                ┌──────────────────────────────────────────────┐
+   node test-*.mjs │  测试脚本（自包含，print PASS/FAIL，exit 1）│
+                └──────────────────────────────────────────────┘
+                                  │
+          ┌───────────────────────┼───────────────────────────┐
+          │                       │                           │
+   makeCtx() 假 ctx          import 纯函数              mock streamFn
+   (test-orchestration:51)    (test-batch/agentic/          (test-agentic*.mjs)
+          │                     cluster/symbols/…)          (test-articles-agentic)
+          │                       │                           │
+          ▼                       ▼                           ▼
+   apply(ctx, cfg)           直接调用断言              lib/agentic.js 循环
+   注册 cw/codewiki_generate  collectSources /             read_code
+   + webServer 端点           prepareArticleTasks /        list_files /
+          │                   runRealtimeTasks /           edit_article /
+          ▼                   fixAnchors / cluster…        generate_sub_module
+   makeBatchMock() 假 llm                              (agentic-host 适配)
+   (test-orchestration:145)         │                      │
+          │ 按 prompt 首行分发应答    │                      │
+          ▼                         ▼                      ▼
+   JobService.tick 阶段机    断言输入/输出            断言落盘/递归
+   (articles→…→done)         (纯函数)                 (子模块/大档池)
+          │
+          ▼
+   waitJob(JOBS_FILE) 轮询终态 + 落盘核查（core.md/autoCommit/wiki 路径）
+
+   守门测试（不走插件）：
+   test-wiki-anchors.mjs ── 读 .codewiki/*.md + index.js/client.js 行内容 ── 校验锚点
+   test-cwd-paths.mjs   ── apply() 抓 cw 工具 + 真实仓库路径 ── 路径归一化
+   test-fixtures/gen-graphdiff-golden.py ── Python difflib ── graphdiff-golden.json ── test-graphdiff.mjs 对拍
+```
+
+## Data Flow
+
+- **编排套件启动**：`DSH_CODEWIKI_TICK_MS='300'` 加速 tick（`test-orchestration.mjs:22`），`DSH_CODEWIKI_JOBS_FILE` 指向带随机 token 的临时文件以隔离真实宿主（`test-orchestration.mjs:22-23`）；`TEST_JOB_TOKEN` 防止 pid 复用读到历史 fixture 任务（`test-orchestration.mjs:22-25`）。
+- **接线**：`makeCtx()` 构造与 cordis 同构的假 ctx → `apply(mainCtx, batchCfg())` 把插件注册进 ctx → 从 `main.registered` 取出 `cw` / `codewiki_generate` / `codewiki_progress` 工具并 `execute`（`test-orchestration.mjs:276-283`）。`makeBatchMock()` 的 `llmProxy` 把 `llm.stream` 调用转发到当前 `activeLlm`（`test-orchestration.mjs:132-140`）。
+- **执行→断言**：`gen.execute({cwd: fixtureRepo})` 立即返回 `{submitted, jobId, stage}`（零 LLM 调用）→ `waitJob(cwd)` 轮询 `JOBS_FILE` 等终态（`test-orchestration.mjs:212-225`）→ 读 `job.wikiPath` 下已落盘文章核对（`modules/core.md` 含 `PROOFED`、`_architecture.md` 等，`test-orchestration.mjs:653-660`）。
+- **纯逻辑单测**：直接从 `./index.js` 或 `./lib/*.js` import 纯函数，注入假模型（`makeLlm` / `fakeLlm` / 脚本化 `streamFn`），断言返回值或落盘文件，不启动服务。
+- **产物守门**：`test-wiki-anchors.mjs` 遍历已编译 `.codewiki/*.md`，对照 `index.js`/`client.js` 真实行内容校验锚点；`test-cwd-paths.mjs` 用真实仓库目录经 `apply` 注册出的 `cw` 工具验证路径归一化。
+
+## Connections
+
+- [[codewiki]] — 插件入口 `index.js`：本套件中 `test-orchestration.mjs` / `test-batch.mjs` / `test-sessions.mjs` / `test-worktree.mjs` / `test-wiki-entry.mjs` / `test-semantic-plan.mjs` / `test-incremental-e2e.mjs` 都直接 import 并驱动它。
+- [[symbols-extraction]] — `lib/symbols.js`：`test-symbols.mjs` 的提取/import 边/正则降级全部针对此模块。
+- [[graph-diff]] — `lib/graph-diff.js`：`test-graphdiff.mjs` + `test-fixtures/gen-graphdiff-golden.py` 对拍验证。
+- [[semantic-clustering]] — `lib/cluster.js`：`test-cluster.mjs` 覆盖三段式聚类与全部降级。
+- [[agentic-article-writing]] — `lib/agentic.js` / `lib/agentic-host.js` / `lib/articles-agentic.js`：`test-agentic.mjs` / `test-agentic-host.mjs` / `test-articles-agentic.mjs` 针对工具循环、宿主适配、子模块递归。
+- [[incremental-update]] — `lib/incremental.js`：`test-incremental.mjs` / `test-incremental-e2e.mjs` 覆盖符号级 stale 判定。
+- `CodeWiki.md`（仓库根）：模块清单与整体架构叙述，本套件是其「验证手段」。
+
+## Known Issues
+
+- **套件不在 `modules/` 下、也无测试运行器**：全部 `test-*.mjs` 散落在仓库根，手动逐个 `node` 运行；CI 之外没有统一入口（本模块文章因源不存在而新建）。
+- **环境依赖导致整文件 SKIP**：`test-symbols.mjs` 在 `web-tree-sitter` WASM 不可用时直接 `process.exit(0)`（`test-symbols.mjs:42-45`），AST 用例被整体跳过、只跑正则降级部分，CI 信号偏弱。
+- **`test-wiki-anchors.mjs` 必须先有编译产物**：它读仓库内 `.codewiki/*.md`（`test-wiki-anchors.mjs:14-15,75-79`），未编译（`.codewiki/` 为空或不存在）时直接 `exit 1`，不能独立当作单测跑。
+- **`test-cwd-paths.mjs` 依赖外部真实仓库**：默认路径写死 `E:/ik/Documents/trae_projects/1/Wxxy-CampusLogin`（`test-cwd-paths.mjs:8`），换机/无该仓库时需手动传参，否则 `cw status` 命中排除或失败，并非纯离线自测。
+- **共享 `JOBS_FILE` 隔离靠随机 token**：多个 `test-*.mjs` 都用 `DSH_CODEWIKI_JOBS_FILE` 覆盖默认路径（编排、`test-sessions.mjs`、`test-worktree.mjs` 等），但旧实现只用 `pid` 时曾出现 pid 复用读到历史 fixture 任务导致「偶发 20 项失败」（`test-orchestration.mjs:19-23`），现追加随机 token 缓解；若同一进程并行跑多个套件仍需各自独占 `JOBS_FILE`。
+- **`test-orchestration.mjs` 基线刻意关掉三档新能力**：`LEGACY_CHANNEL = { planMode:'dirs', agenticArticles:false, symbolIncremental:false }`（`test-orchestration.mjs:44`）让编排套件继续守护旧（批量单轮）通道；语义规划/agentic 写作/符号增量分别由 `test-semantic-plan.mjs` / `test-articles-agentic.mjs` / `test-incremental*.mjs` 单独验证，改动任一能力时别只跑编排套件。
+- **Windows 句柄释放竞态**：少数套件在 `finally` 里 `fs.rmSync(tmp, { force:true, maxRetries:5, retryDelay:100 })`（`test-orchestration.mjs:1021`）或静默吞错（`test-orchestration.mjs:1526`），因为 `cw` 子进程可能仍持有 tmp 句柄，删不掉时留待系统 tmp 自清。
 
 ## Overview
 

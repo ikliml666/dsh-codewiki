@@ -10,19 +10,29 @@ tags: [configuration, settings, plugin-system, configForms, patch]
 
 ## Overview
 
-`configuration-management` 是 dsh-codewiki 插件里「配置值如何被声明、归一化、校验、持久化、热读取」的横切概念。它横跨三个文件：
+`configuration-management` 是 dsh-codewiki 里「配置值如何被声明、归一化、校验、持久化、热读取」的横切概念。它横跨三个文件：
 
-- `cordis.patch.yml` —— 静态挂载元数据：插件挂载 id `codewiki` 与初值 `config: {}`（`- insert:` 在 `cordis.patch.yml:3`，`id: codewiki` 在 `cordis.patch.yml:20`，`name:` 指向 `index.js` 的 file:/// 直挂路径在 `cordis.patch.yml:21`，`config: {}` 在 `cordis.patch.yml:3`；头部注释段 `cordis.patch.yml:1-18` 只文档化了 25 个设置项中的 13 个，见 `cordis.patch.yml:3-14`）。
-- `index.js` —— 配置 schema（`Config`，`index.js:60-86`，25 个字段）、取值兼容层（`val`，`index.js:88-90`）、唯一归一化入口（`liveConfig`，`index.js:92-134`），以及散布在各条边界上的消费点（工具 execute、`submit` 闸门、阶段执行器、Web 端点、自动更新调度器、systemPrompt 提醒）。另有少量**进程级配置走环境变量**，模块加载时读一次、不热生效（见下）。
-- `client.js` —— 浏览器侧设置表单（`CodewikiCard`，`client.js:548-1036`），经宿主 `configForms` 服务的命名空间 `codewiki`（`NS` 声明在 `client.js:18`，`form = ctx.configForms.get(NS)` 在 `client.js:548`）读写同一份配置；总览页还能就地改写 `excludePaths`（`toggleExclude`，`client.js:1207-1225`）。
+- `cordis.patch.yml` —— 静态挂载元数据：插件挂载 id `codewiki` 与初值 `config: {}`（`- insert:` 在 `cordis.patch.yml:3`，`id: codewiki` 在 `cordis.patch.yml:20`，`name:` 指向 `index.js` 的 `file:///` 直挂路径在 `cordis.patch.yml:21`，`config: {}` 在 `cordis.patch.yml:3`；头部注释段 `cordis.patch.yml:1-18` 只文档化了 25 个设置项中的 13 个，见 `cordis.patch.yml:3-14`）。
+- `index.js` —— 配置 schema（`Config`，`index.js:60-86`，25 个字段）、取值兼容层（`val`，`index.js:88-90`）、唯一归一化入口（`liveConfig`，`index.js:92-134`），以及散布在各条边界上的消费点（工具 execute、提交闸门、阶段执行器、Web 端点、自动更新调度器、systemPrompt 提醒）。另有少量**进程级配置走环境变量**，模块加载时读一次、不热生效（见下）。
+- `client.js` —— 浏览器侧设置表单（`CodewikiCard`，`client.js:548-1035`），经宿主 `configForms` 服务的命名空间 `codewiki`（`NS` 声明在 `client.js:17`，`form = ctx.configForms.get(NS)` 在 `client.js:513`）读写同一份配置；总览页还能就地改写 `excludePaths`（`toggleExclude`，`client.js:1207-1225`）。
 
-核心设计取向：**插件没有自己的配置文件**。配置的权威副本在宿主的 Config 服务里，插件侧只声明 schema、并在每次使用时现场调一次 `liveConfig(cfg)`。因此不存在「改了设置要重启」的问题 —— 这条承诺写在客户端词典的 `intro` 文案里（zh 版 `client.js:38`「此处设置经 configForms 热生效，无需重启」，en 版 `client.js:213` 'Settings here apply hot via configForms — no restart needed'）。
+核心设计取向：**插件没有自己的配置文件**。配置的权威副本在宿主的 Config 服务里，插件侧只声明 schema、并在每次使用时现场调一次 `liveConfig(config)`。因此不存在「改了设置要重启」的问题 —— 这条承诺写在客户端词典的 `intro` 文案里（zh 版 `client.js:38`「此处设置经 configForms 热生效，无需重启」，en 版 `client.js:213` 'Settings here apply hot via configForms — no restart needed'）。
 
 一致性的另一条主线：**全部字段都带 `.volatile()`**（`Config` 声明里每个字段链尾都是 `.volatile()`，`index.js:60-85`），即配置不落持久化快照、读取永远取当前值。这也是 `liveConfig` 可以在各条边界反复调用的前提。
 
-第三个取向是**默认值双保险**：`cordis.patch.yml` 的初值是空对象 `{}`（`cordis.patch.yml:3`），所以所有默认值必须由 `Config` 的 `.default()`（`index.js:60-85`）与 `liveConfig` 的回落表达式（`index.js:92-134`）共同兜住；两处任一缺失都会让字段变成 `undefined` 并向下游传播。
+第三个取向是**默认值双保险**：`cordis.patch.yml` 的初值是空对象 `{}`（`cordis.patch.yml:3`），所以所有默认值必须由 `Config` 的 `.default()`（`index.js:60-85`）与 `liveConfig` 的回落表达式（`index.js:60-95`）共同兜住；两处任一缺失都会让字段变成 `undefined` 并向下游传播。
 
-id 对齐关系：cordis 挂载 id 是 `codewiki`（`cordis.patch.yml:20`），插件名是 `dsh-codewiki`（`PLUGIN_NAME` 在 `index.js:27`，`export const name` 在 `index.js:28`）；客户端模块 id 是 `@local/dsh-codewiki`（`client.js:11`），`NS` 与 `KEY` 都必须是 `codewiki`（`client.js:18`，头注释写明 id 必须等于 `package.json` 的 `name`（`client.js:7`）、词典值必须是字符串（`client.js:18`））。
+id 对齐关系：cordis 挂载 id 是 `codewiki`（`cordis.patch.yml:20`），插件名是 `dsh-codewiki`（`PLUGIN_NAME` 在 `index.js:27`，`export const name` 在 `index.js:28`）；客户端模块 id 是 `@local/dsh-codewiki`（`client.js:11`），`NS` 与 `KEY` 都必须是 `codewiki`（`client.js:17`、`client.js:18`）。
+
+## Key Components
+
+## Architecture
+
+## Data Flow
+
+## Connections
+
+## Known Issues
 
 ## Key Components
 

@@ -5,12 +5,28 @@ source_files:
   - package.json
   - cordis.patch.yml
   - .gitignore
+  - .codewiki/_meta.yaml
+  - index.js
+  - README.md
 tags: [配置, 元数据, 依赖, Cordis, Patch]
 ---
 
+
+
 ## Overview
 
-本模块负责定义 `@local/dsh-codewiki` 项目的核心元数据、运行时依赖约束以及针对 DeepSeek Harness (DSH) 插件系统的补丁加载配置。它通过 `package.json`（行1-28）声明 Node.js 环境要求及基础依赖，并通过 `cordis.patch.yml`（行1-33）精确控制 CodeWiki 功能在 DSH 中的挂载方式、默认行为参数（如 `binaryPath`、`batchProvider`、`batchModel`、并发限制、单项目串行、计划模式、agentic 写作、符号级增量等）以及二进制文件路径解析逻辑。此外，`.gitignore`（行1-12）确保了构建产物和临时日志不会污染版本控制系统。
+本模块负责定义 `@local/dsh-codewiki` 项目的**核心元数据、运行时依赖约束、DSH 插件挂载补丁、Git 忽略规则与 CodeWiki 产物元信息**。它由五个静态文件组成，自身不含任何可执行逻辑，但在 `dsh bundle` 打包 / 本地开发直挂时被读取，决定了插件以何种 id 挂载、默认编译行为从哪取、以及哪些产物不进版本库。
+
+- `package.json`（行1-29）声明 Node.js/DHS 环境要求、基础依赖与 DSH 打包字段，是当前插件所有行为的「包级声明」。
+- `cordis.patch.yml`（行1-34）是 DSH 插件系统的 Cordis 挂载补丁：以 `- insert:` 把本插件注册为 id `codewiki`，并声明 config 命名空间 = `codewiki`。注意它**不在此处声明任何默认值**——注释块（行6-18）只列出配置项含义，真正的默认值在 `index.js` 的 `Config` schema（行60-86）里定义，`cordis.patch.yml` 的 `config: {}`（行24）只是空壳，留空即用 schema 默认。
+- `.gitignore`（行1-13）保证构建产物、cw 二进制备份、DSH 运行期产物、探针与测试输出不污染版本库。
+- `.codewiki/_meta.yaml`（行1-6）是 CodeWiki 编译产物的元信息（项目名、仓库绝对路径、最近编译 commit 与时间戳）。
+
+> 关键更新：旧版配置清单只列了 `cordis.patch.yml` 注释里的 14 项，**漏掉了 `index.js` 的 `Config` schema 中新增的 `bigProvider`/`bigModel`/`bigReasoningEffort`/`bigTokenBudget`/`sessionTier`/`parallelProjects`/`autoCommit`/`excludePaths`/`autoUpdate`/`autoUpdateMin`/`workspaceOnly` 等字段**。这些才是「large tier 超大输入分层编译」真正启用与并发/自动提交策略的配置来源，详见下文「Config schema」小节。
+
+当前版本为 `0.13.4`（`package.json` 行3）。`package.json` 行4 的描述明确了：CLI（`cw`）、全仓库 Wiki 编译管线（插件内、默认 `workbuddy`/`hy3` 192k 上下文、`large tier volces-ark/glm-5.3-flash` 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能；并声明自 0.13.0 起吸收了 FSoft-AI4Code/CodeWiki 的 AST 符号提取 + LLM 语义聚类、agentic 工具循环文章写作、符号级增量更新，基于 Node + tree-sitter WASM 实现（无 Python 运行时）。`README.md` 行1-5 与 `CodeWiki.md` 同步描述了同一套能力，其中 `README.md` 行2 说明了 `cw` 是 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI，MIT）的接入包装。
+
+ `@local/dsh-codewiki` 项目的核心元数据、运行时依赖约束以及针对 DeepSeek Harness (DSH) 插件系统的补丁加载配置。它通过 `package.json`（行1-28）声明 Node.js 环境要求及基础依赖，并通过 `cordis.patch.yml`（行1-33）精确控制 CodeWiki 功能在 DSH 中的挂载方式、默认行为参数（如 `binaryPath`、`batchProvider`、`batchModel`、并发限制、单项目串行、计划模式、agentic 写作、符号级增量等）以及二进制文件路径解析逻辑。此外，`.gitignore`（行1-12）确保了构建产物和临时日志不会污染版本控制系统。
 
 该模块是项目静态结构的一部分，但在运行时被 `dsh bundle` 命令读取，用于生成最终的插件包或指导本地开发环境的 Cordis 挂载行为。当前版本为 `0.13.4`（见 `package.json` 行3），其描述（行4）明确了 CLI (`cw`)、全仓库 Wiki 编译管线（插件内、默认 workbuddy/hy3 192k 上下文、large tier volces-ark/glm-5.3-flash 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能，并声明自 0.13.0 起吸收了 FSoft-AI4Code/CodeWiki 的 AST 符号提取 + LLM 语义聚类、agentic 工具循环文章写作、符号级增量更新，基于 Node + tree-sitter WASM 实现（无 Python 运行时）。
 
@@ -20,72 +36,79 @@ tags: [配置, 元数据, 依赖, Cordis, Patch]
 
 ### package.json
 
-位于仓库根目录，JSON 格式配置文件（源码行1-28）。
+位于仓库根目录，JSON 格式配置文件（源码行1-29）。无代码函数/类，以下为各字段含义与行号。
 
-- **行2** `"name": "@local/dsh-codewiki"`：项目唯一标识符。
+- **行2** `"name": "@local/dsh-codewiki"`：项目唯一标识符（命名空间 `@local/` 表示本地私有包）。
 - **行3** `"version": "0.13.4"`：当前语义化版本号。
-- **行4** `"description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline (in-plugin, default workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k for oversized input, zero subagents, single-project serial) with a sidebar panel. Since 0.13.0 absorbs FSoft-AI4Code/CodeWiki's AST symbol extraction + LLM semantic clustering, agentic tool-loop article writing, and symbol-level incremental updates, implemented with Node + tree-sitter WASM (no Python runtime)."`：描述 CLI、全仓库 Wiki 编译管线及侧边栏面板功能，包含 large tier 超大输入模型支持说明，并声明 0.13.0 吸收的三层能力与技术栈。
-- **行5** `"private": true`：标记为私有包，防止意外发布到公共注册表。
-- **行6** `"type": "module"`：启用 ES Modules (ESM) 支持，所有 `.js` 文件默认视为 ESM。
-- **行7** `"main": "index.js"`：入口点。
-- **行8-11** `"exports"`：定义子路径导出。
-  - **行9** `"."`: 映射至 `./index.js`。
-  - **行10** `"./client"`: 映射至 `./client.js`。
-- **行12** `"license": "MIT"`：开源许可证类型。
+- **行4** `"description"`：长描述，说明 CLI（`cw`）、全仓库 Wiki 编译管线（插件内、默认 `workbuddy`/`hy3` 192k、large tier `volces-ark/glm-5.3-flash` 512k 用于超大输入、零子代理、单项目串行）及侧边栏面板功能；并声明自 0.13.0 起吸收 FSoft-AI4Code/CodeWiki 的三层能力（AST 符号提取+LLM 语义聚类、agentic 工具循环写作、符号级增量），用 Node + tree-sitter WASM 实现，无 Python 运行时。
+- **行5** `"private": true`：私有包，防止误发布到公共注册表。
+- **行6** `"type": "module"`：启用 ES Modules (ESM)，所有 `.js` 文件默认按 ESM 处理（对应 `index.js` 行8 起的 `import`、`import.meta.url` 用法）。
+- **行7** `"main": "index.js"`：入口点，也是 DSH 宿主加载插件时执行的模块。
+- **行8-11** `"exports"`：子路径导出。
+  - **行9** `"."` 映射至 `./index.js`。
+  - **行10** `"./client"` 映射至 `./client.js`（浏览器半侧 UI，见 `client-interface`）。
+- **行12** `"license": "MIT"`：开源许可证。
 - **行13-16** `"engines"`：
-  - **行14** `"node": ">=20"`：强制要求 Node.js 版本不低于 20。
-  - **行15** `"dsh": ">=0.2.0-rc.0"`：强制要求 DeepSeek Harness 版本不低于 0.2.0 的 rc.0 预发布版。
+  - **行14** `"node": ">=20"`：强制 Node.js ≥ 20。
+  - **行15** `"dsh": ">=0.2.0-rc.0"`：强制 DeepSeek Harness ≥ 0.2.0-rc.0。
 - **行17-19** `"dependencies"`：
-  - **行18** `"@deepseek-ai/schemastery": "^3.18.4"`：核心运行时依赖，用于 Schema 验证或工具定义。
+  - **行18** `"@deepseek-ai/schemastery": "^3.18.4"`：运行时依赖，`index.js` 行14 通过 `import z from '@deepseek-ai/schemastery'` 用它定义 `Config` schema（行60-86）与各类工具参数 schema。
 - **行20-27** `"dsh"`：自定义字段，专供 DSH 工具链使用。
-  - **行21-23** `"client"`：`"platform"` 为 `"web"`（行22），指定客户端运行平台为 Web。
-  - **行24-26** `"bundle"`：`"patch"` 为 `"cordis.patch.yml"`（行25），指定打包时使用的 Cordis 补丁定义文件路径。
+  - **行21-23** `"client"`：`"platform": "web"`（行22），指定客户端运行平台为 Web（对应 `client.js` 浏览器半侧）。
+  - **行24-26** `"bundle"`：`"patch": "cordis.patch.yml"`（行25），指定 `dsh bundle` 打包时使用的 Cordis 补丁文件路径。
+
+
+
+
 
 ### cordis.patch.yml
 
-位于仓库根目录，YAML 格式补丁定义文件（源码行1-33）。由 `dsh bundle` 或 Cordis 加载器读取。
+位于仓库根目录，YAML 格式补丁定义文件（源码行1-34）。由 `dsh bundle` 或 Cordis 加载器读取。
 
-- **行1-18** 注释块：
+- **行1-4** 注释块：
   - 行1 说明文件用途：dsh-codewiki — CodeWiki (mraza007/codewiki) for DeepSeek Harness。
-  - 行2-4 说明挂载方式：本文件供 bundle 形式安装用；本地开发走 `profiles/web/cordis.patch.yml` 的 `file:///` 直挂（URL 中空格写 `%20`），二者保持 id 一致为 `codewiki`；并注明 0.13.0 起吸入 AST 聚类 / agentic 写作 / 符号级增量三层能力。
-  - 行5 指明设置项 config 命名空间 = `codewiki`。
-  - 行6-18 详细列出配置项含义（仅注释，未在 YAML 主体展开）：
-    - `binaryPath`（行6）：cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 `bin/cw.exe`。
-    - `batchProvider`（行7）：编译模型提供商（必须是模型设置里已注册的 provider；默认 `workbuddy`，留空=提交失败）。
-    - `batchModel`（行8）：编译模型 id（默认 `hy3`，免费 192k 上下文）。
-    - `batchReasoningEffort`（行9）：思考程度档位（取值来自模型目录 `reasoning.efforts`；留空=模型默认档）。
-    - `maxConcurrency`（行10）：默认档并发上限（1–8，默认 2）。
-    - `bigConcurrency`（行11）：大档并发上限（1–8，默认 0=跟随默认档）：与默认档各自独立限流、同时推进。
-    - `serialProjects`（行12）：单项目串行（默认开；同一时刻只推进一个仓库的编译任务，其余排队）。
-    - `articleLanguage`（行13）：文章语言（默认中文）。
-    - `planMode`（行14）：模块划分：auto=AST 符号 + LLM 语义聚类（默认）｜dirs=顶层目录分组（旧行为）。
-    - `agenticArticles`（行15）：文章写作走 agentic 工具循环（默认开）：模型自己 read_code/edit_article，不整包内联。
-    - `agenticMaxSteps`（行16）：agentic 单篇步数上限（默认 30，1–100）。
-    - `symbolIncremental`（行17）：增量按 AST 符号级判定（默认开）：只重写接口真变了的模块，注释/空白改动跳过。
-    - `updateReminder`（行18）：会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 `.codewiki/`；默认开）。
-- **行19** `- insert:`：定义插入操作。
-- **行20** `- id: codewiki`：插件 ID，固定为 `codewiki`，须全局唯一且与本地开发配置一致。
-- **行21** `name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js`：指向本地绝对路径的 `index.js`，包含空格编码 `%20`，为 Windows 绝对路径。根据行2-4注释，此路径为 bundle 安装形态；本地开发直挂走另一文件。
-- **行22-23** 注释：默认值不在这里重复声明：留空即用插件 Config schema 里的默认值（见 index.js 的 Config）。想改哪项就填哪项，未填的沿用默认。
-- **行24** `config: {}`：初始配置对象为空。实际配置项（如上述 `binaryPath` 等）需外部注入或依赖插件 `index.js` 中的 Config schema 默认值（见行22-23）。
-- **行25-33** 注释示例：展示如何填写 config 以换编译模型、调并发、关掉 agentic 写作等（具体项如 `batchProvider`、`batchModel`、`maxConcurrency`、`planMode`、`agenticArticles`、`agenticMaxSteps`、`symbolIncremental`）。
+  - 行2 说明 0.13.0 起吸入 AST 聚类 / agentic 写作 / 符号级增量三层能力。
+  - 行3-4 说明挂载方式：本文件供 **bundle 形式安装**用；本地开发走 `profiles/web/cordis.patch.yml` 的 `file:///` 直挂（URL 中空格写 `%20`），二者保持 id 一致为 `codewiki`。⚠️ 注意：仓库当前**不存在 `profiles/` 目录**（`list_files('profiles')` 报 ENOENT），该本地开发直挂文件实际缺失，仅 bundle 形态可用。
+- **行5** 指明设置项 config 命名空间 = `codewiki`。
+- **行6-18** 注释块列出配置项含义（仅注释，未在 YAML 主体展开默认值）：
+  - `binaryPath`（行6）：cw 可执行路径；留空优先用 PATH 里的 cw，找不到再用插件自带 `bin/cw.exe` / `bin/cw`。
+  - `batchProvider`（行7）：编译模型提供商（必须是模型设置里已注册的 provider；默认 `workbuddy`，留空=提交失败）。
+  - `batchModel`（行8）：编译模型 id（默认 `hy3`，免费 192k 上下文）。
+  - `batchReasoningEffort`（行9）：思考档位（取值来自模型目录 `reasoning.efforts`；留空=模型默认档）。
+  - `maxConcurrency`（行10）：默认档并发上限（1–8，默认 2）。
+  - `bigConcurrency`（行11）：大档并发上限（1–8，默认 0=跟随默认档），与默认档各自独立限流。
+  - `serialProjects`（行12）：单项目串行（默认开）。
+  - `articleLanguage`（行13）：文章语言（默认中文）。
+  - `planMode`（行14）：模块划分 auto=AST 符号+LLM 语义聚类（默认）｜dirs=顶层目录分组（旧行为）。
+  - `agenticArticles`（行15）：文章写作走 agentic 工具循环（默认开）。
+  - `agenticMaxSteps`（行16）：agentic 单篇步数上限（默认 30，1–100）。
+  - `symbolIncremental`（行17）：增量按 AST 符号级判定（默认开）。
+  - `updateReminder`（行18）：会话系统提示注入 wiki 维护提醒（默认开）。
+  - ⚠️ 注意：上述注释只覆盖了 14 个配置项，**未提及** `bigProvider`/`bigModel`/`bigReasoningEffort`/`bigTokenBudget`/`sessionTier`/`parallelProjects`/`autoCommit`/`excludePaths`/`autoUpdate`/`autoUpdateMin`/`workspaceOnly`/`enabled`，这些真实字段全部定义在 `index.js` 的 `Config` schema 中（见本节末尾与下方「Config schema」小节）。
+- **行19** `- insert:`：Cordis 的插入操作根节点。
+- **行20** `- id: codewiki`：插件 ID，固定为 `codewiki`，须全局唯一且须与本地开发配置一致。
+- **行21** `name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js`：指向本地绝对路径的 `index.js`，含空格编码 `%20`，为 Windows 绝对路径。此为 bundle 安装形态声明。
+- **行22-23** 注释：默认值不在本文件重复声明——留空即用插件 `Config` schema 里的默认值（见 `index.js` 的 `Config`）。想改哪项就填哪项。
+- **行24** `config: {}`：初始配置对象为空。实际默认值来自 `index.js` 的 `Config`（行60-86）与 `liveConfig()`（行92-134）合并逻辑；本文件只作为用户覆盖层。
+- **行25-33** 注释示例：展示如何填写 `config`（行26-33 注掉）以换编译模型、调并发、关掉 agentic 写作等，逐项对应行6-18 的配置项。
 
 ### .gitignore
 
-位于仓库根目录，Git 忽略规则文件（源码行1-12）。
+位于仓库根目录，Git 忽略规则文件（源码行1-13）。无代码函数/类，以下为各规则行号与含义。
 
-- **行1** `node_modules/`：忽略 npm/yarn/pnpm 安装的依赖目录。
-- **行2** `vendor/codewiki/target/`：忽略 vendor 目录下 CodeWiki 构建的目标输出文件夹。
+- **行1** `node_modules/`：忽略 npm/yarn/pnpm 安装依赖目录。
+- **行2** `vendor/codewiki/target/`：忽略 vendor 目录下 CodeWiki 构建目标输出文件夹。
 - **行3** `*.log`：忽略所有日志文件。
 - **行4** 空行。
-- **行5** 注释说明 `bin/*.bak-*` 用途：cw 二进制备份（丢失源码的最后产物，安全网）。
-- **行6** `bin/*.bak-*`：忽略 `bin/` 目录下以 `.bak-` 开头的备份文件。
+- **行5** 注释：说明 `bin/*.bak-*` 用途为 cw 二进制备份（丢失源码的最后产物，安全网）。
+- **行6** `bin/*.bak-*`：忽略 `bin/` 目录下以 `.bak-` 开头的备份文件（当前仓库 `bin/` 下有 `cw.exe` 与 `cw.exe.bak-20261010`，后者被忽略、前者保留）。
 - **行7** 空行。
 - **行8** `.orch-test-out.txt`：忽略编排测试输出文件。
-- **行9** `.probe3.txt`：忽略探针测试文件。
+- **行9** `.probe3.txt`：忽略探针测试标记文件。
 - **行10** 空行。
-- **行11** 注释说明 `.dsh-ops/` 用途：DSH 运行期产物（面板会话流、工具调用记录），不入库。
-- **行12** `.dsh-ops/`：忽略 DSH 运行期产物。
+- **行11** 注释：说明 `.dsh-ops/` 用途为 DSH 运行期产物（面板会话流、工具调用记录），不入库。
+- **行12** `.dsh-ops/`：忽略 DSH 运行期产物目录。
+- **行13** 空行（文件末）。
 
 ## Architecture
 

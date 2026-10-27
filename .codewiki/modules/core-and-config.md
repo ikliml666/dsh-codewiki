@@ -14,9 +14,9 @@ tags: [core, config, plugin-entry, client-ui, dsh-codewiki]
 
 本模块是 `dsh-codewiki` 插件的核心代码与项目配置集合，包含插件主入口 `index.js`、浏览器侧客户端 `client.js`、cordis 挂载补丁 `cordis.patch.yml`、包定义 `package.json` 与 git 忽略规则 `.gitignore`。当前版本 0.13.4（`package.json` `3|`）。0.13.0 起插件吸入了 FSoft-AI4Code/CodeWiki（MIT，ACL 2026）的三层能力——AST 符号提取 + LLM 语义聚类（`semanticPlan` `884|`）、agentic 工具循环写作（`startAgenticRun` `2023|`）与符号级增量判定（`extractCurrentGraph` `1563|`）——全部用 Node + tree-sitter WASM 实现，不需要 Python 运行时；任一环节失败都自动降级回顶层目录分组 / 单轮整包装填 / 文件级增量，不会中断编译（`cordis.patch.yml` `2|`、`package.json` `4|`）。
 
-`index.js` 把 `mraza007/codewiki`（Rust CLI `cw`）接入 DeepSeek Harness（`1|`）。它注册四个工具（`apply` `3969|`）：基础 CLI 封装 `cw`（`cwToolDefinition` `1161|`）、编译提交 `codewiki_generate`（`generateToolDefinition` `2978|`）、固定 scope=auto 的日常维护快捷入口 `codewiki_update`（`updateToolDefinition` `3200|`）、只读进度查询 `codewiki_progress`（`progressToolDefinition` `3271|`）；外加后台常驻编排服务（`createJobService` `1695|`，阶段机 `articles → crosscut → compose → review → index → commit`，见 `STAGE_HANDLER` `2762|-2769|`）、宿主 webServer 回环端点（`installWebServer` `3479|`，挂 `/api/codewiki/*` 七个端点）、编译产物自动提交（`autoCommitWiki` `3807|`）与会话系统提示维护提醒注入（`installUpdateReminder` `3935|`）。全部模型环节在插件内完成：唯一模型通道是宿主 `llm` 服务（`llmChat` `412|`），默认 `workbuddy/hy3`（免费 192k 上下文，单请求输入预算 110k），超大输入改走大档 `volces-ark/glm-5.3-flash`（512k 上下文），零子代理（头注释 `2|-7|`）。
+`index.js` 把 `mraza007/codewiki`（Rust CLI `cw`）接入 DeepSeek Harness（`1|`）。它注册四个工具（`apply` `3969|`）：基础 CLI 封装 `cw`（`cwToolDefinition` `1161|`）、编译提交 `codewiki_generate`（`generateToolDefinition` `2978|`）、固定 scope=auto 的日常维护快捷入口 `codewiki_update`（`updateToolDefinition` `3200|`）、只读进度查询 `codewiki_progress`（`progressToolDefinition` `3271|`）；外加后台常驻编排服务（`createJobService` `1695|`，阶段机 `articles → crosscut → compose → review → index → commit`，见 `STAGE_HANDLER` `2762|-2769|`）、宿主 webServer 回环端点（`installWebServer` `3479|`，挂 `/api/codewiki/*` 七个端点）、编译产物自动提交（`autoCommitWiki` `3807|`）与会话系统提示维护提醒注入（`installUpdateReminder` `3935|`）。全部模型环节在插件内完成：唯一模型通道是宿主 `llm` 服务（`llmChat` `412|`，未导出，仅供内部调用），默认 `workbuddy/hy3`（免费 192k 上下文，单请求输入预算 110k），超大输入改走大档 `volces-ark/glm-5.3-flash`（512k 上下文），零子代理（头注释 `2|-7|`）。
 
-`client.js` 是浏览器半侧（`1|-8|`）：挂载「插件」页设置表单 `CodewikiCard`（`548|`）与侧边栏编译面板 `CodewikiPanel`（`1418|`，含仓库总览 `ReposTab` `1177|`、跨任务会话视图 `SessionView` `1326|`），经 `configForms` 命名空间 `codewiki` 读写配置（`17|`、`513|`），轮询宿主回环端点展示进度。`cordis.patch.yml` 以 `insert` 把 `index.js` 注册为 id `codewiki` 的插件（`19|-24|`）；`package.json` 声明包名 `@local/dsh-codewiki`、`exports` 双入口（`8|-11|`）与 `dsh.bundle.patch`（`24|-26|`）；`.gitignore` 排除依赖目录、cw fork 构建产物、cw 二进制备份与 DSH 运行期产物（`1|-12|`）。
+`client.js` 是浏览器半侧（`1|-8|`）：挂载「插件」页设置表单 `CodewikiCard`（`548|`）与侧边栏编译面板 `CodewikiPanel`（`1418|`，含仓库总览 `ReposTab` `1177|`、跨任务会话视图 `SessionView` `1326|`），经 `configForms` 命名空间 `codewiki` 读写配置（`17|`、`513|`），轮询宿主回环端点展示进度。`cordis.patch.yml` 以 `insert` 把 `index.js` 注册为 id `codewiki` 的插件（`19|-24|`）；`package.json` 声明包名 `@local/dsh-codewiki`、`exports` 双入口（`8|-11|`）与 `dsh.bundle.patch`（`24|-26|`）；`.gitignore` 排除依赖目录、cw fork 构建产物、cw 二进制备份与 DSH 运行期产物（`1|-13|`）。
 
 ## Key Components
 
@@ -98,4 +98,71 @@ tags: [core, config, plugin-entry, client-ui, dsh-codewiki]
 - `1053|-1069| batchArticleObservePrompt` — 文章分割观察（源码批 → 技术观察，要求「宁全勿简」：被省略的细节合成阶段将永远缺失）。
 - `1073|-1101| batchArticleComposePrompt` — 分割合成（全部批次观察 + 可选旧文 → 完整文章；观察引用的 `文件:行号` 直接沿用，不得发明）。
 - `1105|-1124| batchProofreadPrompt` — 单篇校对 prompt（核对 frontmatter、行号抽查、source_files 补全、改写不符描述）。
-- `1126|-1155| batchProofreadBatchPrompt` — 批量校对（hy3 适配 0.10.8）：多篇文章+各自源码合并为一个请求，输出按 `@@@article: 名`/`
+- `1126|-1155| batchProofreadBatchPrompt` — 批量校对（hy3 适配 0.10.8）：多篇文章+各自源码合并为一个请求，输出按 `@@@article: 名` / `@@@end` 标记分节，服务侧 `settleProofread` `1943|` 拆回逐篇、`writeValidated` `1870|` 校验后才落盘。
+- `1161|-1224| cwToolDefinition(cfg)` — 工具 1 `cw`：薄封装 CodeWiki CLI，白名单 `CW_SUBCOMMANDS`（`1208|-1209|`），经 `resolveBinary` `140|` + `runCw` `162|` 调 `cw`，`enabled=false` 时直接报错（`1203|`）。
+- `1238|-1260| parseSourceFiles(fm)` / `readSourceFiles(articlePath)` — 从 frontmatter 解析 `source_files`（inline 数组与 block 列表两式），供 stale 流程与本地核对取文件清单。
+- `1263|-1270| currentCommit(cwd)` — 取 HEAD 短 sha（快照记 baseline）；非 git 仓库返回 null。
+- `1272|-1277| wikiPathFor(cwd, binary, signal)` — 调 `cw path` 取 wiki 目录，失败回落仓库内 `.codewiki`。
+- `1232|-1234| slugify(name)` — 模块名→slug，保留 CJK、清理其它脚本字符。
+- `2978|-3190| generateToolDefinition(cfg, svc)` — 工具 2 `codewiki_generate`：判态（走 `parseStatus`）+ 提交；`scope=auto|full|stale`；stale 走符号级增量（`filterStaleTasks` `3130|`）；全量先 `cw init` 再 `svc.submit`。
+- `3200|-3252| updateToolDefinition(cfg, generateDef)` — 工具 2b `codewiki_update`：固定 `scope=auto`，复用 `generateDef.execute`（`3242|`）。
+- `3260|-3263| samePath(a,b)` / `3265|-3269| progressView(job)` — 进度比计算（done/taskList）。
+- `3271|-3375| progressToolDefinition(cfg, svc)` — 工具 3 `codewiki_progress`：只读查 job 进度（按 cwd/jobId 过滤），与面板同源 `jobSummary` `1614|`。
+- `3381|-3774| installWebServer(ctx, service, extra)` — 回环端点（guard `isLoopbackRequest` `3381|`）：`/api/codewiki/jobs` `3522|`、`/repos` `3560|`、`/sessions` `3655|`、`/sessions/item` `3677|`、`/models` `3701|`、`/model-efforts` `3720|`、`/control` `3741|`（cancel/refresh/compile）。
+- `3807|-3889| autoCommitWiki(cwd, {jobId, writtenCount})` — 编译产物自动提交：仅 pathspec `.codewiki`/`CodeWiki.md`（`3814|`），分支合并式（0.10.11），失败降级为 `commitHintText` 提醒（`3891|`）。
+- `3891|-3922| commitHintText(cwd, jobs)` — 一次性「产物待提交」提醒：仅当 `autoCommitState(latest)==='pending'` 且 git 未提交时（`3902|`）；60s TTL 缓存 `3789|`。
+- `3924|-3933| reminderText(cwd)` — 会话系统提示里的 wiki 维护提醒文案（收尾须调 `codewiki_generate`）。
+- `3935|-3967| installUpdateReminder(ctx, config)` — 经 `systemPrompt.section` 注入提醒（`3944|`），`updateReminder=false` 或仓库无 `CodeWiki.md` 时不注入。
+- `3969|-4034| apply(ctx, config)` — 插件装配入口：`inject` 取 `agentsRef`/`llmRef`（`3970|-3971|`）、起 `createJobService`+`start`（`3972|-3973|`）、注册四工具（`4014|-4030|`）、起 `installWebServer`、`installUpdateReminder`、60s 心跳自动更新调度 `autoScan` `3983|`。
+
+## Architecture
+
+`index.js` 是宿主半侧的唯一进程内模块：插件加载时 `apply`（`3969|`）经 cordis `inject` 拿到 `agents`/`llm` 服务引用，创建并常驻一个 `createJobService`（`1695|`）后台编排服务（每 `TICK_MS=10000` `1295|` 一拍推进 job 阶段机），同时注册四个工具、挂回环 webServer、注入会话提醒。`client.js` 是独立浏览器进程，只轮询回环端点、经 `configForms` 读写 `codewiki` 命名空间配置，与主进程无直接函数调用。
+
+```text
+┌─────────────── 浏览器 (client.js 1681 行) ───────────────┐         ┌──── 宿主进程 (index.js 4034 行) ────┐
+│ CodewikiCard(设置)  CodewikiPanel(进度)                   │  HTTP  │  apply(3969)                       │
+│  ReposTab  SessionView  经 configForms 读写 'codewiki'    │◄─loop──► /api/codewiki/{jobs,repos,       │
+└──────────────────────────────────────────────────────────┘  back  │   sessions,models,control}         │
+                                                                     │  installWebServer(3479)            │
+                  cw 子进程 (Rust CLI)                              │        │                             │
+  generateTool(2978) ── runCw(162) ──► [cw init/status/index/     │        ▼                             │
+  installWebServer/autoCommit ── git/spawnSync ──► meta/cw path]  │  createJobService(1695)             │
+                                                                     │   ├ tick(2771) → STAGE_HANDLER     │
+  模型生成（唯一通道=宿主 llm.stream）                            │   │   articles→crosscut→compose→     │
+  runRealtimeTasks(469) ── llmChat(412) ──► [llm 服务]            │   │   review→index→commit (2762)     │
+   startAgenticRun(2023) ── runAgenticArticles ──► [llm 服务]    │   ├ startBatchChatRun(1976)          │
+  会话通道兜底: dispatchSessionTasks(2141) ──► 发起会话 steer     │   └ submit(2859)/cancel(2946)/list  │
+```
+
+阶段机由 `STAGE_HANDLER`（`2762|-2769|`）映射：`articles`(`tickArticles` `2223|`) → `crosscut`(`tickCrosscut` `2439|`) → `compose`(`tickCompose` `2525|`) → `review`(`tickReview` `2574|`) → `index`(`tickIndex` `2687|`) → `commit`(`tickCommit` `2744|`)。每阶段把 prompt 交给后台并发池 `startBatchChatRun`（`1976|`）或 `startAgenticRun`（`2023|`），结果写进 `batchResults`（`1974|`）由 `settleJob`（`1835|`）收割，`tally`（`1897|`）/`writeValidated`（`1870|`）记账落盘。
+
+## Data Flow
+
+全量编译（`codewiki_generate` `scope=full`）：
+
+1. `generateToolDefinition.execute`（`3022|`）调 `cw status`→`parseStatus`（`213|`）判态，必要时 `cw init`。
+2. `svc.submit`（`2859|`）建 job（`owner=instanceId`、`stage=submitting`），经 `liveConfig` 校验 `batchProvider/batchModel/llmRef`，进 `articles`（或 `queued` 排队）。
+3. `tickArticles`（`2223|`）：`buildPlan`（`2074|`）→ `localPlan`（`862|`）或 `semanticPlan`（`884|` AST 聚类）；agentic 开则 `startAgenticRun`+`markBigAgenticTasks`，否则 `prepareArticleTasks`（`727|` 装填）→ `submitBatchFor`（`2099|`）→ `startBatchChatRun`。
+4. 每阶段结果经 `settleJob`→`tally`/`writeValidated` 落盘；`tickIndex` 跑 `cw index`+`cw meta update`、写符号快照（`extractCurrentGraph` `1563|`→`saveSnapshot`）、`ensureWikiEntry`。
+5. `tickCommit` 调 `autoCommitWiki`（`3807|`）把 `.codewiki/`+`CodeWiki.md` 提交到主题分支并合并回原分支（`3814|` 起）。
+
+增量编译（`scope=stale`/`auto`）：`generateToolDefinition` 在 `3098|` 处用 `status.staleArticles` 预建更新任务，再经 `filterStaleTasks`（`3130|`）按符号快照比对只留真受影响的文章，提交 `kind:'stale'` job 直接进 `articles`（提交时预构建 `prebuiltTasks`，`2828|`）。
+
+会话通道兜底：单文件连大档预算都装不下时 `prepareArticleTasks` 返回 `sessionTasks`（`770|`），`dispatchSessionTasks`（`2141|`）把指令写任务文件并 `buildSessionSteerText`（`1467|`） steer 发起会话派子智能体，轮询 `classifySessionTask`（`1450|`）收割。
+
+## Connections
+
+- [[plugin-core]] / [[plugin-runtime]]：本模块 = 插件核心与配置（`index.js`+`client.js`+`cordis.patch.yml`+`package.json`+`.gitignore`），被 cordis 挂载为 id `codewiki`（`cordis.patch.yml` `19|-24|`）。
+- [[orchestration-tests]] / [[test-suite]]：并发池、会话通道、规划等纯函数由 `test-*.mjs` 单测覆盖（`shouldFallBackFromAgentic` `855|`、`classifySessionTask` `1450|`、`buildSessionSteerText` `1467|` 等）。
+- [[client-interface]]：浏览器半侧 `client.js` 是本模块的双入口之一（`exports["./client"]` `index.js` `10|`）。
+- [[documentation-and-config]]：文章格式与六个固定章节由 `articleFormatSection`（`818|`）定义，编译出的 `modules/*.md`/`_architecture.md` 即为 [[core-and-config]] 等模块文档。
+
+## Known Issues
+
+- 会话通道仅当 `bigProvider` 留空且单文件 > 大档预算时才启用（`719|-723|` 注释）；启用依赖发起会话可用（`dispatchSessionTasks` `2143|` 判定 `agent.steer`），面板/自动调度提交本就无会话，因此该路径在那些入口下不可用、会直接 fail。
+- 跨实例一致性靠 `JOBS_LOCK_FILE`（`1587|`，60s 过期强删）、`mergeFromDisk`（`1749|`）与 `dirtyIds`（`1709|`）协作；`DSH_CODEWIKI_JOBS_FILE` 隔离不当会导致测试与真机内存副本互相覆盖（`1292|-1293|` 注释，tps 采样 flaky 的根因）。
+- `autoCommitWiki`（`3807|`）只在 `WIKI_PATHS` 两个 pathspec 上提交（`3814|`），`.codewiki` 被项目 `.gitignore` 忽略时一律返回 `reason: ignored` 不提交（`3831|`）；合并冲突时保留主题分支不强合（`3875|`）。
+- `apply`（`3969|`）在 cordis 严格语义下必须 `inject(['llm'])` 才能访问 `ctx.llm`（`1660|-1663|` 注释）；`llm` 未注入时 `submit` 会 `fail` 报「llm 服务未注入」（`2915|`）。
+- 会话系统提示提醒（`installUpdateReminder` `3935|`）只在仓库根存在 `CodeWiki.md` 时才注入（`3950|`），且仅当 `updateReminder` 开启（`3948|`）；自动提交成功时 `commitHintText`（`3891|`）静默，不唤醒会话。
+

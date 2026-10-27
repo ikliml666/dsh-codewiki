@@ -4,6 +4,69 @@ type: concept
 source_files:
   - index.js
   - client.js
+  - lib/articles-agentic.js
+  - lib/agentic.js
+  - lib/cluster.js
+  - lib/incremental.js
+  - lib/symbols.js
+  - lib/graph-diff.js
+tags: [wiki-generation, job-service, host-llm-service, pipeline, observability, auto-commit]
+---
+
+## Overview
+
+`wiki-generation-flow` 是 dsh-codewiki 的核心概念：把一次「仓库 → 活 wiki」的编译拆成一条**可持久化、可中断、可续跑、可观测**的服务化流水线。它不是一次同步函数调用，而是跨多次事件循环、跨宿主重启、必要时跨会话推进的状态机。插件对宿主暴露四个工具：`cw`（`1161| function cwToolDefinition(cfg) {`，薄封装 CodeWiki CLI）、`codewiki_generate`（服务化编译提交，`2978| function generateToolDefinition(cfg, svc) {`）、`codewiki_update`（固定 scope=auto 的日常维护入口，`3200| function updateToolDefinition(cfg, generateDef) {`）与 `codewiki_progress`（只读查进度，`3271| function progressToolDefinition(cfg, svc) {`）。编译的全部模型环节在插件内由宿主 llm 服务完成，默认模型 `workbuddy/hy3`（免费、192k 上下文，单请求输入预算 110k），零子代理（`1| // 提供两个工具：...` 注释定位代码库意图；`5| //   codewiki_generate — 服务化编译：判态后把编译任务提交给宿主常驻服务`）。默认并发 2（`33| const DEFAULT_CONCURRENCY = 2`，硬顶 `31| const CONCURRENCY_HARD_CAP = 8`），文章语言默认中文（`75|   articleLanguage: z.string().default('中文')...`）。
+
+四条设计主轴决定整条流程的形状：
+
+1. **阶段机与作业持久化**：作业（job）落盘在 `os.tmpdir()/dsh-codewiki-jobs.json`（`1294| const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')`），由 `setInterval` 心跳（`1295| const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)`，默认 10s）推进 `tick`（`2771|   async function tick() {`）。进程中断后下一进程凭磁盘状态续跑；同一仓库同时只允许一个非终态作业（`2858| const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))`）；跨进程用文件锁 `acquireTickLock`（`1590| function acquireTickLock() {`）与 `owner` 归属判定互斥（实例身份见 `1703|   const instanceId = ...`，孤儿接管阈值 `1487| const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)`，默认 5 分钟）。
+2. **token 预算优先的三档装填**：所有模型调用都是单轮文本生成，目标是把输入压进 110k 普通预算（`541| const BATCH_TOKEN_BUDGET = 110000`）。超出的先整任务改用大档（`bigProvider/bigModel`，默认 volces-ark/glm-5.3-flash，预算 `42| const DEFAULT_BIG_TOKEN_BUDGET = 420000`）；单文件连大档都装不下才转「会话通道」交发起会话模型派子智能体（`770|     if (tooBig) { emitSession(text); continue }`、`2141|   function dispatchSessionTasks(job, tasks) {`）；超大模块还有「观察→合成」分割（`790|     if (batches.length > 1) {`）。大档与默认档在并发池里各自独立限流（`474|   const bigTasks = []` 与 `475|   const normalTasks = []` 分池，`480|   const pools = []`）。
+3. **双写作通道**：文章写作默认走 agentic 工具循环（`77|   agenticArticles: z.boolean().default(true)...模型自己 read_code/list_files 读源码、edit_article 增量写...`）——模型自己读源码、增量写，不再把源码整包内联进 prompt；执行器是 `startAgenticRun`（`2023|   function startAgenticRun(job, tasks) {`），单批失败过半才退回单轮整包通道重跑一次（`855| export function shouldFallBackFromAgentic(results) {`、`1932|   function shouldFallBackHere(job, results, tasks) {`）。单轮整包装填（`727| export function prepareArticleTasks(tasks, { cwd, language, bigProvider = '', bigModel = '', bigReasoningEffort = '', bigBudget = DEFAULT_BIG_TOKEN_BUDGET } = {}) {`）是退路，也是装填决策的公共底座。
+4. **确定性兜底**：行号锚点校正（`568| export function fixAnchors(content, cwd) {`）、frontmatter 校验（`1870|   function writeValidated(job, task, content) {`）、索引重建（`2691|         const idx = await runCw(binary, job.cwd, ['index'], 120000)`）、入口文件生成（`246| export function ensureWikiEntry(cwd, language = '中文') {`）、产物自动提交（`3807| export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {`，由独立 `commit` 阶段的 `2744|   async function tickCommit(job) {` 调用）都由代码而非模型保证。
+
+编译触发入口有四个：会话内 `codewiki_generate` / `codewiki_update`；面板「更新」按钮（走 `POST /api/codewiki/control` 的 compile 动作，服务端 `3759|         if (body?.action === 'compile' && body?.cwd) {`，经 `4031|   installWebServer(ctx, service, { config, schedState, compile: (args, exec) => generateDef.execute(args, exec) })` 接到 generateDef）；自动更新调度器（`3983|   const autoScan = async () => {`，60s 心跳 `4011|   const scanTimer = setInterval(() => { void autoScan() }, 60000)`）。`codewiki_progress` 是只读查询，不触发编译。
+
+当前版本的结构性事实（与早期实现差异）：
+
+- **唯一模型通道是宿主 llm 服务**（`412| async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal, onDelta }) {`，服务引用经 `1663| let llmRef = null` 与 `3971|   if (typeof ctx.inject === 'function') ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })` 注入），插件零密钥（`1609|   // 0.10.1 起插件不存任何密钥，job 里也不再出现 apiKey 字段。`）；提交时只校验 provider/model 非空与 `llmRef.stream` 存在（`2913|       if (!c.batchProvider) throw ...` 至 `2915|       if (!llmRef || typeof llmRef.stream !== 'function') throw ...`）。
+- **没有独立规划阶段**：全量编译提交后直接进 `articles`，模块清单在 `tickArticles` 开头就地构建（`2335|         if (!job.plan) {` → `2338|           job.plan = await buildPlan(job, files)`；规划阶段已删的说明见 `2219|   // 规划阶段已删（0.10.7）...`）。`planMode=auto`（默认，`76|   planMode: z.string().default('auto')...`）走 `semanticPlan`（`884| export async function semanticPlan(files, { cwd, llm, provider, model, reasoningEffort, signal, notes = [] } = {}) {`，来自 `lib/cluster.js` + `lib/symbols.js`：tree-sitter AST 符号提取 + LLM 语义聚类，吸收自 FSoft CodeWiki）任一环节失败降级 `localPlan`（`862| export function localPlan(files) {`）顶层目录分组。
+- **agentic 写作是默认通道**（`2358|       if (c0.agenticArticles && tasks.length) {`），单轮整包为退路。
+- **大档并发独立限流**：`72|   bigConcurrency: z.number().default(0)...留空或 0 = 跟随默认档并发...`，折算见 `111|     bigConcurrency: Number.isFinite(bigConcurrency) && bigConcurrency >= 1`（默认 0 回落默认档）。
+- **产物提交是独立阶段**：`tickIndex` 写成功且 `autoCommit` 开启时转 `commit`（`2735|     if (job.writtenCount > 0 && liveConfig(config).autoCommit) {`、`2736|       setStage(job, 'commit')`），`autoCommitWiki` 走「主题分支提交 → 合并回原分支」（分支合并式，0.10.11，`3851|     // 分支合并式（0.10.11）：主题分支上提交 → 合并回原分支 → 删主题分支。`）。
+- **自动更新调度默认关**（`83|   autoUpdate: z.boolean().default(false)...`，间隔 `84|   autoUpdateMin: z.number().default(30)...` 默认 30 分钟最小 5）。
+
+客户端（client.js）提供侧边栏面板与设置页：`CodewikiPanel`（`1418|         function CodewikiPanel() {`）每 2s 轮询 jobs 端点（`22|     const POLL_MS = 2000`）渲染阶段步骤条与吞吐徽标；`ReposTab`（`1177|         function ReposTab() {`）轮询仓库总览（`23|     const REPOS_PATH = '/api/codewiki/repos'`、`31|     const REPOS_POLL_MS = 10000`）；`SessionView`（`1326|         function SessionView({ job, onClose }) {`）展示并发池每个 LLM 请求的 prompt/输出记录（保留 24h：`1310| const SESSION_TTL_MS = 24 * 60 * 60 * 1000`，目录 `1311| export const SESSIONS_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-sessions')`）；设置卡片 `CodewikiCard`（`548|         function CodewikiCard(props) {`）读写插件配置。
+
+## Key Components
+
+### 1. Job Service 与阶段机
+
+### 2. 提交入口与三态判定（codewiki_generate）
+
+### 3. Token 预算与输入装填
+
+### 4. 双写作通道：agentic 与单轮整包
+
+### 5. 横切与合成
+
+### 6. 本地核对与批量校对
+
+### 7. 自动提交与侧边栏观测
+
+## Architecture
+
+## Data Flow
+
+## Connections
+
+## Known Issues
+
+---
+title: wiki-generation-flow
+type: concept
+source_files:
+  - index.js
+  - client.js
 tags: [wiki-generation, job-service, host-llm-service, pipeline, observability, auto-commit]
 ---
 
@@ -35,13 +98,13 @@ tags: [wiki-generation, job-service, host-llm-service, pipeline, observability, 
 
 ### 1. Job Service 与阶段机
 
-`createJobService(config, onSettled)`（`1695| function createJobService(config, onSettled) {`）是全部编排状态的唯一持有者，返回 `{ submit, cancel, list, findActive, start, stop }`（`2970|   return { submit, cancel, list, findActive, start, stop }`）。
+`createJobService(config, onSettled)`（`1695| function createJobService(config, onSettled) {`）是全部编排状态的唯一持有者，返回 `{ submit, cancel, list, findActive, start, stop }`（`2970|   return { submit, cancel, list, findActive, start, stop }`）。它由 `apply` 在插件启动时创建并 `service.start()`（`3972|   const service = createJobService(config, wakeCompileSession)`、`3973|   service.start()`）。
 
 **阶段全集**见 `STAGE_HANDLER`（`2762|   const STAGE_HANDLER = {`）：
 
 | 阶段 | 处理函数 | 职责 |
 |---|---|---|
-| submitting | submit 内占位（`2891|       stage: 'submitting',`） | 凭证/llm 服务校验期间的落盘占位 |
+| submitting | submit 内占位（`2887|       stage: 'submitting',`） | 凭证/llm 服务校验期间的落盘占位 |
 | queued | tick 唤醒（`2820|         if (job.stage === 'queued') {`） | 项目闸门排队，轮到后落地寄存任务 |
 | articles | `2223|   async function tickArticles(job) {` | 规划 + 模块文章（agentic / 单轮 / 观察合成） |
 | crosscut | `2439|   async function tickCrosscut(job) {` | `_architecture.md` / `_patterns.md` / concepts |
@@ -52,13 +115,13 @@ tags: [wiki-generation, job-service, host-llm-service, pipeline, observability, 
 
 另有三个终态 `1518| const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled'])`。`stale` 增量作业从 `articles` 起步、完成直接进 `review`（`2414|     setStage(job, job.kind === 'full' ? 'crosscut' : 'review')`）；全量走完全部阶段。
 
-**提交 `submit`**（`2859|   async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId }) {`）的闸门次序是刻意的：排除清单判定（`2861|     const exHit = excludedItem(cwd, c0.excludePaths)`，实现 `284| function excludedItem(cwd, list) {`，命中即抛错并附命中项）→ worktree 闸门（`2867|     const wt = detectLinkedWorktree(cwd)`，判定 `309| export function detectLinkedWorktree(cwd) {`，auto 调度静默跳过 `2870|       return { skipped: 'worktree', reason: msg }`）→ 空壳目录闸门（`2878|     if (!hasCompilableSources(cwd)) {`，探测 `352| export function hasCompilableSources(cwd) {` 带 10 分钟缓存 `350| const SOURCE_PROBE_TTL_MS = 10 * 60 * 1000`，手动路径先清缓存 `2877|     if (!auto) clearSourceProbeCache(cwd)`）→ 登记已知仓库（`2883|     rememberRepo(cwd)`，清单 `1493| const REPOS_FILE = ...`、写入 `1497| function rememberRepo(cwd) {`）→ 幂等检查（`2884|     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))`）→ 才创建 `stage='submitting'` 占位并落盘（`2887|     const job = {`）。凭证校验仅三项（`2911`–`2915`），通过后记录 `credentialSource`（`2921|     job.credentialSource = ...`）。项目闸门（`2928|     const busyOthers = jobs.filter(...)` 满额时）进 `queued` 并把预置任务寄存到 `pendingTasks`（`2931|       job.pendingStage = 'articles'`、`2932|       job.pendingTasks = ...`），否则直接 `2937|       setStage(job, 'articles')`。收尾 `2941|     flush()` 后 **`2942|     void tick() // 立即推进一步，不等首个 tick 间隔`**。
+**提交 `submit`**（`2859|   async function submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId }) {`）的闸门次序是刻意的：排除清单判定（`2861|     const exHit = excludedItem(cwd, c0.excludePaths)`，实现 `284| function excludedItem(cwd, list) {`，命中即抛错并附命中项）→ worktree 闸门（`2867|     const wt = detectLinkedWorktree(cwd)`，判定 `309| export function detectLinkedWorktree(cwd) {`，auto 调度静默跳过 `2870|       return { skipped: 'worktree', reason: msg }`）→ 空壳目录闸门（`2878|     if (!hasCompilableSources(cwd)) {`，探测 `352| export function hasCompilableSources(cwd) {` 带 10 分钟缓存 `350| const SOURCE_PROBE_TTL_MS = 10 * 60 * 1000`，手动路径先清缓存 `2877|     if (!auto) clearSourceProbeCache(cwd)`）→ 登记已知仓库（`2883|     rememberRepo(cwd)`，清单 `1493| const REPOS_FILE = ...`、写入 `1497| function rememberRepo(cwd) {`）→ 幂等检查（`2884|     const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))`）→ 才创建 `stage='submitting'` 占位并落盘（`2887|     const job = {`）。凭证校验仅三项（`2911`–`2915`），通过后记录 `credentialSource`（`2921|     job.credentialSource = ...`）。项目闸门（`2926|     const limit = Math.max(1, c1.parallelLimit ?? 1)` 满额时）进 `queued` 并把预置任务寄存到 `pendingTasks`（`2931|       job.pendingStage = 'articles'`、`2932|       job.pendingTasks = ...`），否则直接 `2937|       setStage(job, 'articles')`。收尾 `2940|     persist()` 后 **`2942|     void tick() // 立即推进一步，不等首个 tick 间隔`**。
 
-**推进 `tick`**（`2771`）的多层互斥：模块内重入守卫（`2772|     if (ticking) return`）；跨进程文件锁（`2773|     if (!acquireTickLock()) return`，锁文件 `1587| const JOBS_LOCK_FILE = ...`，残留锁 60s 过期强删 `1596|       if (Date.now() - fs.statSync(JOBS_LOCK_FILE).mtimeMs > 60000) {`）；会话记录清理每 10 分钟一轮（`2777|       if (!tick.lastPruneAt || ...`）；跨实例取消标记拾取 `syncCancelFlags`（`2781|       syncCancelFlags()`，实现 `1811|   function syncCancelFlags() {`）；项目并行闸门（`2785|       const parallelLimit = Math.max(1, liveConfig(config).parallelLimit ?? 1)`——`serialProjects` 默认串行=上限 1，折算见 `115|     parallelLimit: (() => {` 至 `119|     })(),`）；`owner` 归属判定：另一实例的 job 停更未超 `ORPHAN_TAKEOVER_MS` 就让路，超时则接管并重发在途会话任务（`2797|         if (job.owner && job.owner !== instanceId) {` 至 `2805|           if (job.sessionTasks?.length) resendSessionSteer(job)`）。取消是标记制：tick 见 `2809|         if (job.cancelRequested) {` 才置 `cancelled`、中断在飞请求（`2815|           const ac = batchAborters.get(job.id)`、`2816|           if (ac) ac.abort()`）并丢弃未收割结果。旧版卡在 `plan` 阶段的残留任务迁移到 `articles`（`2835|         if (job.stage === 'plan') {`）。
+**推进 `tick`**（`2771`）的多层互斥：模块内重入守卫（`2772|     if (ticking) return`）；跨进程文件锁（`2773|     if (!acquireTickLock()) return`，锁文件 `1587| const JOBS_LOCK_FILE = ...`，残留锁 60s 过期强删 `1596|       if (Date.now() - fs.statSync(JOBS_LOCK_FILE).mtimeMs > 60000) {`）；会话记录清理每 10 分钟一轮（`2777|       if (!tick.lastPruneAt || ...`）；跨实例取消标记拾取 `syncCancelFlags`（`2781|       syncCancelFlags()`，实现 `1811|   function syncCancelFlags() {`）；项目并行闸门（`2785|       const parallelLimit = Math.max(1, liveConfig(config).parallelLimit ?? 1)`——`serialProjects` 默认串行=上限 1，折算见 `115|     parallelLimit: (() => {` 至 `119|     })(),`）；`owner` 归属判定：另一实例的 job 停更未超 `ORPHAN_TAKEOVER_MS` 就让路，超时则接管并重发在途会话任务（`2797|         if (job.owner && job.owner !== instanceId) {` 至 `2805|           if (job.sessionTasks?.length) resendSessionSteer(job)`）。取消是标记制：tick 见 `2808|         if (job.cancelRequested) {` 才置 `cancelled`、中断在飞请求（`2812|           const ac = batchAborters.get(job.id)`、`2813|           if (ac) ac.abort()`）并丢弃未收割结果。旧版卡在 `plan` 阶段的残留任务迁移到 `articles`（`2835|         if (job.stage === 'plan') {`）。
 
 **持久化**：`saveJobs`（`1607| function saveJobs(jobs) {`）只留最近 30 个（`1610|   const kept = jobs.slice(-MAX_JOBS_KEPT)`，常量 `1488| const MAX_JOBS_KEPT = 30`）；`mergeFromDisk`（`1749|   function mergeFromDisk() {`）吸收另一实例的新增/更新 job；脏标记 `dirty`/`dirtyIds`（`1706`–`1709`）保证只有状态变更过才整写文件（`touch` 统一入口 `1781|   const touch = (job) => {`）。阶段切换统一走 `setStage`（`1786|   const setStage = (job, stage) => {`），累计 `stageTimings` 供面板展示；用量累计 `addUsage`（`1798|   const addUsage = (job, { inputTok = 0, outputTok = 0, requests = 0, batch = false, realtime = false, overTier2 = 0 } = {}) => {`）。启动时还做两类残留清理：Temp 沙箱终态任务移除（`1713`–`1724`）、worktree/空壳目录的历史任务连同已知仓库登记一起摘除（`1731`–`1746`，反登记 `1508| export function forgetRepo(cwd) {`）。
 
-**结果结算三件套**：`settleJob`（`1835|   async function settleJob(job) {`）从 `batchResults`（`1974|   const batchResults = new Map()`）收割执行器结果；执行器丢失（宿主重启）时，agentic 任务按任务本体整批重跑（`1846|     const agenticTasks = (job.tasks ?? []).filter((t) => t.agentic === true && t.mission && t.articlePath)`，其余按 `job.tasks` 持久化的 `batchPrompt` 快照重跑本阶段（`1856|     const runnable = tasks.filter((t) => typeof t.batchPrompt === 'string' && t.batchPrompt.length)`）——这是唯一恢复路径，快照缺失则 fail（`1863|     fail(job, '请求因宿主重启丢失且无法重跑（任务缺少 prompt 快照），请重新提交')`）。`writeValidated`（`1870`）是 keepInMemory 结果的落盘闸门：输出不以 `---` 开头即拒绝（`1871|     if (typeof content !== 'string' || !content.trimStart().startsWith('---')) {`），通过后跑 `fixAnchors` 才写盘。`tally`（`1897|   function tally(job, results, tasks, { replace = false, mergeByName = false } = {}) {`）按名字合并累计 `writtenCount/failedCount`，`replace=true`（校对）与 `mergeByName=true`（重跑路径）都不让「曾经的成就被后续失败抹掉」（`1913|         if (!rec.ok && wasOk) rec.ok = true // 曾经的成就不被后续失败抹掉`）。取消入口 `cancel`（`2946|   function cancel(jobId) {`）只置 `cancelRequested` 标记。
+**结果结算三件套**：`settleJob`（`1835|   async function settleJob(job) {`）从 `batchResults`（`1973|   const batchResults = new Map()`）收割执行器结果；执行器丢失（宿主重启）时，agentic 任务按任务本体整批重跑（`1846|     const agenticTasks = (job.tasks ?? []).filter((t) => t.agentic === true && t.mission && t.articlePath)`，其余按 `job.tasks` 持久化的 `batchPrompt` 快照重跑本阶段（`1855|     const tasks = job.tasks ?? []` → 过滤 `1856|     const runnable = tasks.filter((t) => typeof t.batchPrompt === 'string' && t.batchPrompt.length)`）——这是唯一恢复路径，快照缺失则 fail（`1863|     fail(job, '请求因宿主重启丢失且无法重跑（任务缺少 prompt 快照），请重新提交')`）。`writeValidated`（`1870`）是 keepInMemory 结果的落盘闸门：输出不以 `---` 开头即拒绝（`1871|     if (typeof content !== 'string' || !content.trimStart().startsWith('---')) {`），通过后跑 `fixAnchors` 才写盘。`tally`（`1897|   function tally(job, results, tasks, { replace = false, mergeByName = false } = {}) {`）按名字合并累计 `writtenCount/failedCount`，`replace=true`（校对）与 `mergeByName=true`（重跑路径）都不让「曾经的成就被后续失败抹掉」（`1913|         if (!rec.ok && wasOk) rec.ok = true // 曾经的成就不被后续失败抹掉`）。取消入口 `cancel`（`2946|   function cancel(jobId) {`）只置 `cancelRequested` 标记。
 
 ### 2. 提交入口与三态判定（codewiki_generate）
 

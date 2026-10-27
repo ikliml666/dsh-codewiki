@@ -16,14 +16,15 @@
 - [[learnings/cw-binary-source-lost|cw-binary-source-lost]]
 ## Module
 
+- [[modules/integration-test-suites|Integration Test Suites]]
 - [[modules/batch-tests|batch-tests]]
+- [[modules/client-interface|client-interface]]
 - [[modules/configuration-and-metadata|configuration-and-metadata]]
 - [[modules/core-and-config|core-and-config]]
 - [[modules/core-application|core-application]]
 - [[modules/cwd-path-tests|cwd-path-tests]]
 - [[modules/documentation|documentation]]
 - [[modules/git-and-ops-artifacts|git-and-ops-artifacts]]
-- [[modules/integration-test-suites|integration-test-suites]]
 - [[modules/logs-and-temp|logs-and-temp]]
 - [[modules/observability|observability]]
 - [[modules/orchestration-tests|orchestration-tests]]

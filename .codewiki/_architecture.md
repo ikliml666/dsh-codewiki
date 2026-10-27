@@ -2,51 +2,46 @@
 title: System Architecture Overview
 type: architecture
 source_files:
-  - README.md
-  - CodeWiki.md
-  - CHANGELOG.md
-  - test-orchestration.mjs
-  - test-batch.mjs
-  - test-cwd-paths.mjs
-  - test-wiki-anchors.mjs
-  - test-wiki-entry.mjs
-  - index.js
-  - client.js
-  - cordis.patch.yml
   - package.json
+  - cordis.patch.yml
+  - index.js
+  - lib/symbols.js
+  - lib/cluster.js
+  - lib/agentic.js
+  - lib/agentic-host.js
+  - lib/articles-agentic.js
+  - lib/graph-diff.js
+  - lib/incremental.js
+  - README.md
+  - CHANGELOG.md
   - .gitignore
-  - .tmp-test-orchestration.log
-  - .tmp-test-batch.log
-  - .tmp-test-cwd-paths.log
-  - .tmp-test-wiki-anchors.log
-  - .tmp-test-wiki-entry.log
-  - watcher2.log
-tags: [架构, 系统总览, codewiki, dsh-codewiki, 模块连接]
+  - .codewiki/_index.md
+tags: [架构, 系统总览, codewiki, dsh-codewiki, 模块连接, 编译流水线, 吸收自FSoft]
 ---
 
 ## Overview
 
-本文件是 `@local/dsh-codewiki` 的系统总览，写给对仓库零上下文的未来 agent。插件（插件名 `PLUGIN_NAME`（`index.js:27`），当前版本 0.13.4（`package.json:3`））把 Rust CLI `cw`（来自 mraza007/codewiki，`README.md:3`）接入 DeepSeek Harness，提供仓库内活 wiki（`<repo>/.codewiki/`）的编译、更新与进度查询。全部模型环节在插件内完成、零子代理：模型调用唯一通道是 `llmChat`（`index.js:412-437`，经宿主 `llm.stream()`，请求带 `source: { kind: 'plugin:codewiki' }`（`index.js:27`）与 `temperature: 0`（`index.js:27`））；编译由宿主常驻服务 `createJobService`（`index.js:1695-2971`）以 tick 阶段机推进。
+本文件是 `@local/dsh-codewiki`（当前版本 0.13.4，`package.json:3`）的系统总览，写给对仓库零上下文的未来 agent。插件把 Rust CLI `cw`（来自 mraza007/codewiki，`README.md:3`）接入 DeepSeek Harness，提供仓库内活 wiki（`<repo>/.codewiki/`，随仓库提交共享）的编译、更新与进度查询。全部模型环节在插件内完成、零子代理：模型调用唯一通道是 `llmChat`（`index.js:412-437`），它经宿主 `llm.stream()` 发请求，请求带 `source: { kind: 'plugin:codewiki' }`（`index.js:412`）与 `temperature: 0`（`index.js:412`）；编译由宿主常驻服务 `createJobService`（`index.js:1695-2971`）以 10s tick（`TICK_MS`，`index.js:1295`）阶段机推进。
 
-仓库由四个逻辑部分构成：**core-and-config**（`index.js` 宿主半侧单文件 4033 行 + `lib/` 七个吸收模块 + `client.js` 浏览器半侧 1680 行 + `cordis.patch.yml`/`package.json`/`.gitignore`）、**docs-and-meta**（`README.md`/`CodeWiki.md`/`CHANGELOG.md`）、**test-scripts**（`test-*.mjs` 回归脚本）、**logs-and-temp**（`.tmp-test-*.log` 与 `watcher2.log`，均为被 `*.log`（`.gitignore:3`）忽略的历史调试产物）。挂载方式是 `cordis.patch.yml:19-24` 的 `insert` 条目（id `codewiki`，file:/// 直挂，`config: {}` 表示全部用 Config schema 默认值）。
+仓库由四部分组成：**core-and-config**（`index.js` 宿主半侧单文件 4034 行 + `lib/` 七个吸收模块 + `client.js` 浏览器半侧 + `cordis.patch.yml`/`package.json`/`.gitignore`）、**docs-and-meta**（`README.md`/`CHANGELOG.md`/`.codewiki/_index.md` 等；仓库无独立 `CodeWiki.md` 文档，入口由流水线在缺省时自动生成，见 `ensureWikiEntry` `index.js:246-279`）、**test-scripts**（`test-*.mjs` 回归脚本）、**logs-and-temp**（`*.log` 被 `.gitignore:2` 忽略，`.dsh-ops/` 见 `.gitignore:2-3`）。挂载方式是 `cordis.patch.yml:19-24` 的 `insert` 条目（id `codewiki`，本地开发走 `file:///` 直挂，`config: {}` 表示全部用 `Config` schema 默认值）。
 
 当前版本（0.13.4）的关键形态：
 
-- **三层吸收能力（0.13.0，`README.md:5`、`CHANGELOG.md:67`，四层对照表 `README.md:32-35`）**：AST 符号提取（`extractRepoGraph`（`index.js:16`），AST 不可用时表驱动 `REGEX_RULES` 正则降级，`CHANGELOG.md:51`）、LLM 语义聚类模块划分（`clusterComponents`（`index.js:17`），真递归下钻，`CHANGELOG.md:67`）、agentic 工具循环写作（`runAgenticArticles`（`index.js:23`））、符号级增量判定（`filterStaleTasks`/`slimGraph`/`graphFromSnapshot` 等（`index.js:77-80`），0.13.2 起按 `codeHash` 判定纯注释改动不重写，`CHANGELOG.md:48`）。全部用 Node + tree-sitter WASM 实现，不引 Python 运行时。三个开关 `planMode`（`index.js:76`）、`agenticArticles`（`index.js:77`，步数上限 `agenticMaxSteps`（`index.js:78`））、`symbolIncremental`（`index.js:79`）默认全开（`README.md:37`），任一环节失败自动降级；0.13.1 把 `generate_sub_module` 子模块递归成文真正接进生产链路（`CHANGELOG.md:67-87`），0.13.2 修掉其 `subDepth` 递归封顶失效的真缺陷（`CHANGELOG.md:46`），0.13.3 用真实模型跑通 agentic 通道并修复首次真实运行暴露的三个缺陷（`CHANGELOG.md:67-83`），0.13.4 修复 agentic 工具层的多处实测翻车点（CRLF 行尾匹配、子模块封顶死链、`read_code` 字符上限、忽略目录与负行号，`CHANGELOG.md:67-84`）。
-- **阶段机无独立 plan 阶段（0.10.7 删）**：`STAGE_HANDLER`（`index.js:2762-2769`）为 articles → crosscut →（超预算拆分时 compose）→ review → index → commit；模块划分在 articles 开头就地由 `buildPlan`（`index.js:2074-2097`）完成，queued 唤醒恒进 articles（`index.js:2762-2765`）。
-- **三级装填预算**：普通单请求 110k（`BATCH_TOKEN_BUDGET`（`index.js:541`））、兜底硬上限 128k（`BATCH_TOKEN_HARD_LIMIT`（`index.js:546`））、大档预算 420k（`DEFAULT_BIG_TOKEN_BUDGET`（`index.js:42`），默认 `DEFAULT_BIG_PROVIDER`/`DEFAULT_BIG_MODEL`（`index.js:39-40`）= volces-ark/glm-5.3-flash 512k 上下文）。
-- **双池并发（0.12.2）**：`runRealtimeTasks`（`index.js:469-528`）按任务装填时打的 `bigTier` 标记把大档与默认档请求拆进两个独立限流池、`Promise.all` 同时推进（`index.js:526`）；agentic 通道同样接双池（0.13.2，`markBigAgenticTasks`（`index.js:23`）打标）。
-- **提交是独立 commit 阶段（0.10.11）**：`tickCommit`（`index.js:2744-2760`）调 `autoCommitWiki`（`index.js:3807-3889`），走「主题分支 codewiki/wiki-\<jobId\> 提交 → 合并回原分支 → 删主题分支」，失败降级不丢产物。
+- **三层吸收能力（0.13.0，四层对照表 `README.md:32-37`）**：AST 符号提取（`extractRepoGraph` `lib/symbols.js:785-805`，AST 不可用时表驱动 `REGEX_RULES` 正则降级 `lib/symbols.js:302-368`）、LLM 语义聚类模块划分（`clusterComponents` `lib/cluster.js:291-389`，真递归下钻 `subdivide` `lib/cluster.js:396-422`）、agentic 工具循环写作（`runAgenticArticles` `lib/articles-agentic.js:204-279`，工具 `lib/agentic.js:323-383`）、符号级增量判定（`filterStaleTasks`/`slimGraph`/`graphFromSnapshot` 等 `lib/incremental.js:140-194`）。全部用 Node + tree-sitter WASM 实现，不引 Python 运行时（依赖落在 `vendor/tree-sitter/`，`README.md:32`）。三个开关 `planMode`（`index.js:76`）、`agenticArticles`（`index.js:77`，步数上限 `agenticMaxSteps` `index.js:78`）、`symbolIncremental`（`index.js:79`）默认全开（`cordis.patch.yml:14-17`），任一环节失败自动降级；0.13.1 把 `generate_sub_module` 子模块递归成文真正接进生产链路（`lib/articles-agentic.js:204-300` + `CHANGELOG.md:75-93`），0.13.2 修掉 `subDepth` 递归封顶失效的真缺陷（`CHANGELOG.md:46`）并加 `codeHash` 纯注释判定（`lib/graph-diff.js:108-111` + `lib/incremental.js:140-155`），0.13.3 用真实模型跑通 agentic 通道并修重复读抑制等三缺陷（`CHANGELOG.md:67-81`），0.13.4 修工具层四个实测翻车点（CRLF 行尾匹配、子模块封顶死链、`read_code` 字符上限、忽略目录与负行号，`CHANGELOG.md:67-81`）。
+- **阶段机无独立 plan 阶段（0.10.7 删）**：`STAGE_HANDLER`（`index.js:2762-2769`）为 `articles` → `crosscut` →（超预算拆分时 `compose`）→ `review` → `index` → `commit`；模块划分在 `articles` 开头就地由 `buildPlan`（`index.js:2074-2097`）完成，`queued` 唤醒恒进 `articles`（`index.js:2820-2827`）。
+- **三级装填预算**：普通单请求 110k（`BATCH_TOKEN_BUDGET` `index.js:541`）、兜底硬上限 128k（`BATCH_TOKEN_HARD_LIMIT` `index.js:546`）、大档预算 420k（`DEFAULT_BIG_TOKEN_BUDGET` `index.js:42`，默认 `DEFAULT_BIG_PROVIDER`/`DEFAULT_BIG_MODEL` `index.js:39-40` = volces-ark/glm-5.3-flash 512k 上下文）。
+- **双池并发（0.12.2）**：`runRealtimeTasks`（`index.js:469-528`）按任务装填时打的 `bigTier` 标记把大档与默认档请求拆进两个独立限流池、`Promise.all` 同时推进（`index.js:524`）；agentic 通道同样接双池（0.13.2，`markBigAgenticTasks` `lib/articles-agentic.js:287-300` 打标，`startAgenticRun` `index.js:2023-2070` 传 `bigConcurrency`）。
+- **提交是独立 commit 阶段（0.10.11）**：`tickCommit`（`index.js:2744-2760`）调 `autoCommitWiki`（`index.js:3807-3889`），走「主题分支 `codewiki/wiki-<jobId>`（`index.js:2744`）提交 → 合并回原分支 → 删主题分支」，失败降级不丢产物。
 - **编译对象闸门（0.12.0/0.12.1）**：`detectLinkedWorktree`（`index.js:309-325`）拒绝 git worktree、`isDeadCompileTarget`（`index.js:378-386`）拒绝「无可编译源码」的空壳目录，submit/面板/启动清理三处共用。
-- **会话透明化（0.11.0/0.12.0）**：每个 LLM 请求的 prompt/输出落盘（`beginSessionRecord`（`index.js:1402-1444`）），跨任务聚合（`listAllSessionRecords`（`index.js:1348-1368`））供面板全局「会话」Tab，保留 24h（`SESSION_TTL_MS`（`index.js:1310`））。
-- **多仓库并行（0.11.0）**：`serialProjects`（`index.js:73`）默认开 = 上限 1；关闭后按 `parallelProjects`（`index.js:74`，派生 `parallelLimit`（`index.js:115-119`））1–4 并行推进。
+- **会话透明化（0.11.0/0.12.0）**：每个 LLM 请求的 prompt/输出落盘（`beginSessionRecord` `index.js:1402-1444`），跨任务聚合（`listAllSessionRecords` `index.js:1348-1368`）供面板全局「会话」Tab，保留 24h（`SESSION_TTL_MS` `index.js:1310`）。
+- **多仓库并行（0.11.0）**：`serialProjects`（`index.js:73`）默认开 = 上限 1；关闭后按 `parallelProjects`（`index.js:74`，派生 `parallelLimit` `index.js:115-119`）1–4 并行推进。
 
 ## System Overview
 
 ```text
 ┌────────────────────────────┐    ┌───────────────────────┐
 │ docs-and-meta              │    │ logs-and-temp         │
-│ README/CodeWiki/CHANGELOG  │◄───│ .tmp-*.log/watcher2   │
+│ README/CHANGELOG/_index    │◄───│ *.log / .dsh-ops       │
 └─────────────┬──────────────┘    └───────────┬───────────┘
               │ 约定/口径                      │ 回归输出
               ▼                               ▼
@@ -62,11 +57,11 @@ tags: [架构, 系统总览, codewiki, dsh-codewiki, 模块连接]
 └────────────────────────────┘
 ```
 
-- **`index.js`（宿主半侧中枢）**：入口 `apply`（`index.js:3969-4033`）注入 `agentsRef`（`index.js:1658`）与 `llmRef`（`index.js:1663`）、创建并启动服务（`index.js:3969-3970`）、注册四个工具（`index.js:3969`：cw / codewiki_generate / codewiki_update / codewiki_progress，单工具 schema 违规只丢该工具的防御在 `index.js:3969-3978`）、挂 `installWebServer`（`index.js:3479-3774`，七个回环端点）、布 `installUpdateReminder`（`index.js:3935-3967`）、启动 60s 心跳的自动更新调度 `autoScan`（`index.js:3983-4010`，定时器 `index.js:4011-4013`）。
-- **`lib/`（吸收自 FSoft CodeWiki 的七个模块）**：symbols（AST 提取 + 正则降级）、cluster（两阶段聚类 + 真递归下钻）、agentic + agentic-host + articles-agentic（工具循环写作）、graph-diff + incremental（符号级增量，含 `codeHash` 注释判定）；导入清单在 `index.js:16-24`，能力矩阵与降级路径见 `README.md:32-35`。
-- **`client.js`（浏览器半侧）**：`window.__ModuleLoader__.load`（`client.js:10-11`）注册设置表单 `CodewikiCard`（`client.js:548-1036`：运行/编译模型/大档模型/编译流程（吸收自 FSoft CodeWiki）/调度与排除五节 + 保存条（`client.js:548-554`））与侧边栏 `CodewikiPanel`（`client.js:1418-1663`：总览/任务/会话/设置四 Tab），入口图标 `PanelIcon`（`client.js:1665`，`PANEL_ORDER`（`client.js:21`）= 52）。设置命名空间 `NS`（`client.js:17`）= `codewiki`。
-- **宿主服务依赖**：llm（唯一模型通道，凭证由宿主按 provider 解析，插件零密钥）、webServer（面板端点）、agents（编译终态 steer 唤醒与会话通道派发）、tools（工具注册）、workspaceRegistry（任务过滤）。
-- **docs-and-meta**：README 是用户面文档，CodeWiki.md 是项目 wiki 入口，CHANGELOG 逐版本记录设计决策；**test-scripts** 直接 `import` 插件验证契约（`test-batch.mjs:7-12`、`test-orchestration.mjs:24`），`test-wiki-anchors.mjs:1-8` 守卫本文这类 wiki 文章的行号锚点。
+- **`index.js`（宿主半侧中枢）**：入口 `apply`（`index.js:3969-4033`）注入 `agentsRef`（`index.js:3970`）与 `llmRef`（`index.js:3971`）、创建并启动服务（`index.js:3969-3970`）、注册四个工具（`index.js:3969-3985`：cw / codewiki_generate / codewiki_update / codewiki_progress，单工具 schema 违规只丢该工具的防御在 `index.js:3969-3980`）、挂 `installWebServer`（`index.js:3479-3774`，九个回环端点见 `index.js:3969-4033`）、布 `installUpdateReminder`（`index.js:3935-3967`）、启动 60s 心跳的自动更新调度 `autoScan`（`index.js:3983-4012`）。
+- **`lib/`（吸收自 FSoft CodeWiki 的七个模块）**：symbols（AST 提取 + 正则降级）、cluster（两阶段聚类 + 真递归下钻）、agentic + agentic-host + articles-agentic（工具循环写作）、graph-diff + incremental（符号级增量，含 `codeHash` 注释判定）；导入清单在 `index.js:16-24`，能力矩阵与降级路径见 `README.md:30-35`。
+- **`client.js`（浏览器半侧）**：`window.__ModuleLoader__.load`（`client.js:10-11`）注册设置表单 `CodewikiCard`（`client.js:548` 起的函数作用域，含运行/编译模型/大档模型/编译流程（吸收自 FSoft CodeWiki）/调度与排除五节 + 保存条）与侧边栏 `CodewikiPanel`（`client.js:1418-1663`：总览/任务/会话/设置四 Tab），入口图标 `PanelIcon`（`client.js:1665`，`PANEL_ORDER`（`client.js:21`）= 52）。设置命名空间 `NS`（`client.js:17`）= `codewiki`。
+- **宿主服务依赖**：llm（唯一模型通道，凭证由宿主按 provider 解析，插件零密钥）、webServer（面板端点）、agents（编译终态 steer 唤醒与会话通道派发）、tools（工具注册）、workspaceRegistry（任务过滤，见 `wsFilterPaths` `index.js:3495-3510`）。
+- **docs-and-meta**：README 是用户面文档，CHANGELOG 逐版本记录设计决策，`.codewiki/_index.md` 是仓库 wiki 的入口索引；**test-scripts** 直接 `import` 插件验证契约（`test-batch.mjs`、`test-orchestration.mjs`、`test-wiki-anchors.mjs` 等），`test-wiki-anchors.mjs` 守卫本文这类 wiki 文章的行号锚点（其符号提取规则与 `fixAnchors` `index.js:568-577` 同源）。
 
 ## Data Flow
 
@@ -90,7 +85,7 @@ tags: [架构, 系统总览, codewiki, dsh-codewiki, 模块连接]
                         └──────────────────────────┘
 ```
 
-1. **提交入口与闸门**：会话调 `codewiki_generate`（`generateToolDefinition`（`index.js:2978-3190`）的 execute（`index.js:2978`））：`normalizeCwd`（`index.js:49-54`，调用在 `index.js:3026`）→ 排除清单 `excludedItem`（`index.js:284-293`，调用在 `index.js:3028-3029`）→ worktree 闸门（`detectLinkedWorktree` 调用在 `index.js:3033`）→ 空壳闸门（`clearSourceProbeCache`（`index.js:368-371`）清缓存 + `hasCompilableSources`（`index.js:352-366`）判定，`index.js:3047-3054`）→ `cw status`（`runCw`（`index.js:162-187`）调用在 `index.js:3061`）→ `parseStatus`（`index.js:213-226`）三态（调用在 `index.js:3066`）。幂等：同仓库活动任务直接返回（`findActive`（`index.js:2958`）调用在 `index.js:3072`）；clean 短路（`index.js:2978-2981`）；stale 按文章 frontmatter 的 `source_files`（`parseSourceFiles`（`index.js:1238-1250`））逐篇预构建（`index.js:2978-2994`）——若 `symbolIncremental` 开启，用 `loadSnapshot`（`index.js:3121`）+ `extractCurrentGraph`（`index.js:1563-1580`）+ `graphFromSnapshot`（`index.js:3129`）+ `filterStaleTasks`（`index.js:3130`）做组件级过滤，全部滤掉则只刷新基线不重写（`index.js:2978-2983`）；missing 先 `cw init`（`index.js:2978-2984`）再全量提交（`index.js:3180-3187`）。`svc.submit`（`index.js:2859-2944`）再过三道闸（`index.js:2861-2882`）、`rememberRepo` 登记（`index.js:2883`）、落 `submitting` 占位（`index.js:2886-2908`）、编译模型三项校验（`index.js:2978-2987`，provider/model/llm 任一缺失即 fail 留痕）、排队判定后 `persist`+`flush`+立即 `tick`（`index.js:2940-2942`）。`codewiki_update`（`updateToolDefinition`（`index.js:3200-3252`））是固定 scope=auto 的包装；`codewiki_progress`（`progressToolDefinition`（`index.js:3271-3375`））只读查进度。
+1. **提交入口与闸门**：会话调 `codewiki_generate`（`generateToolDefinition`（`index.js:2978-3190`）的 execute（`index.js:2978-3144`））：`normalizeCwd`（`index.js:49-54`，调用在 `index.js:3026`）→ 排除清单 `excludedItem`（`index.js:284-296`，调用在 `index.js:3028`/`index.js:3072`）→ worktree 闸门（`detectLinkedWorktree` 调用在 `index.js:3033`）→ 空壳闸门（`clearSourceProbeCache`（`index.js:368-371`）清缓存 + `hasCompilableSources`（`index.js:352-366`）判定，`index.js:3047-3054`）→ `cw status`（`runCw`（`index.js:162-187`）调用在 `index.js:3061`）→ `parseStatus`（`index.js:213-226`）三态（调用在 `index.js:3066`）。幂等：同仓库活动任务直接返回（`findActive`（`index.js:2958`）调用在 `index.js:3072`）；clean 短路（`index.js:2978-2981`）；stale 按文章 frontmatter 的 `source_files`（`parseSourceFiles`（`index.js:1238-1250`））逐篇预构建（`index.js:2978-2993`）——若 `symbolIncremental` 开启，用 `loadSnapshot`（`index.js:3121`）+ `extractCurrentGraph`（`index.js:1563-1580`）+ `graphFromSnapshot`（`index.js:3129`）+ `filterStaleTasks`（`index.js:3130`）做组件级过滤，全部滤掉则只刷新基线不重写（`index.js:2978-2984`）；missing 先 `cw init`（`index.js:2978-2984`）再全量提交（`index.js:3180-3187`）。`svc.submit`（`index.js:2859-2944`）再过三道闸（`index.js:2861-2882`）、`rememberRepo` 登记（`index.js:2883`）、落 `submitting` 占位（`index.js:2886-2908`）、编译模型三项校验（`index.js:2978-2987`，provider/model/llm 任一缺失即 fail 留痕）、排队判定后 `persist`+`flush`+立即 `tick`（`index.js:2940-2942`）。`codewiki_update`（`updateToolDefinition`（`index.js:3200-3252`））是固定 scope=auto 的包装；`codewiki_progress`（`progressToolDefinition`（`index.js:3271-3375`））只读查进度。
 
 2. **项目闸门与排队**：`serialProjects` 默认开（串行=上限 1），关闭后按 `parallelLimit` 并行。submit 把后到任务预置 `queued`（`index.js:2922-2935`，`pendingStage`/`pendingTasks` 寄存），`tick`（`index.js:2771-2857`）每轮先算 `activeIds` 集合（忙碌项优先、再按提交顺序唤醒最早 queued，`index.js:2785-2794`），轮到时落地预置字段（`index.js:2820-2829`）、非本轮项目跳过（`index.js:2832`）；取消不受闸门限制（`index.js:2785-2794`，中断在飞请求），且跨实例取消标记由 `syncCancelFlags`（`index.js:1811-1822`，调用在 `index.js:2781`）每轮拾取。另一实例停更超 `ORPHAN_TAKEOVER_MS`（`index.js:1487`，默认 5 分钟）即孤儿接管（`index.js:2785-2793`）。
 
