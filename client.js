@@ -943,7 +943,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-                        // 编译流程（吸收自 FSoft CodeWiki 的三档能力：语义聚类 / agentic 写作 / 符号级增量）
+            // 编译流程（吸收自 FSoft CodeWiki 的三档能力：语义聚类 / agentic 写作 / 符号级增量）
             el('section', { 'data-dscw-field': '' },
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secPipeline'))),
               el('div', { 'data-dscw-hint': '' }, t('secPipelineHint')),

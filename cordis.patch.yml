@@ -19,4 +19,15 @@
 - insert:
     - id: codewiki
       name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js
+      # 默认值不在这里重复声明：留空即用插件 Config schema 里的默认值（见 index.js 的 Config）。
+      # 想改哪项就填哪项，未填的沿用默认。
       config: {}
+      # 例：换编译模型、调并发、关掉 agentic 写作
+      # config:
+      #   batchProvider: workbuddy
+      #   batchModel: hy3
+      #   maxConcurrency: 2
+      #   planMode: auto
+      #   agenticArticles: true
+      #   agenticMaxSteps: 30
+      #   symbolIncremental: true

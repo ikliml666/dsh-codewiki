@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.13.2 — 2026-10-27
+
+### 修复：0.13.0/0.13.1 的审计整改（一条真缺陷 + 一批诚实性与一致性问题）
+
+- 背景：对 `feat/sess-session-absorb-fsoft` 分支做双轴代码审查（Standards + Spec），逐条实测复核后确认 1 条真缺陷、一批文档/一致性偏差。用户裁定「全部修复」。
+
+- **P0 真缺陷：`subDepth` 递归封顶失效（`lib/articles-agentic.js`）**。`dispatchSub` 是**本层**的闭包，深度判定 `_depth >= subDepth` 绑在本层的 `_depth` 上；递归时原样传 `onSubModule: dispatchSub`，子层永远用父层的深度判定 → 封顶永不触发，模型可以无限往下拆。实测：`subDepth=1`/`maxSteps=4` 时模型调用 81 次；`subDepth=2` 直接 `JavaScript heap out of memory`。修法：递归时传 `onSubModule: null`，让子层按自己的 `_depth` 重建 `dispatchSub`（绑定 `_depth + 1`）。补测试：`subDepth=1` 只允许一层、`subDepth=2` 允许两层；回退验证（把 `onSubModule: null` 改回 `dispatchSub`）两条测试均 FAIL。
+
+- **纯注释改动不再触发重写（`lib/graph-diff.js` + `lib/incremental.js`）**。README 与 CHANGELOG 原先宣称「纯注释、空白改动不再触发全文重写」，但 `normalizeBody` 与上游 Python 逐字一致、只做空白归一，所以是文档过度承诺而非移植错。修法：**不动 `diffGraphs`**（与上游逐位对齐、有 78 条 golden 对拍），在判定层加降级——新增 `codeHash(node)` = 剥离注释与空白归一后的 sha1；`stripComments` 支持 `/* */` 块注释与 `//`、`#`、`--`、`;`、`%` 五种行首注释，并新增 `stripTrailingComment` 处理行尾注释；快照新增 `codeHash` 字段；`filterStaleTasks` 里「`bodyHash` 变了但 `codeHash` 没变且 `docstring` 没变」的组件归入 `cosmeticOnly` 不重写，其余变更照旧。返回值新增 `cosmeticOnly: string[]`，`dropped` 条目带 `cosmeticOnlyComponents` 便于解释「为什么这篇没重写」。`opts.ignoreCommentOnly === false` 可关掉该降级回到严格模式。快照缺 `codeHash`（旧快照）时该组件不降级，行为与旧版一致。
+  - 行尾注释只认 `//` 与 `#`（`TRAILING_COMMENT_MARKS`），**不认** `--`/`;`/`%`——它们在表达式里出现太多（`a--`、`for(;;)`、`50%2`），按行尾截断会吃掉真代码。行首注释仍认全五种。
+
+- **`lib/symbols.js` 补正则降级（239 行）**。原实现 AST 不可用时 `return []` 静默丢符号，整块语言的模块凭空从模块清单里消失，日志只有「skipped +N」。新增表驱动 `REGEX_RULES`（16 种语言，`fn`/`cls`/`arrow`/`iface`/`params`）+ `regexExtract(relPath, content, lang)`：按行扫、跳过块注释与单行注释、产出与 AST 同形状的符号记录；仅在 AST 路径不可用时启用，命中数记进 `stats.regex` 让调用方看得见降级。测试 24 条（含「WASM 不可用时自动走正则」「WASM 可用时 `stats.regex` 为 0」）。
+
+- **`lib/cluster.js` 下钻真递归（452→467 行）**。`subdivide` 原先只被顶层 `for` 循环调一次、内部不再递归，`maxDepth` 实际只当 `maxDepth > 1` 的布尔开关用——配 3 和配 2 行为完全一样。改为 `subdivide(..., depth, maxDepth, splitThreshold)`：子模块仍 `>= splitThreshold` 且 `depth < maxDepth` 时继续下钻，`stats.levels` 记录真实层数。测试 30 条。
+
+- **agentic 通道接双池（`lib/articles-agentic.js` + `index.js`）**。`runAgenticArticles` 早就有 `bigConcurrency` 双池实现，但生产链路从未传这个参数、也没给任务打 `bigTier` 标记——大档在 agentic 通道事实上不生效。新增导出 `sourceTokensOf(task, cwd)`（与 `index.js` 的 `estimateTokens` 同口径：CJK 按 1、其余按 3.5 字符/token）与 `markBigAgenticTasks(tasks, {bigTier, sizeOf})`（模块源文本量超 `bigTokenBudget` 才打标，`bigProvider` 未配置时原样返回）；`index.js` 的 `startAgenticRun` 传 `bigConcurrency: c.bigConcurrency` 并据此打标。新增导出 `resolveTaskRoute`：任务自带 provider/model 时以任务为准、**不回落**默认档的 `reasoningEffort`（默认档的 effort 可能不被大档模型支持）。
+
+- **`DEFAULT_MAX_STEPS` 统一（`lib/agentic.js` → `lib/articles-agentic.js` 再导出）**。原先 `lib/agentic.js` 内部写 24、`lib/articles-agentic.js` 导出 30，直接调 `runAgenticArticle` 拿 24、走生产链路拿 30，同一配置两种行为。改为唯一定义在 `lib/agentic.js`（= 30，与 `index.js` Config 默认值一致），`articles-agentic.js` 导入并再导出保持既有导入路径可用。
+
+- **`tally` 去重语义收窄（`index.js`）**。0.13.0 把「按名字去重」改成无条件执行（本意是修重跑重复计数），但它顺带改变了校对阶段以外的所有 `tally` 调用语义（属于 scope creep）。收窄为两个独立开关：`replace=true`（校对阶段，同名覆盖）与 `mergeByName=true`（文章/观察/合成的重跑路径）；正常首次 tally 不合并。调用点按语义各自传参。
+
+- **`plan` 不再携带全量源码（`index.js`）**。`semanticPlan` 返回的 `plan.graph.components` 原先把每个组件的 `sourceCode` 一起带上，而 `plan` 会随 job 整体写进 `JOBS_FILE`——本仓 341 个组件约 347KB 纯冗余（判变更只用 `bodyHash`/签名/依赖，源码没有任何消费者）。已移除；`extractCurrentGraph` 的现场图不受影响。
+
+- **`cordis.patch.yml` 补配置示例**：`config: {}` 保留（含义是全部用 Config schema 默认值），补上被注释的完整字段示例（`batchProvider`/`batchModel`/`maxConcurrency`/`planMode`/`agenticArticles`/`agenticMaxSteps`/`symbolIncremental`）并注明「留空即用 schema 默认值」。
+
+- **文档一致性**：README 的工具表把 `edit_article` 误写成 `insert/replace/str_replace/delete`（实际只有 `view`/`str_replace`/`insert` 三种命令）已改正；CHANGELOG 0.13.0 里各模块行数（`symbols.js` 701→884、`cluster.js` 452→467、`agentic.js` 388→401、`articles-agentic.js` 131→292、`graph-diff.js` 497→578、`incremental.js` 169→206）按当前实际核对更新；`client.js` 一处缩进错位已修。
+
+- **清理**：`index.js` 删掉未使用的 `isDiffEmpty`/`serializeDiff`/`changedIds` 导入；`semanticPlan` 的 `extractRepoGraph` 调用去掉未使用的 `rootDir` 参数；`lib/agentic-host.js` 里 `content.map((b) => ... ? b : b)` 这种恒等映射（Middle Man）改为直接传 `content`。
+
+- 测试：`test-symbols` 19→24、`test-cluster` 28→30、`test-articles-agentic` 7→16、`test-incremental` 15→20、`test-semantic-plan` 10→11。全套回归：`test-agentic` 39、`test-agentic-host` 15、`test-agentic-fallback` 10、`test-batch` 128、`test-graphdiff` 全过、`test-incremental-e2e` 8、`test-orchestration` 编排冒烟、`test-cwd-paths`/`test-sessions`/`test-wiki-entry`/`test-worktree` 全过。
+
+- 版本 0.13.1 → 0.13.2（patch：修一条真缺陷 + 诚实性与一致性整改，无新增配置项）。
+
 ## 0.13.1 — 2026-10-27
 
 ### 修复：`generate_sub_module` 在生产链路上是空转的
@@ -28,13 +61,13 @@
 
 - 背景（用户需求）：用户看到 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（ACL 2026，MIT）比底层的 [mraza007/codewiki](https://github.com/mraza007/codewiki) 活跃得多，问能否换掉。核查后的结论是**不该换栈、该吸收**：`mraza007/codewiki` 是 Rust CLI 骨架，提供 `status`/`init`/`index`/`meta update` 这套文件级接口，插件与它 1:1 相符；而它**不含**「模块怎么划分」与「文章怎么写」这两件真正决定 wiki 质量的事——插件原先补的是最省事的两刀（顶层目录分组 + 源码整包内联一次成文）。FSoft 那套恰好就是在这两处做工程化，但它本身没有 `status`/`index`/`meta`，换掉会把插件的三态判定与增量链路一起丢掉，且要引入 Python 运行时（实测装下来 668MB）。用户 2026-10-26 选定「路线三：吸收优势、不换栈」，语言经三方案实测后定为 Node + tree-sitter WASM（不引 Python/Rust 运行时）。
 
-- **符号提取（`lib/symbols.js`，701 行）**：表驱动 `LANG_RULES` 替代上游按语言逐个 `analyzer`（约 800 行/语言）。用 `web-tree-sitter` + `tree-sitter-wasms` 的 36 个 WASM 语法，覆盖 16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name, kind, parameters, baseClasses, dependsOn, bodyHash, sourceCode, docstring}>`；`resolveImportEdges` 建跨文件依赖边（相对路径、包名、`__init__.py`、Go module 路径、Rust `crate::` 都有归一）。某语言无 WASM 语法时退回正则级符号提取，不影响其它语言。本仓库自检：135 个组件、0 解析失败。
+- **符号提取（`lib/symbols.js`，884 行）**：表驱动 `LANG_RULES` 替代上游按语言逐个 `analyzer`（约 800 行/语言）。用 `web-tree-sitter` + `tree-sitter-wasms` 的 36 个 WASM 语法，覆盖 16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name, kind, parameters, baseClasses, dependsOn, bodyHash, sourceCode, docstring}>`；`resolveImportEdges` 建跨文件依赖边（相对路径、包名、`__init__.py`、Go module 路径、Rust `crate::` 都有归一）。某语言无 WASM 语法时退回正则级符号提取，不影响其它语言。本仓库自检：135 个组件、0 解析失败。
 
-- **模块划分（`lib/cluster.js`，452 行）**：移植上游 `cluster_modules.py` 的两阶段聚类——先按组件职责聚类，再对超大模块递归下钻（`CLUSTER_MODULE_PROMPT` 分支），最后 super-group 合并。`heuristicCluster` 兜底：**单顶层目录（极常见的 `src/` 布局）时自动下探到第二层**，否则整仓会被塞进一个模块。模型请求失败或没有模型时退回 `localPlan` 顶层目录分组，并在 job note 里写明降级原因。
+- **模块划分（`lib/cluster.js`，467 行）**：移植上游 `cluster_modules.py` 的两阶段聚类——先按组件职责聚类，再对超大模块递归下钻（`CLUSTER_MODULE_PROMPT` 分支），最后 super-group 合并。`heuristicCluster` 兜底：**单顶层目录（极常见的 `src/` 布局）时自动下探到第二层**，否则整仓会被塞进一个模块。模型请求失败或没有模型时退回 `localPlan` 顶层目录分组，并在 job note 里写明降级原因。
 
-- **文章写作（`lib/agentic.js` 388 + `lib/agentic-host.js` 101 + `lib/articles-agentic.js` 131）**：上游 `run_module_agent` 的工具循环。工具 `read_code`（带行号前缀、支持行范围）、`list_files`（递归深度）、`edit_article`（view / str_replace / insert，空文章用 insert 从第 0 行搭骨架）、`generate_sub_module`（委派子模块成文）。好处是不再把源码整包塞进 prompt，因此**没有「超预算 → 拆观察批 → 合成」那一整套**，大文件也不会退化成观察批。`agentic-host.js` 负责裸消息 ↔ 宿主 `llm.stream` 的 Message/chunk 协议适配（`makeHostStream`/`makeFsWorkspace`/`toRequestMessages`），`articles-agentic.js` 接 job 生命周期（并发池、落盘、锚点修正）。单篇空文章算失败，不会用空文件覆盖旧文。
+- **文章写作（`lib/agentic.js` 401 + `lib/agentic-host.js` 101 + `lib/articles-agentic.js` 292）**：上游 `run_module_agent` 的工具循环。工具 `read_code`（带行号前缀、支持行范围）、`list_files`（递归深度）、`edit_article`（view / str_replace / insert，空文章用 insert 从第 0 行搭骨架）、`generate_sub_module`（委派子模块成文）。好处是不再把源码整包塞进 prompt，因此**没有「超预算 → 拆观察批 → 合成」那一整套**，大文件也不会退化成观察批。`agentic-host.js` 负责裸消息 ↔ 宿主 `llm.stream` 的 Message/chunk 协议适配（`makeHostStream`/`makeFsWorkspace`/`toRequestMessages`），`articles-agentic.js` 接 job 生命周期（并发池、落盘、锚点修正）。单篇空文章算失败，不会用空文件覆盖旧文。
 
-- **符号级增量（`lib/graph-diff.js` 497 + `lib/incremental.js` 169）**：逐位移植上游 `updater/graph_diff.py`——组件级 `bodyHash` + 签名比对，区分 `interface` / `added` / `deleted` / `renamed` / `body` / `edge` 六类变更，其中 `renamed` 用「删除+新增近似」配对。`incremental.js` 负责快照存取（`.codewiki/temp/symbol-graph.json`，随 wiki 入库）、文件级 → 组件级折算、按文章 frontmatter 的 `source_files` 过滤出「哪些文章真的要重写」。**收益**：纯注释、空白、格式化、函数体局部改动不再触发全文重写。快照缺失/版本不符/提取失败一律退回文件级 mtime/hash 判定。
+- **符号级增量（`lib/graph-diff.js` 578 + `lib/incremental.js` 206）**：逐位移植上游 `updater/graph_diff.py`——组件级 `bodyHash` + 签名比对，区分 `interface` / `added` / `deleted` / `renamed` / `body` / `edge` 六类变更，其中 `renamed` 用「删除+新增近似」配对。`incremental.js` 负责快照存取（`.codewiki/temp/symbol-graph.json`，随 wiki 入库）、文件级 → 组件级折算、按文章 frontmatter 的 `source_files` 过滤出「哪些文章真的要重写」。**收益**：纯注释、空白、格式化、函数体局部改动不再触发全文重写。快照缺失/版本不符/提取失败一律退回文件级 mtime/hash 判定。
 
 - **接入（`index.js`）**：新增 `planMode` / `agenticArticles` / `agenticMaxSteps` / `symbolIncremental` 四个配置，**默认全开**；三者分别设成 `dirs`/`false`/`false` 即恢复 0.12.x 旧行为。`buildPlan` 走 `semanticPlan`（新导出）并由 `extractCurrentGraph` 提供符号图；`tickArticles` 增加 agentic 通道分支，与 `startBatchChatRun` 并列的第二条执行器（结果同样进 `batchResults` 由 `settleJob` 收割），宿主重启后按 `t.tasks[*].agentic === true` 重跑而不再找 `batchPrompt`。
 
