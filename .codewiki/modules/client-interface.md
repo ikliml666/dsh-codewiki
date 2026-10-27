@@ -4,7 +4,6 @@ type: module
 source_files:
   - client.js
 tags: [client, react, api-wrapper, plugin-system, sidebar-panel, config-forms]
----
 
 ## Overview
 

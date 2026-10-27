@@ -17,7 +17,6 @@
 ## Module
 
 - [[modules/batch-tests|batch-tests]]
-- [[modules/client-interface|client-interface]]
 - [[modules/configuration-and-metadata|configuration-and-metadata]]
 - [[modules/core-and-config|core-and-config]]
 - [[modules/core-application|core-application]]
