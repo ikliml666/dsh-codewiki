@@ -24,6 +24,7 @@
 - [[modules/core-application|core-application]]
 - [[modules/cwd-path-tests|cwd-path-tests]]
 - [[modules/documentation|documentation]]
+- [[modules/documentation-and-config|documentation-and-config]]
 - [[modules/git-and-ops-artifacts|git-and-ops-artifacts]]
 - [[modules/logs-and-temp|logs-and-temp]]
 - [[modules/observability|observability]]
@@ -33,6 +34,3 @@
 - [[modules/test-suite|test-suite]]
 - [[modules/testing-suite|testing-suite]]
 - [[modules/wiki-tests|wiki-tests]]
-## Unknown
-
-- [[modules/documentation-and-config|modules/documentation-and-config.md]]
