@@ -167,7 +167,24 @@ await check('makeFsWorkspace 拒绝越界列', async () => {
   await assert.rejects(async () => ws.listDir('../..'), /越界/)
 })
 
-console.log(`\n${pass} passed, ${fails.length} failed`)
+
+await check('同一批裸消息多次转换，MessageId 保持稳定（身份跨边界）', async () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'yo' }, { type: 'tool-call', id: 'c1', name: 'read_code', arguments: '{}' }] },
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }], isError: false }] },
+  ]
+  const a = toRequestMessages(messages, { provider: 'p', model: 'm' })
+  const b = toRequestMessages(messages, { provider: 'p', model: 'm' })
+  assert(a.length === b.length)
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i].id, b[i].id, `第 ${i} 条消息 id 应稳定`)
+  }
+  assert.equal(a[2].toolCallId, 'c1')
+})
 if (fails.length) for (const f of fails) console.log(`\n--- ${f.label} ---\n${f.err.stack}`)
 fs.rmSync(tmp, { recursive: true, force: true })
+
+console.log(`\n${pass} passed, ${fails.length} failed`)
+if (fails.length) for (const f of fails) console.log(`\n--- ${f.label} ---\n${f.err.stack}`)
 process.exit(fails.length ? 1 : 0)

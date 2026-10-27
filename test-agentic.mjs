@@ -446,6 +446,78 @@ await check('parseToolArgs 对象直通、空串给空对象', async () => {
   assert.deepEqual(parseToolArgs('{"a":2}', [], 0, 't'), { a: 2 })
 })
 
+await check('parseToolArgs 剥 ```json 围栏', async () => {
+  assert.deepEqual(parseToolArgs('```json\n{"path":"a.js"}\n```', [], 0, 'read_code'), { path: 'a.js' })
+  assert.deepEqual(parseToolArgs('```\n{"command":"view"}\n```', [], 0, 'edit_article'), { command: 'view' })
+  // 围栏内还有前导说明的常见形态
+  assert.deepEqual(parseToolArgs('```JSON\n\n{"line":0}\n```', [], 0, 't'), { line: 0 })
+})
+
+await check('parseToolArgs 截取夹在说明文字里的 JSON', async () => {
+  const got = parseToolArgs('好的，我来读代码。{"path":"src/a.js","start_line":3} 这样可以吗', [], 0, 'read_code')
+  assert.deepEqual(got, { path: 'src/a.js', start_line: 3 })
+})
+
+await check('parseToolArgs 平衡括号不误截字符串内的花括号', async () => {
+  const got = parseToolArgs('说明 {"text":"a { b } c","line":2} 尾注', [], 0, 'insert')
+  assert.deepEqual(got, { text: 'a { b } c', line: 2 })
+})
+
+await check('parseToolArgs 真坏 JSON 记警告并给空对象', async () => {
+  const steps = []
+  assert.deepEqual(parseToolArgs('{不是 json', steps, 7, 'read_code'), {})
+  assert.equal(steps.length, 1)
+  assert.equal(steps[0].step, 7)
+  assert.match(steps[0].warning, /不是合法 JSON/)
+})
+
+await check('parseToolArgs 非对象 JSON 视为坏参数', async () => {
+  const steps = []
+  assert.deepEqual(parseToolArgs('[1,2,3]', steps, 0, 't'), {})
+  assert.match(steps[0].warning, /必须是 JSON 对象/)
+})
+
+await check('read_code 重复读不再回吐正文，只提示第几步读过', async () => {
+  const lines50 = Array.from({length: 50}, (_, i) => `line${i+1}`).join('\n')
+  let reads = 0
+  let step = 3
+  const ws = makeWorkspace({ async readFile() { reads++; return lines50 } })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => step })
+  const first = await tools.read_code({ path: 'a.js', start_line: 1, end_line: 10 })
+  assert(first.text.includes('1| line1'), '首次读要回正文')
+  step = 7
+  const second = await tools.read_code({ path: 'a.js', start_line: 1, end_line: 10 })
+  assert(second.text.includes('第 3 步读过'), `重复读要报首次步号，实际：${second.text.slice(0, 80)}`)
+  assert(!second.text.includes('1| line1'), '重复读不能再回正文')
+  assert.equal(reads, 1, '重复读不应再碰文件系统')
+})
+
+await check('read_code 换个行范围仍正常读（去重只认同一段）', async () => {
+  const lines50 = Array.from({length: 50}, (_, i) => `line${i+1}`).join('\n')
+  const ws = makeWorkspace({ async readFile() { return lines50 } })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => 2 })
+  await tools.read_code({ path: 'a.js', start_line: 1, end_line: 10 })
+  const other = await tools.read_code({ path: 'a.js', start_line: 20, end_line: 30 })
+  assert(other.text.includes('20| line20'), '不同行范围要正常返回正文')
+})
+
+await check('不同文件互不影响去重', async () => {
+  const ws = makeWorkspace({ async readFile() { return 'aaa\nbbb' } })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => 1 })
+  await tools.read_code({ path: 'a.js' })
+  const b = await tools.read_code({ path: 'b.js' })
+  assert(!b.text.includes('读过'), '另一个文件要正常返回正文，实际：' + b.text.slice(0, 60))
+})
+
+await check('read_code 不带 end_line 重复读同样命中', async () => {
+  const ws = makeWorkspace({ async readFile() { return 'x\ny\nz' } })
+  const tools = buildToolset({ workspace: ws, editor: makeArticleEditor(''), getStep: () => 5 })
+  const first = await tools.read_code({ path: 'a.js' })
+  assert(!first.isError)
+  const again = await tools.read_code({ path: 'a.js' })
+  assert(again.text.includes('第 5 步读过'), `同段重复读要提示，实际：${again.text.slice(0, 60)}`)
+})
+
 await check('buildToolset 暴露四个工具', async () => {
   const ts = buildToolset({ workspace: makeWorkspace(), editor: makeArticleEditor('') })
   assert.deepEqual(Object.keys(ts).sort(), ['edit_article', 'generate_sub_module', 'list_files', 'read_code'])

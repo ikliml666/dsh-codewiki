@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.3 — 2026-10-27
+
+### 修复：首次真实运行（真模型 + 真落盘）暴露的三个缺陷
+
+背景：此前 0.13.x 的 191 条断言全部由注入的假 `streamFn` 驱动，agentic 写作通道**从未真实跑过一次**（用户追问「测试过写文章吗」后核实）。本轮改用真实宿主 `llm.stream` 跑通，立刻暴露出离线测试结构性看不到的问题。
+
+- **`read_code` 重复读抑制（`lib/agentic.js`）**。真实运行里模型会反复读同一个大文件：一次 45 步的探针中 `read_code` 调用 16 次、其中 12 次是重复读，`index.js` 被读了 13 遍，累计请求上下文 2144KB，步数全耗在读码上，最终 `stopReason='max-steps'` 而文章没写完。根因是模型没有「我读过这个」的记忆，而工具每次都老实回吐全文。修法：`makeReadCodeTool` 增加 `seen` 记账（键为 `path + 起始行 + 结束行`），同一段再读只回一句「你已经在第 N 步读过这段，内容就在你上面的上下文里」。**去重判定必须发生在读盘之前**——初版写在 `readFile` 之后，重复读照样把整份文件读进内存，白省不了 IO（该时序缺陷由新增测试「重复读不应再碰文件系统」捕获，回退验证劣化后 2 条 FAIL）。修后同一探针：重复读 12 → 5 次、上下文 2144 → 1413KB、步数 45 → 17、`stopReason` 由 `max-steps` 变为 `finished`。
+  - 步号经 `buildToolset({ getStep })` 由循环内的 `stepRef` 注入，循环每步刷新，模型看到的「第 N 步」是真实步号。
+
+- **`toRequestMessages` 的 MessageId 身份漂移（`lib/agentic-host.js`）**。宿主 d.ts 对 `MessageId` 的要求是 `Stable identity preserved across every representation boundary`（`message.d.ts:126`），而工具循环每轮都拿同一份裸 `messages` 重新过一遍 `toRequestMessages`，每次都 `createUserMessage` / `createAssistantMessage`，同一条消息每步换一个新 UUID。实测同一批裸消息连调两次，`user` 与 `assistant` 的 id 全不同。修法：模块级 `WeakMap` 以裸消息对象为键缓存已构造的正式消息（tool 角色一拆多，键里带 `toolCallId`），对象随循环消息生命周期回收。**首版只缓存了 assistant 分支、漏了 user**，被新增测试「同一批裸消息多次转换，MessageId 保持稳定」直接判 FAIL，补上 user 分支后通过。
+
+- **真实探针的三个配套坑（已一并修掉）**。
+  1. `runOneArticle` 落盘读的是 `task.articlePath`，探针先前传 `articleFile` 导致文章不落盘、误判成「跑了但没写」——答案在 `lib/articles-agentic.js:132` 的 `task?.articlePath`。
+  2. 工具 JSON 参数被包在 markdown 围栏里时 `parseToolArgs` 原先不剥围栏，已按「原样 → 剥 ```json 围栏 → 截首个括号平衡对象」三级递进处理。
+  3. 真实宿主 `llm.stream` 的 `signal` 需透传，否则长请求无法中断。
+
+测试：`test-agentic.mjs` 44 → 48 条（新增 4 条覆盖去重、跨行范围、跨文件、不带 `end_line` 的同段判定），`test-agentic-host.mjs` 15 → 16 条（身份稳定）。全量 17 个测试文件回归：`test-agentic-fallback` 10、`test-agentic-host` 16、`test-agentic` 48、`test-articles-agentic` 16、`test-batch` 128、`test-cluster` 30、`test-cwd-paths` ALL PASS、`test-graphdiff` ALL PASS、`test-incremental-e2e` 8、`test-incremental` 20、`test-orchestration` PASS、`test-semantic-plan` 11、`test-sessions` PASS、`test-symbols` 24、`test-wiki-entry` 全部断言通过、`test-worktree` PASS。
+
 ## 0.13.2 — 2026-10-27
 
 ### 修复：0.13.0/0.13.1 的审计整改（一条真缺陷 + 一批诚实性与一致性问题）
