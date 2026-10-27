@@ -9,6 +9,7 @@ import {
   buildSessionSteerText,
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
+  validateArticleEnvelope,
 } from './index.js'
 
 let passed = 0
@@ -577,7 +578,61 @@ const fa = (body) => faFm + body
   const multiOk = fixAnchors(fa('`alpha` (`a.js:1`)、`delta` (`a.js:5`)。'), faRoot)
   check(multiOk.fixed === 0 && /`alpha` \(`a\.js:1`\)、`delta` \(`a\.js:5`\)/.test(multiOk.text),
     '一行两个已正确的锚点 → 互不干扰原样保留')
+
+  // 多锚点行的「已正确」判定必须用**已被占用**的符号来挡：同一行两个锚点不能认领同一个
+  // 符号，否则第二个锚点会被改到第一个符号的行上。
+  //
+  // 注意这里**不能**要求「起始行含该符号就必须改成它的声明行」——单锚点行一直采用宽松
+  // 判定（起始行提到该符号即认可，见上一条用例），多锚点行若改用严格判定，就会出现
+  // 同一份文档单锚点行保留、多锚点行被改的不一致。真正的护栏是 used 占用 + 就近排序：
+  // 第 3 行 `const gamma = beta()` 同时含两个符号，`beta` 认领第 3 行后，`gamma` 仍能
+  // 各自改到它自己的位置——两个符号不会被同一个锚点抢走。
+  const swap = fixAnchors(fa('`beta` (`a.js:3`)、`gamma` (`a.js:99`)。'), faRoot)
+  check(swap.fixed === 1 && swap.text.includes('`gamma` (`a.js:3`)'),
+    '多锚点行：认领过 beta 的第 3 行仍能被 gamma 用，gamma 锚点照常修正')
+  const oneWrong = fixAnchors(fa('`alpha` (`a.js:1`)、`delta` (`a.js:99`)。'), faRoot)
+  check(oneWrong.fixed === 1 && oneWrong.text.includes('`alpha` (`a.js:1`)') && oneWrong.text.includes('`delta` (`a.js:5`)'),
+    '一对其一错 → 只改错的那个，不因第一个已正确就放过第二个')
+  const reversed = fixAnchors(fa('`delta` (`a.js:99`)、`alpha` (`a.js:1`)。'), faRoot)
+  check(reversed.fixed === 1 && reversed.text.includes('`delta` (`a.js:5`)') && reversed.text.includes('`alpha` (`a.js:1`)'),
+    '锚点顺序颠倒 → 仍各按自己的符号修正')
+  // 单锚点行保持宽松判定（起始行提到该符号即认可），这条钉住「不为了严格而改写全仓既有锚点」
+  check(fixAnchors(fa('见 `beta` (`a.js:3`)。'), faRoot).fixed === 0,
+    '单锚点行保持宽松：起始行是该符号的调用处也视为已正确')
   fs.rmSync(faRoot, { recursive: true, force: true })
+}
+
+// ---- validateArticleEnvelope：frontmatter 信封校验 ----
+// 这条闸门挡的是「半截 frontmatter 文章能落盘、但整篇锚点永远不会被校正」这类静默失效，
+// 光看编译成功发现不了，必须逐种坏输出各钉一条。
+console.log('\n== validateArticleEnvelope ==')
+{
+  const C = (s) => s.join('\n')
+  check(validateArticleEnvelope(C(['---', 'title: t', '---', '', '正文'])) === null,
+    '正常闭合 → 合格')
+  check(validateArticleEnvelope(C(['', '  ', '---', 'title: t', '---', '', '正文'])) === null,
+    '前置空行/空白缩进 → 仍合格（trimStart 后判断）')
+  check(validateArticleEnvelope(C(['---', 'title: t', '---'])) === null,
+    '只有 frontmatter 没有正文 → 合格（信封完整即可）')
+  check(validateArticleEnvelope(C(['---\r', 'title: t\r', '---\r', '', '正文'])) === null,
+    'CRLF 行尾 → 合格')
+  check(/缺 frontmatter/.test(validateArticleEnvelope('正文直接开始，没有 frontmatter')),
+    '缺开头 --- → 判为缺 frontmatter')
+  check(/缺 frontmatter/.test(validateArticleEnvelope('')),
+    '空串 → 判为缺 frontmatter')
+  check(/缺 frontmatter/.test(validateArticleEnvelope(null)),
+    'null → 判为缺 frontmatter（不能抛错）')
+  check(/缺 frontmatter/.test(validateArticleEnvelope(42)),
+    '非字符串 → 判为缺 frontmatter（不能抛错）')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', 'title: t', '', '正文']))),
+    '缺结束 --- → 判为未闭合')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', 'title: t']))),
+    'frontmatter 只有开头 → 判为未闭合')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', '', '正文', '--- 出现在正文里']))),
+    '结束 --- 后没有换行收尾且非独占行 → 判为未闭合')
+  // 正文里的 --- 不能被误当成 frontmatter 结尾：只有紧随首个 --- 段落后那一个才算
+  check(validateArticleEnvelope(C(['---', 'title: t', '---', '', '正文', '', '---', '', '分隔线'])) === null,
+    '正文里的 --- 分隔线不影响信封判定')
 }
 
 console.log(`\n${failures.length ? 'FAIL' : 'ALL PASS'}：${passed} 通过，${failures.length} 失败`)

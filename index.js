@@ -255,29 +255,34 @@ function countWikiArticles(wikiPath) {
 //      等横切产物不归模块规划管，一律不碰。
 //   3. 只删「本次 modules 清单里没有、且不在本次 job.articles 里」的文件；本次写过但
 //      失败的也保留（失败可能是暂时的，不该顺手删证据）。
-//   4. 删前把文件名记进 note，便于事后核对；删除失败只记账不中断。
+//   4. 删除失败只记账不中断：写入 job.plan.prunedFailed 并 note，不抛错（一处删不掉
+//      不该让整轮编译失败），但也不能像旧实现那样 catch 空块静默吞掉——删不掉的孤儿
+//      会一直留在 modules/ 下，事后无从追溯。
 export function pruneOrphanModules(job) {
   const removed = []
-  if (job?.kind !== 'full') return { removed, skipped: '非全量编译，跳过孤儿清理' }
+  const failed = []
+  if (job?.kind !== 'full') return { removed, failed, skipped: '非全量编译，跳过孤儿清理' }
   const modules = job.plan?.modules
-  if (!Array.isArray(modules) || !modules.length) return { removed, skipped: '无完整模块清单，跳过孤儿清理' }
+  if (!Array.isArray(modules) || !modules.length) return { removed, failed, skipped: '无完整模块清单，跳过孤儿清理' }
   const dir = path.join(job.wikiPath, 'modules')
-  if (!fs.existsSync(dir)) return { removed }
+  if (!fs.existsSync(dir)) return { removed, failed }
   // 本次规划出的模块文章名（与组装任务的 slugify 规则保持一致）
   const planned = new Set(modules.map((m) => `${slugify(m.name)}.md`))
   // 本次 job 写过的（含失败）也保留：失败不该顺手删证据
   const touched = new Set((job.articles ?? []).map((a) => path.basename(String(a.name ?? ''))))
   let entries = []
-  try { entries = fs.readdirSync(dir) } catch { return { removed } }
+  try { entries = fs.readdirSync(dir) } catch { return { removed, failed } }
   for (const name of entries) {
     if (!name.endsWith('.md')) continue
     if (planned.has(name) || touched.has(name)) continue
     try {
       fs.rmSync(path.join(dir, name), { force: true })
       removed.push(name)
-    } catch { /* 删不掉的留给下次，不影响编译 */ }
+    } catch (err) {
+      failed.push(`${name}（${String(err?.code ?? err?.message ?? err)}）`)
+    }
   }
-  return { removed }
+  return { removed, failed }
 }
 
 // CodeWiki.md 入口：编译收尾时若仓库根缺失则自动生成。139052c 把收尾提醒门控收紧到入口文件，
@@ -605,14 +610,212 @@ export function numberLines(content) {
 // 形态（function/class/const/let），仍歧义则不动；找不到 → 不动。全部修正只改行号数字，
 // 绝不动文章其他内容；source_files 之外的文件引用一律不碰。符号提取规则复制自
 // test-wiki-anchors.mjs symbolsOnLine（两处同源，改一处须同步另一处）。
+// CHANGELOG.md 是**追加式流水账**：每次发版在顶部插入一节，于是所有指向它的行号
+// 都必然单向漂移（0.13.2 那节今天在第 58 行，下个版本发布后就在第 80 行）。
+// 符号定位对这类锚点完全无效——CHANGELOG 里没有可声明的符号，而 fixAnchors 的符号分支
+// 遇到「行内无反引号符号」直接 return line，连尝试都不做。但这批锚点几乎都写了版本号
+// （`0.13.0（CHANGELOG.md:109）`），而版本标题 `## 0.13.0` 是**稳定锚**。
+// 重定位规则：同一版本 V 被引用的所有失效锚点里，取最小行号 Hmin 当作「写作时该节首的
+// 估计」，新行号 = 当前节首 S + (n - Hmin)。**必须保留这个相对偏移**——若一律改写成
+// 节首 S，`CHANGELOG.md:8` 与 `CHANGELOG.md:10` 会双双变成 `S`（拉平，正是 0.13.5
+// 修过的数据破坏）。无版本号的 CHANGELOG 锚点无从定位，只记 unresolved 不动。
+export function changelogSections(clLines) {
+  const secs = []
+  clLines.forEach((l, i) => {
+    const m = l.match(/^##\s+(\d+\.\d+(?:\.\d+)*)/)
+    if (m) secs.push({ ver: m[1], start: i + 1, end: clLines.length })
+  })
+  for (let i = 0; i < secs.length - 1; i++) secs[i].end = secs[i + 1].start - 1
+  return secs
+}
+
+export function fixChangelogAnchors(content, cwd) {
+  const unresolved = []
+  const anchorRe = /CHANGELOG\.md[:：](\d+)(?:-(\d+))?/g
+  if (!cwd || !content.includes('CHANGELOG.md')) return { text: content, fixed: 0, unresolved }
+  let clLines
+  try { clLines = fs.readFileSync(path.join(cwd, 'CHANGELOG.md'), 'utf8').split(/\r?\n/) } catch {
+    return { text: content, fixed: 0, unresolved }
+  }
+  const secs = changelogSections(clLines)
+  if (!secs.length) return { text: content, fixed: 0, unresolved }
+  const secOf = (v) => secs.find((s) => s.ver === v)
+  // 「已正确」判定不能只看「行号存在且非空」：CHANGELOG 每次发版顶部插新节，
+  // 于是 `CHANGELOG.md:109` 这类旧锚点今天必然仍在文件范围内、落在**别的版本节**里，
+  // 且大多非空——只按范围判会把它们全判为正确，重定位永远不触发（实测 34 条里
+  // 只有 6 条被认出失效，其余 28 条都被这种「技术有效」蒙过）。
+  // 正确语义：带版本号的锚点必须落在**该版本对应的节内**；不带版本号的才退回范围判定。
+  const isValid = (n, end, ver) => {
+    const sec = ver ? secOf(ver) : null
+    if (sec) {
+      return n >= sec.start && n <= sec.end && (clLines[n - 1] ?? '').trim().length > 0 &&
+        (end === null || (end >= n && end <= sec.end))
+    }
+    return n >= 1 && n <= clLines.length && (clLines[n - 1] ?? '').trim().length > 0 &&
+      (end === null || (end >= n && end <= clLines.length))
+  }
+
+  // 版本号归属：取锚点**左侧最近的版本号**（中文习惯「0.13.0 …（CHANGELOG.md:58）」）。
+  //
+  // 这条判据必须与 test-wiki-anchors.mjs 的 CHANGELOG 语义校验**完全同源**，
+  // 否则修正器与校验器各用一套归属规则，就会出现「修正器认为已对、校验器判错」
+  // 的死循环。曾试过两种偏离，都失败：
+  // ① 只认「同一括号内」的版本号——实测大量长段落里版本号在括号外
+  //    （「0.13.0 吸收……四个配置（index.js:79-82，默认全开，CHANGELOG.md:58）」），
+  //    括号内无版本号 → 判为「归属不明」跳过 → 44 条永远修不掉；
+  // ② 括号内优先、否则退回整行——归属会随锚点数字变化而翻转，来回振荡。
+  // 真正导致振荡的是 reloc 的 Map key 用锚点文本（同行重复文本互相覆盖，见下），
+  // 改用行内序号后，这个朴素判据就稳定收敛了（实测 2 轮收敛）。
+  const verOf = (line, at) => {
+    let ver = null
+    for (const m of line.matchAll(/\b(\d+\.\d+(?:\.\d+)*)\b/g)) {
+      if (!secOf(m[1]) || m.index >= at) continue
+      ver = m[1]
+    }
+    return ver
+  }
+
+  // 第一遍：收**本行全部**带版本号的锚点（不只是失效的）——基准必须由整行决定，
+  // 否则修好一部分后基准跟着变，第二次运行又会算出不同的偏移（实测不幂等：第二次
+  // 仍有 11 处被改写）。失效项与有效项一起参与行内 Hmin 计算，改写时跳过已有效的。
+  // ord = 该行内第几个 CHANGELOG 锚点（0 起）。用文本当 key 会出问题：实测同一行里常
+  // 出现两个**文本完全相同**的 `CHANGELOG.md:256`（分别属于 0.10.9 与 0.10.11 两个版本
+  // 子句），Map key 重复 → 后一个覆盖前一个 → 本该保持的有效锚点也被改成别人的行号，
+  // 下一轮又判失效改回来，无限振荡。行内序号是唯一能区分它们的坐标。
+  const items = []
+  content.split(/\r?\n/).forEach((line, i) => {
+    let ord = 0
+    for (const a of line.matchAll(anchorRe)) {
+      const n = Number(a[1]), end = a[2] ? Number(a[2]) : null
+      const ver = verOf(line, a.index)
+      items.push({ idx: i, ord: ord++, n, end, ver, whole: a[0], valid: isValid(n, end, ver) })
+    }
+  })
+  if (!items.some((it) => !it.valid)) return { text: content, fixed: 0, unresolved }
+
+  // Hmin 必须**按行内聚合**，不能全仓按版本取最小。跨行取最小会引入假偏移：
+  // 同一篇里 `:42` 引用 0.10.11 的 3-15、`:24` 又引用 0.10.11 的 8，全局 Hmin=3
+  // 于是 8 被算成「节首+5」，而 261（原本就是历史错锚点）会被算成「节首+258」直接越界。
+  // 只有**同一行内**的并列引用才有确定可推的相对关系（同一句话描述同一节的几处），
+  // 跨行各自独立引用时唯一安全的落点就是节首。
+  //
+  // 幂等的关键：基准必须由**该行该版本的全部锚点**（有效 + 失效）决定，不能只统计失效项。
+  // 只统计失效项会振荡——实测 `?:58→113`、下一轮 `113→58` 无限来回：第一轮把 58 改成 113，
+  // 于是 113 变成「有效」退出统计集，基准随之从 58 变 113，又把它算回 58。
+  // 用全集算基准则位移量恒定：整组同移 delta 后基准同步前移，第二轮算出 delta=0，自然收敛。
+  const rowHmin = new Map()
+  for (const it of items) {
+    if (!it.ver) continue
+    const k = `${it.idx}|${it.ver}`
+    rowHmin.set(k, Math.min(rowHmin.get(k) ?? Infinity, it.n))
+  }
+  const reloc = new Map()
+  for (const it of items) {
+    if (it.valid) continue // 已在该版本节内的不动
+    const sec = it.ver ? secOf(it.ver) : null
+    if (!sec) { unresolved.push(`CHANGELOG.md:${it.n} 版本归属不明未改`); continue }
+    const key = `${it.idx}|${it.ver}`
+    const base = rowHmin.get(key) ?? it.n
+    const nn = sec.start + (it.n - base)
+    const span = it.end === null ? 0 : Math.abs(it.end - it.n)
+    const ne = Math.min(nn + span, sec.end)
+    if (nn < sec.start || nn > sec.end || !(clLines[nn - 1] ?? '').trim() || ne > sec.end) {
+      unresolved.push(`CHANGELOG.md:${it.n} 版本 ${it.ver} 重定位越界未改`)
+      continue
+    }
+    reloc.set(`${it.idx}|${it.ord}`, { nn, ne: span ? ne : null })
+  }
+  if (!reloc.size) return { text: content, fixed: 0, unresolved }
+
+  const crlf = /\r\n/.test(content)
+  let fixed = 0
+  const text = content.split(/\r?\n/).map((line, i) => {
+    let cursor = 0
+    const out = []
+    let ord = 0
+    for (const a of line.matchAll(anchorRe)) {
+      const r = reloc.get(`${i}|${ord++}`)
+      out.push(line.slice(cursor, a.index))
+      cursor = a.index + a[0].length
+      if (!r) { out.push(a[0]); continue }
+      fixed += 1
+      out.push(`CHANGELOG.md:${r.nn}${r.ne ? `-${r.ne}` : ''}`)
+    }
+    out.push(line.slice(cursor))
+    return out.length > 1 ? out.join('') : line
+  }).join(crlf ? '\r\n' : '\n')
+  return { text, fixed, unresolved }
+}
+
+// 修复 frontmatter 未闭合（闭合 `---` 被写成空行、或在生成时被吃掉）。
+//
+// 三条判据同时满足才动手，避免误伤普通文章：
+// ① 首行恰好是 `---`；② 紧随其后至少一行**无缩进**的 `key: value` 元数据
+// （`title:` / `type:` / `source_files:` / `tags:` 这类）；③ 元数据块之后紧跟
+// 一个空行（原闭合符应出现的位置）。命中就把那个空行改写成 `---`。
+// 正文里的 `---` 分隔线、以及通篇没有元数据的普通 md 都不满足 ② 或 ③。
+export function repairUnclosedFrontmatter(content) {
+  const lines = content.split(/\r?\n/)
+  if (lines[0] !== '---') return null
+  const metaRe = /^[A-Za-z_][\w-]*:/
+  let meta = 0
+  let i = 1
+  for (; i < lines.length; i++) {
+    const l = lines[i]
+    if (metaRe.test(l)) { meta += 1; continue }
+    // 缩进续行（`  - index.js`、多行数组）属于上一行元数据
+    if (meta > 0 && /^[ \t]+\S/.test(l)) continue
+    break
+  }
+  if (meta === 0) return null
+  if (i >= lines.length || lines[i].trim() !== '') return null
+  lines[i] = '---'
+  return {
+    text: lines.join(/\r\n/.test(content) ? '\r\n' : '\n'),
+    note: `frontmatter 未闭合已补全（第 ${i + 1} 行）`,
+  }
+}
+
 export function fixAnchors(content, cwd) {
   const unresolved = []
-  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  // frontmatter 未闭合的文章必须在这里就识别出来：`^---\r?\n([\s\S]*?)\r?\n---`
+  // 匹配不上时整篇所有锚点都会被静默跳过（下面第一行就 return），而文章照常落盘、
+  // 编译照常「成功」——失败完全不可见。实测 `.codewiki/learnings/update-reminder-entry-gap.md`
+  // 的闭合 `---` 被写成空行，就这样积了 19 处失效锚点且每轮编译都过。
+  // 修复：首个 `---` 之后若在正文开始前存在一段连续 `key: value` 形态的元数据行、
+  // 紧接一个空行，就把那个空行改写成 `---`。只在「像 frontmatter 但没闭合」时动手，
+  // 普通文章（含正文里的 `---` 分隔线）不受影响。
+  let fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fmMatch) {
+    const repaired = repairUnclosedFrontmatter(content)
+    if (repaired) {
+      content = repaired.text
+      fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+      unresolved.push(`${repaired.note}`)
+    }
+  }
   if (!fmMatch || !cwd) return { text: content, fixed: 0, unresolved }
+  // CHANGELOG 锚点先单独修：它是流水账，只能按「版本节首 + 相对偏移」重定位，
+  // 符号归属那套在这里无解（CHANGELOG 里没有可声明的符号）。也因为它可能在
+  // source_files 之外，所以不依赖 srcs 判断。
+  const clRes = fixChangelogAnchors(content, cwd)
+  content = clRes.text
+  unresolved.push(...clRes.unresolved)
+  let fixed = clRes.fixed
   const srcs = parseSourceFiles(fmMatch[1])
-  if (!srcs.length) return { text: content, fixed: 0, unresolved }
+  if (!srcs.length) return { text: content, fixed, unresolved }
   const resolveFile = (f) => {
     if (srcs.includes(f)) return f
+    // source_files 里写的是**模块相对路径**（article 生成时按模块目录拼的
+    // `modules/test-suite/index.js`），而文章正文引用的是**仓库根**路径
+    // （`index.js:941-954`）。两者 basename 相同 → 按 basename 匹配会把根锚点
+    // 映射到不存在的 `modules/test-suite/index.js` → loadSource 返回 null →
+    // 整行静默跳过，锚点永远修不掉（实测 test-suite.md 34 行 `localPlan` 与
+    // unreminder-entry-gap.md 19 处锚点都这样堆积）。仓库根真实存在的同路径
+    // 优先：文档锚点的语义永远是「仓库里的这个文件」，虚拟映射只是文章元数据。
+    try {
+      if (fs.existsSync(path.join(cwd, f))) return f
+    } catch { /* 探测失败按「无此文件」处理 */ }
     const cands = srcs.filter((r) => r.split('/').pop() === f)
     return cands.length === 1 ? cands[0] : null
   }
@@ -626,12 +829,16 @@ export function fixAnchors(content, cwd) {
     return cache.get(rel)
   }
   // 返回 [{sym, at}]：带上反引号符号在行内的字符位置，供锚点就近绑定用。
+  // 文件名不算符号（与 test-wiki-anchors.mjs 的 symbolsOnLine 同源）：`package.json`
+  // （`package.json:1-28`）这类写法里反引号包的是文件路径，拿它去源文件里搜必然搜不到。
+  const FILE_LIKE = /\.(?:js|mjs|cjs|ts|tsx|jsx|md|json|yml|yaml|txt|log|toml|lock|cfg|ini)$/i
   const symbolsWithPos = (line) => {
     const out = []
     for (const m of line.matchAll(/`([^`\n]+)`/g)) {
       const sym = m[1].trim().replace(/\(.*\)$/, '').trim()
       if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(sym)) continue
       if (sym.length < 3 || sym.split('.').pop().length < 3) continue
+      if (FILE_LIKE.test(sym)) continue
       out.push({ sym, at: m.index + 1 + m[1].indexOf(m[1].trim()) })
     }
     return out
@@ -641,7 +848,6 @@ export function fixAnchors(content, cwd) {
   const bodyStart = fmMatch[0].split(/\r?\n/).length // 正文首行（1-based 行号 ≤ bodyStart 是 frontmatter）
   const crlf = /\r\n/.test(content)
   const lines = content.split(/\r?\n/)
-  let fixed = 0
   const anchorRe = /([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g
   const text = lines.map((line, idx) => {
     if (idx + 1 <= bodyStart) return line
@@ -649,6 +855,10 @@ export function fixAnchors(content, cwd) {
     if (!syms.length) return line
     const anchors = [...line.matchAll(anchorRe)]
     if (!anchors.length) return line
+    // 多锚点行也修，但每个锚点只认**它自己之前**的就近符号（见下方 order 的注释）。
+    // 曾用「多锚点行一律跳过」来止血振荡，那是错的：行号漂移恰恰最常发生在这些
+    // 并列引用了大量符号的长行上（_patterns.md 一行十几次 index.js:N），跳过等于
+    // 让它们永远失效。振荡的真因是「锚点之后的符号也能被选中」，已在那里修掉。
     // 逐锚点定位：一行里有 N 个锚点时必须各自绑定「离它最近的可解析符号」。
     // 旧实现从 syms[0] 起找第一个能解析的符号，命中后把**整行所有锚点**都改成那一个行号，
     // 于是 `A (index.js:11)、B (index.js:22)` 这种并列描述被拉平成 `A (index.js:11)、B (index.js:11)`
@@ -667,19 +877,84 @@ export function fixAnchors(content, cwd) {
       cursor = atPos + whole.length
       const rel = resolveFile(f)
       if (!rel) { out.push(whole); continue }
+      // CHANGELOG 锚点已由 fixChangelogAnchors 按版本节重定位过，这里绝不能再交给符号
+      // 归属逻辑处理——CHANGELOG 里没有可声明的符号，落进来只可能被误改或重复计数。
+      if (rel === 'CHANGELOG.md') { out.push(whole); continue }
       const src = loadSource(rel)
       if (!src) { out.push(whole); continue }
       const start = Number(n1)
       const at = `${rel}:${start}${n2 ? `-${n2}` : ''}`
-      // 已正确（锚点起始行含有本行某个尚未被别的锚点用掉的符号）→ 原样保留
-      if (src[start - 1]) {
-        const hitSym = syms.find((s) => !used.has(s.sym) && hasSym(src[start - 1], s.sym))
-        if (hitSym) { used.add(hitSym.sym); out.push(whole); continue }
+      // 符号在源文件里的唯一归属行。返回 {line} 唯一归属 / {ambiguous:true} 多处出现
+      // 且无唯一声明行 / {} 未出现。归属规则：「只出现一次」即以该行为准；出现多次时
+      // 只认唯一的声明形态（function/class 直接跟符号；const/let 要求符号后跟 =，
+      // 排除 `const gamma = beta()` 这种「别的符号的声明」）。
+      // 「已正确」判定与「修正」共用同一个归属函数，两者否则会各说各话——见下面的注释。
+      const locate = (s) => {
+        const hits = []
+        src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
+        if (hits.length === 0) return {}
+        if (hits.length === 1) return { line: hits[0] }
+        const tail = s.split('.').pop().replace(/[$]/g, '\\$')
+        const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
+        const defs = hits.filter((n) => defRe.test(src[n - 1]))
+        if (defs.length === 1) return { line: defs[0] }
+        // 跨文件符号（本仓 lib/*.js 或第三方）在本文件里没有声明行，只有 import/require
+        // 与使用处。此时文档锚点指的必然是**使用处**，import 行不是它要引用的实现位置。
+        // 排除 import/require 行后若只剩唯一一处就取它——`clusterComponents` 在
+        // `index.js` 只有 import（17）与调用（1226）两处，不排除则永远 ambiguous、
+        // 锚点永远修不掉（实测 `_architecture.md:74` 稳定报「符号歧义未改」）。
+        const importRe = /^[ \t]*(?:import\b|(?:const|let|var)\s[^=]*=\s*require\s*\()/
+        const uses = hits.filter((n) => !importRe.test(src[n - 1]))
+        if (uses.length === 1) return { line: uses[0] }
+        return { ambiguous: true }
       }
-      // 按与锚点的字符距离由近到远试，最近的优先；已被前面的锚点占用的符号跳过
-      const order = syms
-        .filter((s) => !used.has(s.sym))
+      // 按与锚点的字符距离由近到远排序；已被前面的锚点占用的符号跳过。
+      //
+      // 但只在**锚点之前**的符号里选：中文行文的锚注写在「符号（锚点）」的括号里，
+      // 锚点**之后**出现的符号属于后文，不可能拥有这个锚点。曾经不设此约束，纯按
+      // 字符距离排，实测 `- \`articleMd(...)\`（test-orchestration.mjs:33-35）：…用
+      // \`makeBatchMock\` 生成…` 这行里，后文的 makeBatchMock（距 39）比主符号
+      // articleMd（距 40）只近 1 个字符就被选中，锚点被改到 145-147；下一轮行内
+      // 文本已变、距离关系翻转，又改回 33-35——无限来回、永不收敛（实测 5 轮不收敛）。
+      // 锚点之前没有符号时（「（index.js:11）见 \`foo\`」这类倒装写法）退回全部候选，
+      // 保持旧行为不变。
+      const free = syms.filter((s) => !used.has(`${rel}|${s.sym}`))
+      const leading = free.filter((s) => s.at < atPos)
+      const order = (leading.length ? leading : free)
         .sort((p, q) => Math.abs(p.at - atPos) - Math.abs(q.at - atPos))
+      // 「已正确」快路径：锚点起始行提到了「离它最近、尚未被占用」的符号即认可。
+      // 防拉平靠的是 used 占用 + 就近排序，**不是**「符号在全文有唯一声明行」——
+      // 旧实现对多锚点行要求 `locate(sym).line === start`，而 locate 在符号多处出现
+      // 时返回 ambiguous（大量符号在文件里被引用多次），于是**本来正确的锚点被判为错**、
+      // 再被拿去改成别的行：实测因此引入 35 行真回归（例 `client.js:489` 与
+      // `client.js:495` 各自正确且指向不同行，修后都变成 495）。单锚点行一直用宽松
+      // 判定、从无此问题；多锚点行同样宽松即安全，因为每个符号只允许被一个锚点认领。
+      const nearest = order[0]
+      // 区间锚点的语义是「这段代码」（`index.js:1018-1045` 指整块），不是首行：
+      // 符号只要出现在区间内任何一行就算对上。校验器 test-wiki-anchors.mjs 正是这么
+      // 判的（`span.includes(sym) || span.includes(tail)` 在整段上搜）。修正器若不认，
+      // 就会把**校验器认可的正确锚点**判成错、再拿去重定位，实测 `_patterns.md:73`
+      // 的 `plan`（区间内多次出现但全文 42 处、无唯一声明行 → locate 返回 ambiguous）
+      // 每轮被记成「符号歧义未改」，永远留着不动而校验器一直报错。
+      if (n2) {
+        const end2 = Number(n2)
+        const span = src.slice(start - 1, Math.min(end2, src.length)).join('\n')
+        const hit = order.find((s) => span.includes(s.sym) || span.includes(s.sym.split('.').pop()))
+        // 终点越界（`a.js:1-99` 而文件只有 5 行）不能走「已正确」快路径：上面判断区间时
+        // 用 Math.min 把终点截到文件尾，于是符号「必然」落在区间内、锚点被原样放行，
+        // 而校验器 test-wiki-anchors.mjs 会一直报「区间终点在行数范围内」失败——这个锚点
+        // 就永远修不掉了。交给下面的重定位分支，它会按跨度把尾行钳到 src.length。
+        if (hit && start >= 1 && end2 <= src.length) {
+          used.add(`${rel}|${hit.sym}`)
+          out.push(whole)
+          continue
+        }
+      }
+      if (src[start - 1] && nearest && hasSym(src[start - 1], nearest.sym)) {
+        used.add(`${rel}|${nearest.sym}`)
+        out.push(whole)
+        continue
+      }
       let R = null
       let picked = null
       let ambiguous = false
@@ -687,18 +962,9 @@ export function fixAnchors(content, cwd) {
         // 点分符号（如 Config.articleLanguage）歧义时退试首段——首段才是可声明的部分
         const variants = cand.sym.includes('.') ? [cand.sym, cand.sym.split('.')[0]] : [cand.sym]
         for (const s of variants) {
-          const hits = []
-          src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
-          if (hits.length === 1) { R = hits[0]; picked = cand.sym; break }
-          if (hits.length > 1) {
-            // 声明形态：符号是本行声明的目标（const gamma = beta() 这种「别的符号的声明」不算——
-            // function/class 直接跟符号；const/let 要求符号后跟 =，排除赋值右侧引用）
-            const tail = s.split('.').pop().replace(/[$]/g, '\\$')
-            const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
-            const defs = hits.filter((n) => defRe.test(src[n - 1]))
-            if (defs.length === 1) { R = defs[0]; picked = cand.sym; break }
-            ambiguous = true // 试下一个候选
-          }
+          const loc = locate(s)
+          if (loc.line !== undefined) { R = loc.line; picked = cand.sym; break }
+          if (loc.ambiguous) ambiguous = true // 试下一个候选
         }
         if (R !== null) break
       }
@@ -707,7 +973,7 @@ export function fixAnchors(content, cwd) {
         out.push(whole)
         continue
       }
-      used.add(picked)
+      used.add(`${rel}|${picked}`)
       if (n2) {
         const end2 = Number(n2)
         // 原文区间可能本身就是倒序（如 `index.js:902-901`，作者手误或前后行号写反）。
@@ -727,6 +993,22 @@ export function fixAnchors(content, cwd) {
     return out.join('')
   }).join(crlf ? '\r\n' : '\n') // 混合行尾按整文主风格规范化
   return { text, fixed, unresolved }
+}
+
+// 文章信封校验：模型输出必须是一段 frontmatter（开头 --- 与结束 --- 成对）加正文。
+// 返回 null 表示合格，否则返回给 note 用的原因短语。
+// 只查开头不查闭合会放过半截 frontmatter 的文章：它们能落盘，但 fixAnchors 的
+// /^---\n([\s\S]*?)\n---/ 匹配不上，于是**整篇的行号锚点一次都不会被校正**——实测
+// .codewiki/learnings/update-reminder-entry-gap.md 就这样积了 19 处失效锚点，而且
+// 每次编译都「成功」，失败完全不可见。抽成导出函数是为了让它可被单测直接钉住
+// （此前这段只藏在 writeValidated 里，只能靠整轮 orchestration 间接覆盖）。
+export function validateArticleEnvelope(content) {
+  if (typeof content !== 'string' || !content.trimStart().startsWith('---')) return '模型输出缺 frontmatter'
+  // 结束标记必须**独占一行**：`---(?:\r?\n|$)` 而不是裸 `---`。否则正文里
+  // 「--- 出现在某一行的行首」（分隔线带说明、列表项下的横线）会被当成 frontmatter
+  // 闭合，把真正缺失的结束 --- 放过去——那正是这条闸门要挡的那类静默失效。
+  if (!/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(content.trimStart())) return 'frontmatter 未闭合（缺结束 ---）'
+  return null
 }
 
 // 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
@@ -1943,20 +2225,13 @@ function createJobService(config, onSettled) {
     return null
   }
 
-  // keepInMemory 结果的落盘闸门：输出必须以 frontmatter 开头，坏输出不写 wiki。
-  // keepInMemory 任务（横切/校对）在批量阶段不落盘，唯一写盘点在这里——
+  // keepInMemory 结果的落盘闸门：输出必须以 frontmatter 开头且闭合，坏输出不写 wiki。
+  // keepInMemory 任务（横切/校对）在批量阶段不落盘，唯一写盘点落在这里——
   // 不能再走 applyTaskResult（它对 keepInMemory 只回内存不落盘）。
   function writeValidated(job, task, content) {
-    if (typeof content !== 'string' || !content.trimStart().startsWith('---')) {
-      note(job, `${task.name}：模型输出缺 frontmatter，不落盘（原文件保留）`)
-      return { name: task.name, ok: false, stopReason: 'invalid' }
-    }
-    // frontmatter 必须闭合（开头 --- 与结束 --- 成对）。只查开头不查闭合会放过半截
-    // frontmatter 的文章：它们能落盘，但 fixAnchors 的 /^---\n([\s\S]*?)\n---/ 匹配不上，
-    // 于是整篇的行号锚点一次都不会被校正——实测 .codewiki/learnings/update-reminder-entry-gap.md
-    // 就是这样积了 19 处失效锚点，且每次编译都「成功」、失败不可见。
-    if (!/^---\r?\n[\s\S]*?\r?\n---/.test(content.trimStart())) {
-      note(job, `${task.name}：frontmatter 未闭合（缺结束 ---），不落盘（原文件保留）`)
+    const why = validateArticleEnvelope(content)
+    if (why) {
+      note(job, `${task.name}：${why}，不落盘（原文件保留）`)
       return { name: task.name, ok: false, stopReason: 'invalid' }
     }
     try {
@@ -2781,6 +3056,11 @@ function createJobService(config, onSettled) {
           note(job, `清理孤儿模块文章 ${pr.removed.length} 篇（模块划分已变，旧文件无人重写）—— ${pr.removed.slice(0, 5).join('、')}${pr.removed.length > 5 ? ' 等' : ''}`)
         } else if (pr.skipped && job.kind === 'full') {
           note(job, `孤儿清理跳过：${pr.skipped}`)
+        }
+        // 删不掉的孤儿必须留痕：它们会一直占着 modules/ 并被 cw index 收录，
+        // 静默吞掉的话下次编译仍然「成功」，无从知道有篇死文章还在。
+        if (pr.failed.length) {
+          note(job, `孤儿模块文章 ${pr.failed.length} 篇删除失败（下次编译重试）—— ${pr.failed.slice(0, 5).join('、')}${pr.failed.length > 5 ? ' 等' : ''}`)
         }
       } catch (err) {
         note(job, `孤儿清理异常（忽略，不影响编译）—— ${String(err?.message ?? err).slice(0, 200)}`)

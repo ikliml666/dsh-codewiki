@@ -34,7 +34,7 @@ tags: [testing, automation, orchestration, wiki-validation]
 *   **`localPlan` (index.js:941-954)**：顶层目录分组规划，用于兜底架构分析。
 *   **`packArticles` (index.js:1050-1064)**：横切输入装填，超预算时仅保留头部并标注。
 *   **`scanRepoFiles` (index.js:1614-1643)**：仓库勘探，过滤黑名单（node_modules, .git）、二进制、超大及空文件。
-*   **`resolveBatchApiKey` (index.js:240-263)**：凭证解析链，优先级为显式配置 > 宿主凭据库。注入失败或无条目返回 `null`。
+*   **`resolveBatchApiKey` 已移除**：0.10.1 起插件不碰任何密钥，凭证由宿主按 provider 解析；`test-batch.mjs:521` 断言该导出为 `undefined`（原文档描述该函数的凭证解析链已失效）。
 
 ### 2. test-cwd-paths.mjs — 工作目录路径修复验证
 **用途**：验证 CW CLI 在 Windows 和 MSYS 路径下的兼容性及路径规范化。

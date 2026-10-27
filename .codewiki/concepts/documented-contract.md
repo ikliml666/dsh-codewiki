@@ -198,5 +198,3 @@ tags: [文档契约, 跨模块, codewiki, frontmatter, 文章格式, 测试验�
 - `fixAnchors`（index.js:608-728，语义注释 index.js:608-614）：锚点起点行应包含该行反引号内符号；不包含时在源文件全文找符号——恰好一处修正、多处取唯一声明形态、歧义/未找到不动并记 unresolved；全部修正只改行号数字。
 - `parseSourceFiles`（index.js:1317-1329）：读 frontmatter 的 source_files（inline 数组与 block 列表两式）；stale 路径对无 source_files 的过期文章直接跳过并说明（index.js:1317-1319）——frontmatter 因此也是增量流程的机器可读契约。
 - prompt 构造器（格式条款的载体）：`batchArticlePrompt`（index.js:766-793）在 prevArticle 注入段写明「供保留章节结构与 title/type/tags；行号可能已过期一律不得沿用」（index.js:897）并收尾拼 `articleFormatSection()`（index.js:1152）；合成版 `batchArticleComposePrompt`（index.js:1152-1180，同款条款 index.js:1085、格式段 index.js:1085）；横切三件套 `batchArchitecturePrompt`（index.js:1093-1099）/`batchPatternsPrompt`（index.js:1101-1107）/`batchConceptPrompt`（index.js:1111-1117）；观察两件套 `batchObservePrompt`（index.js:1132-1149）/`batchArticleObservePrompt`（index.js:1184-1200）；校对单篇版 `batchProofreadPrompt`（index.js:1207-1226）与批量版 `batchProofreadBatchPrompt`（index.js:1207-1234）——批量校对的输出合同是「每篇一行 `@@@article: 名` + 修正后整文 + `
-
-绑定测试 `definitelyNotASymbolAnywhere`（index.js:10-20）

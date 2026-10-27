@@ -125,6 +125,75 @@ await check('slugify 规则与文件名一致：带空格/中文的模块名能�
   assert(fs.existsSync(path.join(wiki, 'modules', 'core-application.md')))
 })
 
+// 中文/斜杠/括号这些真会被规划产出的模块名，必须与任务组装侧算出同一个文件名。
+// 造文件名时**不能**照抄 slugify 的规则来凭空造（那样测试只是自证），而要用
+// 「规划名 -> 期望文件名」的显式对照断言，两边规则一旦漂移就会红。
+await check('中文/斜杠/括号模块名能匹配上自己的文章（不误删）', async () => {
+  const { wiki } = makeWiki()
+  const cases = [
+    ['核心应用', '核心应用.md'],
+    ['模块/子模块', '模块-子模块.md'],
+    ['日志与追踪 (logging)', '日志与追踪-logging.md'],
+  ]
+  for (const [, file] of cases) fs.writeFileSync(path.join(wiki, 'modules', file), '# y\n')
+  const r = pruneOrphanModules({
+    kind: 'full', wikiPath: wiki,
+    plan: { modules: cases.map(([name]) => ({ name })) },
+    articles: [],
+  })
+  const left = ls(wiki)
+  for (const [, file] of cases) {
+    assert(left.includes(file), `规划内文章 ${file} 被误删（实际剩下 ${left.join('、')}）`)
+    assert(!r.removed.includes(file), `${file} 不该出现在 removed 里`)
+  }
+})
+
+// 删除失败必须记账且不中断：一处删不掉不能拖垮整轮清理，也不能静默吞掉。
+// 用 chmod 造一个真删不掉的目标（Windows 上 chmod 无效，改用 mock fs.rmSync）。
+await check('删除失败：记账进 failed、其他孤儿照删、不抛错', async () => {
+  const { wiki } = makeWiki()
+  // orphan-a 删不掉，orphan-b 正常删
+  const fsMod = await import('node:fs')
+  const origRm = fsMod.default.rmSync
+  fsMod.default.rmSync = (p, opt) => {
+    if (String(p).endsWith('orphan-a.md')) {
+      const e = new Error('EBUSY: resource busy or locked')
+      e.code = 'EBUSY'
+      throw e
+    }
+    return origRm(p, opt)
+  }
+  let r
+  try {
+    r = pruneOrphanModules({
+      kind: 'full', wikiPath: wiki,
+      plan: { modules: [{ name: 'keep' }] },
+      articles: [],
+    })
+  } finally {
+    fsMod.default.rmSync = origRm
+  }
+  assert(fs.existsSync(path.join(wiki, 'modules', 'orphan-a.md')), '删不掉的必须还在')
+  assert(!fs.existsSync(path.join(wiki, 'modules', 'orphan-b.md')), '能删的照删，不被失败拖住')
+  assert.deepEqual(r.removed.sort(), ['orphan-b.md', 'written-failed.md'].sort(), 'removed 只报真删掉的')
+  assert.equal(r.failed.length, 1, 'failed 必须恰好一条')
+  assert(/orphan-a\.md/.test(r.failed[0]) && /EBUSY/.test(r.failed[0]), `failed 要带文件名与原因，实际 ${r.failed[0]}`)
+})
+
+// plan.modules 非空但残缺（目录里有规划外文章）时，当前实现会按它当全集删。
+// 这条钉住「谁负责完整性」：清理器只认非空数组，完整性由编排侧保证。
+// 若将来给 plan 加 completeness 标志，这条要跟着改——先把它写成显式契约断言。
+await check('非空但残缺的 plan：按非空数组当全集（完整性由编排侧保证）', async () => {
+  const { wiki } = makeWiki()
+  const r = pruneOrphanModules({
+    kind: 'full', wikiPath: wiki,
+    plan: { modules: [{ name: 'keep' }] },
+    articles: [],
+  })
+  // 当前契约：只要 modules 非空就当真，三条孤儿全删
+  assert.deepEqual(r.removed.sort(), ['orphan-a.md', 'orphan-b.md', 'written-failed.md'].sort())
+})
+
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) for (const f of fails) console.log(`\n--- ${f.label} ---\n${f.err.stack}`)
 process.exit(fails.length ? 1 : 0)

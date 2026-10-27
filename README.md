@@ -89,3 +89,19 @@ client.js          插件页设置卡片（浏览器半侧；协议参照 ui-set
 ```
 
 验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
+
+全量测试（18 个文件，都直接 `node <file>`，无框架）：
+
+```
+test-agentic.mjs / test-agentic-host.mjs / test-agentic-fallback.mjs / test-articles-agentic.mjs
+test-cluster.mjs / test-symbols.mjs / test-graphdiff.mjs / test-semantic-plan.mjs
+test-incremental.mjs / test-incremental-e2e.mjs / test-batch.mjs / test-prune-orphans.mjs
+test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs / test-cwd-paths.mjs
+test-wiki-entry.mjs / test-wiki-anchors.mjs
+```
+
+`test-wiki-anchors.mjs` 校验 `.codewiki/` 里所有 `file:行号` 锚点是否指向真实代码，分两档：
+
+- **默认档**：结构事实（行号越界、区间倒序）永远硬断言；**符号绑定**按新鲜度分档——源文件自编译基线（`.codewiki/_meta.yaml` 的 `last_compiled_commit`）以来没变则硬断言，变了则记为「待重编译」不计失败（文档这时候本来就该滞后，跑一次 `codewiki_generate` 基线前移后自动升级为硬断言）。
+- **`--strict` 档**：符号绑定一律硬断言，用于发版前自查。当前有 18 处历史遗留失败（文档引用了已删除的符号，需下一次真实编译重写那几段，不由修正器猜）。
+
