@@ -39,6 +39,22 @@
 
 **验证**：新增两套测试 `test-engine-quality-gate.mjs` 29 条、`test-engine-apply-plan.mjs` 37 条全绿；全套 33 套测试复跑全绿（`test-batch` 148、`test-agentic` 55、`test-article-contract` 29、既有 8 套引擎测试 19/24/19/20/11/9/24/17 等），只有 `test-wiki-anchors` 报「3335 过 / 46 败 / 39 待重编译」——存量锚点问题，非本次引入。真实 cw 端到端两次实测（临时 git 仓库）：`tools/fsoft-engine/probe-apply-real-cw.mjs` 走完写盘 → `cw index` → `cw meta update` → 自动提交，提交内容恰为 `.codewiki/_index.md`、`.codewiki/_meta.yaml`、`.codewiki/modules/core.md`、`CodeWiki.md`，`verifyCommitScope` 返回 `{"ok":true,...,"unexpected":[]}`；`tools/fsoft-engine/probe-index-missing.mjs` 验证「退出 0 但缺页」被记 `index-failed` 并回滚。这两项仍**未接生产**：`index.js` 的编译主流程尚未调用 `gateNativeOutput`/`applyNativeOutput`，是阶段 4 的接线。
 
+### 接入：FSoft 原生引擎进入生产 JobService（阶段 4），默认仍走旧 Node 流水线
+
+阶段 3 的门与落地器此前只有测试能调；这一轮把它们**接进真实的 JobService**，`codewiki_generate` / `codewiki_update` 的 full 编译可以走原生通道。**默认关**（`nativeEngine: false`），打开才切；旧流水线一行没删，仍是默认路径。
+
+- **`lib/engine/native-run.js`（494 行）——单次编译的裁决管线**。把四段串成一条链：环境（`doctor` + 引擎锁比对）→ 引擎 `generate`/`update` → `gateNativeOutput` → `applyNativeOutput`，终态取**三者最弱**（`cancelled < failed < partial < done`）。这条规则是这层的全部意义：**引擎报 done 不能替代质量门**（假引擎写空产物 → 真 gate 判 failed → 整批 failed，`test-engine-native-job.mjs` 用例 15），**落地器 partial 不能报 done**（提交不成立 → partial + `canAdvanceBaseline:false`，用例 10）。`partial`/`failed`/`cancelled` 一律不推进基线。
+- **模型桥**：`startLlmBridge` 起 loopback 桥，FSoft 只拿 `CODEWIKI_BASE_URL`/`CODEWIKI_API_KEY`(占位)/模型名。修了一个**必然踩中**的接线 bug：`bridge` 对象根本没有 `model` 字段（`Object.keys(bridge)` 只有 `url/placeholderKey/port/stats/close`），原写法 `bridge.model ?? ''` 恒为空串 → `entry.py:_model_config()` 判缺模型通道 → 每次原生编译都在 cluster 段 `engine-model` 失败。改为由调用方传 `model`/`clusterModel`（`nativeEnginePlan(channel,{...,model,clusterModel})`，index.js:252）。占位 key 每次 `randomBytes(32)` 随机生成、只进子进程 env、不进日志（`onLog` 只记 `{at,method,path,status,ms}`）。
+- **`docsDir` 必须放仓库外**。原设计写 `.codewiki/temp/native-docs`，实测首次编译**整批失败**：引擎先把这个目录建出来但没有 `_meta.yaml`，`apply-plan.js:549` 的 `wikiExisted` 判定据此认为「人工删改过半截库」→ `wiki-missing` 拒绝初始化。改为 `os.tmpdir()/dsh-codewiki-native-<jobId>`，落地后清理（`index.js:2727` 起）。
+- **环境失败如实失败，不绕过**：`doctor` 报 `probe-failed` → `engine-missing`；锁 `drift` → `engine-deps`（版本/Python 变化必须重新锁）；`pip check` 不闭合 → `engine-deps`，**不自动 `pip install` 糊过去**。首跑 `absent` 时**不**在编译前写锁（否则编译失败也会留下「已锁定」的假象），改为产物落地成功且 `.codewiki/_meta.yaml` 已存在后才写。
+- **JobService 接线**（`index.js:2713-2890`）：`nativeRuns`/`nativeResults`/`nativeAborters` 三张表，`startNativeRun` 建 `AbortController` 并起 `runNativeJob`，`tickNative` 在 10s 节拍上收割结果；阶段映射 `NATIVE_STAGE_TO_PANEL` 把八段映射回既有面板契约（`env/graph/cluster/articles→articles`、`validate→review`、`index/baseline→index`、`commit→commit`），**不新增面板阶段值**。取消沿用既有语义：`cancelRequested` → abort 进程树 → 只写 cancelled、迟到结果不覆盖终态。单项目串行、幂等 findActive、面板 record 全部复用既有实现。
+- **`client.js` 面板**：新增「原生引擎」通道标识与 `nativeStageLabel`/`gateLabel`/`applyLabel` 等文案（中英双语），终态后展示质量门与落地器各自的 outcome；不影响旧通道显示。
+- **保守默认的理由**：真实全量/增量编译仍未由主代理端到端重放（本轮验证到「真 gate + 真 apply + 假引擎真进程」这一层），且 stale 增量还走内置流水线（统一增量是阶段 5）。所以默认 `nativeEngine:false`，原生是显式 opt-in；`symbols`/`cluster`/`graph-diff`/`incremental`/`update-planner` 一行未删。
+
+**验证**：新增 `test-engine-native-job.mjs`，**96 项断言全过**，16 个用例全部走真实链路（`codewiki_generate.execute → JobService.submit → tick(300ms) → tickNative → runNativeJob`），gate/apply 是真的、引擎用真 node 进程跑的假引擎（真 stdio + 真 JSON-lines 协议，不是 stub 函数）：成功 done（写盘+索引+基线+提交全成立）、partial（引擎少写一篇）、failed（引擎崩）、取消（stall 模式，断言进程树被终止且迟到结果不覆盖终态）、引擎 done 但产物为空被质量门拦下、环境失败（`probe-failed`/`deps-bad`）、锁漂移、`cw index` 失败（`_index.md` 变目录 → 真 exit 1）回滚、`cw meta update` 失败（`_meta.yaml` 删 `project:` 行 → 真 exit 1）回滚、提交失败（`commit-failed` 不回滚产物）、单项目串行（第二个仓库 queued 后自动轮到）、**旧通道默认不受影响**（`nativeEngine` 关闭时引擎足迹为空数组、`channel` 未设、无 `nativeResult`）、stale 不走原生。全套 34 套测试复跑全绿；`test-wiki-anchors` 仍报「3263 过 / 12 败」——存量锚点问题（`git stash` 掉本轮改动后基线为 3138 过 / 44 败，本轮改动让失败数从 44 降到 12、无新增失败项）。
+
+**未完成边界（如实）**：① 真实 FSoft 全量/增量编译**未**在本轮由生产通道端到端重放（只用假引擎验证了接线与裁决，真实 Python 引擎的单次编译仍是阶段 1C 的 fixture 级证据）；② 统一增量（含未提交工作区变更合成 change-set）是阶段 5，`stale` 不走原生；③ 阶段 5-7 未动。
+
 ## 0.14.0 — 2026-10-27
 
 ### 修复：增量漏检、部分失败仍报成功、坏文章入库（融合 FSoft 的 updater/质量门）

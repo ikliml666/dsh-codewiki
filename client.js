@@ -135,6 +135,17 @@ window.__ModuleLoader__.load({
       stagePartial: '部分完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
+      // 原生引擎（阶段 4）八段契约的真实阶段名：面板阶段条仍是粗粒度七步，
+      // 引擎自报的阶段另显示一行——两者不是一回事，混着显示会让人以为步骤条错了。
+      nativeStageLabel: '引擎阶段',
+      channelNative: '原生引擎',
+      nativeEnv: '探测环境',
+      nativeGraph: '解析代码图',
+      nativeCluster: '聚类模块',
+      nativeValidate: '产物校验',
+      nativeBaseline: '推进基线',
+      gateLabel: '质量门',
+      applyLabel: '落地',
       stepQueued: '排队',
       kindFull: '全量',
       kindStale: '增量',
@@ -312,6 +323,15 @@ window.__ModuleLoader__.load({
       stagePartial: 'Partial',
       stageFailed: 'Failed',
       stageCancelled: 'Cancelled',
+      nativeStageLabel: 'Engine stage',
+      channelNative: 'Native engine',
+      nativeEnv: 'Probing environment',
+      nativeGraph: 'Parsing code graph',
+      nativeCluster: 'Clustering modules',
+      nativeValidate: 'Validating output',
+      nativeBaseline: 'Advancing baseline',
+      gateLabel: 'Quality gate',
+      applyLabel: 'Apply',
       kindFull: 'Full',
       kindStale: 'Stale',
       kindResume: 'Resume',
@@ -1042,6 +1062,15 @@ window.__ModuleLoader__.load({
         // -------------------------------------------------------------------
 
         const stageLabel = (stage) => tBound(`stage${String(stage).charAt(0).toUpperCase()}${String(stage).slice(1)}`)
+        // 原生引擎阶段名（八段契约）。与面板七步阶段同名的那几个（articles/index/commit）
+        // 直接映射回步骤条标签，避免同一阶段出现两种说法。
+        const NATIVE_STAGE_KEYS = {
+          env: 'nativeEnv', graph: 'nativeGraph', cluster: 'nativeCluster',
+          articles: 'stageArticles', validate: 'nativeValidate',
+          index: 'stageIndex', baseline: 'nativeBaseline', commit: 'stageCommit',
+        }
+        const nativeStageName = (stage) => (stage && NATIVE_STAGE_KEYS[stage] ? tBound(NATIVE_STAGE_KEYS[stage]) : null)
+
         const stateLabel = (st) => tBound(`state${String(st).charAt(0).toUpperCase()}${String(st).slice(1)}`)
         const kindLabelOf = (t, kind) => t(`kind${String(kind).charAt(0).toUpperCase()}${String(kind).slice(1)}`)
         const progressBar = (done, total) => (total > 0
@@ -1531,6 +1560,15 @@ window.__ModuleLoader__.load({
             if (total) meta.push(`${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`)
             else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
             if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
+            // 原生通道（阶段 4）：步骤条是粗粒度七步，引擎自报的是八段契约——粒度不同，
+            // 所以真实引擎阶段另起一项显示，不能拿它去改步骤条的序号（那会让旧任务错位）。
+            if (job.channel === 'native') {
+              const ns = nativeStageName(job.nativeStage)
+              if (active && ns) meta.push(`${t('nativeStageLabel')} ${ns}${Number.isFinite(job.nativePercent) ? ` ${job.nativePercent}%` : ''}`)
+              const nr = job.nativeResult
+              if (!active && nr?.gate?.outcome) meta.push(`${t('gateLabel')} ${nr.gate.outcome}`)
+              if (!active && nr?.apply?.outcome) meta.push(`${t('applyLabel')} ${nr.apply.outcome}`)
+            }
             // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
             // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
             const blockers = Array.isArray(job.blockers) ? job.blockers : []

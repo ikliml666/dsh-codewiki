@@ -32,6 +32,9 @@ import {
   describeOutcome, isTerminalStage, TERMINAL, UPDATE_RECORD_REL,
 } from './lib/update-record.js'
 import { inspectArticle, hasBlockingIssue, issueSummary } from './lib/article-contract.js'
+// 阶段 4：原生引擎（FSoft Python）通道。整条裁决链在 native-run.js 里固定，
+// 这里只负责「起进程 / 收进度 / 按结果判终态」——绝不在 tick 里重写裁决。
+import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from './lib/engine/native-run.js'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -93,6 +96,10 @@ export const Config = z.object({
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
   workspaceOnly: z.boolean().default(true).volatile().description('任务页只显示属于已添加 dsh 工作区（宿主工作区列表）的任务'),
+  nativeEngine: z.boolean().default(false).volatile().description('原生引擎通道（FSoft Python 引擎，阶段 4）：开启后 full 编译走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=沿用内置 Node 流水线（默认）。stale 增量仍走内置流水线（统一增量在下一阶段）'),
+  nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
+  nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
+  nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 45 分钟；超时由进程树终止兜底'),
 })
 
 function val(x) {
@@ -140,6 +147,12 @@ function liveConfig(config) {
     autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
     autoCommit: val(c.autoCommit) !== false,
     workspaceOnly: val(c.workspaceOnly) !== false,
+    // 原生通道（阶段 4）：必须经过 liveConfig 透出，否则 nativeChannelFor 永远读到
+    // undefined——开关看起来打开了、实际一路走旧流水线，这种「静默不生效」比报错更难查。
+    nativeEngine: val(c.nativeEngine) === true,
+    nativeEnginePython: String(val(c.nativeEnginePython) ?? '').trim(),
+    nativeEngineEntry: String(val(c.nativeEngineEntry) ?? '').trim(),
+    nativeEngineTimeoutMs: Number(val(c.nativeEngineTimeoutMs)) || 0,
   }
 }
 
@@ -194,6 +207,64 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
       resolve({ exitCode: code ?? -1, stdout, stderr, timedOut })
     })
   })
+}
+
+// ---------------------------------------------------------------------------
+// 原生引擎通道（阶段 4）：FSoft Python 引擎 + 薄适配层
+//
+// 两个独立开关的语义（务必分清，否则会「以为换了通道其实没换」）：
+//   nativeEngine          = 允许 full 编译走原生通道（默认 false → 旧 Node 流水线不变）
+//   nativeEnginePython    = 引擎解释器（装了 FSoft 的 venv python）
+// 增量（stale）本轮仍走内置流水线：统一增量是下一阶段的事，这里不半接。
+// ---------------------------------------------------------------------------
+
+// 原生通道是否用于本次任务。只有「开关打开 + full 编译 + 有解释器」才走；
+// 任一条件不成立都返回 null，调用方据此走旧路径 —— 绝不在中途悄悄换通道。
+export function nativeChannelFor(cfg, { kind = null, scope = null } = {}) {
+  const c = cfg ?? {}
+  if (c.nativeEngine !== true) return null
+  const isFull = kind === 'full' || (kind == null && (scope == null || scope === 'full' || scope === 'auto'))
+  if (!isFull) return null
+  return {
+    python: resolveNativePython(c),
+    entry: String(c.nativeEngineEntry ?? '').trim() || DEFAULT_ENGINE_ENTRY,
+    timeoutMs: Number(c.nativeEngineTimeoutMs) > 0 ? Number(c.nativeEngineTimeoutMs) : DEFAULT_ENGINE_TIMEOUT_MS,
+  }
+}
+
+// 解释器解析顺序：配置 > 环境变量 > PATH 里的 python。不做「找一个能用的」启发式——
+// 猜错解释器会让「环境不闭合」伪装成「引擎坏了」，用户看不出该修哪个。
+export function resolveNativePython(cfg) {
+  const fromCfg = String(cfg?.nativeEnginePython ?? '').trim()
+  if (fromCfg) return fromCfg
+  const fromEnv = String(process.env.DSH_CODEWIKI_PYTHON ?? '').trim()
+  if (fromEnv) return fromEnv
+  return 'python'
+}
+
+// 引擎子进程描述。模型通道用**占位 key**（桥每次随机生成，只活在进程环境里），
+// 真实凭证从不进入子进程环境，也从不进日志。
+// 注意：模型名必须由调用方显式传入。llm-bridge 的返回对象只有
+// {url, placeholderKey, port, stats, close}——它**不含** model 字段（桥只负责转发，
+// 不知道也不该知道模型选择）。曾经写成 `bridge.model`，实测得到 undefined → 
+// CODEWIKI_MAIN_MODEL 变成空串 → entry.py 的 _model_config 判「缺少模型通道」→
+// 每次原生编译都在 cluster 阶段以 engine-model 失败，且失败原因看起来像环境没配好。
+export function nativeEnginePlan(channel, { requestId = '', bridge = null, model = '', clusterModel = '' } = {}) {
+  const env = {
+    // Python 输出必须是 UTF-8：Windows 默认 cp936 会把中文文章写成乱码
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
+    // 引擎绝不该自己去翻本机凭证库/配置：显式关掉 keyring，缺 key 时如实报 engine-model
+    CODEWIKI_NO_KEYRING: '1',
+  }
+  if (bridge) {
+    const mainModel = String(model || bridge.model || '').trim()
+    env.CODEWIKI_BASE_URL = bridge.url
+    env.CODEWIKI_API_KEY = bridge.placeholderKey
+    env.CODEWIKI_MAIN_MODEL = mainModel
+    env.CODEWIKI_CLUSTER_MODEL = String(clusterModel || bridge.clusterModel || mainModel).trim()
+  }
+  return { command: channel.python, args: [channel.entry], env }
 }
 
 // cw（本地 fork，源码 vendor/codewiki，行为基线上游 main 64323823）的三态输出
@@ -2242,6 +2313,14 @@ function jobSummary(job) {
     // 插件自动提交结果（0.10.9）：面板与 codewiki_progress 共用同一份 jobSummary，
     // 缺了这个字段两处都拿不到，只能从 notes 里猜。
     autoCommit: job.autoCommit ?? null,
+    // 原生通道（阶段 4）：channel 决定这条任务是「谁在跑」，nativeStage 是引擎自己
+    // 报的真实阶段（八段契约），与面板步骤条的粗粒度 stage 不是一回事，两个都要给。
+    channel: job.channel ?? 'legacy',
+    nativeStage: job.nativeStage ?? null,
+    nativePercent: job.nativePercent ?? null,
+    nativeMessage: job.nativeMessage ?? null,
+    nativeTotal: job.nativeTotal ?? null,
+    nativeResult: job.nativeResult ?? null,
     error: job.error ?? null,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
@@ -2626,6 +2705,183 @@ function createJobService(config, onSettled) {
   const batchRuns = new Map()     // jobId → 执行器 Promise
   const batchResults = new Map()  // jobId → results[]（null = 执行器整体失败，已 fail）
   const batchAborters = new Map() // jobId → AbortController
+
+  // ── 原生引擎通道（阶段 4）的执行器 ──────────────────────────────────────
+  // 与 batchRuns 同构：runNativeJob 是一条长任务（一次 generate 全跑完），
+  // 不能塞进 tick 的一步里——tick 是 10s 节拍，跑不完就返回会让下一次 tick 重复提交。
+  // 所以「启动 → 等结果 → 收割」三段分开，结果为 null 表示已 fail（由执行器自己判）。
+  const nativeRuns = new Map()     // jobId → Promise
+  const nativeResults = new Map()  // jobId → EngineResult | null
+  const nativeAborters = new Map() // jobId → AbortController
+
+  // 原生八段 → 面板现有阶段。面板步骤条按 ACTIVE_STAGES 渲染，改它会牵动一大堆
+  // 布局与文案；真实引擎阶段另存 job.nativeStage，让面板既能显示「在第几步」，
+  // 又能显示「引擎自己走到哪」。映射原则：凡是写文章之前的一律算「写文章中」。
+  const NATIVE_STAGE_TO_PANEL = {
+    env: 'articles', graph: 'articles', cluster: 'articles', articles: 'articles',
+    validate: 'review', index: 'index', baseline: 'index', commit: 'commit',
+  }
+  // 原生通道单次编译：起一条长任务，结果为 EngineResult（含 gate/apply 现场）。
+  // 失败一律进 nativeResults=null 并由这里 fail()，与 batchRuns 的约定一致：
+  // 收割方（settleJob）只看「有没有结果」，不用自己猜执行器死活。
+  function startNativeRun(job, channel) {
+    const ac = new AbortController()
+    nativeAborters.set(job.id, ac)
+    const c = liveConfig(config)
+    // 引擎原始产物目录必须放在**仓库外**（临时目录）。
+    // 曾经放在 .codewiki/temp/native-docs，实测会在首次编译时整批失败：落地器
+    // apply-plan.js:542-565 用「.codewiki 目录是否存在」判断要不要跑 cw init，
+    // 而引擎写产物这一步已经先把 .codewiki/ 建出来了，于是被判成
+    // 「.codewiki/ 存在但缺 _meta.yaml（人工删改过？）」→ wiki-missing → failed。
+    // 放临时目录还顺带避免产物被当成仓库页、避免残留污染 git 状态。
+    const docsDir = path.join(os.tmpdir(), `dsh-codewiki-native-${job.id}`)
+    const run = Promise.resolve()
+      .then(() => runNativeJob({
+        repoRoot: job.cwd,
+        scope: job.scope,
+        kind: job.kind,
+        requestId: `${job.id}-native`,
+        signal: ac.signal,
+        timeoutMs: channel.timeoutMs,
+        docsDir,
+        deps: {
+          config: {
+            ...c,
+            engineRoot: '',
+          },
+          llm: llmRef,
+          engineFor: ({ bridge }) => nativeEnginePlan(channel, {
+            requestId: job.id,
+            bridge,
+            // 模型名来自编译模型配置（不是桥）：桥只转发，不含 model 字段。
+            model: c.batchModel,
+            clusterModel: c.batchModel,
+          }),
+          applyDeps: {
+            jobId: job.id,
+            // 落地器的 cw 与自动提交都复用主实现：阶段 3 的那份是「等阶段 4 注入」的
+            // 临时件，两套提交语义并存迟早分叉。
+            runCw: (binary, cwd, args, timeoutMs) => runCw(binary, cwd, args, timeoutMs, ac.signal),
+            commit: (root, opts) => autoCommitWiki(root, opts),
+          },
+        },
+        onProgress: (p) => {
+          // 引擎进度只映射到面板阶段 + 计数，不改终态语义（终态只由 runNativeJob 裁决）。
+          job.nativeStage = p.stage
+          job.nativePercent = p.percent
+          if (p.message) job.nativeMessage = String(p.message).slice(0, 200)
+          const mapped = NATIVE_STAGE_TO_PANEL[p.stage]
+          if (mapped && !JOB_TERMINAL.has(job.stage) && job.stage !== mapped) setStage(job, mapped)
+          if (p.writtenCount) job.writtenCount = p.writtenCount
+          if (p.failedCount) job.failedCount = p.failedCount
+          if (p.totalCount) job.nativeTotal = p.totalCount
+          touch(job)
+        },
+        onLog: (e) => { job.nativeLogs = [...(job.nativeLogs ?? []), e].slice(-20) },
+      }))
+      .then(
+        (res) => nativeResults.set(job.id, res),
+        (err) => {
+          nativeResults.set(job.id, null)
+          if (!JOB_TERMINAL.has(job.stage)) {
+            const msg = `原生引擎执行失败 —— ${String(err?.message ?? err)}`
+            note(job, msg)
+            fail(job, msg)
+          }
+        },
+      )
+      .finally(() => {
+        nativeRuns.delete(job.id); nativeAborters.delete(job.id)
+        // 引擎原始产物是临时件（落地后就不再需要）：留着只会在系统临时目录里堆垃圾。
+        try { fs.rmSync(docsDir, { recursive: true, force: true }) } catch { /* 清不掉不影响终态 */ }
+        touch(job)
+      })
+    nativeRuns.set(job.id, run)
+    return run
+  }
+
+  // 原生阶段的任务推进：起一次（stage=articles 且没有在跑的），后续 tick 只等待。
+  // 返回 true 表示本轮「有动作，别继续往下走」。
+  async function tickNative(job, channel) {
+    // 结果已就绪 → 收割（与 batchResults 同一套约定：执行器只调一次，收割方删记录）
+    if (nativeResults.has(job.id)) {
+      const res = nativeResults.get(job.id)
+      nativeResults.delete(job.id)
+      if (!res) return true // 执行器已 fail（null = 整体失败），终态已写，不再动
+      // 取消优先：取消是终态，不许被「刚好跑完的 done」覆盖
+      if (job.cancelRequested && res.outcome !== 'cancelled') {
+        setStage(job, 'cancelled')
+        job.finishedAt = new Date().toISOString()
+        note(job, '已取消：原生引擎结果作废（未落盘部分保持原样）')
+        touch(job)
+        return true
+      }
+      job.writtenCount = Number(res.writtenCount ?? 0) || 0
+      job.failedCount = Number(res.failedCount ?? 0) || 0
+      job.blockers = res.blockers ?? []
+      // 引擎/裁决给出的错误原文必须落到 job.error：finishJob 只在 blockers 非空时
+      // 拿 blockers[0].detail 兜底，而「引擎 crashed」「协议破坏」这类失败的真实原因
+      // 在 res.error 里（如「引擎正常退出但没有 result 消息（协议破坏）」），
+      // 不搬过来，面板与 codewiki_progress 就只剩一句「编译未成立」，等于要人去猜。
+      if (res.error && !job.error) job.error = String(res.error.message ?? '').slice(0, 500) || null
+      job.nativeResult = {
+        outcome: res.outcome,
+        stage: res.stage ?? null,
+        engine: res.engine ?? null,
+        gate: res.gate ?? null,
+        apply: res.apply ?? null,
+        engineLock: res.engineLock ?? null,
+        notes: (res.notes ?? []).slice(-10),
+      }
+      if (Array.isArray(res.gate?.articles) && res.gate.articles.length) {
+        // 文章明细取质量门的真实产物清单：面板的「已写/失败」是这里来的，
+        // 不是从引擎自报的计数推——引擎说写了 20 篇、门说只有 17 篇合格，以门为准。
+        // action='write' 才算真的落地；skip 表示这一页被门拦下了（记为未完成，
+        // 与旧流水线的 ok:false 同义，让面板不再把被拦的页显示成成功）。
+        job.articles = res.gate.articles.map((a) => ({
+          name: path.basename(String(a.wikiPath ?? a.source ?? '')),
+          ok: a.action === 'write',
+        }))
+      }
+      const judged = {
+        outcome: res.outcome,
+        blockers: res.blockers ?? [],
+        canAdvanceBaseline: res.canAdvanceBaseline === true,
+      }
+      job.judged = judged
+      job.canAdvanceBaseline = judged.canAdvanceBaseline
+      saveRecord(job, judged)
+      if (res.outcome === 'cancelled') {
+        // 取消是终态：不走 finishJob（它只认 done/partial/failed，会把 cancelled 落成 done），
+        // 也不覆盖任何已写好的终态。canAdvanceBaseline 恒 false——半成品基线绝不前移。
+        job.outcome = 'cancelled'
+        job.blockers = res.blockers ?? [{ kind: 'cancelled', detail: '原生引擎已取消' }]
+        job.canAdvanceBaseline = false
+        setStage(job, 'cancelled')
+        job.finishedAt = new Date().toISOString()
+        note(job, '任务终态：已取消（产物未落地，基线未推进）')
+        touch(job)
+      } else {
+        // 不跑 tickCommit：原生通道的 commit 已在落地器里完成（提交失败会进 blockers，
+        // 终态不会是 done）。再调一次旧 tickCommit 只会重复提交同一批产物。
+        finishJob(job, res.outcome, res.blockers ?? [])
+      }
+      return true
+    }
+    if (nativeRuns.has(job.id)) return true // 在跑，等下轮
+    if (job.nativeStarted === true) {
+      // 已经跑过一轮却还在非终态：说明执行器丢了（宿主重启）。原生通道没有可重放的
+      // prompt 快照，重跑一次全量既贵又可能污染半成品——如实失败，让人重新提交。
+      if (job.cancelRequested) return false
+      fail(job, '原生引擎执行器丢失（宿主重启），无法续跑；请重新提交编译')
+      return true
+    }
+    job.nativeStarted = true
+    note(job, `原生通道启动（引擎 ${path.basename(channel.entry)}，解释器 ${channel.python}）`)
+    startNativeRun(job, channel)
+    return true
+  }
+
   function startBatchChatRun(job, prepared) {
     const c = liveConfig(config)
     const ac = new AbortController()
@@ -3528,11 +3784,22 @@ function createJobService(config, onSettled) {
         if (job.cancelRequested) {
           setStage(job, 'cancelled')
           job.finishedAt = new Date().toISOString()
+          // 取消是终态，但不是「成功」：基线绝不能因为一个半成品任务前移。
+          // setStage 只改 stage，不会碰 outcome/canAdvanceBaseline——留空会让人
+          // 从 job 文件里读到「cancelled 且 canAdvanceBaseline 还是上一次的 true」。
+          job.outcome = 'cancelled'
+          job.canAdvanceBaseline = false
           // 无服务端批次可保留：中断在飞请求（未完成请求不计费），丢弃未收割结果
           const ac = batchAborters.get(job.id)
           if (ac) ac.abort()
           batchResults.delete(job.id)
+          // 原生通道：abort 会终止受管的 Python 进程树（client.js terminateProcessTree），
+          // 结果作废、不再 gate/apply。取消是终态，后续到达的 done 也不会覆盖。
+          const nac = nativeAborters.get(job.id)
+          if (nac) nac.abort()
+          nativeResults.delete(job.id)
           if (job.batchRef) note(job, '已取消：在途请求已中断（未完成请求不计费）')
+          if (job.channel === 'native') note(job, '已取消：原生引擎进程树已终止，产物未落地')
           touch(job)
           continue
         }
@@ -3560,6 +3827,36 @@ function createJobService(config, onSettled) {
           note(job, '旧版规划阶段任务迁移到 articles（本地规划重建清单）')
           touch(job)
         }
+        // ── 原生通道（阶段 4）──────────────────────────────────────────────
+        // 通道一旦锁定就跟着 job 走：原生任务的 stage 只是「引擎走到第几步」的展示，
+        // 若让它落进 STAGE_HANDLER，跑到 index/commit 时会去调旧流水线的同名 handler，
+        // 同一批产物被两套实现各写一遍。所以 native 任务一律只走 tickNative。
+        const lc = liveConfig(config)
+        if (!job.channel) {
+          const want = nativeChannelFor(lc, { kind: job.kind, scope: job.scope })
+          if (want && job.stage === 'articles') {
+            job.channel = 'native'
+            job.nativeChannel = want
+            note(job, `编译通道：原生引擎（入口 ${path.basename(want.entry)}，解释器 ${want.python}）`)
+            persist()
+          }
+        }
+        if (job.channel === 'native') {
+          const ch = job.nativeChannel ?? nativeChannelFor(lc, { kind: job.kind, scope: job.scope })
+          if (!ch) {
+            fail(job, '原生通道缺少引擎快照（job 文件里没有 nativeChannel），无法续跑；请重新提交编译')
+            persist()
+            continue
+          }
+          try {
+            await tickNative(job, ch)
+          } catch (err) {
+            fail(job, `原生阶段异常 —— ${String(err?.message ?? err)}`)
+          }
+          if (JOB_TERMINAL.has(job.stage)) persist()
+          continue
+        }
+
         const handler = STAGE_HANDLER[job.stage]
         if (!handler) { fail(job, `未知阶段 ${job.stage}`); continue }
         try {
