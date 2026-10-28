@@ -8,6 +8,10 @@ source_files:
   - lib/engine/quality-gate.js
   - lib/engine/apply-plan.js
   - lib/engine/client.js
+  - lib/engine/manifest.js
+  - lib/engine/python/entry.py
+  - lib/engine/python/stage_map.py
+  - lib/article-contract.js
   - test-engine-output.mjs
   - test-engine-output-real.mjs
 tags: [engine, fsoft, output, mapping, validation, native]
@@ -24,6 +28,7 @@ tags: [engine, fsoft, output, mapping, validation, native]
 3. **校验（validate）**：把「能不能算成功」判成可机读的 `problems` 列表。只判「产物自身是否自洽」（页在不在、正文空不空、链接指向的东西在不在计划内）；frontmatter/锚点/写集冲突这类**目标格式**闸门属于阶段 3（`lib/engine/quality-gate.js` 与 `lib/engine/apply-plan.js`）。
 
 安全边界（写下来防止它长成「第二个引擎」，`lib/engine/output.js:8-15`）：
+
 - 不重新聚类、不做图 diff、不改写文章正文（FSoft 已经算完了）；
 - 不臆造 `source_files`（沿用 mapping.js 的证据规则）；
 - 不因为「产物看起来差不多」就把 problem 降级成 warning——缺页就是缺页，上层据此判 partial。
@@ -43,13 +48,13 @@ tags: [engine, fsoft, output, mapping, validation, native]
 **函数**
 
 - `listMarkdownPages(rootDir, rel)`（第 44-62 行）：递归收集 `docs/` 下所有 markdown 页（POSIX 相对路径、已排序）。跳过 `.` 开头的隐藏目录与 `temp/`（依赖图、引用索引、artifact 索引等工作文件）。
-- `readJsonIfExists(file, problems, kind, { optional })`（第 64-82 行）：读一个 JSON 文件；`ENOENT` 且 `optional=false` 才报 `kind` 类问题；可选文件缺失不报；存在但坏了永远报 `bad-json`（不因为「文件可选」就吞掉）。
+- `readJsonIfExists(file, problems, kind, { optional })`（第 64-86 行）：读一个 JSON 文件；`ENOENT` 且 `optional=false` 才报 `kind` 类问题；可选文件缺失不报；存在但坏了永远报 `bad-json`（不因为「文件可选」就吞掉）。
 - `collectOutput({ docsDir })`（第 91-124 行）：**读**层主入口。返回 `{docsDir, exists, pages, json, problems}`。`json` 含 `metadata / moduleTree / firstModuleTree / updateRecord` 四个字段（`firstModuleTree` 与 `updateRecord` 通过 `optional:true` 读取，全量首轮本来就没有）；`pages` 来自 `listMarkdownPages` 的递归收集。**不抛**（坏输入变成 problems，缺 `docsDir` 报 `missing-docs-dir`）。
-- `bodyLength(text)`（第 127-137 行）：去掉标题行与空白后的正文字符数，用于判「这页其实只有个标题」。
-- `relativeLinks(text)`（第 140-152 行）：收集正文里的相对 markdown 链接目标，跳过外链（`http:`/`mailto:`/`data:` 等 scheme）、锚点（`#`）、图片 data URI。
+- `bodyLength(text)`（第 127-137 行）：去掉标题行与空白后的正文字符数，用于判「这页其实只有个标题」。首个 `#{1,6} ` 标题行被跳过，剩余内容去空白后计数；无标题的纯文本也计（如 `没有标题但有正文` 计 8）。
+- `relativeLinks(text)`（第 140-152 行）：收集正文里的相对 markdown 链接目标，跳过外链（`http:`/`mailto:`/`data:` 等 scheme）、锚点（`#`）、图片 data URI。正则 `/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g`。
 - `buildWritePlan({ docsDir, componentFiles, overviewName })`（第 162-173 行）：编排入口——`collectOutput` 后交给 `mapFsoftOutput`，返回 `{collected, mapped}`。纯函数之外只多一次目录读。
-- `validateOutput({ docsDir, repoRoot, componentFiles, overviewName })`（第 184-282 行）：**校验**主入口。返回 `{ok, problems, mapped, collected, stats}`，**不抛、不修任何东西**。依次检查：① 入口（`entry-missing`）；② 空模块树（`empty-module-tree`，whole-repository 模式的正常产物但归属证据缺失）；③ 每篇文章正文非空（`empty-body`）；④ 未映射页（`unmapped-page`）；⑤ 模块树有但没产页（`article-missing`，从 mapping 的 warnings 升级）；⑥ `source_files` 真实存在（`source-missing`，仅当给了 `repoRoot`）；⑦ docs 内相对链接死链（`dead-link`）。`push` 闭包（第 187-190 行）会校验 `kind` 已登记，未登记一律抛错（防自由发挥）。`stats`（第 275-280 行）含 `pages / articles / unmapped / problems` 计数。
-- `emptyStats()`（第 284-286 行）：返回全 0 的 stats 兜底。
+- `validateOutput({ docsDir, repoRoot, componentFiles, overviewName })`（第 184-281 行）：**校验**主入口。返回 `{ok, problems, mapped, collected, stats}`，**不抛、不修任何东西**。依次检查：① 入口（`entry-missing`，第 197 行）；② 空模块树（`empty-module-tree`，第 199-207 行，whole-repository 模式的正常产物但归属证据缺失）；③ 每篇文章正文非空（`empty-body`，第 224 行）；④ 未映射页（`unmapped-page`，第 228 行）；⑤ 模块树有但没产页（`article-missing`，从 mapping 的 warnings 升级，第 231-233 行）；⑥ `source_files` 真实存在（`source-missing`，仅当给了 `repoRoot`，第 236-248 行）；⑦ docs 内相对链接死链（`dead-link`，第 252-265 行）。`push` 闭包（第 187-190 行）会校验 `kind` 已登记，未登记一律抛错（防自由发挥）。`stats`（第 275-280 行）含 `pages / articles / unmapped / problems` 计数。
+- `emptyStats()`（第 284-286 行）：返回全 0 的 stats 兜底（字段 `pages / articles / unmapped / problems`）。
 - 默认导出（第 288 行）：聚合 `OUTPUT_PROBLEM_KINDS, collectOutput, buildWritePlan, validateOutput, bodyLength, relativeLinks`。
 
 ### `lib/engine/mapping.js`
@@ -63,24 +68,21 @@ tags: [engine, fsoft, output, mapping, validation, native]
 - `moduleSlug(name)`（第 38-44 行）：模块名 → cw 惯用的 kebab-case 文件名（ASCII 保留，其它折叠成 `-`，小写）。与 cw 现有文章命名一致。
 - `normalizeSourceFiles(list)`（第 48-58 行）：去重 + 去 `./` 前缀，作为 `source_files` 规范化。
 - `sourceFilesOf(components, componentFiles)`（第 62-72 行）：模块页的 `source_files` 唯一来源——只认组件→文件证据。组件 id 形如 `src/a.py::Class.method`，取 `::` 前文件部分；`componentFiles` 里有则用映射值，否则若含 `::` 取文件部分，否则跳过（宁缺勿造，绝不以目录名猜）。
-- `indexModuleTree(moduleTree)`（第 76-96 行）：把 FSoft `{name: {path, components, children}}` 的模块树建立 `name → {name, path, components, hasChildren, artifact, parent}` 的索引，含 `walk` 递归。
-- `mapFsoftOutput({ pages, moduleTree, componentFiles, metadata, updateRecord, overviewName })`（第 115-268 行）：**纯函数**格式翻译。对每页：overview 页→入口（重复出现则后到的进 `unmapped`）；非 md→`unmapped`；模块树空（`{}`）时页名不在树里也进写集但 `attribution='unattributed'`、`source_files=[]`；否则按树节点映射为 `articles`（`type:'module'`、`pageKind` 为 `leaf`/`parent`/`artifact`、`moduleName`、`sourceFiles`、`attribution:'attributed'`、`warnings`）。slug 冲突（`A_B` 与 `A-B` 都→`a-b`）两页都进 `unmapped`（不覆盖）。模块树有但没产页→全局 `warnings`（上层升级成 `article-missing`）。返回 `{contractVersion, entry, articles, unmapped, meta:{lastCompiledCommit, layout, language}, updateRecord, warnings}`。
-- 默认导出见第 38-268 行引用的各函数（无聚合 default 导出对象，按需具名导出）。
+- `indexModuleTree(moduleTree)`（第 76-96 行）：把 FSoft `{name: {path, components, children}}` 的模块树建立 `name → {name, path, components, hasChildren, artifact, parent}` 的索引，含 `walk` 递归。其中 `artifact` 由 `node.artifact` 或名称匹配 `/^artifacts?$/i` 决定。
+- `mapFsoftOutput({ pages, moduleTree, componentFiles, metadata, updateRecord, overviewName })`（第 115-267 行）：**纯函数**格式翻译。对每页：overview 页→入口（重复出现则后到的进 `unmapped`）；非 md→`unmapped`；模块树空（`{}`）时页名不在树里也进写集但 `attribution='unattributed'`、`source_files=[]`；否则按树节点映射为 `articles`（`type:'module'`、`pageKind` 为 `leaf`/`parent`/`artifact`、`moduleName`、`sourceFiles`、`attribution:'attributed'`、`warnings`）。slug 冲突（`A_B` 与 `A-B` 都→`a-b`）两页都进 `unmapped`（不覆盖，第 165-174/200-210 行）。模块树有但没产页→全局 `warnings`（第 235-242 行，上层升级成 `article-missing`）。返回 `{contractVersion, entry, articles, unmapped, meta:{lastCompiledCommit, layout, language}, updateRecord, warnings}`，其中 `contractVersion` 取 `ENGINE_CONTRACT_VERSION`（第 256 行），`meta.lastCompiledCommit` 来自 `metadata.generation_info.commit_id`。无聚合 default 导出对象，按需具名导出。
 
 ### `lib/engine/contract.js`（被 mapping 引用的契约常量与词表）
 
 - `ENGINE_CONTRACT_VERSION`（第 20 行）：当前契约版本（值 `1`）。`mapFsoftOutput` 的返回里 `contractVersion` 字段即取它。
-- `ENGINE_STAGES`（第 24-33 行）、`TERMINAL_OUTCOMES`（第 35 行）、`BLOCKER_KINDS`（第 42-53 行）、`ENGINE_ERROR_CODES`（第 57-67 行）：机读枚举，供面板、终态判定、apply-plan 与 quality-gate 共用。
-- `engineResult` / `engineProgress` / `engineError` / `validateEngineResult` / `describeEngineResult`：跨进程结果/进度/错误的纯函数构造与校验（第 97-240 行），本模块不调用，但 `ENGINE_CONTRACT_VERSION` 直接被 mapping 使用。
+- `ENGINE_STAGES`（第 24-33 行）、`TERMINAL_OUTCOMES`（第 35 行）、`BLOCKER_KINDS`（第 42-53 行）、`ENGINE_ERROR_CODES`（第 57-67 行）：机读枚举，供面板、终态判定、apply-plan 与 quality-gate 共用。`BLOCKER_KINDS` 含 `article-missing` / `unmapped-page` / `quality-gate` 等，与 output 的 problem kind 对齐。
+- `engineResult` / `engineProgress` / `engineError` / `validateEngineResult` / `describeEngineResult`（第 97-239 行）：跨进程结果/进度/错误的纯函数构造与校验，本模块不调用，但 `ENGINE_CONTRACT_VERSION` 直接被 mapping 使用。
 
 ### 相关消费方（不在本模块但密切协作）
 
-- `lib/engine/quality-gate.js:gateNativeOutput`（第 390 行起）直接调用 `validateOutput` 与 `bodyLength`，把产物自洽判据复用到「采用门」里，并把 `empty-module-tree` 降级成 `degradation`、`unmapped-page`/`article-missing` 升级成 `defect`。
-- `renderArticle`（quality-gate.js:316）消费 mapping 产出的 `article` 结构，渲染成带 frontmatter 的完整 wiki 文章。
+- `lib/engine/quality-gate.js`：第 38 行 `import { validateOutput, bodyLength } from './output.js'`，第 40 行 `import { WIKI_ENTRY, WIKI_META_REL } from './mapping.js'`。`gateNativeOutput`（第 390 行起）直接调用 `validateOutput`，把产物自洽判据复用到「采用门」里，并把 `empty-module-tree` 降级成 `degradation`（第 419-422 行）、`unmapped-page`/`article-missing` 升级成 `defect`（第 423-428 行）。
+- `renderArticle`（quality-gate.js:316）消费 mapping 产出的 `article` 结构（`wikiPath`/`type`/`moduleName`/`sourceFiles`/`source`），渲染成带 frontmatter 的完整 wiki 文章；`checkRendered`（第 346 行）复用 `bodyLength` 判渲染后正文空壳。
 
 ## Architecture
-
-三组件流水线：collect（output.js）读磁盘 → map（mapping.js）纯翻译 → validate（output.js）判 problems。quality-gate（阶段 3）与 apply-plan（阶段 3/4）在其上叠加采用门与落地。
 
 ```text
   FSoft docs/ 树
@@ -132,7 +134,7 @@ tags: [engine, fsoft, output, mapping, validation, native]
 
 3. **validate**（`output.js:184`）：`validateOutput` 在 `buildWritePlan` 之上再逐页读正文、比对：正文空→`empty-body`；映射不上→从 `mapped.unmapped` 推 `unmapped-page`；模块树有但没产页→把 mapping 的 `warnings` 升级成 `article-missing`；给 `repoRoot` 时校验 `source_files` 存在性（`source-missing`，第 236-248 行）；docs 内相对链接在计划外→`dead-link`（第 252-265 行，跳过 `../` 仓库源文件链接与 `http` 外链）。`ok = problems.length === 0`。
 
-4. **consume**：`quality-gate.js:gateNativeOutput`（第 400 行）复用同一份 `validateOutput` 结果，再渲染+契约+基线，合成 `GateReport`；其 `rendered` 写集最终由 `apply-plan.js:applyNativeOutput` 落地。
+4. **consume**：`quality-gate.js` 的 `gateNativeOutput`（第 390 行起，第 400 行调用 `validateOutput`）复用同一份 `validateOutput` 结果，再渲染+契约+基线，合成 `GateReport`；其 `rendered` 写集最终由 `apply-plan.js:applyNativeOutput` 落地。
 
 关键不变量（数据层面）：
 - 递归收页是必须的——hierarchical 布局把子模块页放在子目录（`doc_layout.py:module_doc_relpath` 的 `posixpath.join(*path[:-1], name.md)`），只扫根会漏整棵子树（`output.js:113-116`、`test-engine-output-real.mjs:6`）。

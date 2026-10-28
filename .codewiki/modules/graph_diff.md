@@ -5,142 +5,195 @@ source_files:
   - lib/graph-diff.js
   - test-graphdiff.mjs
   - test-fixtures/gen-graphdiff-golden.py
-  - test-fixtures/graphdiff-golden.json
+  - lib/symbols.js
   - lib/incremental.js
   - lib/update-planner.js
-  - lib/change-set.js
-  - lib/symbols.js
-  - lib/update-record.js
-tags: [incremental-update, graph-diff, similarity, rename-detection, fsoft-port]
+  - lib/article-contract.js
+  - lib/engine/quality-gate.js
+tags: [diff, incremental, symbol-graph, hash, unified-diff, rename-detection]
 ---
 
 ## Overview
 
-`lib/graph-diff.js` 是**符号级增量 diff** 引擎：给定两份「文档/代码图」（Map<id, node>），
-算出哪些组件真的变了、变的是签名还是实现、哪个删除对应哪个新增（改名），并给出可机读的
-判定结果与可供落盘/对拍的序列化。它是增量编译「要不要重写某篇文章」的判定底座。
+`lib/graph-diff.js` 是符号级增量 diff 的核心算法库：它接收两份「组件图」（`Map<componentId, node>`，节点形状由 `lib/symbols.js` 提取、由 `lib/incremental.js` 瘦身快照），逐组件比较，产出「哪些组件真的变了、变的是签名还是实现、哪个删除对应哪个新增 = 改名」，并为每个实质变化的组件生成一段 unified body diff。
 
-本模块是**逐位移植**自上游 FSoft-AI4Code/CodeWiki 的
-`codewiki/src/be/updater/graph_diff.py`（MIT，ACL 2026 论文实现），理由见文件头
-`lib/graph-diff.js:1-10`：上游最值钱的判定（哪些组件真变、变签名还是实现、删除↔新增=改名）
-全部是纯标准库算法（hashlib/difflib/re），零 ML 依赖；逐位移植后本插件保持纯 Node、零外部
-运行时，判定精度与上游一致。
+它移植自 FSoft-AI4Code/CodeWiki 的 `codewiki/src/be/updater/graph_diff.py`（MIT，ACL 2026 论文实现），见文件头注释 `lib/graph-diff.js:1-10`。移植而非调用的原因（`lib/graph-diff.js:4-6`）：上游那些最值钱的判定全是纯标准库算法（`hashlib`/`difflib`/`re`），零 ML 依赖，逐位移植后本插件保持纯 Node、零外部运行时，判定精度与上游一致。
 
-组件 id 约定与上游相同：`<相对路径>#<符号名>`（上游是 `path::name`，用 `#` 是为了不与
-Windows 盘符里的 `:` 混淆）。Node 记录形状（`lib/graph-diff.js:9-10`、
-`lib/symbols.js:13-14`）：
+核心能力分为四块：
 
-```
-{ id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn }
-```
+- **代码归一与哈希**：`stripComments`（`lib/graph-diff.js:69`）剥掉注释与排版差异，`codeHash`（`lib/graph-diff.js:108`）只看代码本体，`bodyHash`（`lib/graph-diff.js:121`）连 docstring 一起哈希——区分「只改了注释」与「代码有实质变化」。
+- **difflib 移植**：`SequenceMatcher` 的匹配块算法（`getMatchingBlocks` `lib/graph-diff.js:191`、`findLongestMatch` `lib/graph-diff.js:166`）与 `ratio`（`sequenceRatio` `lib/graph-diff.js:229`、`bodySimilarity` `lib/graph-diff.js:239`）、`unified_diff`（`unifiedDiff` `lib/graph-diff.js:327`、`unifiedBodyDiff` `lib/graph-diff.js:358`）完整逐位移植，有 Python golden 对拍（`test-fixtures/graphdiff-golden.json`）。
+- **改名配对**：`pairRenames`（`lib/graph-diff.js:371`）按 body 相似度贪心最佳匹配，把「删除 + 新增」近似成「改名」。
+- **主入口**：`diffGraphs`（`lib/graph-diff.js:447`）把以上拼成组件级变更集，分类为 `added` / `deleted` / `interface` / `body` / `edge` / `renamed`，并附带每条 `records`。
 
-本模块对外只暴露纯函数，不碰文件系统，因此可被 `lib/incremental.js`、`lib/update-planner.js`
-直接复用并离线单测。所有「组件级」判定与上游逐位对齐，由 `test-graphdiff.mjs` 对拍验证
-（`test-graphdiff.mjs:1-2`、`28-42`）。
+组件 id 约定与上游相同：`<相对路径>#<符号名>`（上游是 `path::name`，用 `#` 是为避开 Windows 盘符里的 `:`），见 `lib/graph-diff.js:8-9`。Node 记录形状：`{ id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn }`（见 `lib/graph-diff.js:10`）。
 
 ## Key Components
 
-### 常量（导出）
+### 导出的常量（分类标签 / 配置 / 标记）
 
-| 名称 | 行号 | 值/含义 |
-|---|---|---|
-| `CLASS_ADDED` | `lib/graph-diff.js:14` | `'added'`，新增组件类 |
-| `CLASS_DELETED` | `lib/graph-diff.js:15` | `'deleted'`，删除组件类 |
-| `CLASS_IFACE` | `lib/graph-diff.js:16` | `'interface'`，签名（对外接口）变化 |
-| `CLASS_BODY` | `lib/graph-diff.js:17` | `'body'`，实现（代码本体）变化 |
-| `CLASS_EDGE` | `lib/graph-diff.js:18` | `'edge'`，仅依赖边变化 |
-| `CLASS_RENAMED` | `lib/graph-diff.js:19` | `'renamed'`，删除+新增被配成改名 |
-| `DIFF_TRUNCATED_MARKER` | `lib/graph-diff.js:21` | `'... [diff truncated] ...'`，超长 diff 截断标记 |
-| `DEFAULT_TAU_REN` | `lib/graph-diff.js:368` | `0.8`，改名配对的 body 相似度阈值 |
-| `DEFAULT_MAX_DIFF_TOKENS` | `lib/graph-diff.js:369` | `2000`，单条 body diff 的最大 token 数（超出截断） |
+- `CLASS_ADDED = 'added'`（`lib/graph-diff.js:14`）—— 仅在新增图中出现的组件。
+- `CLASS_DELETED = 'deleted'`（`lib/graph-diff.js:15`）—— 仅在旧图中出现的组件。
+- `CLASS_IFACE = 'interface'`（`lib/graph-diff.js:16`）—— 签名变化（参数 / 基类 / 名字）。
+- `CLASS_BODY = 'body'`（`lib/graph-diff.js:17`）—— 实现变化（body 哈希变，签名没变）。
+- `CLASS_EDGE = 'edge'`（`lib/graph-diff.js:18`）—— 仅依赖边变化。
+- `CLASS_RENAMED = 'renamed'`（`lib/graph-diff.js:19`）—— 删除 + 新增经相似度配对成的改名。
+- `DIFF_TRUNCATED_MARKER = '... [diff truncated] ...'`（`lib/graph-diff.js:251`）—— `truncateToTokens` 截断处插入的标记。
+- `DEFAULT_TAU_REN = 0.8`（`lib/graph-diff.js:368`）—— 改名配对相似度阈值（默认）。
+- `DEFAULT_MAX_DIFF_TOKENS = 2000`（`lib/graph-diff.js:369`）—— body diff 截断后的最大 token 数（默认）。
 
-### 注释/空白剥离与哈希
+### 模块级正则
 
-| 函数 | 行号 | 用途 |
-|---|---|---|
-| `normalizeBody(text)` | `lib/graph-diff.js:28-30` | 去首尾空白、折叠内部空白为单空格；`null`/`undefined` 按空串处理。 |
-| `stripTrailingComment(line)` | `lib/graph-diff.js:43-62` | 剥掉一行里**引号外**的行注释（`//` 与 `#`）。跟踪 `' " \`` 三种引号与反斜杠转义（`"http://x"` 不会被误判）；`#` 仅当行首或前一字符为空白才算注释，避免吃到 C 预处理/JS 私有字段。 |
-| `stripComments(text)` | `lib/graph-diff.js:69-100` | 逐行扫描、跟踪块注释状态，去掉块注释、行首注释与行尾注释，只留代码本体。用途：区分「只改了注释/排版」与「代码有实质变化」。注释前缀表 `LINE_COMMENT_MARKS`（`lib/graph-diff.js:35`）、块注释表 `BLOCK_COMMENT_PAIRS`（`lib/graph-diff.js:36`）、行内剥离标记 `TRAILING_COMMENT_MARKS`（`lib/graph-diff.js:39`）。 |
-| `codeHash(node)` | `lib/graph-diff.js:108-111` | 代码本体哈希：**不含**注释与排版。只改注释→`codeHash` 不变。无源码但有固化 `codeHash` 时直接返回（`lib/graph-diff.js:69`）；否则对 `stripComments(sourceCode)` 取 sha1。 |
-| `documentedSource(node)` | `lib/graph-diff.js:114-119` | 源码＋文档注释拼接；Rust 的 `///` 在 `sourceCode` 之外，不带上就看不出「只改了文档」。docstring 为空或已包含在代码内则不重复拼接。 |
-| `bodyHash(node)` | `lib/graph-diff.js:121-126` | 整段代码（含 docstring）的归一化 sha1。快照回读节点无 `sourceCode` 时用固化的 `bodyHash`（`lib/graph-diff.js:124`），保证与上游 `normalize_body` 一致。 |
-| `signature(node)` | `lib/graph-diff.js:128-134` | 取 `{ name, parameters, baseClasses }`（数组均展开成新数组）。 |
-| `signatureChanged(a, b)` | `lib/graph-diff.js:136-145` | 逐一比对 name / parameters / baseClasses；任一不同返回 `true`。用于判定 `interface` 类变更。 |
+- `WS = /\s+/gu`（`lib/graph-diff.js:23`）—— 空白归一。
+- `TOKEN = /[\p{L}\p{N}_]+|[^\p{L}\p{N}_\s]/gu`（`lib/graph-diff.js:26`）—— Unicode 感知的 tokenizer；注释说明 JS 的 `\w` 只有 `[A-Za-z0-9_]` 会让中文按字切碎、相似度偏高，故用 Unicode 属性类还原 Python 语义（`lib/graph-diff.js:24-25`）。
 
-### difflib 移植（token 级相似度）
+### 注释剥离相关
 
-| 函数 | 行号 | 用途 |
-|---|---|---|
-| `tokens(text)` | `lib/graph-diff.js:147-149` | 用 Unicode 感知的 `TOKEN` 正则（`lib/graph-diff.js:26`，还原 Python `\w` 的中文语义）把文本切成 token 数组。 |
-| `buildB2J(b)` | `lib/graph-diff.js:156-164` | `difflib.SequenceMatcher` 的 b2j 索引（`token -> 出现位置列表`）。 |
-| `findLongestMatch(a, b, b2j, alo, ahi, blo, bhi)` | `lib/graph-diff.js:166-189` | 在指定区间内找最长匹配块，与上游算法逐位一致。 |
-| `getMatchingBlocks(a, b)` | `lib/graph-diff.js:191-226` | 递归划分 + 合并相邻块，完全复刻 Python `get_matching_blocks`。 |
-| `sequenceRatio(aArr, bArr)` | `lib/graph-diff.js:229-236` | `difflib.SequenceMatcher.ratio()`：`(2*matches)/(|a|+|b|)`，落在 [0,1]。两序列皆空返回 `1.0`。 |
-| `bodySimilarity(a, b)` | `lib/graph-diff.js:239-245` | 上游 `body_similarity`：token 序列的 difflib ratio。双侧为空返回 `1.0`，单侧为空返回 `0.0`。改名配对与 golden 对拍都用它。 |
-| `approxTokens(text)` | `lib/graph-diff.js:247-249` | 用 `长度/4 + 1` 估算 token 数，给截断预算用。 |
-| `truncateToTokens(text, maxTokens)` | `lib/graph-diff.js:251-257` | 超过预算时保留头尾各一半并插入 `DIFF_TRUNCATED_MARKER`（`lib/graph-diff.js:256`）。 |
-| `splitKeepEnds(text)` | `lib/graph-diff.js:263-269` | 复刻 Python `splitlines(keepends=True)`：末尾无换行的最后一行也保留。 |
-| `getOpcodes(a, b)` | `lib/graph-diff.js:271-287` | 由匹配块推出 opcode（`equal/replace/delete/insert`）。 |
-| `getGroupedOpcodes(a, b, n)` | `lib/graph-diff.js:289-317` | 按 n 行上下文归并 opcode，复刻 Python `get_grouped_opcodes`。 |
-| `rangeUnified(start, stop)` | `lib/graph-diff.js:319-325` | 生成 unified diff 的行列号范围字符串。 |
-| `unifiedDiff(aLines, bLines, fromFile, toFile, n=3, lineterm='\n')` | `lib/graph-diff.js:327-355` | 逐位移植 `difflib.unified_diff`：header 仅在首个 group 输出一次、每个 group 都有 `@@` 头。 |
-| `unifiedBodyDiff(oldNode, newNode, label)` | `lib/graph-diff.js:358-362` | 上游 `unified_body_diff`：对 `documentedSource` 取行、以整文件相对路径作 label、上下文固定 2 行。 |
+- `LINE_COMMENT_MARKS = ['//', '///', '#', '--', ';', '%']`（`lib/graph-diff.js:35`）
+- `BLOCK_COMMENT_PAIRS = [['/*', '*/'], ['<!--', '-->'], ['"""', '"""'], ["'''", "'''"]]`（`lib/graph-diff.js:36`）
+- `TRAILING_COMMENT_MARKS = ['//', '#']`（`lib/graph-diff.js:39`）
+- `stripTrailingComment(line)`（`lib/graph-diff.js:43`）—— 剥掉一行里引号外的行尾注释（只认 `//` 与 `#` 行内剥离；`#` 仅当行首或前为空白时才算注释，避免吃到 C 预处理 / JS 私有字段）。`"http://x"` 不被误判。
+- `stripComments(text)`（`lib/graph-diff.js:69`，**导出**）—— 逐行扫、跟踪块注释状态，去掉注释与纯装饰空白；用于区分「只改了注释/排版」与「代码有实质变化」。字符串里的 `//` 会被近似误判为注释（可接受，见 `lib/graph-diff.js:64-68`）。
+
+### 归一与哈希
+
+- `normalizeBody(text)`（`lib/graph-diff.js:28`，**导出**）—— 去空、把空白压成单个空格。
+- `codeHash(node)`（`lib/graph-diff.js:108`，**导出**）—— 不含注释/排版的代码本体 sha1；若节点已带固化 `codeHash` 且无源码则直接返回（`lib/graph-diff.js:109`）。用于「只改注释」降级判定。
+- `documentedSource(node)`（`lib/graph-diff.js:114`，**导出**）—— 源码 + docstring；Rust 的 `///` 在 `sourceCode` 之外，不带上就看不出「只改了文档」。
+- `bodyHash(node)`（`lib/graph-diff.js:121`，**导出**）—— 对 `normalizeBody(documentedSource(node))` 取 sha1；若节点无源码但带固化 `bodyHash` 则直接返回（`lib/graph-diff.js:28`）。快照回读节点走这条缓存分支，避免把源码读回来重算。
+- `signature(node)`（`lib/graph-diff.js:128`，**导出**）—— 抽取 `{ name, parameters, baseClasses }`，用于签名比较。
+- `signatureChanged(a, b)`（`lib/graph-diff.js:136`，**导出**）—— 逐字段比较签名，任一不同即返回 `true`。
+
+### difflib 移植（token 序列相似度 / unified diff）
+
+- `tokens(text)`（`lib/graph-diff.js:147`）—— 用 `TOKEN` 正则切分。
+- `buildB2J(b)`（`lib/graph-diff.js:156`）—— 构造值→下标列表的映射（SequenceMatcher 内部）。
+- `findLongestMatch(a, b, b2j, alo, ahi, blo, bhi)`（`lib/graph-diff.js:166`）—— 最长公共子序列匹配块（autojunk=False 语义）。
+- `getMatchingBlocks(a, b)`（`lib/graph-diff.js:191`）—— 队列式递归求匹配块并归并相邻块，与 Python difflib 完全一致。
+- `sequenceRatio(aArr, bArr)`（`lib/graph-diff.js:229`，**导出**）—— `(2.0 * matches) / total`，区间 `[0,1]`。
+- `bodySimilarity(a, b)`（`lib/graph-diff.js:239`，**导出**）—— token 序列的 difflib ratio；空/空返回 1.0，单边空返回 0.0。
+- `approxTokens(text)`（`lib/graph-diff.js:247`，**导出**）—— 按 `length/4 + 1` 估算 token 数。
+- `truncateToTokens(text, maxTokens)`（`lib/graph-diff.js:251`，**导出**）—— 超过预算则保留头尾各一半并插入 `DIFF_TRUNCATED_MARKER`（`lib/graph-diff.js:21`）。
+- `splitKeepEnds(text)`（`lib/graph-diff.js:263`）—— 模拟 Python `splitlines(keepends=True)`。
+- `getOpcodes(a, b)`（`lib/graph-diff.js:271`）—— 由匹配块生成 `replace/delete/insert/equal` opcode。
+- `getGroupedOpcodes(a, b, n)`（`lib/graph-diff.js:289`）—— 按 n 行上下文分组 opcode（每组长匹配块之间截断）。
+- `rangeUnified(start, stop)`（`lib/graph-diff.js:319`）—— 把区间渲染成 unified diff 的 `@@` 行号格式。
+- `unifiedDiff(aLines, bLines, fromFile, toFile, n=3, lineterm='\n')`（`lib/graph-diff.js:327`，**导出**）—— difflib `unified_diff` 逐位移植；`---`/`+++` header 只输出一次，`@@` 头每个 group 都有（`lib/graph-diff.js:260-266`）。
+- `unifiedBodyDiff(oldNode, newNode, label)`（`lib/graph-diff.js:358`，**导出**）—— 用 `documentedSource` 取两节点源码切片，调 `unifiedDiff` 生成上下文 2 行的 body diff，label 用 `a/<label>`、`b/<label>`。
 
 ### 改名配对
 
-| 函数 | 行号 | 用途 |
-|---|---|---|
-| `pairRenames(deleted, added, oldGraph, newGraph, tauRen=DEFAULT_TAU_REN)` | `lib/graph-diff.js:371-407` | 按 body 相似度贪心最佳匹配。仅同 kind 配对；先按长度比快速剪枝（够不到 `tauRen` 的直接跳过，`lib/graph-diff.js:391`），再用 `bodySimilarity` 算相似度，`sim >= tauRen` 才入候选；候选按相似度降序，贪心去重取最优配对，返回 `[[oldId, newId, sim], ...]`。 |
+- `pairRenames(deleted, added, oldGraph, newGraph, tauRen=DEFAULT_TAU_REN)`（`lib/graph-diff.js:371`，**导出**）—— 按 kind 把新增分组（`lib/graph-diff.js:373-378`），对每对 (oldId, newId) 先用长度比快速剪枝（`lib/graph-diff.js:391-392`，够不到 `tauRen*0.9` 直接跳过），再用 `bodySimilarity` 求相似度；按相似度降序贪心配对，返回 `[[oldId, newId, sim], ...]`（`lib/graph-diff.js:396-406`）。`deleted`/`added` 任一为空直接返回 `[]`（`lib/graph-diff.js:372`）。
 
 ### 主入口与结果结构
 
-`diffGraphs` 返回的对象结构由 `emptyGraphDiff()`（`lib/graph-diff.js:413-423`）定义，所有字段：
+- `emptyGraphDiff()`（`lib/graph-diff.js:413`，**导出**）—— 返回空的 diff 结果壳：
 
-| 字段 | 类型 | 含义 |
-|---|---|---|
-| `added` | `Set<string>` | 仅出现在新图的组件 id |
-| `deleted` | `Set<string>` | 仅出现在旧图的组件 id |
-| `interface` | `Set<string>` | 签名变化的组件 id（含因改名导致签名变的 newId） |
-| `body` | `Set<string>` | 仅实现（代码本体）变化的组件 id |
-| `edge` | `Set<string>` | 仅依赖边变化的组件 id |
-| `renamed` | `Map<oldId, newId>` | 删除↔新增被配成改名的映射 |
-| `records` | `Map<cid, record>` | 每个变更组件的明细记录 |
+  ```
+  {
+    added: Set, deleted: Set, interface: Set, body: Set, edge: Set,
+    renamed: Map,   // oldId -> newId
+    records: Map,   // componentId -> record
+  }
+  ```
 
-每个 `record` 的字段（`lib/graph-diff.js:480-494` 定义 body 类；`506-520` renamed；`528-542` added；`546-560` deleted）：
+- `graphDiffCounts(d)`（`lib/graph-diff.js:425`，**导出**）—— 把各 Set/Map 的 `size` 汇总成 `{ added, deleted, interface, body, edge, renamed }`。
+- `changedIds(d)`（`lib/graph-diff.js:436`，**导出**）—— 所有变更 id 的并集（含 renamed 的 newId）。
+- `isDiffEmpty(d)`（`lib/graph-diff.js:442`，**导出**）—— `changedIds(d).size === 0`。
+- `diffGraphs(oldGraph, newGraph, opts={})`（`lib/graph-diff.js:447`，**导出**）—— 主入口，详见 Data Flow。
 
-| record 字段 | 含义 |
-|---|---|
-| `componentId` | 变更组件 id |
-| `changeClass` | `'added'/'deleted'/'interface'/'body'/'edge'/'renamed'` |
-| `oldId` / `newId` | 旧/新 id（新增的 `oldId=null`，删除的 `newId=null`） |
-| `relativePath` | 文件相对路径 |
-| `componentType` | 组件 kind |
-| `oldSignature` / `newSignature` | 旧/新 `signature(node)` 结果 |
-| `similarity` | renamed 时为四舍五入保留 4 位小数的相似度，其余为 `null` |
-| `signatureChanged` | 布尔，签名是否变化 |
-| `edgesAdded` / `edgesRemoved` | 依赖边增删（排序后的数组） |
-| `diff` | body 变化时的截断 unified diff（`truncateToTokens(..., maxDiffTokens)`）；无变化时为空串 |
+每条 `records` entry 的字段（由 `diffGraphs` 构造，见 `lib/graph-diff.js:480-497`、`506-520`、`528-542`、`546-560`）：
 
-| 函数 | 行号 | 用途 |
-|---|---|---|
-| `emptyGraphDiff()` | `lib/graph-diff.js:413-423` | 返回空的判定结果结构（见上表）。 |
-| `graphDiffCounts(d)` | `lib/graph-diff.js:425-434` | 把六个计数的 `size` 汇总成普通对象 `{ added, deleted, interface, body, edge, renamed }`。 |
-| `changedIds(d)` | `lib/graph-diff.js:436-440` | 返回所有变更 id 的 `Set`（含 renamed 的 newId）。 |
-| `isDiffEmpty(d)` | `lib/graph-diff.js:442-444` | `changedIds(d).size === 0` 时为真。 |
-| `diffGraphs(oldGraph, newGraph, opts={})` | `lib/graph-diff.js:447-564` | 主入口。详见下方「判定逻辑」。 |
-| `serializeDiff(d)` | `lib/graph-diff.js:567-578` | 序列化用：把 `Set/Map` 转成排序数组/对象，并附带 `counts`，便于落盘与对拍。 |
+| 字段 | 含义 |
+|------|------|
+| `componentId` | 组件 id（renamed 时是 newId） |
+| `changeClass` | 上述 `CLASS_*` 之一 |
+| `oldId` / `newId` | 旧/新 id（added 的 oldId 为 `null`，deleted 的 newId 为 `null`） |
+| `relativePath` | 取自新节点（或旧节点）的 `relativePath` |
+| `componentType` | `kind` |
+| `oldSignature` / `newSignature` | `signature()` 结果（缺失侧为 `null`/`null`） |
+| `similarity` | 仅 renamed 有值，其余 `null`，保留 4 位小数（`Math.round(sim*10000)/10000` `lib/graph-diff.js:515`） |
+| `signatureChanged` | `signatureChanged(o, n)` 的布尔值 |
+| `edgesAdded` / `edgesRemoved` | `dependsOn` 的差集，已排序（`lib/graph-diff.js:478-479`） |
+| `diff` | 截断后的 `unifiedBodyDiff` 字符串；非 body/renamed 变化组件为空串 |
 
-### `diffGraphs` 判定逻辑（`lib/graph-diff.js:447-564`）
-
-1. `opts.tauRen` 默认 `DEFAULT_TAU_REN`、`opts.maxDiffTokens` 默认 `DEFAULT_MAX_DIFF_TOKENS`（`lib/graph-diff.js:448-449`）。
-2. 先按 id 集合差分出 `added` / `deleted`（`lib/graph-diff.js:454-455`）。
-3. 对共有 id：算 `signatureChanged` / `bodyHash` 是否变化 / `dependsOn` 是否变化；三者皆无则跳过（`lib/graph-diff.js:457-466`）。否则分类：`signatureChanged`→`interface`，否则`hashChanged`→`body`，否则→`edge`（`lib/graph-diff.js:467-477`），并写 `records`。`hashChanged` 时填充截断 unified diff（`lib/graph-diff.js:495`）。
-4. 改名配对：`pairRenames` 的结果里把 oldId 从 `deleted`、newId 从 `added` 中移除，写入 `renamed`（oldId→newId），并写 renamed record；若签名也变了，把 newId 同时加入 `interface`（`lib/graph-diff.js:499-524`）。
-5. 兜底写 `added` / `deleted` 的 record（`lib/graph-diff.js:526-561`）。
+- `serializeDiff(d)`（`lib/graph-diff.js:567`，**导出**）—— 把 Set/Map 转数组（按 id 排序、`renamed` 转对象），产出可 JSON 化的 `{ counts, added, deleted, interface, body, edge, renamed, records }`，便于落盘与对拍。
 
 ## Architecture
 
-本模块是纯函数管线，组件 ≥3 且流程非平凡，框图如下：
+`graph-diff` 是纯算法模块，内部由「归一/哈希 → difflib 移植 → 改名配对 → 汇总」四层串成。`diffGraphs` 把 `oldGraph`/`newGraph` 两个 `Map` 喂进去，逐组件分类、递归配对改名、构造 `records`。
+
+```text
+            oldGraph Map ──┐
+                           ├──► diffGraphs (447)
+            newGraph Map ──┘        │
+                                   ├─► 哈希/签名比对 ── codeHash/bodyHash/signatureChanged
+                                   │   (108/121/136)
+                                   ├─► pairRenames ──► bodySimilarity (239)
+                                   │   (371)            + SequenceMatcher (191/229)
+                                   │
+                                   ▼
+                          emptyGraphDiff 结构 (413)
+                          ┌──────────────────────────────────┐
+                          │ added/deleted/interface/body/edge │
+                          │ renamed: oldId->newId            │
+                          │ records: id -> { changeClass,    │
+                          │   oldSig/newSig, edges±, diff }  │
+                          └──────────────────────────────────┘
+                                   │
+                  unifiedBodyDiff (358) ──► unifiedDiff (327) ──► truncateToTokens (251)
+                                   │
+                                   ▼
+                          serializeDiff (567) ──► JSON 落盘 / 对拍
+
+  注释剥离: stripComments (69) ← LINE/BLOCK/TRAILING_COMMENT_MARKS (35-39)
+  哈希:     codeHash (108) / bodyHash (121) ← documentedSource (114)/normalizeBody (28)
+```
+
+下游消费方（Connections 一节详述）：`lib/incremental.js` 的 `filterStaleTasks` 与 `lib/update-planner.js` 的 `planUpdate` 都先调 `diffGraphs`，再用 `changedIds`/`graphDiffCounts` 做判定与统计。
+
+## Data Flow
+
+`diffGraphs(oldGraph, newGraph, opts)`（`lib/graph-diff.js:447`）的完整流程：
+
+1. **参数解析**：`tauRen = opts.tauRen ?? DEFAULT_TAU_REN`、`maxDiffTokens = opts.maxDiffTokens ?? DEFAULT_MAX_DIFF_TOKENS`（`lib/graph-diff.js:413-414`）；`emptyGraphDiff()` 起壳（`lib/graph-diff.js:450`）。
+2. **id 全集对比**：`newIds` 中不在 `oldIds` 的进 `added`，`oldIds` 中不在 `newIds` 的进 `deleted`（`lib/graph-diff.js:454-455`）。
+3. **共现组件分类**（`lib/graph-diff.js:457-497`）：对 `oldIds` 与 `newIds` 都有的 `cid`：
+   - 算 `sigChanged = signatureChanged(o, n)`、 `hashChanged = bodyHash(o) !== bodyHash(n)`、依赖边差集 `edgesChanged`（`lib/graph-diff.js:461-465`）。
+   - 三者都不变则 `continue`（`lib/graph-diff.js:466`）。
+   - 优先级：`sigChanged` → `interface`；否则 `hashChanged` → `body`；否则 `edge`（`lib/graph-diff.js:468-477`）。
+   - 构造 `rec`，`edgesAdded`/`edgesRemoved` 是 `dependsOn` 有序差集（`lib/graph-diff.js:478-479`）；若 `hashChanged` 则 `rec.diff = truncateToTokens(unifiedBodyDiff(o, n, cid), maxDiffTokens)`（`lib/graph-diff.js:495`）。
+4. **改名配对**（`lib/graph-diff.js:499-524`）：用 `pairRenames(result.deleted, result.added, oldGraph, newGraph, tauRen)` 得到 `[[oldId, newId, sim], ...]`；逐个把 `oldId` 从 `deleted` 删、`newId` 从 `added` 删，写入 `renamed.set(oldId, newId)`（`lib/graph-diff.js:500-502`），构造 `CLASS_RENAMED` 的 `rec`，`similarity` 保留 4 位小数（`lib/graph-diff.js:515`）；若 `signatureChanged` 则同时把 `newId` 加进 `interface`（`lib/graph-diff.js:523`）。
+5. **补充 added/deleted 记录**（`lib/graph-diff.js:526-561`）：给每个剩余 `added` 构造 `CLASS_ADDED` 的 `rec`（`oldSignature` 为 `null`，`edgesAdded` 为 `dependsOn` 去重排序，`diff` 为 `unifiedBodyDiff(null, n, cid)`）；给每个剩余 `deleted` 构造 `CLASS_DELETED` 的 `rec`（`newSignature` 为 `null`，`edgesRemoved` 为旧 `dependsOn`，`diff` 为 `unifiedBodyDiff(o, null, cid)`）。
+6. **返回** `result`（`lib/graph-diff.js:563`）。
+
+调用方通常再调一次 `serializeDiff(result)`（`lib/graph-diff.js:567`）转成可 JSON 结构用于落盘或测试对拍（见 `test-graphdiff.mjs:83-84`）。
+
+**节点形状契约**（与 `lib/symbols.js:13-14` 一致）：`{ id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn }`。注意快照回读节点（经 `lib/incremental.js:69` 的 `graphFromSnapshot`）`sourceCode`/`docstring` 为空、`bodyHash`/`codeHash` 已固化——这时 `codeHash`（`lib/graph-diff.js:109`）和 `bodyHash`（`lib/graph-diff.js:124`）直接走缓存分支，不重算。这也是 `SLIM_FIELDS`（`lib/incremental.js:26`）刻意保留哈希字段的原因。
+
+## Connections
+
+- [[incremental]] —— 本模块的直接上游消费者。`lib/incremental.js:140` 导入 `diffGraphs, changedIds, graphDiffCounts, bodyHash, codeHash`；`filterStaleTasks`（`lib/incremental.js:140-194`）调 `diffGraphs` 后，用 `codeHash` 在判定层做「纯注释/排版改动降级」（只降级 `body` 类，见 `lib/incremental.js:146-169`），并把 `change`/`counts`/`cosmeticOnly` 一并透传给调用方。同一文件还负责图快照的瘦身存取（`slimGraph`/`graphFromSnapshot`，`lib/incremental.js:37-88`），决定了节点回读时 `bodyHash`/`codeHash` 已固化这一前提。
+- [[update-planner]] —— 另一个消费者。`lib/update-planner.js:156` 导入 `diffGraphs, changedIds, graphDiffCounts, codeHash`；`planUpdate`（`lib/update-planner.js:186`）在非 fileLevel 时调 `diffGraphs`（`lib/update-planner.js:57`），并经 `realChangedIds`（`lib/update-planner.js:180`）按 `diff.body` 再走一遍 `codeHash` 降级，区分 `real`/`cosmetic`/`structural`（`lib/update-planner.js:73-80`），最终驱动 write/keep/delete/review 四类 action 与反向依赖闭包（`lib/update-planner.js:181-191`）。
+- [[symbols]] —— 节点形状与 id 约定的来源。组件 id `<相对路径>#<符号名>` 与节点字段 `{ id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn }` 在 `lib/symbols.js:10-14` 声明，与本文模块严格对齐（上游是 `path::name`）。
+- [[article-contract]] / [[engine-quality-gate]] —— 下游不直接依赖 graph-diff，但 `diffGraphs` 产出的 `records.diff`（unified body diff）最终会作为「这次改了几处、为什么」的上下文进入文章写作；quality-gate（`lib/engine/quality-gate.js`）负责采用门，本模块不参与该阶段。
+- 测试与对拍基准：[[test-graphdiff]]（即 `test-graphdiff.mjs`）与 `test-fixtures/gen-graphdiff-golden.py` + `test-fixtures/graphdiff-golden.json`。golden 用 Python 原生 `difflib`/`hashlib` 生成期望值（相似度、哈希、unified diff 三类用例，`gen-graphdiff-golden.py:31-123`），Node 侧逐项比对（容忍 `1e-12`，`test-graphdiff.mjs:2`），保证移植逐位一致。
+
+## Known Issues
+
+- **字符串内 `//` 被近似误判为注释**：`stripComments`（`lib/graph-diff.js:69-73`、`69-100`）不区分字符串字面量里的 `//`，会把它连同后续内容一并剥掉。作者明确注释这是「可接受的近似」——最坏情况是让某行看着像注释的代码被剥掉，使 `codeHash` 更小概率碰撞；引入真词法分析需带语言参数、会复杂化这条纯逻辑路径，故未做。影响范围：纯注释降级判定在极个别含 `//` 字符串的代码上可能误判。
+
+- **`#`/`;`/`%`/`--` 不做行内剥离**：`TRAILING_COMMENT_MARKS` 只含 `//` 和 `#`（`lib/graph-diff.js:39`），且 `#` 仅当行首或前为空白才算注释（`lib/graph-diff.js:35`），原因见 `lib/graph-diff.js:37-38`——这些符号在表达式里太常见（`a--b`、分号结尾、取模），剥离会吃掉真代码。反之 `--`/`;`/`%` 只在行首生效（`LINE_COMMENT_MARKS`，`lib/graph-diff.js:35`、`93-94`）。
+
+- **`bodyHash` 不区分注释、需判定层降级**：`bodyHash`（`lib/graph-diff.js:121`）覆盖整段源码文本，注释被改一下它就变，于是文章会被无条件重写。作者确认这不是移植错（上游 Python `normalize_body` 也只做空白归一，`lib/incremental.js:147-149`）。因此「纯注释改动降级」是在判定层（`filterStaleTasks`/`realChangedIds`）用 `codeHash` 补一道（`lib/incremental.js:155-169`、`lib/update-planner.js:60-72`），本模块刻意保持与上游逐位对齐、不在此修改。
+
+- **`TOKEN` 用 Unicode 近似 Python `\w`**：`TOKEN`（`lib/graph-diff.js:26`）用 `[\p{L}\p{N}_]` 还原 Python 的 Unicode 感知 `\w`，否则中文会被按字切碎、相似度整体偏高（`lib/graph-diff.js:24-25`）。这是语义对齐上的有意为之，不是 bug，但意味着非字母数字符号的切分粒度与 Python `\w` 在数学符号（如 `\p{N}` 是否含下角标等）上可能存在细微差异。
+
+- **改名配对是贪心近似，非全局最优**：`pairRenames`（`lib/graph-diff.js:371-407`）按相似度降序贪心配对，先到先得（`usedOld`/`usedNew` 去重，`lib/graph-diff.js:397-405`）；同一旧组件若与多个新组件都高相似，只能配一个。长度差太大（够不到 `tauRen*0.9`）直接剪枝（`lib/graph-diff.js:397-398`），所以「大幅改动但语义等同」的改名可能漏配、退化成独立的 added + deleted。
+
+- **无功能禁用/注释关闭项**：本模块全部导出均处于启用状态，未发现有被 `//` 整块注释关闭或受 `disabled` 标志控制的代码（已通读 `lib/graph-diff.js` 全部 578 行）。
+
+- **`documentedSource` 的 docstring 前缀不幂等**：当 `doc` 已作为子串出现在 `code` 中时，`documentedSource`（`lib/graph-diff.js:114-119`）不会前缀 docstring（`lib/graph-diff.js:117` 的 `!code.includes(doc)` 判断），否则会重复。这意味着「docstring 恰好等于源码子串」的节点，`bodyHash` 与「docstring 独立」的节点可能不同——属边界情形，未特殊处理。
 
 ```text
             oldGraph / newGraph  (Map<id, node>)
@@ -180,25 +233,7 @@ Windows 盘符里的 `:` 混淆）。Node 记录形状（`lib/graph-diff.js:9-10
 - **difflib 逐位移植**：`buildB2J`→`findLongestMatch`→`getMatchingBlocks`→`sequenceRatio` + `getOpcodes`→`getGroupedOpcodes`→`unifiedDiff`，与 Python `difflib` 完全一致，因此能用 `test-fixtures/gen-graphdiff-golden.py` 生成的 golden 逐用例对拍（见 `test-graphdiff.mjs:28-42`）。
 - **改名配对独立成步**：先按 id 差分得 deleted/added，再在二者间按 body 相似度贪心配对，配对成功的从 deleted/added 移除并写入 `renamed`，保证「改名」不被视为「删除+新增」。
 
-## Data Flow
 
-以一次增量编译为例，数据从符号提取流到判定再流到计划器：
-
-1. **图来源**：`lib/symbols.js` 用 web-tree-sitter 提取出 `Map<id, node>`（`lib/symbols.js:13-14` 规定的形状与本模块契约一致）。旧图来自上一次编译落盘的快照（`lib/incremental.js:22` 的 `SNAPSHOT_REL`，由 `slimGraph` 生成，`lib/incremental.js:37-48`），新图来自本次实时提取。
-2. **快照瘦身**：`slimGraph` 只存判定所需字段，不存 `sourceCode`，但把 `bodyHash`/`codeHash` 固化进快照（`lib/incremental.js:26-48`），让回读节点走 `bodyHash`/`codeHash` 的缓存分支（`lib/graph-diff.js:109`、`124`）。
-3. **组件级 diff**：调用方把旧/新图交给 `diffGraphs`（`lib/incremental.js:141`、`lib/update-planner.js:186`），得到 `GraphDiff` 结构与 `records`。
-4. **纯注释降级**（判定层，不在本模块内）：`filterStaleTasks`（`lib/incremental.js:140-156`）与 `realChangedIds`（`lib/update-planner.js:57-81`）复用 `codeHash` 把「只改了注释/排版」的 body 变更降级为 `cosmetic`，不动 `diffGraphs`（因为它与上游逐位对齐、有 golden 对拍）。interface/added/deleted/renamed/edge 一律不放行。
-5. **计划生成**：`planUpdate`（`lib/update-planner.js:156`）消费 diff，结合 `moduleMap` 与 `dependentsOf`（`lib/update-planner.js:85`）算反向依赖闭包，给每篇文章产出 `write/keep/delete/review` 四类 action。
-6. **序列化与对拍**：`serializeDiff`（`lib/graph-diff.js:567`）把结果转 JSON；`test-graphdiff.mjs` 用 `test-fixtures/graphdiff-golden.json`（由 `gen-graphdiff-golden.py` 用 Python `difflib`/`hashlib` 生成，`test-fixtures/gen-graphdiff-golden.py:1-8`）逐用例验证 `bodySimilarity`/`bodyHash`/`unifiedDiff` 与上游一致（误差 `<1e-12`，`test-graphdiff.mjs:2`）。
-
-## Connections
-
-- [[incremental]] — `lib/incremental.js` 是主要调用方：`filterStaleTasks`（`lib/incremental.js:140-194`）直接调用 `diffGraphs`/`changedIds`/`graphDiffCounts`/`bodyHash`/`codeHash`，并用 `codeHash` 做纯注释降级；`SNAPSHOT_REL` 的瘦身快照（`lib/incremental.js:22-48`）是 `diffGraphs` 的旧图来源。
-- [[update-planner]] — `lib/update-planner.js` 的 `planUpdate`（`lib/update-planner.js:156`）与 `realChangedIds`（`lib/update-planner.js:57`）消费 `diffGraphs` 结果，结合 `moduleMap`/`dependentsOf` 生成文章级增量计划；两者共用同一套 `codeHash` 降级判据。
-- [[symbols]] — `lib/symbols.js` 是图的**生产者**，其 Node 记录形状（`lib/symbols.js:13-14`）与本模块的契约完全一致，是 `diffGraphs` 输入的前提。
-- [[change-set]] — `lib/change-set.js` 采集文件级变更，与 `update-planner` 配合在 `fileLevel` 时退化成文件级判定（不再调用 `diffGraphs`，`lib/update-planner.js:179-192`）。
-- [[update-record]] — `lib/update-record.js` 记录每次编译的终态，其中「完整性」部分依赖本模块产出的变更计数（`graphDiffCounts`）判定是否可推进基线。
-- [[lib]] — 本模块在 `lib/` 代码库中的归属与同目录其它核心库的整体关系，见 `modules/lib.md`。
 
 ## Known Issues
 

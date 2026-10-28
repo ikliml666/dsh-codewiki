@@ -7,11 +7,15 @@ source_files:
   - lib/engine/process-tree.js
   - lib/engine/contract.js
   - lib/engine/llm-bridge.js
+  - lib/engine/quality-gate.js
+  - lib/engine/apply-plan.js
+  - lib/engine/mapping.js
   - lib/engine/python/entry.py
   - lib/engine/python/stage_map.py
   - test-engine-manifest.mjs
   - test-engine-process-tree.mjs
   - test-engine-client.mjs
+  - test-engine-python-entry.mjs
 tags: [engine, process, manifest, process-tree, protocol, python-bridge]
 ---
 
