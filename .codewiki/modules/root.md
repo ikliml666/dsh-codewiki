@@ -98,7 +98,7 @@ tags: [root, client-ui, sidebar-panel, test-suite, orchestration]
 - 607-610| `dirty`：`JSON.stringify(draft) !== JSON.stringify(snapshot.value)`。
 - 613-617| `selectedProvider`：目录命中的 provider 条目，未命中为 null（手填形态）。
 - 622-653| `useEfforts(provider, model)`：二次拉取 `EFFORTS_PATH?provider=&model=`；状态形状 `{ for, efforts, defaultEffort, error, loading }`（623），`for` 是 `provider\0model` 键。654-655| 普通档 `effortsState` 与大档 `bigEffortsState` 各一份，同一套读取逻辑（620-621 行注释）。
-- 660-764| `modelTrio({ pKey, mKey, eKey, state, allowEmptyProvider, providerPlaceholder })`：一个模型的三个字段（提供商/模型/思考程度）共用渲染与目录联动——换提供商清空模型与旧档位（677-684）、目录里已配置但已删除的 provider/model 保留为 `__custom` 选项避免静默丢配置（688-691、706-714）、目录未声明档位时给 `GENERIC_EFFORTS` 手选（727-743）、大档 `allowEmptyProvider=true` 多一个「（未启用）」空选项（686、723）。
+- 660-764| `modelTrio({ pKey, mKey, eKey, state, allowEmptyProvider, providerPlaceholder })`：一个模型的三个字段（提供商/模型/思考程度）共用渲染与目录联动——换提供商清空模型与旧档位（677-684）、目录里已配置但已删除的 provider/model 保留为 `__custom` 选项避免静默丢配置（688-691、706-714）、目录未声明档位时给 `GENERIC_EFFORTS` 手选（727-743）、大档 `allowEmptyProvider=true` 多一个「（未启用）」空选项（686），provider 留空时档位处改显 `bigDisabled` 提示（723）。
 
 保存与校验（766-805）：
 
@@ -132,7 +132,7 @@ tags: [root, client-ui, sidebar-panel, test-suite, orchestration]
 - 1213-1232| `toggleExclude(r)`：直接改插件配置 `excludePaths`（`form.mutate`，与设置卡保存同链路、经宿主 configForms 持久化并热生效，1211-1212 行注释）；成功后 `POST CONTROL { action:'refresh' }` 失效服务端总览缓存并立即重拉（1224-1226）。
 - 1234-1242| `compile(cwd)`：`POST CONTROL { action:'compile', cwd }`（stale 仓库的「更新」按钮）。
 - 1244-1245| `sched = data?.scheduler`、`repos = data?.repos`。
-- 1247-1327| 渲染（整体包 try/catch，异常显形 1325-1327）：调度块（1249-1276——开/关 Tag、扫描间隔、上次扫描/错误、下次扫描 = 上次扫描 + 间隔，「60s 心跳有同量级误差，显示为约值」1262 行注释，附 `lastScanRepos/lastScanSubmitted` 统计）；仓库卡列表（1278-1324——`state` 五态映射 `clean→done / stale→stale / error→failed / 其余→cancelled`（1281）、`excluded` Tag、stale 时「更新」按钮、排除/取消排除按钮、lastJob 的 meta 行 + 进度条；`ljActive` 排除 `done/partial/failed/cancelled` 四终态，否则已结束任务会被当成在跑继续显示进度条（1301-1302 行注释））。
+- 1247-1327| 渲染（整体包 try/catch，异常显形 1325-1327）：调度块（1249-1276——开/关 Tag、扫描间隔、上次扫描/错误、下次扫描 = 上次扫描 + 间隔，「60s 心跳有同量级误差，显示为约值」1262 行注释，附 `lastScanRepos/lastScanSubmitted` 统计）；仓库卡列表（1278-1324——`state` 五态映射 `clean→done / stale→stale / error→failed / 其余→cancelled`（1281）、`excluded` Tag、stale 时「更新」按钮、排除/取消排除按钮、lastJob 的 meta 行 + 进度条；`ljActive` 排除 `done/partial/failed/cancelled` 四终态，否则已结束任务会被当成在跑继续显示进度条（1301 行注释））。
 
 ### client.js：`SessionView`（1334-1424）—— 会话视图（LLM 请求记录）
 
@@ -270,7 +270,7 @@ mock 宿主 llm 服务（`llm.stream` 按 prompt 首行特征应答，插件零�
 
 ## Known Issues
 
-- **通用思考档位是尽力而为**：目录未声明 efforts 的模型（client.js 28-30 行注释）只能给 `GENERIC_EFFORTS` 手选；选了模型不支持的值靠 llmChat 兜底「剥档重试」，请求不失败但所选档位实际不生效。
+- **通用思考档位是尽力而为**：目录未声明 efforts 的模型（client.js 28-29 行注释）只能给 `GENERIC_EFFORTS` 手选；选了模型不支持的值靠 llmChat 兜底「剥档重试」，请求不失败但所选档位实际不生效。
 - **自动提交的合并冲突路径**：合并冲突时产物保留在主题分支 `codewiki/wiki-<jobId>` 等手动合并（client.js 45 行 `autoCommitHint`）；test-orchestration.mjs 516-519 行注释也明确「真正的 add/add 冲突在黑盒测试里构造不出来」，该防御路径无单测覆盖。
 - **test-orchestration.mjs 钉旧通道**：`LEGACY_CHANNEL`（44 行）显式关闭语义规划/agentic 写作/符号级增量三档——新通道的行为回归分别依赖 test-semantic-plan.mjs、test-agentic-host.mjs、test-incremental*.mjs；改通道时两套断言需同步。
 - **硬编码的本机路径**：test-engine-output-real.mjs 32-37 与 test-engine-quality-gate.mjs 433-437 的 1C 真实产物路径（`E:/ik/.../.probe-fsoft/wiki_out_1c/docs`）、test-cwd-paths.mjs 8 的默认仓库路径——其他机器上相应测试整组 SKIP 或需 argv 覆盖。

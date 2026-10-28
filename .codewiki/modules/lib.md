@@ -433,7 +433,7 @@ tags: [agentic-writing, engine-bridge, incremental-update, quality-gate]
 2. `runOneArticle`（33）构造 editor（旧文作初始内容，59-62）、workspace、写集（67）与 streamFn（69，默认 `makeHostStream`）。
 3. `runAgenticArticle`（`lib/agentic.js:331`）每步：`streamFn({messages, tools, signal})`（373）→ `makeHostStream` 内部 `toRequestMessages`（`lib/agentic-host.js:34`）把裸消息换正式 Message → `llm.stream` chunk 流被 `BlockAssembler` 收成 blocks（87-99）。
 4. blocks 里的 tool-call 经 `parseToolArgs`（476）抢救参数 → `buildToolset`（279）分派执行 → 结果作为 tool-result 消息回灌 `messages`（421）；工具实现通过 `makeFsWorkspace`（`lib/agentic-host.js:111`）读仓库。
-5. 无工具调用 → `stopReason='finished'`（389-395）；文章经写集校验（`articles-agentic.js:83-99`）与 `fixAnchors`（169-174）后落盘（175-176）。模型调 `generate_sub_module` 时 `dispatchSub`（83-128）就地递归 `runOneArticle` 写 `modules/<父>/<子>.md`。
+5. 无工具调用 → `stopReason='finished'`（389-395）；文章经写集校验（`articles-agentic.js:83-95`）与 `fixAnchors`（169-174）后落盘（175-176）。模型调 `generate_sub_module` 时 `dispatchSub`（83-128）就地递归 `runOneArticle` 写 `modules/<父>/<子>.md`。
 
 ### 流程 B：FSoft 原生引擎通道
 
@@ -452,7 +452,7 @@ tags: [agentic-writing, engine-bridge, incremental-update, quality-gate]
 ## Connections
 
 - [[index]] —— 插件主入口：消费 `runAgenticArticles`/`planUpdate`/`judgeOutcome`/`applyNativeOutput`，并向 `apply-plan.js` 注入 `runCw` 与 `autoCommitWiki`（`lib/engine/apply-plan.js:27` 引 `index.js:4655`，`lib/engine/apply-plan.js:532` 引 `index.js:4021`）；`DEFAULT_MAX_STEPS` 的 Config 默认值也必须与 `lib/agentic.js:325` 一致（321-324 注释）。
-- [[vendor]] —— `vendor/tree-sitter` 是 `SymbolExtractor` 的可选依赖根（`lib/symbols.js:472`，缺了只失去 AST 能力退正则）；`vendor/codewiki` 是 FSoft 引擎本体（`lib/engine/apply-plan.js:327` 引 `vendor/codewiki/src/main.rs:236-256` 的索引行为）。
+- [[vendor]] —— `vendor/tree-sitter` 是 `SymbolExtractor` 的可选依赖根（`lib/symbols.js:472`，缺了只失去 AST 能力退正则）；`vendor/codewiki` 是 FSoft 引擎本体（`lib/engine/apply-plan.js:326` 引 `vendor/codewiki/src/main.rs:236-256` 的索引行为）。
 - [[tests]] —— `test-engine-client.mjs` 钉死 client.js 的协议不变量（`lib/engine/client.js:13`）；`test-engine-python-entry.mjs` 反向断言 `stage_map.py` 与 `contract.js` 的阶段集合一致（`lib/engine/python/stage_map.py:8-10`）；`lib/agentic.js`/`article-contract.js` 的纯函数设计就是为这些测试服务的。
 
 ## Known Issues
@@ -469,9 +469,9 @@ tags: [agentic-writing, engine-bridge, incremental-update, quality-gate]
 - **旧增量判定三个盲区**：反向依赖看不见、新文件无归属被静默丢、未重写页不做 stale scan（`lib/update-planner.js:4-11`）；以及 keep 被算进必需清单导致完整成功误判 partial（398-403）、CodeWiki.md 无归属误判 partial（419-424）。均已修复并留注释。
 - **纯注释改动触发重写**：`bodyHash` 覆盖整段源码文本，上游 `normalize_body` 也只做空白归一（`lib/incremental.js:144-150`）。降级在判定层做，不动与上游逐位对齐、有 golden 对拍的 `diffGraphs`（148-150）。
 - **WASM 语法不可用静默丢语言**：早期 `extractFile` 直接 `return []`，整块语言凭空消失、日志只见 skipped（`lib/symbols.js:286-297`）。现在正则降级 + `stats.regex` 记账（551-594）；正则路径本身“有损但不丢”（296），字符串里的 `//` 在 `stripComments` 中会被误剥是可接受近似（`lib/graph-diff.js:69-72`）。
-- **cw index 缺页静默成功**：frontmatter 解析失败的文章被 continue、exitCode 依然 0；实测 `title: 核心: 引擎` 让 serde_yaml 把后半个当嵌套映射（`lib/engine/apply-plan.js:338-343` 与 `lib/engine/quality-gate.js:269-274`）。防御：`findArticlesMissingFromIndex`（338-359）+ `yamlScalar`（269-288）。
+- **cw index 缺页静默成功**：frontmatter 解析失败的文章被 continue、exitCode 依然 0；实测 `title: 核心: 引擎` 让 serde_yaml 把后半个当嵌套映射（`lib/engine/apply-plan.js:338-343` 与 `lib/engine/quality-gate.js:269-276`）。防御：`findArticlesMissingFromIndex`（338-359）+ `yamlScalar`（269-288）。
 - **Windows 索引链接反斜杠**：`cw index` 可能写出 `[[modules\a|x]]`，同一篇文章两种写法等于索引不可信；规范化失败按索引失败整体回滚（`lib/engine/apply-plan.js:609-628`）。
-- **孤儿进程烧 token**：只 kill 直接子进程，Python 派生的孙进程会变孤儿（`lib/engine/process-tree.js:61-64`）。`terminateProcessTree` 按平台整树终止（61-103）。
+- **孤儿进程烧 token**：只 kill 直接子进程，Python 派生的孙进程会变孤儿（`lib/engine/process-tree.js:61-65`）。`terminateProcessTree` 按平台整树终止（61-103）。
 - **引擎日志污染协议流**：FSoft 大量 `print`/`click.secho`，click 缓存 stdout 包装器使事后替换无效（`lib/engine/python/entry.py:12-21`）。`_ProtocolOnly` 在 import codewiki 前接管（46-92）。
 - **fallback_model 缺省必崩**：FSoft `create_fallback_models` 在 `model_name.lower()` 上抛 AttributeError，崩在 graph 阶段开头、表现为 engine-crashed（`lib/engine/python/entry.py:263-267`）。
 - **进度假完成**：引擎若报 100% 而 wiki 还没索引/提交会误导（`lib/engine/python/stage_map.py:12-16`）；进度上限压 90%（63）。未知阶段不抛错（58-60）。
