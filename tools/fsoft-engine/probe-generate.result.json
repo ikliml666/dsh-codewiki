@@ -1,0 +1,15 @@
+{
+  "exitCode": 0,
+  "protocolLines": 8,
+  "nonJsonLines": 0,
+  "progressCount": 6,
+  "stages": [
+    "env",
+    "graph",
+    "cluster",
+    "articles"
+  ],
+  "outcome": "failed",
+  "errorCode": "engine-model",
+  "stderrTail": "^^^^^^^^^^^^^\r\n    |   File \"E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\.probe-fsoft\\src\\codewiki\\src\\be\\llm_services.py\", line 188, in _completions_create\r\n    |     return await super()._completions_create(\r\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n    |   File \"E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\.probe-fsoft\\venv\\Lib\\site-packages\\pydantic_ai\\models\\openai.py\", line 1625, in _completions_create\r\n    |     with _map_api_errors(self.model_name, self._provider.model_id_namespace), map_decode_errors(self.model_name):\r\n    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n    |   File \"C:\\Users\\ik\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\contextlib.py\", line 158, in __exit__\r\n    |     self.gen.throw(value)\r\n    |   File \"E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\.probe-fsoft\\venv\\Lib\\site-packages\\pydantic_ai\\models\\openai.py\", line 259, in _map_api_errors\r\n    |     raise _map_status_error(e, model_name, model_id_namespace) from e\r\n    | pydantic_ai.exceptions.ModelRateLimitError: status_code: 429, model_name: probe-model, body: {'message': 'probe: 假模型服务器固定限流', 'type': 'rate_limit'}\r\n    +------------------------------------\r\n\r\n"
+}

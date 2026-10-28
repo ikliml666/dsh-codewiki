@@ -81,6 +81,29 @@ await check('engineResult：数字字段归一为非负数，缺失即 0（面�
   assert.equal(bad.writtenCount, 0)
 })
 
+await check('engineResult：engine.deps 保留依赖闭合结论（doctor 成功时也要给证据，不能只说 done）', async () => {
+  // 为什么这条必须钉：doctor 的价值是回答「这个环境能不能信」。如果 done 结果里
+  // 只有一句 outcome=done，上层无从知道 pip check 到底跑没跑、结论是什么；
+  // 而 engineResult 是白名单归一化，不显式保留的字段会被**静默丢弃**。
+  const withDeps = engineResult({
+    outcome: 'done',
+    engine: { version: '2.0.0', python: '3.12.10', deps: { ok: true, summary: 'No broken requirements found.' } },
+  })
+  assert.deepEqual(withDeps.engine.deps, { ok: true, summary: 'No broken requirements found.' })
+
+  // 缺失时给确定值而不是 undefined：面板与 job 记录直接序列化，undefined 会变没这个键
+  const noDeps = engineResult({ outcome: 'done', engine: { version: '2.0.0' } })
+  assert.deepEqual(noDeps.engine.deps, { ok: false, summary: '' })
+
+  // 只有严格的 true 才算闭合：字符串 "false"/1 这类真值不算通过
+  const sloppy = engineResult({ outcome: 'done', engine: { deps: { ok: 'yes' } } })
+  assert.equal(sloppy.engine.deps.ok, false)
+
+  // 摘要必须截断，避免 pip check 全量输出把 job 记录撑爆
+  const long = engineResult({ outcome: 'done', engine: { deps: { ok: true, summary: 'x'.repeat(5000) } } })
+  assert.equal(long.engine.deps.summary.length, 2000)
+})
+
 await check('engineProgress：阶段必须在枚举内，百分比夹到 0–100', async () => {
   assert.throws(() => engineProgress({ stage: 'planning' }), /stage/)
   const p = engineProgress({ stage: 'articles', percent: 250, writtenCount: 2 })
