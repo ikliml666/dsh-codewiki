@@ -13,6 +13,18 @@
 
 **复核**：主代理重新运行 `pip check` 与无模型依赖图探针，分别得到 `No broken requirements found.`、`ok: true`（15 组件 / 6 叶子，R1–R5 全 true）；新增四套测试复跑为 18 / 24 / 17 / 5 全过。桥准入修复为 `randomBytes(32)` 随机占位 key + 与本次 key 精确比对，新增「同格式伪造 key 返回 401 且不触发模型」用例。1C 只确认原生 committed-diff 的四类场景；未提交工作区变更仍待阶段 5，不计作已通过。真实全量/增量、工具调用和进程树取消为子智能体报告，尚未由主代理重放。
 
+### 新增：FSoft 原生引擎的阶段 2 可复用薄适配层（子进程协议/清单/产物校验），仍未接生产
+
+阶段 2 只做「怎么可靠地跟引擎说话」与「怎么可靠地判它的产物」，**不重写任何 FSoft 算法**，也不改生产路径与旧核心。
+
+- **`lib/engine/client.js`（424 行）——子进程协议层**。`runEngine()` 起子进程、把请求写成一行 JSON、按 `requestId` 关联 stdout 的 JSON-lines，四个动作 `doctor/generate/update/cancel` 同一套通道。协议违规逐条记 `protocolViolations` 而不是抛栈：`not-json` / `bad-shape` / `unknown-request` / `duplicate-result` / `late-result` / `bad-result` / `line-too-long` / `protocol-version`。三条关键设计：① 多字节 UTF-8 跨 chunk 不切坏（按 Buffer 缓冲再按行切）；② **语义结果只看 `result` 消息**——进程退出码 0 但无 result 记 `engine-protocol`，非零退出但给了 `done` 保留 `done` 并记 `nonzero-exit` 违规，避免「进程正常退出 = 成功」的误读；③ 取消后到达的 result 记 `late-result` 丢弃，不让已取消的任务把结果塞回来。超时/取消都走 `terminateProcessTree` 杀整棵树，不是只 kill 父进程。
+- **`lib/engine/manifest.js`（181 行）——环境清单与锁定**。`probeEnvironment()` 拿引擎版本/解释器版本/`pip check` 结论，`fingerprintOf()` 只对「版本 + 解释器版本」取 16 位 sha256（不拿机器路径当指纹，换目录不该算漂移）。`readLock/compareLock/writeLock` 维护 `.codewiki/engine-lock.json`，`compareLock` 给 `absent/match/drift/unhealthy` 四态与逐项 diffs。`doctor()` 把环境不可信翻译成**可执行建议**而不是一句报错。
+- **`lib/engine/output.js`（284 行）——产物校验**。`collectOutput()` 收集页/`module_tree`/`metadata`/`update_record`，`validateOutput()` 给可机读 problem 列表：缺 overview、页名与模块树对不上、`source_files` 指向不存在的文件、正文里的死链、`temp/` 下的工作文件被当成文章。`buildWritePlan()` 只产出「写哪些路径」，**不碰文章内容**。
+- **`lib/engine/python/entry.py`（582 行）+ `stage_map.py`（97 行）——唯一的 Python 薄壳**。读一行请求 → 调 FSoft 公共 API → 写协议行；不实现依赖图、聚类、增量。`doctor` 真跑 `pip check` 并把结论放进 `EngineResult.engine.deps`（成功时也给证据，不能只说一句 done）。凭证面按「不回退读本机配置」设计：测试把 `HOME`/`USERPROFILE` 隔离到临时目录并设 `CODEWIKI_NO_KEYRING=1`，缺模型通道时走明确失败而不是去翻 `~/.codewiki`。
+- **`EngineResult.engine.deps` 进契约**（`lib/engine/contract.js:131-136`）。原契约只保留 `version/commit/python`，`deps` 会被归一化**静默丢弃**，doctor 就白跑了。
+
+**验证**：八套引擎测试 19 / 24 / 19 / 20 / 11 / 9 / 24 / 17 全绿（contract/client/manifest/output/output-real/python-entry/bridge/llm-bridge）；真实 venv 跑 `doctor` 端到端得到 `outcome: done`、`engine.version 2.0.0`、`python 3.12.10`、`deps.ok true`、`No broken requirements found.`、0 违规、834 ms。真实模型 `generate/update` 的薄壳通道**未验证**——本轮只用假模型探针验协议，不宣称真实编译通过。工作区变更增量仍是阶段 5 的事。
+
 ## 0.14.0 — 2026-10-27
 
 ### 修复：增量漏检、部分失败仍报成功、坏文章入库（融合 FSoft 的 updater/质量门）
