@@ -1,144 +1,36 @@
 {
   "version": 1,
-  "jobId": "job-mvs58y8m-5",
+  "jobId": "job-mvs9jamr-6",
   "scope": "auto",
-  "startedAt": "2026-10-28T13:22:11.158Z",
-  "finishedAt": "2026-10-28T17:56:51.859Z",
+  "startedAt": "2026-10-28T15:22:12.243Z",
+  "finishedAt": "2026-10-28T18:21:13.094Z",
   "baseCommit": null,
   "headCommit": null,
   "changeSet": null,
   "plan": null,
   "results": [
     {
-      "name": "modules/clustering.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/update_planning.md",
+      "name": "modules/tools.md",
       "ok": false,
-      "stopReason": "max-steps",
+      "stopReason": "error",
       "error": null
     },
     {
-      "name": "modules/symbols_extraction.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/change_set.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/incremental.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/graph_diff.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/agentic_core.md",
+      "name": "modules/test-fixtures.md",
       "ok": false,
-      "stopReason": "max-steps",
+      "stopReason": "error",
       "error": null
     },
     {
-      "name": "modules/article_contract.md",
-      "ok": false,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/articles_agentic.md",
+      "name": "modules/lib.md",
       "ok": true,
-      "stopReason": "finished",
+      "stopReason": "completed",
       "error": null
     },
     {
-      "name": "modules/engine_protocol.md",
+      "name": "modules/root.md",
       "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/engine_python_adapter.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/engine_bridges.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/engine_apply.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/engine_state_manifest.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/orchestration_api_tests.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/probes_and_fixtures.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/engine_native_job_tests.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/wiki_tests.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/engine_quality.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/batch_tests.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/engine_output_run.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/orchestration_core.md",
-      "ok": true,
-      "stopReason": "stream-error",
+      "stopReason": "completed",
       "error": null
     },
     {
@@ -160,28 +52,12 @@
       "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
     },
     {
-      "name": "modules/engine_quality_gate.md",
-      "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
       "name": "modules/engine_state_manifest.md",
       "issue": "存量文章未过契约：必需章节 Key Components 是空的"
     },
     {
       "name": "modules/incremental.md",
       "issue": "存量文章未过契约：重复章节：Architecture、Data Flow、Connections、Known Issues"
-    },
-    {
-      "name": "modules/test_engine_native.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.codewiki/modules/engine_runtime.md；重复章节：Key Components"
-    },
-    {
-      "name": "modules/tools_fsoft_fixtures.md",
-      "issue": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile"
-    },
-    {
-      "name": "modules/tools_fsoft_probes.md",
-      "issue": "存量文章未过契约：必需章节 Overview 是空的"
     },
     {
       "name": "concepts/file-watching-mechanism.md",
@@ -208,43 +84,13 @@
   "blockers": [
     {
       "kind": "article-failed",
-      "name": "modules/update_planning.md",
-      "detail": "max-steps"
+      "name": "modules/tools.md",
+      "detail": "error"
     },
     {
       "kind": "article-failed",
-      "name": "modules/agentic_core.md",
-      "detail": "max-steps"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/article_contract.md",
-      "detail": "max-steps"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/orchestration_api_tests.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/probes_and_fixtures.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/engine_native_job_tests.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/wiki_tests.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/batch_tests.md",
-      "detail": "stream-error"
+      "name": "modules/test-fixtures.md",
+      "detail": "error"
     },
     {
       "kind": "article-failed",
@@ -263,11 +109,6 @@
     },
     {
       "kind": "quality",
-      "name": "modules/engine_quality_gate.md",
-      "detail": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "kind": "quality",
       "name": "modules/engine_state_manifest.md",
       "detail": "存量文章未过契约：必需章节 Key Components 是空的"
     },
@@ -275,21 +116,6 @@
       "kind": "quality",
       "name": "modules/incremental.md",
       "detail": "存量文章未过契约：重复章节：Architecture、Data Flow、Connections、Known Issues"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/test_engine_native.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.codewiki/modules/engine_runtime.md；重复章节：Key Components"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/tools_fsoft_fixtures.md",
-      "detail": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/tools_fsoft_probes.md",
-      "detail": "存量文章未过契约：必需章节 Overview 是空的"
     },
     {
       "kind": "quality",
@@ -318,29 +144,29 @@
     }
   ],
   "canAdvanceBaseline": false,
-  "writtenCount": 14,
-  "failedCount": 10,
+  "writtenCount": 2,
+  "failedCount": 4,
   "notes": [
-    "modules/clustering.md：批量校对输出缺席，保留原文",
-    "modules/symbols_extraction.md：批量校对输出缺席，保留原文",
-    "modules/change_set.md：批量校对输出缺席，保留原文",
-    "modules/incremental.md：批量校对输出缺席，保留原文",
-    "modules/graph_diff.md：批量校对输出缺席，保留原文",
-    "modules/articles_agentic.md：批量校对输出缺席，保留原文",
-    "modules/engine_protocol.md：批量校对输出缺席，保留原文",
-    "modules/engine_python_adapter.md：批量校对输出缺席，保留原文",
-    "modules/engine_bridges.md：批量校对输出缺席，保留原文",
-    "modules/engine_apply.md：批量校对输出缺席，保留原文",
-    "modules/engine_state_manifest.md：批量校对输出缺席，保留原文",
-    "modules/engine_quality.md：批量校对输出缺席，保留原文",
-    "modules/engine_output_run.md：批量校对输出缺席，保留原文",
-    "modules/orchestration_core.md：批量校对输出缺席，保留原文",
-    "存量文章体检：12 篇未过契约（modules/change_set.md、modules/engine_quality_gate.md、modules/engine_state_manifest.md 等）",
-    "完整性未成立（部分完成（22 项未满足：max-steps））—— max-steps；max-steps；max-steps",
-    "清理孤儿模块文章 20 篇（模块划分已变，旧文件无人重写）—— agentic_article.md、component_clustering.md、engine_bridge.md、engine_client_protocol.md、engine_manifest.md 等",
+    "文章 modules/lib.md 行号锚点存疑（未改）：lib/article-contract.js:49-55 符号歧义未改；vendor/codewiki/src/main.rs:236-256 符号未找到未改；lib/agentic.js:290-305 符号歧义未改 等",
+    "文章 modules/root.md 自动修正 34 处行号锚点",
+    "文章 modules/root.md 行号锚点存疑（未改）：client.js:2-5 符号歧义未改；client.js:19-27 符号歧义未改；client.js:6 符号歧义未改 等",
+    "阶段已启动：2 个请求（模型 workbuddy/hy3，并发 6）",
+    "横切批次已提交：_architecture/_patterns + 0 个概念",
+    "_patterns.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（2 个账号不可用、3 个账号被限流）（code 6004，requestId 59c16d94-b774-4bbb-942f-a385e4af4e0d）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "_architecture.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（2 个账号不可用、3 个账号被限流）（code 6004，requestId 197768d0-afd0-48d6-9681-83af98441a9e）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "1 个请求输入超单请求预算（110k），按大档装填",
+    "阶段已启动：2 个请求（模型 workbuddy/hy3 + 大档 volces-ark/glm-5.3-flash（1 个），并发 6 + 大档 2）",
+    "校对批次已提交：2 篇合并为 2 个请求",
+    "proof-batch-2 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（2 个账号不可用、3 个账号被限流）（code 6004，requestId 77a278c0-e17e-4323-9381-49f52936b5ef）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "modules/lib.md：自动修正 1 处行号锚点",
+    "modules/lib.md：行号锚点存疑（未改）—— lib/article-contract.js:49-55 符号歧义未改；vendor/codewiki/src/main.rs:236-256 符号未找到未改；lib/agentic.js:290-305 符号歧义未改 等",
+    "modules/root.md：批量校对输出缺席，保留原文",
+    "存量文章体检：8 篇未过契约（modules/change_set.md、modules/engine_state_manifest.md、modules/incremental.md 等）",
+    "完整性未成立（部分完成（12 项未满足：error））—— error；error；error",
+    "清理孤儿模块文章 14 篇（模块划分已变，旧文件无人重写）—— articles_agentic.md、change_set.md、clustering.md、engine_apply.md、engine_bridges.md 等",
     "cw index exit 0",
     "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
-    "符号快照已写入（670 个组件），下次增量按组件级判定"
+    "符号快照已写入（675 个组件），下次增量按组件级判定"
   ],
   "wikiPath": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki"
 }
