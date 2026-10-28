@@ -25,6 +25,20 @@
 
 **验证**：八套引擎测试 19 / 24 / 19 / 20 / 11 / 9 / 24 / 17 全绿（contract/client/manifest/output/output-real/python-entry/bridge/llm-bridge）；真实 venv 跑 `doctor` 端到端得到 `outcome: done`、`engine.version 2.0.0`、`python 3.12.10`、`deps.ok true`、`No broken requirements found.`、0 违规、834 ms。真实模型 `generate/update` 的薄壳通道**未验证**——本轮只用假模型探针验协议，不宣称真实编译通过。工作区变更增量仍是阶段 5 的事。
 
+### 新增：FSoft 原生引擎的阶段 3 采用门与落地器（质量门 / 原子应用 / 索引基线回滚 / 自动提交），仍未接生产
+
+阶段 3 补的是「引擎交回产物之后」的两层：**这批产物能不能被采用**，以及**采用这件事真的成立了没有**。仍然不重写任何 FSoft 算法，也不改生产路径与旧核心。
+
+- **`lib/engine/quality-gate.js`（639 行）——采用门**。把三件事合成一个可机读裁决：① 产物自洽（复用 `output.js` 的 `validateOutput`，不重写判定）；② 目标格式契约（把映射结果渲染成真正的 wiki 文章，再走 `article-contract.js` 的 `inspectArticle`）；③ 基线可推进性（产物对应的 commit 必须等于 `HEAD`，且 `_meta.yaml` 的基线本身已入库）。**三类问题必须分开**是这层的核心理由：`defect`（产物自身坏了：缺入口/空正文/死链/`source_files` 指向不存在的文件/`commit-mismatch`）、`degradation`（页是真的但证据不足：whole-repository 模式下 `module_tree` 为 `{}`、页 `source_files` 为空 → 可入库但**不得推进基线**）、`stale`（wiki 陈旧，不是本次产物的错）。终态仍严格：三类皆空才是 `done`。渲染层用 `yamlScalar` 安全序列化标题，含 `:`、中文、反斜杠、换行的标题都不会产出坏 YAML。
+- **`renderArticle` 只把 `action==='write'` 的页交出去**，且带缺陷的页**不放进 `rendered`**——否则调用方拿到一份「大部分成功」的写集，缺的那几篇没人知道缺。
+- **`lib/engine/apply-plan.js`（738 行）——落地器**。四条硬不变量：① **写集封闭**（只允许 `.codewiki/` 之下与仓库根 `CodeWiki.md`，绝对路径/盘符/`..` 上跳/白名单外路径**整批拒写**，不是跳过该条——残缺写集会制造一份没人在意的半成品）；② **索引/基线失败即回滚**（`pre-image` 快照，新文件删掉、旧内容原样写回、`_index.md`/`_meta.yaml` 复原）；③ **提交失败不回滚**（文章本身是好的，只记 `commit-failed` 并如实返回 partial）；④ **未提交不许 done**（兜底再推一次 `commit-failed`）。
+- **两条只有真跑才看得见的坑，都变成了闸门**。一是 `cw index` **退出码 0 不代表文章被收录**：`vendor/codewiki/src/main.rs:236-256` 逐篇 `frontmatter::parse`，解析失败就 `continue`，最后照样写索引并返回 0——落地器在 index 之后**比对写集与 `_index.md` 的实际链接**，缺页即记 `index-failed` 整体回滚。二是 Windows 上 `cw` 写出的链接可能是 `[[modules\a|x]]`，落地器自己带一份 `normalizeIndexLinksIn`（不 import `index.js`，避免单测拉起宿主服务），规范化**失败要回滚**而不是吞掉——否则「索引文件坏到读不出来」会被当成「不需要规范化」然后判成功。
+- **`cw init` 前置**：仓库还没有 wiki 时先跑 `cw init` 建骨架（对齐 `index.js:4021` 的 `state=missing` 分支）；`.codewiki/` 存在但缺 `_meta.yaml` 视为人工删改，记 `wiki-missing` 拒绝自动初始化。
+- **默认自带同语义提交器 `commitWikiArtifacts`**，安全边界逐条对齐 `index.js` 的 `autoCommitWiki`（只 add wiki 两个路径 / 不 amend 不 push / 无 HEAD 与冲突一律拒绝），提交成立后再用 `verifyCommitScope` **反查实际提交内容**，混进 wiki 之外的路径记 `commit-scope`（不回滚，如实报出来）。
+- **三处既有模块的极小改动，默认行为一字不变**：`lib/article-contract.js` 增加 `requiredSections`（原生通道的章节名是 FSoft 自己的 `## Introduction and Purpose` 之类，用 agentic 通道的 `## Overview` 去判它等于给一份**被禁止手改**的正文判死刑）与 `allowEmptySourceFiles`（whole-repository 模式下空 `source_files` 是**诚实记录**而非编造），并修了 `unquote` 对双引号标量的转义还原；`lib/engine/output.js` 把 `collected` 原样带出（避免上层为读 `commit_id` 再扫一遍 docs 造成判据漂移）；`lib/engine/python/entry.py` 的 `_count_docs` 改为 `rglob` 递归（hierarchical 布局把页写在子目录，只 glob 根层会漏计子树）并排除 `temp/` 与点目录。
+
+**验证**：新增两套测试 `test-engine-quality-gate.mjs` 29 条、`test-engine-apply-plan.mjs` 37 条全绿；全套 33 套测试复跑全绿（`test-batch` 148、`test-agentic` 55、`test-article-contract` 29、既有 8 套引擎测试 19/24/19/20/11/9/24/17 等），只有 `test-wiki-anchors` 报「3335 过 / 46 败 / 39 待重编译」——存量锚点问题，非本次引入。真实 cw 端到端两次实测（临时 git 仓库）：`tools/fsoft-engine/probe-apply-real-cw.mjs` 走完写盘 → `cw index` → `cw meta update` → 自动提交，提交内容恰为 `.codewiki/_index.md`、`.codewiki/_meta.yaml`、`.codewiki/modules/core.md`、`CodeWiki.md`，`verifyCommitScope` 返回 `{"ok":true,...,"unexpected":[]}`；`tools/fsoft-engine/probe-index-missing.mjs` 验证「退出 0 但缺页」被记 `index-failed` 并回滚。这两项仍**未接生产**：`index.js` 的编译主流程尚未调用 `gateNativeOutput`/`applyNativeOutput`，是阶段 4 的接线。
+
 ## 0.14.0 — 2026-10-27
 
 ### 修复：增量漏检、部分失败仍报成功、坏文章入库（融合 FSoft 的 updater/质量门）

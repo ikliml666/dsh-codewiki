@@ -336,8 +336,29 @@ def bridge_progress(adapter, request_id, on_stage=None):
 
 
 def _count_docs(docs_dir):
+    """清点产物页数。
+
+    必须**递归**：hierarchical 布局把页写在子目录里（`doc_layout.py:module_doc_relpath`
+    是 `posixpath.join(*module_path[:-1], f"{module_path[-1]}.md")`），只 glob 根层会把
+    整棵子树漏掉——于是 `written` 少计而终态看着像成功，这正是「1 篇成功 + 19 篇失败
+    也报 done」那类误判的来源之一。
+
+    `temp/` 与点开头目录要排除：`temp/update-record.json` 等是记账文件，不是文章。
+    """
     try:
-        return len([p for p in Path(docs_dir).glob("*.md")])
+        root = Path(docs_dir)
+        count = 0
+        for p in root.rglob("*.md"):
+            rel = p.relative_to(root)
+            parts = rel.parts
+            if any(part.startswith(".") for part in parts[:-1]):
+                continue
+            if parts and parts[0] == "temp":
+                continue
+            if not p.is_file():
+                continue
+            count += 1
+        return count
     except Exception:
         return 0
 
