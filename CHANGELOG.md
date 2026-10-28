@@ -1,5 +1,18 @@
 # Changelog
 
+## 未发布 — 2026-10-28
+
+### 新增：FSoft 原生引擎迁移的契约层与三段门禁（0/1A/1B/1C），尚未接生产
+
+目标是把「Node 重新实现 FSoft 算法」换成「FSoft 原生引擎 + 薄适配层」。本轮只做契约、锁定环境与真实链路验证，**生产路径一行未改，旧核心一行未删**。
+
+- **阶段 0 冻结契约**：新增 `docs/fsoft-native-engine.md` 与 `lib/engine/contract.js`（版本化 `EngineResult/EngineProgress/EngineError`，`contractVersion=1`，八段 `ENGINE_STAGES`，四终态 `done/partial/failed/cancelled`，`validateEngineResult` 在反序列化边界做校验而不是信任磁盘对象）；`lib/engine/mapping.js` 定 FSoft 产物 → `CodeWiki.md`/`.codewiki/modules/`/`_meta.yaml`/`temp/update-record.json` 的落点，四条硬规则是「不臆造 `source_files`、不静默丢弃、不覆盖 slug 冲突、不改技术内容」。`test-engine-contract.mjs` 18 条。
+- **阶段 1A 锁定环境**：`tools/fsoft-engine/setup-env.sh` 从零建 venv，`pip check` 零问题、六个 import 全 ok。安装**故意不走正常解析**——`openai`/`pydantic-ai-slim`/`pydantic` 约束互相打架，正常解析必然 `ResolutionImpossible`；冻结清单是已解析快照，按 `--no-deps` + `-c constraints.txt` 落盘再 `pip check` 反向验证。`probe-no-llm-graph.py` 在中文/空格路径 fixture 上跑无模型依赖图，`ok: true`，15 组件 / 6 叶子（python 9 + typescript 4 + null 2），结果固化在 `probe-no-llm-graph.result.json`。venv 与 fixture 运行产物不入 git（`tools/fsoft-engine/fixtures/.gitignore` 只留源码）。
+- **阶段 1B 宿主模型桥**：`lib/engine/llm-bridge.js` 起只绑 `127.0.0.1` 的 OpenAI-compatible 服务，FSoft 只拿到 loopback URL/模型名/占位 key，真凭证留在宿主 provider 内；`lib/engine/openai-bridge.js` 双向翻译 OpenAI 请求体 ↔ 宿主 `llm.stream()` 的 `GenerateOptions`/`StreamChunk`。真机 `workbuddy`/`deepseek-v4.1-flash` 实测：流式 230 chunk、首 chunk 1847 ms、总 3144 ms；非流式带 usage。**工具调用往返暴露了一个只有真跑才看得见的 bug**：assistant 历史消息缺 `source` 字段会被宿主适配层丢弃，第二轮起模型看不见自己上一轮的工具调用（已修，`test-engine-bridge.mjs` 24 条含回归）。
+- **阶段 1C 原生端到端**：Python+TypeScript fixture 全量真实跑通，五类增量逐类验证——注释改动 `no_change`（0 次 LLM 调用）、公开接口 `interface:1` → 重写 overview、新文件 `added:2` → 重写 overview、删除+改名触发 `stale_scan.fixed` 并修好旧符号名（页面里旧名 0 次/新名 20 次）、未变页面 mtime 未动。工作区未提交改动**FSoft 不认**（只取 committed diff），留给阶段 5 由 Node 侧合成 change-set。新增 `lib/engine/process-tree.js`：`terminateProcessTree` 用 `taskkill /T /F` 终止整棵树，实测 204 ms、残留进程 0；异常退出用 `--request-limit 1` 验证语义失败与进程退出码分离（退出码 4）。
+
+**验证**：新增四套测试全绿（`test-engine-contract` 18 / `test-engine-bridge` 24 / `test-engine-llm-bridge` 16 / `test-engine-process-tree` 5）；既有回归无变化（`test-change-set` 15 / `test-update-planner` 20 / `test-update-record` 18 / `test-article-contract` 29 / `test-symbols` 24 / `test-cluster` 30 / `test-incremental` 20 / `test-batch` 148 全过）；`node --check` 全部通过。
+
 ## 0.14.0 — 2026-10-27
 
 ### 修复：增量漏检、部分失败仍报成功、坏文章入库（融合 FSoft 的 updater/质量门）
