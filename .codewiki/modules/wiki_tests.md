@@ -1,1 +1,0 @@
-Now let me read the other three test files that the module covers: entry, worktree, and prune.

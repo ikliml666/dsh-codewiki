@@ -7,121 +7,132 @@ source_files:
   - lib/update-planner.js
   - lib/change-set.js
   - index.js
-tags: [update-record, outcome, persistence, baseline, audit]
+tags: [record, outcome, audit, baseline, partial]
 ---
 
 ## Overview
 
-`update_record` 模块负责把「一次编译到底做了什么、为什么、哪些变化没人管、最终是否完整」落成一份**可机读、可复盘**的 JSON 记录，并给出编译的**终态判定**与「能不能推进编译基线」这一关键闸门。
+`update_record` 模块负责把**一次文档编译到底做了什么、为什么、是否完整**落成一个可机读的 JSON 记录（`temp/update-record.json`），并负责判定编译的**终态（outcome）**与**能否推进编译基线（canAdvanceBaseline）**。
 
-它要解决的历史缺陷（见 `lib/update-record.js:1-11` 注释）：旧实现编译结束只留下 `writtenCount` / `failedCount` 两个数字，job 文件里塞的是整张符号图与任务快照。于是「为什么这篇没重写」「哪几个变更没人管」事后无法复盘，面板也只会显示一句「完成」——而实际上可能是 1 篇成功、19 篇失败。`tickIndex`（见 `index.js:3360-3462`）里旧实现的终态判定只数 `writtenCount`，1 成功 19 失败照样 `done` + `cw meta update`，未消化的变化从此永久失明。
+背景缺陷（见 `lib/update-record.js:1-12` 的模块头注释，及 `test-update-record.mjs:1-6`）：旧实现编译结束只留 `writtenCount` / `failedCount` 两个数字，job 文件里塞的是整张图与任务快照。结果「为什么这篇没重写」「哪几个变更没人管」事后无法复盘，面板也只能显示一句「完成」——而实际上可能 1 篇成功、19 篇失败。
 
-本模块把上述不变量补回，职责分三层：
+本模块解决三件事：
 
-1. **收记录**：把 `ChangeSet` + `UpdatePlan` + 逐篇结果收成一份版本化记录 `buildUpdateRecord`（`lib/update-record.js:131-211`）。job 里只存路径与摘要，不把整图塞进 `update-record.json`（`index.js:2492-2517` 的 `saveRecord` 注释明确说明）。
-2. **判终态**：`judgeOutcome`（`lib/update-record.js:37-128`）从计划与逐篇结果算出 `done` / `partial` / `failed` / `cancelled`，把「完整性不成立」的每种情形写进 `blockers`。
-3. **定闸门**：终态由 `canAdvanceBaseline` 回答「能不能推进编译基线」——**只有完整成功（done）才可以**，partial/failed 不推进（`index.js:3396-3415` 据此决定要不要跑 `cw meta update`）。
+1. **收记录**：把 `ChangeSet`（来自 `lib/change-set.js`）+ `UpdatePlan`（来自 `lib/update-planner.js`）+ 逐篇落盘结果收成一份版本化记录（见 `buildUpdateRecord`，`lib/update-record.js:131`）。
+2. **判定终态**：根据计划内必需文章、逐篇成功/失败、未映射变更、质量闸门、索引完整性等，算出 `done` / `partial` / `failed` / `cancelled`，把每种「完整性不成立」的情形写进 `blockers`（见 `judgeOutcome`，`lib/update-record.js:37`）。
+3. **回答能不能推进基线**：只有完整成功（`outcome === 'done'` 且无 blocker）才允许 `canAdvanceBaseline = true`。partial 也允许文章入库，但**基线绝不前移**，否则等于宣布「未消化的变化已消化」，下次编译将永久失明。
 
-模块本体是「纯函数 + 两个 IO 助手」（`lib/update-record.js:37`）：`judgeOutcome`、`buildUpdateRecord`、`describeOutcome` 都是无副作用的纯函数；`saveUpdateRecord` / `loadUpdateRecord` 是带 `fsImpl` 注入点的 IO 助手，便于单测（`test-update-record.mjs`）。
+模块设计成「纯函数 + 两个 IO 助手」，因此可单测：核心判定（`judgeOutcome` / `buildUpdateRecord` / `describeOutcome`）不碰文件系统，落盘/回读（`saveUpdateRecord` / `loadUpdateRecord` / `recordPath`）通过可注入的 `fsImpl`（默认 `node:fs`）访问磁盘。
+
+测试驱动（见 `test-update-record.mjs:1-6`）把「部分失败仍成功」这条缺陷钉死：旧实现只有 `writtenCount === 0` 才失败，其余一律 `done`；本模块要求任何未消化项 ⇒ `partial` / `failed`，且 `partial` 绝不推进基线。
 
 ## Key Components
 
-本模块全部为 `lib/update-record.js` 中的导出项（无 class / struct，记录本身是一个纯 JSON 对象，字段在 `buildUpdateRecord` 内逐项拼出）。
+全部公开符号都在 `lib/update-record.js`，统一从 `lib/update-record.js` 导入（见 `index.js:30-33`、`test-update-record.mjs:11-14`）。
 
 ### 常量
 
-- `UPDATE_RECORD_VERSION`（`lib/update-record.js:17`）— 记录格式版本，当前为 `1`。`loadUpdateRecord` 用它做版本守卫（`lib/update-record.js:229`）。
-- `UPDATE_RECORD_REL`（`lib/update-record.js:18`）— 记录相对 wiki 根的路径 `temp/update-record.json`，同时也是 job 内存里 `updateRecord.path` 的存储值（`index.js:2511`）。
-- `TERMINAL`（`lib/update-record.js:24`）— `Set(['done','partial','failed','cancelled'])`。终态集合，新增了 `partial`。
+- `UPDATE_RECORD_VERSION`（第 17 行）：记录格式版本号，当前为 `1`。`loadUpdateRecord`（第 233 行）会校验读回的 `rec.version` 必须等于它，否则返回 `null`（版本不符的旧格式拒绝当新格式读）。
+- `UPDATE_RECORD_REL`（第 18 行）：记录相对 wiki 根的相对路径 `'temp/update-record.json'`。被 `recordPath`（第 213 行）与 `index.js:2511` 引用。
+- `TERMINAL`（第 24 行）：终态集合 `Set(['done', 'partial', 'failed', 'cancelled'])`。注意 `cancelled` 也是终态之一（取消的任务不再转圈）。
 
-### 终态判定
+### 函数
 
-- `judgeOutcome({ plan=null, results=[], options={} })`（`lib/update-record.js:37-128`）— 纯函数，核心判定器。
-  - 入参：`plan` 为 `planUpdate` 产物（可为 `null`：full 编译没有增量计划）；`results` 是 `[{ name, ok, error? }]` 逐篇落盘结果；`options` 含 `expectedNames` / `qualityIssues` / `indexOk` / `cancelled` / `extraBlockers`（详见 `lib/update-record.js:33-34`）。
-  - 返回 `{ outcome, blockers, canAdvanceBaseline, writtenCount, failedCount }`。
-  - 关键分支：
-    - 取消优先：`options.cancelled` 直接返 `cancelled` 且 `canAdvanceBaseline=false`（`lib/update-record.js:46-54`）。
-    - 缺页：`plan.requiredNames` 或 `plan.actions` 中 `action==='write'` 但未成功也未失败的，记 `missing-article`（`lib/update-record.js:56-75`）。
-    - 逐篇失败：记 `article-failed`（`lib/update-record.js:78`）。
-    - 未映射变更：只算**源码变更**（`plan.unmappedSourceChanges` 或过滤掉 `.md$` 的 `unmappedChanges`），记 `unmapped-changes`（`lib/update-record.js:83-91`，原因见 `:80-82` 注释，非源码文件混入会让正常增量永远 partial）。
-    - 缺 source_files：记 `missing-sources`（`lib/update-record.js:92-97`）。
-    - 质量闸门：`options.qualityIssues` 记 `quality`（`lib/update-record.js:100-102`）。
-    - 索引校验：`options.indexOk===false` 记 `index`（`lib/update-record.js:105`）。
-    - 调用方硬阻塞：`options.extraBlockers` 记 `extra`/`kind`（`lib/update-record.js:108-110`）。
-    - 终态公式：`blockers/failed/missing/requiredMissing` 全空 ⇒ `done`；`writtenCount===0` 且确有阻塞 ⇒ `failed`；否则 `partial`（`lib/update-record.js:115-118`）。`canAdvanceBaseline` 仅 `outcome==='done' && blockers.length===0` 为真（`lib/update-record.js:124`）。
-- `isTerminalStage(stage)`（`lib/update-record.js:26-28`）— `TERMINAL.has(String(stage ?? ''))`，服务侧用来判断 job 是否到终态（配合 `JOB_TERMINAL`）。
+- `isTerminalStage(stage)`（第 26 行）：判断某 stage 是否在 `TERMINAL` 集合内。实现为 `TERMINAL.has(String(stage ?? ''))`，空值/未知值一律返回 `false`。
+- `judgeOutcome({ plan, results, options })`（第 37 行）：终态判定核心纯函数。返回 `{ outcome, blockers, canAdvanceBaseline, writtenCount, failedCount }`。判定逻辑分七类（详见 `lib/update-record.js:37-110`）：
+  1. **计划内必需文章缺页 / 失败**：从 `plan.requiredNames` 与 `plan.actions`（过滤出 `action === 'write'` 的）比对 `okNames` 与 `failed`，缺页记 `missing-article`（第 65、68 行），无 plan 的 full 编译通道用 `options.expectedNames` 判缺页（第 71-75 行）。
+  2. **逐篇失败**：`failed` 数组里的每一项记 `article-failed`（第 78 行），错误信息截断到 300 字（第 44 行）。
+  3. **未映射变更（unmapped）**：`plan.unmappedSourceChanges ?? plan.unmappedChanges` 过滤掉 `.md$`，记 `unmapped-changes`（第 83-91 行）。非源码文件（README/CodeWiki.md/CHANGELOG）不被引用是常态，混进来会让增量永远落 partial，因此只算源码变更。
+  4. **缺 source_files**：`plan.missingSources` 记 `missing-sources`（第 92-97 行）。
+  5. **质量闸门**：`options.qualityIssues` 记 `quality`（第 100-102 行）。
+  6. **索引/入口完整性**：`options.indexOk === false` 记 `index`（第 105 行）。
+  7. **调用方补充硬阻塞**：`options.extraBlockers`（如 git base 不可达导致 full 退化、执行器整体失败）记 `extra` 或调用方指定的 `kind`（第 108-110 行）。
 
-### 记录组装
+  终态决策（第 112-118 行）：没有任何成果可交付（`writtenCount === 0` 且存在失败/缺页/阻塞）才 `failed`；只要写成一部分就是 `partial`；`blockers`、`failed`、`missing`、`requiredMissing` 全空才 `done`。`canAdvanceBaseline` 仅当 `outcome === 'done'` 且无 blocker（第 124 行）。`options.cancelled` 为 `true` 时直接短路返回 `outcome: 'cancelled'`、`canAdvanceBaseline: false`（第 46-54 行）。
 
-- `buildUpdateRecord({ jobId, scope, changeSet, plan, results, outcome, wikiPath, qualityIssues, notes, startedAt, finishedAt })`（`lib/update-record.js:131-211`）— 纯函数，拼出可序列化记录。
-  - 若 `outcome` 未传，则用 `judgeOutcome({ plan, results, options:{ qualityIssues } })` 现场判定（`:144`）。
-  - 记录顶层字段：`version` / `jobId` / `scope` / `startedAt` / `finishedAt` / `baseCommit` / `headCommit`（取自 `changeSet.baseCommit/headCommit`，`:151-152`）/ `changeSet`（摘要，含 `counts`、`sourceChanges`、`ignored`，`:153-169`）/ `plan`（摘要，每个 action 带 `reason`，`:170-195`）/ `results`（`:196-201`）/ `qualityIssues` / `outcome` / `blockers` / `canAdvanceBaseline` / `writtenCount` / `failedCount` / `notes`（只留最后 20 条，`:208`）/ `wikiPath`。
-  - 故意**不含**整张符号图（`graph`）与任务快照（`tasks`）——`test-update-record.mjs:179-185` 用 `'graph' in rec === false` 与 `'tasks' in rec === false` 钉死这条约束。
+- `buildUpdateRecord({ ... })`（第 131 行）：组装可序列化记录。若 `outcome` 未显式传入，则内部调用 `judgeOutcome({ plan, results, options: { qualityIssues } })`（第 144 行）。产出字段（第 145-210 行）包含 `version`、`jobId`、`scope`、`startedAt`、`finishedAt`、`baseCommit`/`headCommit`（取 `changeSet`）、`changeSet`（只存摘要计数，不塞整图）、`plan`（每个 action 都带 `reason`，保证可复盘、第 181 行）、`results`、`qualityIssues`、`outcome`、`blockers`、`canAdvanceBaseline`、`writtenCount`、`failedCount`、`notes`（截断末尾 20 条，第 208 行）、`wikiPath`。明确不写入整张符号图（`graph`）与任务快照（`tasks`）。
+- `recordPath(wikiPath)`（第 213 行）：返回 `path.join(wikiPath, ...UPDATE_RECORD_REL.split('/'))`，即该 wiki 根下的 `temp/update-record.json` 绝对路径。
+- `saveUpdateRecord(wikiPath, record, fsImpl = fs)`（第 217 行）：落盘 IO 助手。`wikiPath` 为空直接返回 `{ ok: false, reason: '没有 wiki 路径' }`；否则 `mkdirSync(..., { recursive: true })` 后 `writeFileSync` 写入带缩进的 JSON + 换行。成功返回 `{ ok: true, path: file }`，异常返回 `{ ok: false, reason }`（截断 200 字）。
+- `loadUpdateRecord(wikiPath, fsImpl = fs)`（第 229 行）：回读 IO 助手。读不到 / 解析失败 / `version !== UPDATE_RECORD_VERSION` 一律返回 `null`（第 233 行）。
+- `describeOutcome(outcome, blockers = [])`（第 241 行）：面板/工具文案。`done` → 「完成（所有变化已消化）」；`partial` → 「部分完成（N 项未满足：首个阻塞原因）」；`cancelled` → 「已取消」；`failed` → 「失败（首个阻塞原因 / 无可用成果）」；其余原样返回。三态文案一眼可区分，且带首个 blocker 的原因（截断 120/160 字）。
 
-### IO 助手（带 `fsImpl` 注入点）
+### 记录结构（buildUpdateRecord 产出的字段）
 
-- `recordPath(wikiPath)`（`lib/update-record.js:213-215`）— 返回 `<wikiPath>/temp/update-record.json`（`UPDATE_RECORD_REL` 按 `/` 拆后 `path.join`）。
-- `saveUpdateRecord(wikiPath, record, fsImpl=fs)`（`lib/update-record.js:217-227`）— 自动建目录并 `writeFileSync`；失败返回 `{ ok:false, reason }` 而不抛错。是 `index.js:2509` `saveRecord` 的落盘出口。
-- `loadUpdateRecord(wikiPath, fsImpl=fs)`（`lib/update-record.js:229-238`）— 读回 JSON；版本不符（`rec.version !== UPDATE_RECORD_VERSION`）或读取异常一律返回 `null`（不把旧格式当新格式读，`test-update-record.mjs:199-204`）。
+记录是普通 JSON 对象（无 class），关键字段及其来源：
 
-### 文案
-
-- `describeOutcome(outcome, blockers=[])`（`lib/update-record.js:241-253`）— 把三态（含 `cancelled`）转成面板/日志文案：`done`→「完成（所有变化已消化）」、`partial`→「部分完成（N 项未满足：首个原因）」、`failed`→「失败（首个原因）」。`finishJob`（`index.js:2443`）与 `tickIndex`（`index.js:3346`）都调它渲染终态 note。
+| 字段 | 类型 | 来源 / 说明 |
+| --- | --- | --- |
+| `version` | number | `UPDATE_RECORD_VERSION`，恒为 `1` |
+| `jobId` | string \| null | 编译任务 id |
+| `scope` | string | `'auto'` / `'full'` / `'stale'` |
+| `startedAt` / `finishedAt` | string (ISO) | `finishedAt` 默认 `new Date().toISOString()`（第 142 行） |
+| `baseCommit` / `headCommit` | string \| null | 来自 `changeSet` |
+| `changeSet` | object \| null | 含 `state`/`ok`/`fallback`/`reason`/`counts`/`sourceChanges`/`ignored`（第 153-169 行），只存摘要 |
+| `plan` | object \| null | 含 `version`/`fileLevel`/`needsFull`/`actions`/`unmappedChanges`/`missingSources` 等（第 170-195 行） |
+| `results` | array | 逐篇 `{ name, ok, stopReason, error }`，`error` 截断 300 字（第 196-201 行） |
+| `qualityIssues` | array | 逐条 `{ name, issue }`（第 202 行） |
+| `outcome` | string | `judged.outcome`（`'done'`/`'partial'`/`'failed'`/`'cancelled'`） |
+| `blockers` | array | 各阻塞项 `{ kind, name?, detail, items? }` |
+| `canAdvanceBaseline` | boolean | 仅 `done` 且无 blocker 时为 `true` |
+| `writtenCount` / `failedCount` | number | 来自判定结果 |
+| `notes` | array | 截断末尾 20 条 |
+| `wikiPath` | string \| null | wiki 根路径 |
 
 ## Architecture
 
-本模块是编译收尾阶段的「终态判定 + 记录持久化」薄层，上游由 [[update-planner]]（`planUpdate`）产出 `plan`、[[change-set]] 产出 `changeSet`、执行器产出逐篇 `results`，本模块把它们收成记录并给出闸门结论。组件关系如下：
+本模块是纯函数 + 两个 IO 助手，组件少但职责清晰。核心判定与组装不碰磁盘，落盘/回读可注入 `fsImpl`：
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│  index.js  tickIndex (index.js:3363-3462)                         │
-│  ├─ judgeOutcome(plan, results, options)  ── 判终态 + blockers    │
-│  │     ▲ 纯函数 (lib/update-record.js:37-128)                      │
-│  │     ├── plan:  [[update-planner]] planUpdate 产物 (可 null)    │
-│  │     ├── results: job.articles 逐篇落盘结果                     │
-│  │     └── options: qualityIssues / indexOk / extraBlockers ...   │
-│  ├─ saveRecord(job, judged)  (index.js:2495-2517)                 │
-│  │     └─ buildUpdateRecord(...)  ── 纯函数 (lib/update-record.js:131-211)│
-│  │            ├─ changeSet: [[change-set]] collectChangeSet 产物  │
-│  │            └─ describeOutcome(outcome, blockers)  (面板文案)   │
-│  └─ saveUpdateRecord(wikiPath, rec) / loadUpdateRecord ── IO 助手 │
-└──────────────────────────┬───────────────────────────────────────┘
-                           ▼
-            .codewiki/temp/update-record.json (UPDATE_RECORD_REL)
-                           ▲
-            recordPath(wikiPath) = <wiki>/temp/update-record.json
+   ChangeSet             UpdatePlan            逐篇 results
+   (lib/change-set)      (lib/update-planner)  (job.articles)
+        │                    │                       │
+        └─────────┬──────────┴───────────┬───────────┘
+                  ▼                      ▼
+          ┌───────────────────────────────────────┐
+          │  judgeOutcome()  (lib/update-record.js:37)│ 纯函数：算 outcome/blockers/
+          │   七类 blocker + cancelled 短路          │          canAdvanceBaseline
+          └───────────────────┬───────────────────┘
+                              │ outcome 可显式传入或被 judge
+                              ▼
+          ┌───────────────────────────────────────┐
+          │ buildUpdateRecord() (lib/update-record.js:131)│ 纯函数：组装可序列化 JSON
+          │   不塞整图/任务快照，每 action 带 reason │
+          └───────────────┬───────────────────────┘
+                          │ record
+            ┌─────────────┴──────────────┐
+            ▼                            ▼
+  ┌──────────────────┐          ┌─────────────────────┐
+  │ saveUpdateRecord │          │ describeOutcome()   │ 面板/工具文案
+  │ (fsImpl 可注入)  │          └─────────────────────┘
+  └────────┬─────────┘
+           ▼
+  temp/update-record.json
+           │
+           ▼
+  ┌──────────────────┐
+  │ loadUpdateRecord │  (version 校验，不符返回 null)
+  └──────────────────┘
 ```
 
-- `judgeOutcome` 与 `buildUpdateRecord` 是纯函数，不碰文件系统，可在单测里直接喂结构化数据（`test-update-record.mjs`）。
-- `saveUpdateRecord` / `loadUpdateRecord` 是唯一的 IO 边界，第二个参数 `fsImpl` 默认 `node:fs`，测试可注入假实现；两者都内部吞错、返回 `{ ok, reason }` 或 `null`，不向上抛。
-- 版本守卫：`UPDATE_RECORD_VERSION` 不匹配的旧记录被 `loadUpdateRecord` 直接丢弃（`:233`），避免把旧格式误当新格式读。
+调用方 `index.js` 集成位置：
+
+- `tickIndex`（第 3363 行）在索引/基线**之前**调用 `judgeOutcome`，把结果存 `job.judged`；
+- `saveRecord`（第 2495-2517 行）在编译收尾时调用 `buildUpdateRecord` 再 `saveUpdateRecord`，落盘结果记到 `job.updateRecord`；
+- `finishJob`（第 2443 行）用 `judged.outcome` 设置 `job` 终态 stage 并调用 `describeOutcome` 写 note。
 
 ## Data Flow
 
-一次编译从「判不完整」到「记录落盘」的完整数据流（以 `scope=auto/stale` 增量路径为主，full 编译 `plan` 为 `null`）：
+一次编译的终态判定与记录落盘，在 `index.js` 的流水线里是这样流动的：
 
-1. **准备输入**：`tickIndex`（`index.js:3346`）前，存量坏文章体检已把不合格的库内文章并入 `job.qualityIssues`（`index.js:3351-3359`）；`job.articles` 是逐篇落盘结果（`{ name, ok, stopReason }`），`job.updatePlan` 是 [[update-planner]] 的 `planUpdate` 产物，`job.changeSet` 来自 [[change-set]]，`job.hardBlockers` 是执行器整体失败等硬阻塞。
-2. **判终态**：`tickIndex` 调 `judgeOutcome({ plan, results, options:{ expectedNames, qualityIssues, extraBlockers } })`（`index.js:3363-3371`），结果存 `job.judged = { outcome, blockers, canAdvanceBaseline }`（`:3372`）。非 `done` 时记一条 `describeOutcome` 文案 note（`:3373-3376`）。
-3. **闸门决策**：仅当 `job.judged.canAdvanceBaseline===true` 才跑 `cw meta update` 推进基线（`index.js:3399-3415`）；partial/failed 时索引照建（`cw index`）但基线绝不前移——前移等于宣布「变化已被消化」，未消化的部分下次编译将永久失明（`:3396-3398` 注释）。
-4. **组装记录**：`saveRecord(job, judged)`（`index.js:2495-2517`）调 `buildUpdateRecord`，把 `job.id / scope / changeSet / updatePlan / articles / qualityIssues / notes / createdAt` 收成记录（`:2497-2508`）。注意 `outcome` 直接传 `judged`（已判定结果），不再让 `buildUpdateRecord` 重复判（`:2503`）。
-5. **落盘与摘要**：`saveUpdateRecord(job.wikiPath, rec)` 写入 `.codewiki/temp/update-record.json`（`:2509`）。job 内存只留摘要 `job.updateRecord = { path: UPDATE_RECORD_REL, outcome, blockers, canAdvanceBaseline }`（`:2511`），不把整图塞进 jobs 文件（`:2494` 注释）。失败则 `job.updateRecord = { path:null, outcome, reason }`（`:2512`）。
-6. **终态收尾**：`finishJob(job, judged.outcome, judged.blockers)`（`index.js:2443-2448`）把 `outcome` 映射成 stage（`done`/`partial`/`failed`）、写 `canAdvanceBaseline`、记 `describeOutcome` 文案并唤醒会话（partial 也允许入库，但 stage 仍是 partial、基线不推进，见 `:3456` 注释）。
-7. **读取侧**：面板 `GET /api/codewiki/jobs`（`index.js:2206-2237`）与 `codewiki_progress`（`index.js:2206-2219`）共用 `jobSummary`（`index.js:2206-2251`），其中 `outcome` / `blockers` / `canAdvanceBaseline` / `updateRecord` 字段直接来自本模块产物。`loadUpdateRecord` 当前在单测外没有热路径读取（记录是「事后复盘用」的落盘物，读它的是人/审计，而非运行期代码）。
+1. **采集输入**：`submit`（第 3579 行）把 `changeSet` 摘要与 `updatePlan`（`slimPlanForJob` 精简后）挂到 `job` 上（第 3622-3634 行），供后续判定使用。
+2. **逐篇结果累积**：`tickArticles` / `tickCrosscut` / `tickReview` 等阶段通过 `tally`（第 2550 行）把每篇文章的 `{ name, ok, stopReason, path }` 累计进 `job.articles`，并维护 `job.writtenCount` / `job.failedCount`。
+3. **存量体检**：`tickIndex`（第 3352 行）调用 `auditExistingArticles`，把未过契约的存量坏文章并入 `job.qualityIssues`——即使本次全成功，库里有坏文章也会导致 partial 且不推进基线。
+4. **判定终态**：`tickIndex` 第 3363 行调用 `judgeOutcome({ plan: job.updatePlan, results: job.articles, options: { expectedNames, qualityIssues, extraBlockers: job.hardBlockers } })`，结果存 `job.judged = { outcome, blockers, canAdvanceBaseline }`（第 3372 行）。
+5. **闸门**：`tickIndex` 第 3399 行读 `job.judged.canAdvanceBaseline`，仅当 `true` 才 `cw meta update` 推进基线；否则只建索引、不推进（第 3413-3415 行）。
+6. **落盘记录**：`saveRecord(job, judged)`（第 2495 行）在 `tickIndex` 末尾被调用（第 3457 行），内部 `buildUpdateRecord` 组装记录后 `saveUpdateRecord` 写入 `temp/update-record.json`；落盘结果（成功路径含 `outcome`/`blockers` 计数/`canAdvanceBaseline`）记到 `job.updateRecord`（第 2510-2512 行）。
+7. **终态收尾**：`finishJob`（第 2443 行）用 `judged.outcome` 把 `job.stage` 置为 `done` / `partial` / `failed`，并把 `canAdvanceBaseline` 再算一遍（第 2448 行）。
 
-### blocker 种类速查
-
-`judgeOutcome` 可能产出的 `blockers[].kind` 与触发条件：
-
-| kind | 触发位置 | 含义 |
-|------|----------|------|
-| `cancelled` | `lib/update-record.js:49` | `options.cancelled=true`，任务被取消 |
-| `missing-article` | `:65`、`:68`、`:74` | 计划要求写 / 任务清单里有，但既没成功也没失败记录 |
-| `article-failed` | `:78` | 逐篇落盘失败（含 `error` 截断到 300 字符） |
-| `unmapped-changes` | `:86` | 源码变更没有任何文章归属（`items` 列出具体文件） |
-| `missing-sources` | `:93` | 文章缺 `source_files` 无法判定归属 |
-| `quality` | `:101` | 文章质量闸门未过（来自 `job.qualityIssues` 或存量体检） |
-| `index` | `:105` | 索引重建 / 入口文件校验未通过 |
-| `extra` / 自定义 | `:109` | 调用方补充的硬阻塞（如 `git-base`、`meta`） |
+回读方向：面板或其他工具可用 `loadUpdateRecord(wikiPath)`（第 229 行）把记录读回，配合 `describeOutcome` 渲染终态文案；版本号不符（如旧 wiki 残留记录）会被拒绝（第 233 行）。
 
 ## Connections
 

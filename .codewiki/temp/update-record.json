@@ -1,22 +1,64 @@
 {
   "version": 1,
-  "jobId": "job-mvrn2zl7-0",
+  "jobId": "job-mvrnuno0-1",
   "scope": "auto",
-  "startedAt": "2026-10-28T04:53:39.883Z",
-  "finishedAt": "2026-10-28T05:45:04.231Z",
+  "startedAt": "2026-10-28T05:15:10.800Z",
+  "finishedAt": "2026-10-28T07:28:43.947Z",
   "baseCommit": null,
   "headCommit": null,
   "changeSet": null,
   "plan": null,
   "results": [
     {
-      "name": "modules/article_contract.md",
+      "name": "modules/agentic_runtime.md",
       "ok": false,
-      "stopReason": "stream-error",
+      "stopReason": "max-steps",
       "error": null
     },
     {
-      "name": "modules/engine_llm_bridge.md",
+      "name": "modules/cluster.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/symbols.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/article_contract.md",
+      "ok": false,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/update_planner.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/engine_client_proc.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/incremental.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_bridge.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_manifest.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
@@ -28,37 +70,43 @@
       "error": null
     },
     {
-      "name": "modules/engine_mapping.md",
+      "name": "modules/change_set.md",
       "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/agentic_host.md",
-      "ok": false,
       "stopReason": "max-steps",
       "error": null
     },
     {
-      "name": "modules/articles_agentic.md",
+      "name": "modules/engine_output.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/symbol_extraction.md",
+      "name": "modules/test_wiki_articles.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/engine_openai_bridge.md",
+      "name": "modules/test_agentic.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/update_record.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/test_graph_diff.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/agentic_core.md",
+      "name": "modules/test_change_worktree.md",
       "ok": true,
       "stopReason": "max-steps",
       "error": null
@@ -66,91 +114,73 @@
     {
       "name": "modules/graph_diff.md",
       "ok": true,
-      "stopReason": "finished",
+      "stopReason": "max-steps",
       "error": null
     },
     {
-      "name": "modules/engine_process.md",
+      "name": "modules/test_cluster.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/change_set.md",
+      "name": "modules/test_symbols.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/update_planner.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/batch_tests.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/update_record.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/incremental.md",
+      "name": "modules/engine_mapping.md",
       "ok": true,
       "stopReason": "max-steps",
       "error": null
     },
     {
-      "name": "modules/test_core.md",
+      "name": "modules/test_semantic_sessions.md",
       "ok": false,
       "stopReason": "max-steps",
       "error": null
     },
     {
-      "name": "modules/wiki_tests.md",
+      "name": "modules/test_engine_bridge_io.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/cluster_planning.md",
+      "name": "modules/test_update_incremental.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/agent_mocks.md",
+      "name": "modules/test_orchestration_core.md",
       "ok": true,
       "stopReason": "finished",
       "error": null
     },
     {
-      "name": "modules/job_fixtures.md",
-      "ok": false,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/endpoint_stubs.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/repo_fixtures.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/app_client.md",
+      "name": "modules/test_batch.md",
       "ok": true,
-      "stopReason": "max-steps",
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_core.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_orchestration_api.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_fixtures.md",
+      "ok": true,
+      "stopReason": "finished",
       "error": null
     },
     {
@@ -168,36 +198,12 @@
   ],
   "qualityIssues": [
     {
-      "name": "modules/cwd-path-tests.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-cwd-paths.log"
+      "name": "modules/change_set.md",
+      "issue": "存量文章未过契约：代码围栏未闭合（3 个围栏标记）"
     },
     {
-      "name": "modules/documentation.md",
-      "issue": "存量文章未过契约：frontmatter 缺必填字段 source_files"
-    },
-    {
-      "name": "modules/git-and-ops-artifacts.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.probe3.txt"
-    },
-    {
-      "name": "modules/integration-test-suites.md",
-      "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "name": "modules/logs-and-temp.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log、.tmp-test-wiki-entry.log"
-    },
-    {
-      "name": "modules/runtime-artifacts.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.probe3.txt、.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log"
-    },
-    {
-      "name": "modules/test-suite.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：modules/test-suite/index.js、modules/test-suite/test-batch.mjs、modules/test-suite/test-cwd-paths.mjs、modules/test-suite/test-orchestration.mjs、modules/test-suite/test-wiki-anchors.mjs"
-    },
-    {
-      "name": "modules/testing-suite.md",
-      "issue": "存量文章未过契约：frontmatter 缺必填字段 source_files"
+      "name": "modules/engine_mapping.md",
+      "issue": "存量文章未过契约：重复章节：Key Components、Architecture、Data Flow、Connections、Known Issues"
     },
     {
       "name": "modules/wiki_tests.md",
@@ -228,73 +234,28 @@
   "blockers": [
     {
       "kind": "article-failed",
+      "name": "modules/agentic_runtime.md",
+      "detail": "max-steps"
+    },
+    {
+      "kind": "article-failed",
       "name": "modules/article_contract.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/agentic_host.md",
       "detail": "max-steps"
     },
     {
       "kind": "article-failed",
-      "name": "modules/test_core.md",
+      "name": "modules/test_semantic_sessions.md",
       "detail": "max-steps"
     },
     {
-      "kind": "article-failed",
-      "name": "modules/job_fixtures.md",
-      "detail": "max-steps"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/endpoint_stubs.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/repo_fixtures.md",
-      "detail": "stream-error"
+      "kind": "quality",
+      "name": "modules/change_set.md",
+      "detail": "存量文章未过契约：代码围栏未闭合（3 个围栏标记）"
     },
     {
       "kind": "quality",
-      "name": "modules/cwd-path-tests.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-cwd-paths.log"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/documentation.md",
-      "detail": "存量文章未过契约：frontmatter 缺必填字段 source_files"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/git-and-ops-artifacts.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.probe3.txt"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/integration-test-suites.md",
-      "detail": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/logs-and-temp.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log、.tmp-test-wiki-entry.log"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/runtime-artifacts.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.probe3.txt、.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/test-suite.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：modules/test-suite/index.js、modules/test-suite/test-batch.mjs、modules/test-suite/test-cwd-paths.mjs、modules/test-suite/test-orchestration.mjs、modules/test-suite/test-wiki-anchors.mjs"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/testing-suite.md",
-      "detail": "存量文章未过契约：frontmatter 缺必填字段 source_files"
+      "name": "modules/engine_mapping.md",
+      "detail": "存量文章未过契约：重复章节：Key Components、Architecture、Data Flow、Connections、Known Issues"
     },
     {
       "kind": "quality",
@@ -328,29 +289,29 @@
     }
   ],
   "canAdvanceBaseline": false,
-  "writtenCount": 20,
-  "failedCount": 6,
+  "writtenCount": 28,
+  "failedCount": 3,
   "notes": [
-    "_architecture.md：自动修正 1 处行号锚点",
-    "_architecture.md：行号锚点存疑（未改）—— lib/article-contract.js:323 符号未找到未改",
-    "modules/update_record.md：自动修正 2 处行号锚点",
-    "modules/update_record.md：行号锚点存疑（未改）—— index.js:2509 符号歧义未改",
-    "modules/incremental.md：自动修正 4 处行号锚点",
-    "modules/incremental.md：行号锚点存疑（未改）—— test-incremental.mjs:200 符号歧义未改；index.js:3436 符号歧义未改；index.js:3432 符号歧义未改 等",
-    "modules/cluster_planning.md：自动修正 6 处行号锚点",
-    "modules/cluster_planning.md：行号锚点存疑（未改）—— index.js:2998 符号未找到未改；index.js:1670 符号歧义未改",
-    "modules/agentic_core.md：自动修正 3 处行号锚点",
-    "modules/agentic_core.md：行号锚点存疑（未改）—— lib/agentic.js:1 符号歧义未改；test-agentic.mjs:401 符号歧义未改；lib/articles-agentic.js:21 符号未找到未改",
-    "modules/graph_diff.md：自动修正 6 处行号锚点",
-    "modules/graph_diff.md：行号锚点存疑（未改）—— lib/graph-diff.js:9-10 符号歧义未改；lib/graph-diff.js:64-68 符号未找到未改；lib/graph-diff.js:24-26 符号未找到未改 等",
-    "modules/engine_process.md：自动修正 10 处行号锚点",
-    "modules/engine_process.md：行号锚点存疑（未改）—— lib/engine/process-tree.js:18 符号未找到未改；lib/engine/process-tree.js:72 符号未找到未改；lib/engine/process-tree.js:82 符号未找到未改 等",
-    "存量文章体检：14 篇未过契约（modules/cwd-path-tests.md、modules/documentation.md、modules/git-and-ops-artifacts.md 等）",
-    "完整性未成立（部分完成（20 项未满足：stream-error））—— stream-error；max-steps；max-steps",
-    "清理孤儿模块文章 18 篇（模块划分已变，旧文件无人重写）—— batch-tests.md、client-interface.md、configuration-and-metadata.md、core-and-config.md、core-application.md 等",
+    "modules/test_cluster.md：行号锚点存疑（未改）—— test-cluster.mjs:41 符号歧义未改；lib/symbols.js:10 符号未找到未改；lib/cluster.js:348 符号未找到未改",
+    "modules/engine_mapping.md：自动修正 6 处行号锚点",
+    "modules/engine_mapping.md：行号锚点存疑（未改）—— test-engine-output.mjs:206-212 符号未找到未改；lib/engine/mapping.js:115-268 符号未找到未改；lib/engine/mapping.js:116-122 符号未找到未改 等",
+    "modules/test_engine_bridge_io.md：行号锚点存疑（未改）—— test-engine-bridge.mjs:153 符号未找到未改；test-engine-bridge.mjs:93 符号歧义未改",
+    "modules/test_engine_core.md：行号锚点存疑（未改）—— client.js:331-344 符号未找到未改；test-engine-client.mjs:309-324 符号未找到未改；client.js:230 符号未找到未改",
+    "modules/engine_fixtures.md：自动修正 1 处行号锚点",
+    "modules/engine_fixtures.md：行号锚点存疑（未改）—— test-fixtures/graphdiff-golden.json:480-498 符号未找到未改",
+    "modules/test_update_incremental.md：自动修正 1 处行号锚点",
+    "modules/test_update_incremental.md：行号锚点存疑（未改）—— test-update-planner.mjs:22-28 符号歧义未改",
+    "_patterns.md：行号锚点存疑（未改）—— test-engine-manifest.mjs:29-34 符号歧义未改；test-engine-llm-bridge.mjs:28 符号歧义未改；lib/symbols.js:288-296 符号歧义未改 等",
+    "modules/change_set.md：批量校对输出缺席，保留原文",
+    "modules/engine_output.md：批量校对输出缺席，保留原文",
+    "modules/test_wiki_articles.md：批量校对输出缺席，保留原文",
+    "modules/test_agentic.md：批量校对输出缺席，保留原文",
+    "存量文章体检：8 篇未过契约（modules/change_set.md、modules/engine_mapping.md、modules/wiki_tests.md 等）",
+    "完整性未成立（部分完成（11 项未满足：max-steps））—— max-steps；max-steps；max-steps",
+    "清理孤儿模块文章 11 篇（模块划分已变，旧文件无人重写）—— agentic_core.md、agent_mocks.md、app_client.md、articles_agentic.md、batch_tests.md 等",
     "cw index exit 0",
     "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
-    "符号快照已写入（479 个组件），下次增量按组件级判定"
+    "符号快照已写入（573 个组件），下次增量按组件级判定"
   ],
   "wikiPath": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki"
 }

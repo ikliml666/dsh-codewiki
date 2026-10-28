@@ -4,9 +4,12 @@ type: module
 source_files:
   - lib/incremental.js
   - lib/graph-diff.js
+  - lib/update-planner.js
+  - lib/symbols.js
+  - index.js
   - test-incremental.mjs
   - test-incremental-e2e.mjs
-tags: [snapshot, stale-task, incremental-compile, symbol-diff]
+tags: [incremental, snapshot, stale, symbol-graph, diff]
 ---
 
 ## Overview
@@ -21,6 +24,8 @@ tags: [snapshot, stale-task, incremental-compile, symbol-diff]
 - IO 集中在 `loadSnapshot`/`saveSnapshot`/`snapshotPath`（`lib/incremental.js:90`、`:106`、`:90`）。
 
 组件级 diff 的计算本身不在本模块，而是复用 `lib/graph-diff.js` 的 `diffGraphs`/`changedIds`/`graphDiffCounts`/`bodyHash`/`codeHash`（见 `lib/incremental.js:17` 的 import）。本模块在 diff 之上做两件事：快照的「瘦身存取」，以及在判定层加一道「纯注释改动降级」（`lib/incremental.js:146-169`）——这是 `lib/graph-diff.js` 的 hash 粒度不区分注释导致的，本模块在判定层用 `codeHash` 补一道，而不动与上游逐位对齐的 `diffGraphs`。
+
+> **生产消费方说明**：本模块的快照 IO（`slimGraph` / `graphFromSnapshot` / `loadSnapshot` / `saveSnapshot` / `sameSnapshotContent`）确实被 `index.js` 使用——编译收尾写快照见 `index.js:3420-3444`（`tickIndex`），stale 规划入口回读旧快照见 `index.js:3860-3873`（`runStaleUpdate`）。但纯判定函数 `filterStaleTasks` 与摘要函数 `describeChange` 在 `index.js` 里**仅被 import（`index.js:19-22`）而未被生产代码调用**；`filterStaleTasks` 是早期「从文章既有的 source_files 取组件、命中就写」的判定器，已被更完善的 [[update-planner]] `planUpdate`（`lib/update-planner.js:156`，补充了反向依赖、新文件归属、stale scan）取代。`describeChange` 目前仅在本模块的 e2e 测试（`test-incremental-e2e.mjs:75`、`94` 等）中被调用验证，生产侧的变更摘要改由其它措辞的 job note 承载。本文仍完整记录 `filterStaleTasks` 与 `describeChange`，因为它们与本模块的快照体系、与 `lib/graph-diff.js` 的纯注释降级判据是同一套逻辑，是理解增量判定的核心。
 
 ## Key Components
 
