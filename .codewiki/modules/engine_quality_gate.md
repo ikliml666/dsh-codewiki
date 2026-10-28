@@ -3,6 +3,283 @@ title: engine_quality_gate
 type: module
 source_files:
   - lib/engine/quality-gate.js
+  - test-engine-quality-gate.mjs
+  - lib/engine/output.js
+  - lib/article-contract.js
+  - lib/engine/mapping.js
+  - lib/update-record.js
+tags: [engine, quality-gate, native-output, baseline, article-contract]
+---
+
+## Overview
+
+`lib/engine/quality-gate.js` 是引擎流水线的**阶段 3：采用门（quality gate）**。它位于
+`output.js`（阶段 2，只判「产物自身是否自洽」）之后、把 docs 树写进 `.codewiki/` 与
+`CodeWiki.md` 之前。它把三件事合成为一个可机读的裁决（GateReport）：
+
+1. **产物自洽**：复用 `output.js` 的 `validateOutput`（`lib/engine/output.js:184`），不重写任何判定。
+2. **目标格式契约**：把映射结果用 `renderArticle` 渲染成真正的 wiki 文章（合成的 frontmatter
+   + FSoft 原文正文），再走 `article-contract.js` 的 `inspectArticle`（`lib/article-contract.js:213`）——
+   frontmatter 唯一闭合 / 围栏 / 死链 / source_files 证据 / 类型与位置匹配。
+3. **基线可推进性**：产物对应的 commit 必须是**已提交**的 HEAD，且 `.codewiki/_meta.yaml` 的基线
+   本身已入库——未提交的工作区内容不得被当成已提交基线。
+
+模块存在的核心理由是**把三类问题分开**（注释见 `lib/engine/quality-gate.js:15`）。0.14.0 的教训是
+「1 篇成功 + 19 篇失败也报 done」；但反过来把所有问题塞进一个 `blockers` 数组同样有害：引擎会被
+归咎于不是它的问题，或 wiki 的陈旧状态被当成产品缺陷，两条路都让运维在错的地方找原因。因此分类是
+**机读的**，消费者按 `kind` 分派：
+
+- **defect（产品缺陷）**：本次引擎产物自身的问题（缺入口/缺页/空正文/死链/source_files 指向不存在的
+  文件/frontmatter 坏了/围栏未闭合/产物对应的 commit 不是 HEAD）。处置：不让它算完整成功。
+- **degradation（能力降级）**：产物可用但证据不足（whole-repository 模式下 `module_tree` 为空 →
+  页没有归属与 source_files；有页映射不进 wiki）。处置：可以入库，但**增量 ownership 不可信，因此
+  不得推进基线**。注意与 defect 的差别：页是真的、内容是真的，只是没法归属。
+- **stale（wiki 状态陈旧）**：不是本次产物的错（既有 wiki 的基线落后 HEAD、基线只在工作区未提交）。
+  处置：如实报告；只有「基线未入库」这一条会阻止推进（把未提交状态固化成已提交基线是不可逆的记账错误）。
+
+终态仍然严格：**只有三类皆空才是 `done`**。分类改变的是「谁来修、修什么」的定位，不是放宽闸门——放宽
+正是迁移里最危险的方向。
+
+## Key Components
+
+全部公开 API 通过具名导出与 `export default` 双重暴露（`lib/engine/quality-gate.js:626`）。下面是
+模块的公开常量、函数与内部关键助手（均带真实行号）。
+
+### 常量（公开导出）
+
+- `GATE_VERSION`（`42|`）：采用门 schema 版本，当前固定为 `1`，写入 `GateReport.version`。
+- `GATE_DEFECT_KINDS`（`45|`）：`Object.freeze` 的产品缺陷类别表，稳定、可机读，新增只允许追加。
+  值见下：`missing-docs-dir`、`missing-metadata`、`missing-module-tree`、`bad-json`、
+  `entry-missing`、`empty-body`、`article-missing`、`unmapped-page`、`source-missing`、
+  `dead-link`、`article-contract`、`commit-mismatch`、`uncommitted-input`。
+- `GATE_DEGRADATION_KINDS`（`61|`）：能力降级类别表。值：`empty-module-tree`、
+
+  `no-source-evidence`、`missing-section`、`empty-section-optional`。
+- `GATE_STALE_KINDS`（`68|`）：wiki 状态陈旧类别表。值：`baseline-behind-head`、
+  `baseline-uncommitted`、`baseline-absent`。
+- `NATIVE_REQUIRED_SECTIONS`（`86|`）：原生通道传给 `inspectArticle` 的章节白名单，固定为 `[]`。
+  原因见文件注释 `80|`：FSoft 正文由上游 prompt 决定（如 `## Introduction and Purpose`），计划硬约束是
+  「不改技术内容」，用 agentic 通道的 `Overview`/`Key Components` 去判它，每条都是不可修复的 warning，
+  闸门会退化成噪声。「至少一个非空二级标题」由 `renderArticle` 渲染后的 `checkRendered` 单独判。
+
+### 内部集合与助手
+
+- `DEFECT_SET` / `DEGRADATION_SET` / `STALE_SET`（`74|`、`75|`、`76|`）：把三类类别表转成 `Set`，供
+  `gateNativeOutput` 分派时校验「写进的 kind 必须已登记」，未登记一律报错（`406|`、`410|`）。
+- `posix`（`78|`）：把反斜杠统一成 `/`，并兜底 `null`/`undefined`。
+- `git`（`90|`）：只读 git 助手，用 `execFileSync` 调用 `git`，失败（含超时 15s）统一返回 `null`
+  而非抛异常，让「 git 命令失败」变成一个可上报的状态而不是崩溃。
+- `parseMetaCommit`（`104|`）：用正则从 `_meta.yaml` 文本里抓 `last_compiled_commit:` 行的值，
+  去掉可选的引号。
+- `SHA_RE`（`109|`）：40 位 hex sha 校验正则。
+- `WIKI_PATHS`（`156|`）：`['.codewiki/', 'CodeWiki.md']`，`uncommittedSourceChanges` 用来把「wiki 自身
+  产物」排除在「未提交源码改动」之外。
+- `oneLine`（`248|`）：把多行文本压成单行、去首尾空白，供 `titleOf` 提取标题用。
+- `YAML_UNSAFE_HEAD` / `YAML_RESERVED` / `YAML_NUMBER`（`264|`、`266|`、`267|`）：`yamlScalar`
+  判定「裸值不安全」的正则与保留字集合（详见 `yamlScalar`）。
+
+### 公开函数
+
+- **`readCommittedBaseline({ repoRoot, relPath = WIKI_META_REL })`**（`117|`，WIKI_META_REL 来自
+  `lib/engine/mapping.js:32`）：读**已提交**的编译基线，而非工作区文件。返回对象字段：
+  - `ok: boolean` —— 是否拿到有效的已提交基线；
+  - `source: string` —— `'git-head' | 'worktree-only' | 'absent'`；
+  - `commit: string|null` —— `HEAD` 里 `_meta.yaml` 的 `last_compiled_commit`；
+  - `worktreeCommit: string|null` —— 工作区同名文件的 commit（用于比对是否 dirty）；
+  - `dirty: boolean` —— 工作区值是否与 `HEAD` 值不一致；
+  - `reason: string` —— 人类可读原因。
+  关键逻辑：通过 `git('show', 'HEAD:' + rel)`（`126|`）读取已提交内容；工作区文件仅用
+  `fs.readFileSync` 辅助比对。若 `HEAD` 里没有但该文件在工作区存在（`140|`），`source='worktree-only'`、
+  `ok=false`、`dirty=true`——这是「基线未入库」的判定来源，是**唯一会阻止推进**的陈旧。
+
+- **`uncommittedSourceChanges({ repoRoot })`**（`158|`）：用 `git status --porcelain
+  --untracked-files=all`（`161|`）列出**非 wiki** 的未提交改动。返回 `{ ok, paths, reason }`；
+  `paths` 已被 `WIKI_PATHS` 过滤掉 `.codewiki/` 与 `CodeWiki.md` 自身。这是判断「产物反映的内容是否在
+  某个 commit 里」的依据。
+
+- **`assessBaseline({ repoRoot, artifactCommit, baseline, requireCommittedInput = true })`**（`188|`）：
+  判「这批产物的基线能不能被推进」。返回 `{ ok, headCommit, artifactCommit, defects, stale, writable }`。
+  - 若 `requireCommittedInput=false`（`196|`）直接放行（`ok=true, writable=true`）；
+  - 否则比对 `artifactCommit`（产物 `metadata.generation_info.commit_id`）与 `git rev-parse HEAD`
+    （`192|`）：缺 commit / 不是 40 位 sha / 与 HEAD 不符 → `defect: commit-mismatch`；
+  - 通过 `uncommittedSourceChanges` 检查工作区脏否 → `defect: uncommitted-input`（`215|`）；
+  - 基线本身的陈旧只报告不归咎引擎（`227|`）：`baseline-absent` / `baseline-uncommitted` /
+    `baseline-behind-head`；
+  - **只有 `baseline-uncommitted` 这一条陈旧会阻止推进**（把未提交状态记成已消化是不可逆的），
+    见 `blockingStale` 过滤（`241|`）；`ok = defects.length===0 && blockingStale.length===0`（`242|`）。
+
+- **`yamlScalar(value)`**（`269|`）：YAML 标量的安全序列化。只在**确实不安全**时才加双引号，
+  且用 `JSON.stringify` 得到合法 YAML 双引号标量（YAML 1.2 是 JSON 超集）。不安全情形
+  （`plainUnsafe`，`273|`）包括：首尾空格、控制字符、换行/回车、反斜杠（Windows 路径）、`: `/`:` 结尾、
+  ` #`/`#` 开头、`YAML_UNSAFE_HEAD` 首字符、`YAML_RESERVED` 保留字（true/false/yes/no/…）、
+  `YAML_NUMBER` 数字形态。该函数的所有危险值都已在测试 `test-engine-quality-gate.mjs:338` 钉死「写进
+  frontmatter 后能被 `parseFrontmatter` 读回原字符串且 JSON 合法」。
+
+- **`titleOf(bodyText, fallback)`**（`291|`）：从正文第一行 `# 标题` 提取 H1 文本（`293|`）作为
+  frontmatter 的 `title`；提不到则用 `fallback`（通常是模块名）。
+
+- **`renderArticle({ article, body })`**（`316|`）：把映射出的一篇文章渲染成 wiki 文章的**完整文本**
+  ——合成 frontmatter + FSoft 原文。三条硬约束（测试钉死 `test-engine-quality-gate.mjs:314`）：
+  1. **正文一字不动**（不删 H1、不改标题、不重写链接、不补章节）（`318|` 仅 `stripBOM`）；
+  2. **frontmatter 只填有证据的字段**：`source_files` 原样来自映射（`321|`），空列表显式写成
+     `source_files: []`（`328|`）以区分「声明为空」与「没声明」；`type` 来自映射（`320|`）；
+     固定写 `tags: []`（`331|`）、`generated_by: fsoft-native`（`332|`）；
+  3. **可回溯**：`fsoft_page` 记下正文来自 FSoft 原始树的哪个文件（`333|`）。
+     结束标记 `---` 后**不插空行**（`338|`），保证「wiki 里的这篇 = 引擎产出的那篇」可逐字比对。
+
+- **`checkRendered({ content, article, cwd, fsoftPage })`**（`346|`）：渲染后的逐篇检查。先走
+  `inspectArticle`（`347|`，`requiredSections: NATIVE_REQUIRED_SECTIONS`、`allowEmptySourceFiles: true`、
+  `fsImpl: null`、`readableSources: null`、`allowedLinks: null`），再补两条原生通道专属判据：
+  剥掉**自己合成**的 frontmatter 后算 `bodyLength`（来自 `output.js:127`），若 `===0` 则加
+  `empty-body` error（`368|`）——这是因为 `inspectArticle` 的 empty-body 看 `body.trim()`，H1 在就非空，
+  会放过空壳页，这里用剥头后的正文兜住。返回 `{ issues, fsoftPage }`。
+
+- **`gateNativeOutput({ docsDir, repoRoot, componentFiles, overviewName, baseline, requireCommittedInput,
+  includeContent })`**（`390|`）：主入口。纯组合流水线，返回 `GateReport`（可 JSON 序列化）。
+  内部步骤：
+  1. 调 `validateOutput`（`400|`）得到 `collected`/`mapped`/`problems`；
+  2. 把 `validation.problems` 按 kind 分流（`418|`）：`empty-module-tree` → degradation（`420|`）；
+     `article-missing`/`unmapped-page`/已登记 defect → defect（`424|`、`428|`、`432|`）；未登记类别一律
+     当成 `article-contract` 报出来（`436|`），逼上层补映射；
+  3. 入口检查（`440|`）：无 overview → 整批不可入库（`entry.ok=false`）；读不到 / 空正文 / 围栏未闭合
+     → `entry-missing`/`empty-body`/`article-contract`（示例 `449|`、`454|`、`459|`）；
+  4. 逐篇渲染 + 契约（`467|`）：读正文 → `renderArticle` → `checkRendered`；error 级 issue →
+     `article-contract` defect（`487|`），warning 级 → degradation（`492|`）；空 `source_files`
+     → `no-source-evidence` degradation（`497|`）；每篇记 `articles[]` 与（无 defect 时）`rendered[]`
+     （`502|`、`514|`）；
+  5. 基线（`518|`）：取 `collected.json.metadata.generation_info.commit_id` 作 `artifactCommit`，
+     调 `assessBaseline`（`519|`）；
+  6. 终态合成（`526|`）：`writable = entry && entry.ok`；`blocking` 合并 defects + degradations +
+     `baseline-uncommitted` stale（`527|`）；`outcome = !writable ? 'failed' : blocking.length ?
+     'partial' : 'done'`（`533|`）。
+  返回字段见源码 `538|`：`version`、`ok`、`outcome`、`writable`、`canAdvanceBaseline`、`entry`、
+  `articles`、`rendered`、`defects`、`degradations`、`stale`、`blockers`、`counts`
+  （`pages/articles/writable/skipped/unmapped/defects/degradations/stale`）、`baseline`
+  （`headCommit/artifactCommit/source`）。
+
+- **`toContractBlockers(report)`**（`589|`）：把 `GateReport.blockers` 翻成 `contract.js` 的
+  `BLOCKER_KINDS`（`lib/engine/contract.js`）。一一对应不了的一律归 `'quality-gate'`
+  （`591|`），并保留原 kind 在 `detail` 里（`592|`）。映射表 `TO_CONTRACT_KIND`（`572|`）。
+
+- **`toQualityIssues(report)`**（`610|`）：把 gate 结论翻成 `update-record.js` 的 `qualityIssues`
+  （`judgeOutcome` 的输入之一）。逻辑（见 `612|`）：degradations + defects 全量转成
+  `{name, issue}`，stale 里**只有 `baseline-uncommitted` 算阻塞**（`621|`），其余（如基线落后 HEAD）
+  混入会让每次增量都落 partial。这是防止「可写但空 source_files 的页被 `judgeOutcome` 默默算成功并推进
+  基线」的关键接线（测试 `test-engine-quality-gate.mjs:211` 专门验证了盲区）。
+
+## Architecture
+
+组件 ≥3，且主入口 `gateNativeOutput`（`lib/engine/quality-gate.js:390`）是明确的组合流水线。下面是
+采用门的组件关系框图（箭头表示「调用 / 数据流」）：
+
+```text
+                docsDir + repoRoot + componentFiles
+                              │
+                              ▼
+                  ┌───────────────────────────┐
+                  │ gateNativeOutput (390)     │  主入口：组合 + 终态合成
+                  └─────────────┬─────────────┘
+            ┌───────────────────┼───────────────────┐
+            ▼                   ▼                   ▼
+ ┌──────────────────┐  ┌────────────────┐  ┌──────────────────────┐
+ │ output.js        │  │ mapping.js     │  │ assessBaseline (188) │
+ │ validateOutput   │  │ mapFsoftOutput │  │  ├ git rev-parse HEAD│
+ │ (184)            │  │ (115)          │  │  ├ uncommittedSource │
+ │  problems→分流    │  │  articles/entry│  │     Changes (158)    │
+ │  defect/deg.     │  │                │  │  └ readCommittedBase-│
+ └────────┬─────────┘  └───────┬────────┘  │     line (117)        │
+          │                    │           └───────────┬──────────┘
+          │   problems 按 kind 分流     articles[]      │  baseline{ok,stale}
+          ▼                    ▼                        ▼
+ ┌──────────────────────────────────────────────────────────┐
+ │ 逐篇：renderArticle (316) → checkRendered (346)           │
+ │   ├ yamlScalar (269) 合成安全 frontmatter                 │
+ │   └ inspectArticle (article-contract.js:213) 复用契约      │
+ └──────────────────────────┬───────────────────────────────┘
+            │ defects / degradations / stale
+            ▼
+ ┌──────────────────────────┐
+ │ 终态合成 (526):          │
+ │  writable = entry.ok     │
+ │  blocking = defects+     │
+ │     degradations+        │
+ │     baseline-uncommitted │
+ │  outcome: failed/       │
+ │     partial/done         │
+ └────────────┬─────────────┘
+              ▼
+       GateReport (538) ──► toContractBlockers(589) ─► contract.js
+                           └► toQualityIssues(610) ─► update-record.js:judgeOutcome
+```
+
+模块刻意**不**重写任何判定逻辑，而是复用 `output.js` 的 `validateOutput` 与 `article-contract.js` 的
+`inspectArticle`；它的价值在于「分流 + 终态语义 + 基线裁决 + 安全渲染」。
+
+## Data Flow
+
+一笔原生产物从进来到出 `GateReport` 的数据流如下：
+
+1. **入口收集**：`gateNativeOutput`（`390|`）接收 `docsDir`、`repoRoot`、`componentFiles`、
+   `overviewName`、`baseline`、`requireCommittedInput`、`includeContent`。先调
+   `validateOutput`（`400|`），后者内部 `buildWritePlan`（`lib/engine/output.js:162`）→
+   `collectOutput`（`lib/engine/output.js:91`）+ `mapFsoftOutput`（`lib/engine/mapping.js:115`），
+   产出 `{ collected, mapped, problems }`。
+
+2. **问题分流**：遍历 `validation.problems`（`418|`）。`empty-module-tree` 降为 degradation
+   （`420|`，证据缺失而非产物坏了）；`article-missing`/`unmapped-page`/已登记的 defect 升为 defect；
+   未登记类别统一报成 `article-contract` defect（`436|`）以逼上层补映射。所有写进的 kind 必须在对应
+   集合里（`406|`、`410|`），否则抛错。
+
+3. **入口校验**：从 `mapped.entry` 取 overview 页（`440|`），读不到/空正文/围栏未闭合分别推
+   `entry-missing`/`empty-body`/`article-contract` 并置 `entry.ok=false`（`449|`、`454|`、`459|`）。
+
+4. **逐篇渲染 + 契约**：对 `mapped.articles` 每条（`467|`）：读原始正文 → `renderArticle`（`477|`）
+   合成 frontmatter+正文 → `checkRendered`（`478|`）。`inspectArticle` 返回的 error 级 issue 转成
+   `article-contract` defect（`487|`），warning 级转 degradation（`492|`）；空 `source_files` 推
+   `no-source-evidence`（`497|`）。无 defect 的页进入 `rendered[]`（`514|`），且每篇在 `articles[]`
+   里记 `action: 'write' | 'skip'`（`510|`）。注意：有缺陷的页**绝不**进 `rendered`（`155|` 注释说明，
+   否则上游会绕过 skip 整篇落盘）。
+
+5. **基线裁决**：取 `collected.json.metadata.generation_info.commit_id` 为 `artifactCommit`
+   （`518|`），调 `assessBaseline`（`519|`）。后者比对 HEAD、校验 commit 形态与 `uncommitted-input`，
+   再结合 `readCommittedBaseline`（`117|`）报告的基线陈旧，得到 `{ ok, defects, stale }`
+   （`242|` 的 `ok` 仅被 `baseline-uncommitted` 阻塞）。
+
+6. **终态合成**：`writable = Boolean(entry && entry.ok)`（`526|`）；`blocking` 是 defects +
+   degradations + `baseline-uncommitted` 的 stale（`527|`）；`outcome` 三态（`533|`）。
+   最终 `GateReport`（`538|`）含全部明细与 `counts`。
+
+7. **下游接线**：`toContractBlockers`（`589|`）把 blockers 翻成 `contract.js` 的 `BLOCKER_KINDS`，
+   供索引层落盘闸门消费；`toQualityIssues`（`610|`）把结论翻成 `update-record.js` 的 `qualityIssues`，
+   喂给 `judgeOutcome` 防止「空 source_files 页被默默算成功并推进基线」。
+
+## Connections
+
+本模块处于引擎流水线的「采用门」层，与以下模块强耦合：
+
+- [[engine_output]]（阶段 2，`lib/engine/output.js`）：本模块的 `gateNativeOutput` 直接复用
+  `validateOutput`（`lib/engine/output.js:184`）与 `bodyLength`（`lib/engine/output.js:127`），
+  不重写任何「产物自身自洽」判定；二者分工见 `lib/engine/output.js:14` 注释。
+- [[article_contract]]（`lib/article-contract.js`）：复用 `inspectArticle`（`213|`）、
+  `fencesBalanced`（`161|`）、`parseFrontmatter`（`77|`）做渲染后文章的格式闸门；原生通道通过
+  `requiredSections=[]` + `allowEmptySourceFiles=true` 关闭 agentic 通道专属判据。
+- [[engine_mapping]]（`lib/engine/mapping.js`）：本模块 `import` 了 `WIKI_ENTRY`（`30|`）与
+  `WIKI_META_REL`（`32|`），并消费 `mapFsoftOutput`（`115|`）产出的 `entry`/`articles`/`unmapped`。
+- [[engine_contract]]（`lib/engine/contract.js`）：`toContractBlockers`（`589|`）把 gate 的 blockers
+  映射到 `BLOCKER_KINDS`，保证上层落盘闸门能识别。
+- [[update_record]]（`lib/update-record.js`）：`toQualityIssues`（`610|`）把 gate 结论翻成
+  `judgeOutcome`（`lib/update-record.js:37`）的 `qualityIssues`，是「两条判定路径不能一个严一个松」
+  的关键接线（见 `lib/engine/quality-gate.js:598` 注释）。
+- 测试侧：`test-engine-quality-gate.mjs`（本模块专属测试）同时 import 了
+  `lib/update-record.js` 的 `judgeOutcome` 与 `lib/engine/contract.js` 的 `BLOCKER_KINDS` 验证接线正确性。
+
+## Known Issues
+
+---
+title: engine_quality_gate
+type: module
+source_files:
+  - lib/engine/quality-gate.js
   - lib/engine/output.js
   - lib/engine/mapping.js
   - lib/engine/contract.js
@@ -168,11 +445,4 @@ tags: [engine, quality-gate, fsoft, baseline, native-run]
 - [[article_contract]]——`inspectArticle`（`lib/article-contract.js:213`）是被复用的目标格式闸门；门的 `checkRendered` 用其 `requiredSections=[]` + `allowEmptySourceFiles=true` 两个开关规避重复判与噪声降级。
 - [[update_record]]——`judgeOutcome`（`lib/update-record.js:37`）是阶段 4 的另一条终态判定路径；`toQualityIssues` 必须把门的 `degradations`/`defects`/`baseline-uncommitted` 喂进去，否则两条路径会一严一松。
 
-## Known Issues
 
-- **`requireCommittedInput=true` 时 `uncommitted-input` 会把整批判 partial**：工作区任何非 wiki 的未提交改动都算缺陷（`lib/engine/quality-gate.js:215-220`）。这是有意为之——产物反映的内容不在任何 commit 里，不能作为已提交基线。但意味着开发期未提交源码时永远不能推进基线；测试里普遍传 `requireCommittedInput: false` 来绕开（如 `test-engine-quality-gate.mjs:141`）。
-- **未登记的 `output.js` 类别会被静默转成 `article-contract`**：`lib/engine/quality-gate.js:436` 对未知 `problem.kind` 兜底成 `article-contract` 缺陷。这保证「不会静默吞掉」，但会丢失原 kind 信息——若 `output.js` 新增类别，必须在此显式补映射，否则监控按 kind 分派会失效（测试 `test-engine-quality-gate.mjs:185-193` 守住「全部 kind 必须在登记表里」）。
-- **`readCommittedBaseline` 依赖真实 git**：`git show HEAD:.codewiki/_meta.yaml`（`lib/engine/quality-gate.js:117`）在非 git 仓库或没有 HEAD 时返回 `ok:false`，不会抛（被 `git()` 的 catch 吞成 `null`，`:99-101`）。调用方需自行处理 `ok` 为假的情况（如 `assessBaseline` 把它转成 `baseline-absent`/`baseline-uncommitted`）。
-- **`checkRendered` 自剥 frontmatter 才能判空壳**：因 `renderArticle` 合成的 frontmatter 会进 `bodyLength` 统计（`lib/engine/quality-gate.js:362-365`），直接喂全文会让 `# Web` 这种只有标题的空壳页 `bodyLength ≈ 100` 永远判不出空；故必须先 `parseFrontmatter` 剥头（`:366`）再判。
-- **`yamlScalar` 对危险值一律加双引号**：为与既有文章观感一致，安全值保持裸写（`lib/engine/quality-gate.js:269`），但若某未来标题恰命中 `YAML_UNSAFE_HEAD`/`YAML_RESERVED`/`YAML_NUMBER`（如 `12345`、`true`、`~`、`- leading dash`），会渲染成双引号形态。测试 `test-engine-quality-gate.mjs:338-371` 钉死「危险值写出后必须能被 `parseFrontmatter` 读回原字符串」。
-- **真实产物（`.probe-fsoft/wiki_out_1c/docs`）测试默认跳过**：`test-engine-quality-gate.mjs:433-436` 仅在路径存在时跑这组（阶段 1C 未跑过则 SKIP），绝不直接改写原产物（`:13-14`，复制到临时目录后变形）。

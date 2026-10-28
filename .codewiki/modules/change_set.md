@@ -4,175 +4,186 @@ type: module
 source_files:
   - lib/change-set.js
   - test-change-set.mjs
-tags: [git, incremental, change-collection, wiki]
+  - lib/update-planner.js
+  - lib/update-record.js
+  - index.js
+tags: [incremental, git, change-collection, fallback]
 ---
 
 ## Overview
 
-`change_set`（源码 `lib/change-set.js`）是 dsh-codewiki 的「变更采集」模块，负责在每次编译前，把一个仓库里**所有**可能影响 wiki 文章的改动收集成一个规范化、可序列化的对象——`ChangeSet`。
+`lib/change-set.js` 解决的是「一次编译到底要看见哪些改动」这个增量编译的第一道关口。
 
-背景缺陷（已在文件头注释确认，见 `lib/change-set.js:1-13`）：旧实现 `cw status` 只跑 `git diff <last_compiled_commit>..HEAD`，于是三类改动对它完全隐形——（1）改完代码还没提交的工作区修改；（2）只 `git add` 到暂存区没提交的部分；（3）新建但还没被 git 跟踪的文件。结果「改完代码就编译」会把未消化的变化当成已消化（基线被前移），文章与源码脱节却一路绿到底。`change_set` 是把「增量漏检」这条缺陷钉死的第一环。
+背景缺陷（文件头注释 `lib/change-set.js:1-13` 已写明）：旧的 `cw status` 只跑 `git diff <last_compiled_commit>..HEAD`，于是三类改动对它完全隐形——①改完代码还没提交（工作区修改）；②只 `git add` 到暂存区没提交；③新建文件还没被跟踪。结果「改完代码就编译」会把未消化的变化当成已消化（基线被前移），文章与源码脱节却一路绿到底。这是本仓库增量融合要修的第一条——变更不能丢。
 
-模块职责只有一件事（`lib/change-set.js:11-13`）：把 **committed / staged / unstaged / untracked** 四路改动收成一个 `ChangeSet`，并把「采不全」的情形明确暴露出来——返回 `state` + `fallback='full'`，让调用方退回全量编译，**绝不假装 clean**。
+本模块的职责只有一件事（见 `lib/change-set.js:11-13`）：把 **committed / staged / unstaged / untracked** 四路改动收成一个规范化、可序列化（JSON）的 `ChangeSet`，并把「采不全」的情形明确暴露出来（`state` + `fallback='full'`），让调用方退回全量编译——绝不假装 clean（即绝不把「采不到」当成「没变化」）。
 
-核心设计取舍：
-- 路径一律归一为 POSIX 相对路径，越界路径（绝对路径、`../` 跳出）直接丢弃（`normChangePath`，`lib/change-set.js:33-40`）。
-- wiki 自身产物目录 `.codewiki/`（以及顶层 `.codewiki`）不当作源码变更，否则增量永远 dirty、且「未映射变更」永远无法清零；但 README/CHANGELOG/CodeWiki.md 这类被文章 `source_files` 引用的文档仍是合法源码（`isWikiProduct`，`lib/change-set.js:24-29`、`184-185`）。
-- 真实链路用 `execFileSync`，但 `collectChangeSet` 通过依赖注入 `opts.execFile` 接收执行器，便于离线单测（`lib/change-set.js:15`、`107`）。
+核心公共函数是 `collectChangeSet`（`lib/change-set.js:102`），辅助导出有 `CHANGE_SET_VERSION`、`isWikiProduct`、`normChangePath`、`parseNameStatus`，以及模块内部未导出的 `emptyChangeSet` 与 `defaultExecFile`。
+
+设计要点：
+- **依赖注入**：`collectChangeSet` 通过 `opts.execFile` 注入 git 执行器（默认 `defaultExecFile` 用 `execFileSync`），便于离线单测（见 `test-change-set.mjs:177-194`）。
+- **wiki 自身产物排除**：`.codewiki/` 下每次编译都会被重写的产物不算源码变更，否则增量永远 dirty 且「未映射变更」永远无法清零（`lib/change-set.js:21-29`、`lib/change-set.js:184-185`）。README/CHANGELOG/CodeWiki.md 这类被文章 `source_files` 引用的文档仍是合法源码，不在此列。
+- **降级语义**：任何采不全的情形都返回 `ok=false` 且 `fallback='full'`，调用方据此退回全量编译（见 `lib/change-set.js:99-101`）。
 
 ## Key Components
 
-本模块只含一个源文件 `lib/change-set.js`，全部为纯函数（除内部默认执行器封装）。以下按「常量 → 工具函数 → 解析器 → 采集入口」顺序列出公开 API。
+### 常量与辅助（均导出）
 
-### 常量与私有辅助
+- `CHANGE_SET_VERSION`（常量，`lib/change-set.js:19`）：变更集结构版本号，当前为 `1`。
+- `WIKI_PRODUCT_PREFIX`（模块内部常量，`lib/change-set.js:24`，未导出）：`'.codewiki/'`，用于判定「wiki 自身产物目录」。
+- `isWikiProduct(relPath)`（函数，`lib/change-set.js:26-29`）：返回 `relPath` 是否等于 `.codewiki` 或以 `.codewiki/` 开头（路径先 `\`→`/` 归一）。被 `collectChangeSet` 用来从 `all` 中区分出 `sourceChanges` 与 `ignored`。
+- `normChangePath(p)`（函数，`lib/change-set.js:33-40`）：路径归一——`\`→`/`、`trim`、去掉行首 `./`；绝对路径（`/...`）或盘符路径（`C:/...`）以及任何越界路径（`../` 跳出）一律返回 `null`（直接丢弃，它们不该出现在变更集里）。返回归一后的 POSIX 相对路径，空串返回 `null`。
+- `parseNameStatus(out)`（函数，`lib/change-set.js:52-71`）：解析 `git diff --name-status` 输出。每行按 `\t` 拆分：`R`/`C` 开头的记 `{ kind: 'renamed' | 'copied', from, path, status }`（两端路径都过 `normChangePath`，任一为 null 则跳过该行）；`D` 记 `{ kind: 'deleted', path, status }`；其余记 `{ kind: 'modified', path, status }`。`from`/`path` 均为归一后的相对路径。
 
-- `CHANGE_SET_VERSION = 1`（导出常量，`lib/change-set.js:19`）——`ChangeSet.version` 的当前版本号，写进记录做机读版本化。
-- `WIKI_PRODUCT_PREFIX = '.codewiki/'`（私有常量，`lib/change-set.js:24`）——wiki 自身产物目录前缀，用于区分「产物」与「源码」。
-- `defaultExecFile(cwd)`（私有函数，`lib/change-set.js:42-49`）——真实执行器工厂：返回 `(cmd, args) => execFileSync(cmd, args, { cwd, encoding:'utf8', stdio:['ignore','pipe','pipe'], maxBuffer:16*1024*1024 })`。
+### 主入口
 
-### 公开函数
+- `collectChangeSet(cwd, baseCommit, opts = {})`（函数，`lib/change-set.js:102-205`）：采集四路变更集。参数：
+  - `cwd`：仓库工作目录；
+  - `baseCommit`：上次成功编译的基线 commit（对应 `cw` 的 `_meta.yaml:last_compiled_commit`）；
+  - `opts.execFile(cmd, args) -> stdout`：注入的 git 执行器，抛错表示该命令失败，默认 `defaultExecFile(cwd)`（`lib/change-set.js:42-49`，用 `execFileSync`，`maxBuffer: 16*1024*1024`）。
+  - 返回 `ChangeSet` 对象（形状见下）。
+  - 流程（`lib/change-set.js:103-204`）：
+    1. `base` 为空 → `emptyChangeSet('', { state: 'missing-base', fallback: 'full', reason: '没有编译基线 commit，无法计算增量' })`（`lib/change-set.js:104-106`）。
+    2. `git rev-parse HEAD` 失败 → 再问 `git rev-parse --is-inside-work-tree`，区分 `no-git`（非 git 目录）与 `git-error`（`lib/change-set.js:112-122`）；无输出也算 `git-error`。
+    3. `git cat-file -e <base>^{commit}` 失败 → `state: 'unreachable-base'`，基线是 rebase/GC 掉的（`lib/change-set.js:127-137`）。
+    4. 四路采集（`-M` 打开改名检测，见 `lib/change-set.js:139-145`）：
+       - committed：`diff --name-status -M <base>..<headCommit>`；
+       - staged：`diff --name-status -M --cached HEAD`；
+       - unstaged：`diff --name-status -M`（工作区对 HEAD）；
+       - untracked：`ls-files --others --exclude-standard` 后逐行 `normChangePath` + 过滤。
+       任一命令抛错 → `state: 'git-error', fallback: 'full'`（`lib/change-set.js:158-160`）。
+    5. 分类去重（`lib/change-set.js:162-185`）：`all` 必须含改名两端（旧路径从「被谁引用」角度同样是变化）；`deletedSet` 记录删除路径；若同一路径既删又重建（untracked 含同名），从 `deletedSet` 中剔除（否则 planner 会为一篇还在的文件安排 delete action）。`sourceChanges = all` 中排除 wiki 产物的部分；`ignored = all` 中是 wiki 产物的部分。
+    6. 返回 `ok:true, state:'ok', fallback:null`（连同四路分类数组）或上述降级对象。
 
-- `isWikiProduct(relPath)`（`lib/change-set.js:26-29`）
-  - 用途：判断一个相对路径是不是 wiki 自身产物。
-  - 逻辑：`p === '.codewiki'` 或 `p.startsWith('.codewiki/')` 即判真；入参先 `replace(/\\/g,'/')` 归一。
-  - 注意：README/CHANGELOG/CodeWiki.md 等被 `source_files` 引用的文档**不**在此列，仍算源码。
+### ChangeSet 对象字段（完整结构）
 
-- `normChangePath(p)`（`lib/change-set.js:33-40`）
-  - 用途：路径归一与越界过滤。
-  - 逻辑：先把 `\` 换 `/` 并 `trim`；空串返回 `null`；以 `/` 开头或 `^[A-Za-z]:`（Windows 盘符）开头的绝对路径返回 `null`；去掉 `./` 前缀；若含 `../`（开头、中间或整串 `..`）返回 `null`。否则返回归一后的相对路径。
+降级骨架由 `emptyChangeSet`（`lib/change-set.js:73-93`）构造，成功路径在 `lib/change-set.js:187-204` 填充。所有字段如下（无时间戳/自动生成字段，本身为纯快照对象，可 `JSON.stringify` 落盘）：
 
-- `parseNameStatus(out)`（`lib/change-set.js:52-71`）
-  - 用途：解析 `git diff --name-status` 的输出。
-  - 入参 `out` 为命令 stdout 字符串，按 `\r?\n` 切行，每行 `split('\t')`。
-  - 首列 `code`：`R`（rename）/ `C`（copy）两列路径，分别记 `renamed` / `copied`，保留 `from` 与 `path`（到），并带上原始 `status`；`D` 记 `deleted`，其余 `M`/`A`/… 记 `modified`，只留 `path`。每条经 `normChangePath` 过滤越界路径。
-  - 返回 `entries: [{ kind, path, status, from? }]`。
+| 字段 | 类型 | 含义 / 来源 |
+|---|---|---|
+| `version` | number | `CHANGE_SET_VERSION`（始终为 `1`） |
+| `ok` | boolean | `true` 表示四路采集完整成功；`false` 表示降级（必带 `state`/`reason`/`fallback`） |
+| `state` | string | `'ok'` / `'missing-base'` / `'no-git'` / `'git-error'` / `'unreachable-base'` / `'unknown'`（骨架默认） |
+| `fallback` | string\|null | 降级时固定 `'full'`；成功时 `null`。调用方据此决定是否退回全量编译 |
+| `reason` | string | 降级原因文本（slice 截断）；成功时为空串 |
+| `baseCommit` | string | 传入的基线 commit（trim 后） |
+| `headCommit` | string | `git rev-parse HEAD` 结果；降级在能拿到时也填（`lib/change-set.js:119-135`） |
+| `committed` | Array<{kind,path,status,bucket?}> | `base..HEAD` 的已提交改动 |
+| `staged` | Array<{kind,path,status,bucket?}> | 暂存区改动 |
+| `unstaged` | Array<{kind,path,status,bucket?}> | 工作区未提交改动 |
+| `untracked` | Array<string> | 未跟踪新文件（相对路径） |
+| `deleted` | Array<string> | 被删除的文件路径（已剔除「删后又建同名」的情形），按字典序 |
+| `renamed` | Array<{from,path,bucket}> | 改名记录（旧→新），`bucket` 为来源（`committed`/`staged`/`unstaged`） |
+| `all` | Array<string> | 全部变化路径去重后排序（含改名两端）；**注意**：含 wiki 产物 |
+| `sourceChanges` | Array<string> | `all` 中排除 wiki 产物后的部分（真实源码/文档变更），喂给 planner |
+| `ignored` | Array<string> | `all` 中是 wiki 产物的部分，按字典序（只记账，不触发全量） |
 
-- `emptyChangeSet(baseCommit, overrides = {})`（私有函数，`lib/change-set.js:73-93`）
-  - 用途：构造一个「采集失败」的空 `ChangeSet` 骨架，所有字段默认值如下，`overrides` 可覆盖：
-    ```
-    version: CHANGE_SET_VERSION, ok:false, state:'unknown', fallback:null, reason:'',
-    baseCommit: String(baseCommit ?? ''), headCommit:'',
-    committed:[], staged:[], unstaged:[], untracked:[],
-    deleted:[], renamed:[], all:[], sourceChanges:[], ignored:[]
-    ```
+注：`committed/staged/unstaged` 原始条目在去重阶段被就地加上 `bucket` 字段（`lib/change-set.js:175`），标明它们从哪个桶来；最终返回前还会用 `isWikiProduct` 过滤掉 wiki 产物自身（`lib/change-set.js:195-200`）。
 
-- `collectChangeSet(cwd, baseCommit, opts = {})`（`lib/change-set.js:102-205`）——**唯一入口**。
-  - 参数：
-    - `cwd`：仓库工作目录。
-    - `baseCommit`：上次成功编译的基线 commit（来自 `.codewiki/_meta.yaml:last_compiled_commit`）。
-    - `opts.execFile(cmd, args) -> stdout`：可选执行器注入；抛错表示该命令失败。缺省用 `defaultExecFile(cwd)`。
-  - 返回值：`ChangeSet`（结构见下）。`ok=false` 时必带 `state` 与 `reason`，且 `fallback='full'`。
+### 模块内部辅助（未导出）
 
-### ChangeSet 结构（成功态，`lib/change-set.js:187-204`）
-
-成功采集返回的对象全部字段如下（字段名 → 含义）：
-
-| 字段 | 类型 | 含义 |
-|------|------|------|
-| `version` | number | 恒为 `CHANGE_SET_VERSION`（1） |
-| `ok` | boolean | `true` 表示成功采集 |
-| `state` | string | 成功时 `'ok'` |
-| `fallback` | null | 成功态无降级 |
-| `reason` | string | 成功态为空串 |
-| `baseCommit` | string | 基线 commit |
-| `headCommit` | string | `git rev-parse HEAD` 的当前 HEAD |
-| `committed` | array | `base..HEAD` 的改动条目（`kind/path/status`，已剔除 `.codewiki` 产物） |
-| `staged` | array | 暂存区改动（`--cached HEAD`，已剔除产物） |
-| `unstaged` | array | 工作区未提交改动（已剔除产物） |
-| `untracked` | array | 未跟踪新文件相对路径（已剔除产物） |
-| `deleted` | array | 被删路径（已剔除产物、已剔除「又重建」者），排序 |
-| `renamed` | array | `{ from, path, bucket }`（已剔除产物），`bucket` 标记来源桶 |
-| `all` | array | 全部变化路径的并集（含改名两端），**排序** |
-| `sourceChanges` | array | `all` 中过滤掉 wiki 产物后的「真实源码/文档」变化 |
-| `ignored` | array | `all` 中被判为 wiki 产物的路径，排序 |
-
-`all` 的关键语义（`lib/change-set.js:162-185`）：改名时两端（旧路径与新路径）都进 `all`，因为旧路径从「被谁引用」角度同样是变化；同一路径既删又重建（删了又新建同名文件）时，从 `deleted` 中剔除，避免 planner 为一篇还在的文件安排 delete action（`lib/change-set.js:179-181`）。`all` 与 `sourceChanges`/`ignored` 的划分依据是 `isWikiProduct`（`lib/change-set.js:184-185`）。
-
-### 降级语义（失败态 `state` 取值）
-
-`collectChangeSet` 在以下情形返回 `ok:false` 且 `fallback:'full'`（均经 `emptyChangeSet`，`lib/change-set.js:104-159`）：
-
-| `state` | 触发条件 | 代码位置 |
-|---------|----------|----------|
-| `missing-base` | `baseCommit` 为空（无法计算增量） | `lib/change-set.js:104-106` |
-| `no-git` | `rev-parse HEAD` 失败且 `--is-inside-work-tree` 不为 `true` | `lib/change-set.js:118-119` |
-| `git-error` | `rev-parse HEAD` 失败但仍在 git 工作树，或 `rev-parse HEAD` 无输出 | `lib/change-set.js:121-124` |
-| `unreachable-base` | 基线 commit 被 rebase/GC 掉（`cat-file -e base^{commit}` 失败） | `lib/change-set.js:128-137` |
-| `git-error` | 四路采集任一 `git` 命令抛错（含 `ls-files`） | `lib/change-set.js:158-159` |
-
-调用方约定（`lib/change-set.js:100-101`）：`ok=false` 时一定带 `state` 与 `reason`，且 `fallback='full'`——据此退回全量编译；**不许把「采不到」当成「没变化」**。
+- `defaultExecFile(cwd)`（`lib/change-set.js:42-49`）：默认 git 执行器工厂，返回 `(cmd, args) => execFileSync(cmd, args, {...})`。
+- `emptyChangeSet(baseCommit, overrides = {})`（`lib/change-set.js:73-93`）：所有降级分支共用的骨架构造器，按 `overrides` 覆盖默认字段（`ok:false, state:'unknown', fallback:null, ...`）。
+- `collect(label, args)`（闭包，`lib/change-set.js:141-145`）：四路采集的薄封装，捕获异常并转成带 label 的错误（抛给上层统一降级为 `git-error`）。
 
 ## Architecture
 
-该模块只有 4 个公开纯函数 + 1 个私有工厂 + 2 个常量，逻辑扁平、无副作用（除注入的 `execFile`）。下面是「四路采集 → 归一/解析 → 分类去重 → 分离 wiki 产物」的框图：
+`collectChangeSet` 是单文件、无外部状态模块，内部由「四路 git 采集 → 统一解析 → 分类去重 → 排除 wiki 产物」一条流水线构成。框图如下（组件标注文件名/函数）：
 
 ```text
-            git repo (cwd) + baseCommit (from _meta.yaml)
-                          │
-                          ▼
-   collectChangeSet(cwd, baseCommit, {execFile})   lib/change-set.js:102
-                          │
-  ┌───────────────────────┴───────────────────────────────┐
-  │ 1) rev-parse HEAD          → no-git / git-error        │
-  │ 2) cat-file -e <base>^     → unreachable-base          │
-  │ 3) 四路采集 (defaultExecFile / 注入执行器)              │
-  │    committed : diff --name-status -M base..HEAD        │
-  │    staged    : diff --name-status -M --cached HEAD     │
-  │    unstaged  : diff --name-status -M                   │
-  │    untracked : ls-files --others --exclude-standard    │
-  └───────────────────────┬───────────────────────────────┘
-                          │ 每条路径
-                          ▼
-   parseNameStatus() ──► normChangePath()  (POSIX / 去 ./ / 丢越界)
-   isWikiProduct()    (判定 .codewiki/ 产物)
-                          │
-                          ▼
-   allSet / deletedSet / renamed[]   去重(改名两端都留)
-   untracked 并入 allSet；删后重建从 deletedSet 摘除
-                          │
-                          ▼
-   sourceChanges = all  − wiki 产物      lib/change-set.js:184
-   ignored       = all  ∩ wiki 产物      lib/change-set.js:185
-                          │
-                          ▼
-   ChangeSet { version, ok, state, fallback, reason, baseCommit, headCommit,
-               committed/staged/unstaged/untracked/deleted/renamed,
-               all, sourceChanges, ignored }   lib/change-set.js:187
-                          │
-                          ▼
-                交给 update-planner / update-record
+            cwd + baseCommit + opts.execFile
+                         │
+                         ▼
+            ┌──────────────────────────────────┐
+            │ collectChangeSet (change-set.js)  │
+            │  :102                              │
+            └──────────────────────────────────┘
+              │        │         │        │
+   ┌──────────┘        │         │        └──────────┐
+   ▼                   ▼         ▼                    ▼
+┌────────┐      ┌──────────┐ ┌──────────┐     ┌──────────────┐
+│ HEAD   │      │ committed│ │ staged/  │     │ untracked    │
+│ check  │      │ diff     │ │ unstaged │     │ ls-files     │
+│ :113   │      │ -M       │ │ diff -M  │     │ --others     │
+│ cat-file│     │ :151     │ │ :152-153 │     │ :154         │
+└───┬────┘      └────┬─────┘ └────┬─────┘     └──────┬───────┘
+    │  any fail       │            │                  │
+    │ ───────────────►│  parseNameStatus (each)      │ normChangePath
+    │  emptyChangeSet │      :52                     │  each line :156
+    │  state+fallback │            │                  │
+    │  ='full'        │            ▼                  │
+    └─► (caller: full)└──►  collect(label,args):141 ─┘
+                                  │
+                                  ▼
+                    ┌────────────────────────────┐
+                    │ 分类+去重 :162-183          │
+                    │ allSet / deletedSet /      │
+                    │ renamed / untracked        │
+                    │ 删后又建同名 → 移出 deleted │
+                    └──────────────┬─────────────┘
+                                   ▼
+                    ┌────────────────────────────┐
+                    │ isWikiProduct 分离 :184-185 │
+                    │ sourceChanges / ignored    │
+                    └──────────────┬─────────────┘
+                                   ▼
+                         ChangeSet { ok, state,
+                          committed, staged,
+                          unstaged, untracked,
+                          deleted, renamed, all,
+                          sourceChanges, ignored }
+                                   │
+                                   ▼
+                        planUpdate / update-record
 ```
 
-降级分支统一先走 `emptyChangeSet`（`lib/change-set.js:73`）再补 `state`/`fallback:'full'`/`reason`，保证 `ok=false` 时调用方**只可能得到 `full` 级别决策**，绝不假装 clean。
+`state` 的取值与触发条件（均落在降级分支，调用方读 `fallback==='full'` 退回全量）：
+
+| state | 触发位置 | 含义 |
+|---|---|---|
+| `missing-base` | `lib/change-set.js:105` | 没有编译基线 commit |
+| `no-git` | `lib/change-set.js:119` | 不是 git 仓库 / 无法读 HEAD |
+| `git-error` | `lib/change-set.js:121,124,159` | git 命令失败或无输出 |
+| `unreachable-base` | `lib/change-set.js:131-136` | 基线 commit 已不在历史里 |
+| `ok` | `lib/change-set.js:190` | 四路采集成功 |
 
 ## Data Flow
 
-`codewiki_generate` 工具在 `auto`/`stale` 逐篇更新路径上调用本模块（真实链路，无测试桩）：
+`ChangeSet` 不是终态，而是增量编译链路的「第一份证据」，沿 `index.js` → `update-planner.js` → `update-record.js` 一路传递：
 
-1. `readCompiledBaseline(wikiPath)`（位于 `index.js` 的编排逻辑）读 `.codewiki/_meta.yaml:last_compiled_commit` 作为 `baseCommit`；读不到则 `changeSet=null`，由 planner 退文件级。
-2. `collectChangeSet(cwd, baseline)`（`index.js:4133` 与 `index.js:4247` 两处）：
-   - 成功 → 用 `notes` 记录四路计数（`index.js:4090`）。
-   - 失败（`!changeSet.ok`）→ 直接 `return { needFull:true, reason }`（`index.js:4134-4136`、`index.js:4248-4249`），退回全量编译。
-3. 成功对象喂给 `planUpdate({ changeSet, oldGraph, newGraph, articles, moduleMap, options })`（`index.js:4163` 与 `index.js:4259`）。planner 取 `changeSet.sourceChanges`/`deleted`/`renamed`/`untracked` 折算成集合（`lib/update-planner.js` 的 `planUpdate`），产出每篇 `action`：`write`/`keep`/`review`/`delete`，以及 `unmappedChanges`/`needsFull`。
-4. `collectChangeSet` 连同 `updatePlan` 一起传给 `svc.submit({ kind:'stale', …, changeSet, updatePlan })`（`index.js:3876`）。`submit` 内部把它精简为 `job.changeSet`（只取 version/state/baseCommit/headCommit/各 bucket 列表，丢弃 all/sourceChanges/ignored）。
-5. 终态判定阶段把 `job.changeSet` 交给 `buildUpdateRecord`（`lib/update-record.js`）写进 `.codewiki/temp/update-record.json`。
-6. 基线推进闸门：`job.judged.canAdvanceBaseline === true` 才允许 `cw meta update`；`partial`/`failed` 不推基线——未消化的变化下次编译仍可见（`index.js:4122-4129` 的 `runStaleUpdate` 注释与 `4126-4137` 的采集段）。
+1. **采集触发**：`index.js` 的 `runStaleUpdate`（`index.js:4132`）在 stale/auto 逐篇更新分支里读取编译基线（`readCompiledBaseline(wikiPath)`，`index.js:4140`），然后：
+   ```js
+   changeSet = collectChangeSet(cwd, baseline)   // index.js:4143
+   if (!changeSet.ok) return { needFull: true, reason: `变更采集不可用（${changeSet.reason}）` }
+   ```
+   另一处「cw status 说有变更却没命中文章」的分支（`index.js:4248-4257`）同样先 `collectChangeSet` 再交给 `planUpdate`。
 
-可机读性：ChangeSet 纯数据、无方法，可直接 `JSON.stringify`/`parse`（`test-change-set.mjs:196-203` 专门断言），因为这要写进 `update-record.json` 复盘。
+2. **入 job 占位**：编译任务提交时，`changeSet` 的精简版被写入 job 对象（`index.js:3919-3930`，只记 `state/baseCommit/headCommit` 与各分类数组，去掉 `reason`/`all`/`sourceChanges`/`ignored`），供面板展示与终态判定。
+
+3. **喂给 planner**：`changeSet.ok` 且已有文章时，`index.js:4173` 调 `planUpdate({ changeSet, oldGraph, newGraph, articles, moduleMap, options })`（`lib/update-planner.js:156`）。planner 从中取 `sourceChanges / deleted / renamed / untracked / all`（`lib/update-planner.js:424-428`）判断哪篇文章要 write/keep/delete/review，并把「无归属的源码变更」记进 `unmappedSourceChanges` 要求全量（`lib/update-planner.js:391-392`）。`plan.needsFull` 或 `plan.unmappedChanges` 非空时，`index.js` 退回全量编译（`index.js:4177-4179`、`index.js:4272-4277`）。
+
+4. **入更新记录**：最终 `changeSet` 被 `buildUpdateRecord`（`lib/update-record.js:131`，调用在 `index.js` 收尾阶段）收进 `update-record.json` 的 `changeSet` 字段——只留 `state/ok/fallback/reason` 与各类 `counts`、以及完整的 `sourceChanges`/`ignored`（`lib/update-record.js:153-169`）。`judgeOutcome`（`lib/update-record.js:37`）用 `plan.unmappedSourceChanges` 决定 `canAdvanceBaseline`（只有 `outcome==='done'` 才允许前移基线，`lib/update-record.js:124`），从而把「采不全/采到没人认领的变更」显式阻断基线前移。
+
+5. **可序列化约束**：`test-change-set.mjs:196-203` 钉住 `ChangeSet` 必须能 `JSON.parse(JSON.stringify(cs))` 往返（`version/all` 不丢），因为它要写进 `update-record`。
+
+一句话：`collectChangeSet` 把「git 看见的四路改动」变成一份可机读、可降级、可序列化的事实清单；下游 planner 把它翻译成「每篇文章该做什么」，update-record 把它作为「能不能推进编译基线」的依据。
 
 ## Connections
 
-- [[update-planner]] — 核心消费方。`planUpdate` 把 `changeSet` 的 `sourceChanges`/`deleted`/`renamed`/`untracked`/`all` 折算成判定输入；`needsFull` 与 `unmappedChanges` 直接决定能否推进基线。
-- [[update-record]] — `buildUpdateRecord` 把 `job.changeSet` 收编进 `update-record.json`；`judgeOutcome` 据未映射变更记阻塞（阻止基线前移）。
-- 编排服务（`index.js`）— `codewiki_generate` 在 `auto`/`stale` 路径调 `collectChangeSet`（`index.js:4088`、`index.js:4078`），`submit` 把精简后的变更集写进 `job`。
-- [[incremental]] — 符号级增量的图快照与文件级降级与本模块四路采集互为补充：本模块负责「文件级发生了什么」，incremental 负责「这些文件里的组件级变更」。
-- [[engine-contract]] — 终态语义（done/partial/failed/cancelled）与本模块的「采集不可用 ⇒ fallback='full'」一脉相承：任何未消化项都不得把基线前移。
+- [[update-planner]]：`collectChangeSet` 的产物是 `planUpdate` 的第一个输入（`lib/update-planner.js:156-163` 解 `changeSet.sourceChanges/deleted/renamed/untracked/all`）。planner 把无归属的源码变更升级为 `needsFull`，本模块是这套「变化不能丢」语义的数据源头。
+- [[update-record]]：`buildUpdateRecord`（`lib/update-record.js:131-169`）把 `ChangeSet` 收进 `update-record.json`；`judgeOutcome`（`lib/update-record.js:37-128`）依 `unmappedSourceChanges` 决定 `canAdvanceBaseline`。
+- [[incremental]]：当 `update-planner` 走符号级判定时（`oldGraph/newGraph` 非空），`lib/incremental.js` 的 `filterStaleTasks` 复用 `lib/change-set.js` 的 `isWikiProduct` 同源思路（`WIKI_PRODUCT_PREFIX` 在 change-set 定义，`lib/change-set.js:24`），但两者是独立实现；符号快照 `SNAPSHOT_REL` 落在 `.codewiki/temp/` 下，正属本模块排除的 wiki 产物（`lib/incremental.js:22`）。
+- [[symbols]]：`extractCurrentGraph`（`index.js` 经 `lib/symbols.js`）提供 `newGraph`，与 `loadSnapshot`（`[[incremental]]`）的 `oldGraph` 一起喂给 `planUpdate` 做符号级增量；`collectChangeSet` 提供其文件级地基。
+- [[graph-diff]]：符号级判定依赖 `diffGraphs`/`changedIds`/`graphDiffCounts`，与 `ChangeSet` 的文件级变更互补（文件级在无符号可判时兜底，见 `lib/update-planner.js:179-304`）。
+- `index.js`：`runStaleUpdate`（`index.js:4132`）与 stale 兜底分支（`index.js:3876`）是 `collectChangeSet` 在运行时的唯二调用点；`submit`（`index.js:3919`）把精简 `changeSet` 写入 job。
 
 ## Known Issues
 
-- **越界路径被静默丢弃**：`normChangePath`（`lib/change-set.js:33-40`）对 `../` 或盘符路径直接返回 `null`，这些路径不会进入 `all`，也不会触发任何告警——若未来出现合法的仓库外引用，会被无声忽略（当前设计上它们本不该出现）。
-- **改名检测依赖 `-M` 开关**：四路 `git diff` 都带 `-M`，但 `ls-files --others`（untracked）没有改名概念；若「改名 + 未跟踪」混合出现，改名只对 tracked 文件生效（`lib/change-set.js:151-157`）。
-- **「删后重建同名文件」的判定是路径级**：`lib/change-set.js:181` 仅在 untracked 含该路径时从 `deletedSet` 摘除，不做内容比对——同一路径先删文件再新建同名文件会被当作「未删」。
-- **降级原因被截断**：除基线不可达错误用 `slice(0, 120)`（`lib/change-set.js:135`）外，其余 `reason` 经 `String(err.message ?? err).slice(0, 200)`（`lib/change-set.js:119-121, 143`）截断到 200 字符，超长 git 错误细节会丢失；四路采集整体捕获处（`lib/change-set.js:159`）未截断。
-- **`state:'unknown'` 仅作默认初值**：正常路径不会返回 `unknown`（所有分支都覆盖 state），但 `emptyChangeSet` 默认 `state:'unknown'`（`lib/change-set.js:73`），若未来新增分支漏设 state，会把 `ok=false` 与 `unknown` 一起暴露出来。
-- 测试覆盖见 `test-change-set.mjs`（P0-1，1–209 行），钉死了 no-git / missing-base / unreachable-base / clean / unstaged / staged / untracked / deleted / renamed / committed / 四路去重 / wiki 产物剔除 / 路径归一 / 注入 execFile / JSON 可序列化共 15 个场景。
+- **改名只记文件级**：`collectChangeSet` 的 `renamed` 是 `{from, path, bucket}` 文件级记录，没有组件级 oldId→newId 映射。planner 在 stale scan 时需同时接受 `diff.renamed`（`Map<oldId,newId>`，来自 `[[graph-diff]]`）与 git 文件级改名（`lib/update-planner.js:320-324`）两种形态——两者来源不同，需要调用方自己合并，本模块不提供。
+- **「删后又建同名」靠 untracked 列表推断**：同一路径既删又出现在 `untracked` 时，从 `deletedSet` 移除（`lib/change-set.js:179-181`）。若文件系统上该路径其实不存在（极端脏状态），理论上仍会被记为 deleted——这一推断依赖 `ls-files --others` 的即时准确性。
+- **wiki 产物判定只认路径前缀**：`isWikiProduct`（`lib/change-set.js:26-29`）只按 `.codewiki` 前缀过滤。若用户把真实源码放进 `.codewiki/` 下（非常规），会被错误地排除出 `sourceChanges`；反之 `README.md`/`CHANGELOG.md`/`CodeWiki.md` 即便被文章引用也保留在 `sourceChanges`——这是有意为之（`lib/change-set.js:184-187`），但依赖部署约定。
+- **降级不重试/不部分成功**：任一 git 命令失败即整体 `git-error` + `fallback='full'`（`lib/change-set.js:158-160`）——即便只有一路（如 untracked）失败，已采到的 committed/staged 也一并丢弃。这是保守设计（宁可全量也不丢变更），但意味着 git 暂时性故障会强制全量重编。
+- **`all` 含 wiki 产物、`sourceChanges`/`ignored` 不含**：`all` 是去重后的全量（含 `.codewiki/`），而真正喂给 planner 的是 `sourceChanges`（`lib/change-set.js:184-185`）。调用方若误用 `all` 而非 `sourceChanges` 判定归属，会把 wiki 自产物当成「未映射变更」导致永远 partial（这正是 `lib/update-record.js:167-168` 只取 `unmappedSourceChanges` 的原因）。
+- **测试覆盖见 `test-change-set.mjs`**（P0-1）：钉死了非 git 目录（no-git）、缺 baseCommit（missing-base）、base 不可达（unreachable-base）、干净仓库、unstaged/staged/untracked、删除、改名、committed、四路合并去重、wiki 产物剔除 `.codewiki/`、路径归一 POSIX、注入 execFile 离线单测、`ChangeSet` 可 JSON 序列化共 15 个场景（`test-change-set.mjs:47-203`）。
+
+
