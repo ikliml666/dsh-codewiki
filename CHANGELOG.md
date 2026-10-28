@@ -11,7 +11,7 @@
 - **阶段 1B 宿主模型桥**：`lib/engine/llm-bridge.js` 起只绑 `127.0.0.1` 的 OpenAI-compatible 服务，FSoft 只拿到 loopback URL/模型名/占位 key，真凭证留在宿主 provider 内；`lib/engine/openai-bridge.js` 双向翻译 OpenAI 请求体 ↔ 宿主 `llm.stream()` 的 `GenerateOptions`/`StreamChunk`。真机 `workbuddy`/`deepseek-v4.1-flash` 实测：流式 230 chunk、首 chunk 1847 ms、总 3144 ms；非流式带 usage。**工具调用往返暴露了一个只有真跑才看得见的 bug**：assistant 历史消息缺 `source` 字段会被宿主适配层丢弃，第二轮起模型看不见自己上一轮的工具调用（已修，`test-engine-bridge.mjs` 24 条含回归）。
 - **阶段 1C 原生端到端**：Python+TypeScript fixture 全量真实跑通，五类增量逐类验证——注释改动 `no_change`（0 次 LLM 调用）、公开接口 `interface:1` → 重写 overview、新文件 `added:2` → 重写 overview、删除+改名触发 `stale_scan.fixed` 并修好旧符号名（页面里旧名 0 次/新名 20 次）、未变页面 mtime 未动。工作区未提交改动**FSoft 不认**（只取 committed diff），留给阶段 5 由 Node 侧合成 change-set。新增 `lib/engine/process-tree.js`：`terminateProcessTree` 用 `taskkill /T /F` 终止整棵树，实测 204 ms、残留进程 0；异常退出用 `--request-limit 1` 验证语义失败与进程退出码分离（退出码 4）。
 
-**验证**：新增四套测试全绿（`test-engine-contract` 18 / `test-engine-bridge` 24 / `test-engine-llm-bridge` 16 / `test-engine-process-tree` 5）；既有回归无变化（`test-change-set` 15 / `test-update-planner` 20 / `test-update-record` 18 / `test-article-contract` 29 / `test-symbols` 24 / `test-cluster` 30 / `test-incremental` 20 / `test-batch` 148 全过）；`node --check` 全部通过。
+**复核**：主代理重新运行 `pip check` 与无模型依赖图探针，分别得到 `No broken requirements found.`、`ok: true`（15 组件 / 6 叶子，R1–R5 全 true）；新增四套测试复跑为 18 / 24 / 17 / 5 全过。桥准入修复为 `randomBytes(32)` 随机占位 key + 与本次 key 精确比对，新增「同格式伪造 key 返回 401 且不触发模型」用例。1C 只确认原生 committed-diff 的四类场景；未提交工作区变更仍待阶段 5，不计作已通过。真实全量/增量、工具调用和进程树取消为子智能体报告，尚未由主代理重放。
 
 ## 0.14.0 — 2026-10-27
 

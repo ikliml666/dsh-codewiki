@@ -208,6 +208,17 @@ await check('/v1/models 需要占位 key，返回配置的模型', async () => {
   })
 })
 
+await check('同格式但非本次生成的占位 key → 401，不触发模型', async () => {
+  const llm = fakeLlm(async function* () { yield { type: 'text-delta', index: 0, text: '不该执行' } })
+  await withBridge({ llm, provider: 'p', model: 'm' }, async (bridge) => {
+    const forged = `dsh-bridge-${'a'.repeat(64)}`
+    assert.notEqual(forged, bridge.placeholderKey)
+    const res = await post(bridge, simpleBody, { key: forged })
+    assert.equal(res.status, 401)
+    assert.equal(llm.calls.length, 0)
+  })
+})
+
 await check('/healthz 不需要 key，但不泄露任何凭证信息', async () => {
   const llm = fakeLlm(async function* () {})
   await withBridge({ llm, provider: 'workbuddy', model: 'hy3' }, async (bridge) => {
