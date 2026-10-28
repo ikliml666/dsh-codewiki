@@ -4,6 +4,135 @@ type: module
 source_files:
   - lib/incremental.js
   - lib/graph-diff.js
+  - test-incremental.mjs
+  - test-incremental-e2e.mjs
+tags: [incremental, snapshot, stale-filter, symbol-graph]
+---
+
+## Overview
+
+`lib/incremental.js` 实现「符号级增量」：在一次代码改动后，判断**哪些已存在的 wiki 文章需要重写、哪些可以跳过**。它把 `cw status` 只能提供的文件级变更（mtime/内容变了）折算成**组件级**变更（哪些导出的函数/类/方法真的改了签名、实现、依赖），从而让「只改了注释/空行/局部实现、模块对外职责没变」的改动不再触发文章重写。核心收益来自 FSoft-AI4Code/CodeWiki 的 updater（`lib/incremental.js:1-13` 的注释背景）。
+
+本模块负责三件事（`lib/incremental.js:8-13`）：
+
+1. **图快照的瘦身存取**：只存判定需要的字段（不存源码全文，因为 `.codewiki/` 要随仓库入库），固化 `bodyHash`/`codeHash`，让回读后无需重读源码即可判定（`slimGraph` / `graphFromSnapshot` / `loadSnapshot` / `saveSnapshot`）。
+2. **文件级变更 → 组件级变更**：复用 `lib/graph-diff.js` 的 `diffGraphs`（纯逻辑 `filterStaleTasks` 不碰文件系统，方便单测）。
+3. **按文章 frontmatter 的 `source_files` 决定保留/跳过**：`filterStaleTasks` 给出 `{ keep, dropped, change, counts, cosmeticOnly }`。
+
+> 历史注意：生产链路（编排器 `index.js` 的 `runStaleUpdate`，`index.js:3835-3942`）现在走的是 `lib/update-planner.js` 的 `planUpdate`（更强的继承者：新增反向依赖闭包、未重写页 stale scan、无归属变更兜底）。`filterStaleTasks` 是这套思路的**初版/精简版**，仍被导出、单测（`test-incremental.mjs`）与端到端测试（`test-incremental-e2e.mjs`）使用；`update-planner.js` 则直接复用本模块的 `normRel`（`lib/update-planner.js:21`）。两者判据（含纯注释降级）完全同源。
+
+## Key Components
+
+所有公开符号均定义在 `lib/incremental.js`。
+
+### 常量
+
+- `SNAPSHOT_VERSION = 1`（`lib/incremental.js:94`）— 快照格式版本；`loadSnapshot` 对版本不符的快照返回 `null`（宁可全量重写也不误判，见 `lib/incremental.js:98`）。
+- `SNAPSHOT_REL = path.posix.join('temp', 'symbol-graph.json')`（`lib/incremental.js:22`）— 快照相对 `wikiPath` 的落盘路径，放在 `.codewiki/temp/` 下，与上游 `wiki_out/temp/` 同思路，随 wiki 一起入库以避免换机器/换会话后退化成全量重写。
+- `SLIM_FIELDS = ['id', 'name', 'kind', 'relativePath', 'parameters', 'baseClasses', 'dependsOn', 'bodyHash', 'codeHash']`（`lib/incremental.js:26`）— 快照每个组件只保留这些字段；`sourceCode` 一律不存（体积考虑），`bodyHash`/`codeHash` 直接固化。
+
+### 快照函数
+
+- `slimComponent(node)`（`lib/incremental.js:28-34`）— 从组件节点抽取 `SLIM_FIELDS`，并保证 `id`、`relativePath` 强制为字符串（缺失则为 `''`）。
+- `slimGraph(graph, { commit = null, now = new Date().toISOString() } = {})`（`lib/incremental.js:37-48`）— `Map<id, node>` → 可 JSON 化的快照对象。返回结构：
+  - `version`：`SNAPSHOT_VERSION`
+  - `generatedAt`：`now`（ISO 字符串）
+  - `commit`：可选 git commit
+  - `components`：组件数组，按 `id` 排序
+  - 现场节点若未缓存 `bodyHash`/`codeHash`，此处算一次并固化（`lib/incremental.js:40-44`），之后回读不再需源码。
+- `sameSnapshotContent(a, b)`（`lib/incremental.js:53-66`）— 比较两份快照的「实质内容」是否相同，**忽略** `generatedAt`/`commit` 等每次都会变的元数据，也忽略组件顺序（`sort` 后比）。用途：编译收尾写快照前先比一次——代码没变时**不要覆盖**，否则 `autoCommit` 会为「只改了一个时间戳」生成一个空转提交（`lib/incremental.js:50-52`）。组件任一哈希（`bodyHash`/`codeHash`/`dependsOn`）变化都会判为不同。
+- `graphFromSnapshot(snap)`（`lib/incremental.js:69-88`）— 快照对象 → `Map<id, node>`（直接喂给 `graph-diff`）。还原的节点字段：
+  - `id`、`name`、`kind`、`relativePath`、`parameters`(默认 `[]`)、`baseClasses`(默认 `[]`)、`dependsOn`(默认 `[]`)、`bodyHash`、`codeHash`
+  - `sourceCode: ''`、`docstring: ''`（不存源码全文，回读节点靠固化的哈希走 `graph-diff` 的缓存分支）
+- `snapshotPath(wikiPath)`（`lib/incremental.js:90-92`）— 把 `wikiPath` 与 `SNAPSHOT_REL` 拼成绝对路径（用原生 `path`，非 posix）。
+- `loadSnapshot(wikiPath, fsImpl = fs)`（`lib/incremental.js:94-104`）— 读取并解析快照；版本不符（非 `SNAPSHOT_VERSION`）或 `components` 非数组时返回 `null`；解析失败（坏 JSON / 目录不存在）也返回 `null`（安静失败，调用方退回文件级判定）。
+- `saveSnapshot(wikiPath, snap, fsImpl = fs, pathImpl = path)`（`lib/incremental.js:106-115`）— 自动建目录后写盘（紧凑 JSON，无缩进）；返回 `{ ok: true, path }` 或 `{ ok: false, reason }`。
+
+### 路径/索引辅助
+
+- `normRel(p)`（`lib/incremental.js:118-120`）— 目录相对路径归一：把 `\` 换成 `/`，去掉开头的 `./`，`trim`。解决文章 frontmatter 里可能是 `.\src\a.js` 或 `./src/a.js` 而快照里存的是 posix 相对路径的问题。**这是跨模块复用的函数**：`lib/update-planner.js:21` 也 import 它做同样的归一化。
+- `componentsByFile(graph)`（`lib/incremental.js:123-132`）— 返回 `Map<归一化相对路径, 组件id数组>`，按文件聚合组件；无 `relativePath` 的节点跳过。供 `filterStaleTasks` 把「文章 source_files → 命中组件」用。
+
+### 核心判定
+
+- `filterStaleTasks(tasks, oldGraph, newGraph, opts = {})`（`lib/incremental.js:140-194`）— **纯函数，不碰文件系统**。
+  - 入参：`tasks: [{ name, articlePath, sources: [file...] }]`；`oldGraph`/`newGraph`: `Map<id, node>`；`opts`（`ignoreCommentOnly` 默认 `true`）。
+  - 先用 `diffGraphs` 算组件级 diff（`lib/incremental.js:141`），取 `changedIds`（`lib/incremental.js:142`）与 `graphDiffCounts`（`lib/incremental.js:143`），并建 `byFile`（用 `newGraph` 侧，新增文件也要算，`lib/incremental.js:144`）。
+  - **纯注释/排版降级**（核心逻辑，`lib/incremental.js:154-169`）：`body` 类变更中，若 `codeHash`（剥掉注释后的代码本体哈希）新旧一致、且 `docstring` 没变，则视为「描述不变」（`cosmeticOnly`）。`interface`/`added`/`deleted`/`renamed`/`edge` **一律不放行**（那些是真改动对外描述，必须重写）。现场节点按需算 `codeHash`，快照回读节点直接用固化值（算不出就是 `null`，跳过降级）。
+  - 返回对象：
+    - `keep[]`：要重写的文章。每篇带 `changedComponents`（该文章覆盖到的、本次真变了且非纯注释的组件 id 数组，喂给写作者当重点）；若文章 `source_files` 无符号可判（配置/模板/无语法支持的扩展名），保守保留并标 `symbolFallback: true`（`lib/incremental.js:179-183`）。
+    - `dropped[]`：跳过的文章。若只命中纯注释改动，带 `cosmeticOnlyComponents` 解释原因（`lib/incremental.js:189-190`）。
+    - `change`：原始 `diffGraphs` 结果。
+    - `counts`：`graphDiffCounts` 的计数。
+    - `cosmeticOnly[]`：被降级为「不重写」的纯注释改动组件 id。
+- `describeChange(counts)`（`lib/incremental.js:197-206`）— 把 `counts`（`{interface, added, deleted, renamed, body, edge}`）转成人话摘要，例如「接口变 1、实现变 2」，全无变化时返回「无实质变更」。写进 job note，让人一眼看出「改了几处、为什么少写了 N 篇」。
+
+### 模型/结构说明
+
+- `slimGraph` 产出的快照对象无独立 class，是普通对象，字段见上。判定全部基于 `lib/graph-diff.js` 提供的哈希与 diff，本模块本身不定义哈希算法。
+- `filterStaleTasks` 的 `tasks` 元素只有数据字段（`name`/`articlePath`/`sources`），不要求携带 `content`/`type`，与 `planUpdate` 的 `articles` 形状不同（后者的文章可带 `content` 供 stale scan）。
+
+## Architecture
+
+```text
+            oldGraph (Map<id,node>)  ──┐
+            (from loadSnapshot+graphFromSnapshot) │
+                                              ▼
+   files ──► extractCurrentGraph ──► newGraph (Map<id,node>) ──┐
+                                              │                │
+                                              ▼                ▼
+                                        diffGraphs (graph-diff.js)
+                                              │  changedIds / graphDiffCounts / componentsByFile(incremental.js)
+                                              ▼
+   tasks[{name,sources}] ──► filterStaleTasks (incremental.js:140) ◄── opts.ignoreCommentOnly
+                                              │  codeHash 降级 (cosmeticOnly)
+                          ┌───────────────────┼───────────────────┐
+                          ▼                   ▼                   ▼
+                     keep[]               dropped[]            change/counts
+                 (changedComponents)   (cosmeticOnlyComponents)  (describeChange → note)
+                          │
+                          ▼
+                   stale 文章重写任务 (svc.submit kind='stale')
+
+   快照存取回路：
+   extractCurrentGraph ──► slimGraph ──► saveSnapshot ──► .codewiki/temp/symbol-graph.json
+                                                       (loadSnapshot 回读 → graphFromSnapshot → oldGraph)
+```
+
+- `extractCurrentGraph` 定义在 `index.js:2149-2172`（调用 `lib/symbols.js` 的 `extractRepoGraph` + `resolveImportEdges`）。
+- `diffGraphs` / `changedIds` / `graphDiffCounts` / `codeHash` / `bodyHash` 均来自 `lib/graph-diff.js`，由 `lib/incremental.js:17` import。
+- `graphFromSnapshot` / `loadSnapshot` / `slimGraph` 形成快照往返回路，生产链路在 `index.js:3423-3444`（收尾写快照）与 `index.js:3863-3872`（读快照做 stale 比对）使用。
+
+## Data Flow
+
+1. **编译收尾（写快照）**：`tickIndex` 在 `index.js:3346-3367` 调用 `extractCurrentGraph(job.cwd)` → `slimGraph(cur.graph, { commit })` → 用 `loadSnapshot` 比较旧快照，内容没变（`sameSnapshotContent`）就跳过写入，否则 `saveSnapshot` 落盘到 `.codewiki/temp/symbol-graph.json`。受 `symbolIncremental` 配置开关控制（`index.js:3423`）。
+2. **stale 增量比对（读快照）**：`runStaleUpdate`（`index.js:3835-3942`）在 `symbolIncremental` 开启时，于 `index.js:3863-3872` 调 `loadSnapshot(wikiPath)` → `graphFromSnapshot(snap)` 得 `oldGraph`，再用 `extractCurrentGraph` 得 `newGraph`，交给 `planUpdate`（`lib/update-planner.js`）。注意生产路径用的是 `planUpdate` 而非 `filterStaleTasks`；`filterStaleTasks` 的等价链路见 `test-incremental-e2e.mjs:43-141`。
+3. **组件级判定**：`filterStaleTasks` 内部 `diffGraphs(oldGraph, newGraph)` → `changedIds` → `componentsByFile(newGraph)` 把每篇 `sources` 映射成组件 id 集合 → 与 `realChanged`（排除了 `cosmeticOnly` 的变更）求交 → 命中即 `keep` 并附 `changedComponents`，未命中且非纯注释则 `dropped`。
+4. **纯注释降级**：仅对 `diff.body` 命中者，比较 `codeHash(old)` vs `codeHash(new)`（旧图用固化 `codeHash`，无则算，算不出 `null` 跳过降级），一致且 `docstring` 未变 → 降级为 `cosmeticOnly`。
+5. **摘要**：`describeChange(counts)` 输出中文摘要，写入 job note 供面板展示（`index.js:21` 等处记载 `增量规划` 摘要）。
+
+## Connections
+
+- [[graph-diff]] — `diffGraphs` / `changedIds` / `graphDiffCounts` / `codeHash` / `bodyHash` 全部来自此模块，本模块是它之上的「快照存取 + 文章级过滤」层。
+- [[update-planner]] — 生产 stale 链路的实际入口 `planUpdate`；它直接复用本模块的 `normRel`（`lib/update-planner.js:21`），且纯注释降级逻辑与本模块的 `filterStaleTasks` 同源（`lib/update-planner.js:156-182` 的 `realChangedIds`）。`filterStaleTasks` 可视为 `planUpdate` 的初版/子集。
+- [[update-record]] — `judgeOutcome` / `buildUpdateRecord` 消费 `planUpdate` 产出的计划与逐篇结果，决定 `done/partial/failed` 终态（增量是否「所有变化已消化」决定能否前移基线）。
+- [[symbols]] — `extractRepoGraph` / `resolveImportEdges` 产出 `newGraph` 与 `oldGraph`（经 `extractCurrentGraph`，`index.js:2149`）。
+- [[index]]（编排器）— `codewiki_generate` 工具、`runStaleUpdate`、`tickIndex` 中的快照读写回路调用本模块全部 IO 函数。
+
+## Known Issues
+
+- **`filterStaleTasks` 是初版，生产已改用 `planUpdate`**：`index.js` 的 stale 路径走 `planUpdate`（`index.js:3876`、`index.js:21`），`filterStaleTasks` 未在生产编排器里被直接调用（仅测试使用）。两者语义接近但 `planUpdate` 多了反向依赖闭包、未重写页 stale scan、无归属变更兜底与 `needsFull`。维护时改动符号级判定需**同时**看 `lib/update-planner.js:392-418` 的 `realChangedIds`，否则会出现两处判据漂移（代码注释明确说两边同源、改一处须同步）。
+- **`codeHash` 降级的近似**：`stripComments`（`lib/graph-diff.js:69-100`）按「行首注释标记 + 行内 `//`/`#` 剥离」近似，字符串里的 `//` 会被误判为注释（注释本身可接受，`lib/graph-diff.js:66-68`）；这只会让偶发的代码被剥掉、哈希碰撞概率微增，不会漏判真实注释改动。
+- **快照不含 `sourceCode`**：回读节点的 `bodyHash` 来自固化值（`lib/incremental.js:82-84`），若旧快照缺 `codeHash` 字段，降级逻辑会保守保留（`test-incremental.mjs:109-118` 覆盖：拿不到 `codeHash` 时不误跳）。
+- **无禁用/注释掉的代码**：本模块 `lib/incremental.js` 全部函数均启用，无 `disabled` 分支（受控于上层 `symbolIncremental` 配置开关在 `index.js:3423`/`3862` 处决定是否调用，而非本模块内部禁用）。
+- **`loadSnapshot` 对坏 JSON / 缺目录安静返回 `null`**（`lib/incremental.js:101-103`）：调用方必须据此退回文件级判定，否则会退化为「每次都全量重写」。
+
+---
+title: incremental
+type: module
+source_files:
+  - lib/incremental.js
+  - lib/graph-diff.js
   - lib/update-planner.js
   - lib/symbols.js
   - index.js

@@ -3,6 +3,223 @@ title: graph_diff
 type: module
 source_files:
   - lib/graph-diff.js
+  - lib/incremental.js
+  - lib/update-planner.js
+  - test-graphdiff.mjs
+  - test-fixtures/gen-graphdiff-golden.py
+  - test-fixtures/graphdiff-golden.json
+tags: [graph-diff, incremental, symbol, diff, similarity, rename-detection]
+---
+
+## Overview
+
+`lib/graph-diff.js` is a pure-Node, zero-runtime-dependency port of the symbol-level
+incremental diff from FSoft-AI4Code/CodeWiki
+(`codewiki/src/be/updater/graph_diff.py`, MIT, the ACL 2026 paper implementation). The
+comment block at `lib/graph-diff.js:1-11` explains why it is ported rather than called:
+the upstream's most valuable judgments — which components truly changed, whether the
+change is signature vs. implementation, and which deletion corresponds to which addition
+(i.e. a rename) — are all pure standard-library algorithms (hashlib/difflib/re) with
+zero ML dependency, so a line-by-line port keeps this plugin pure Node.
+
+The module answers one question for the incremental pipeline: **given an old symbol
+graph and a new symbol graph, what actually changed at the component level?** It does
+this with three kinds of pure functions:
+
+- **Hashing/normalization** — strip comments and whitespace so "only comments changed"
+  does not trigger a rewrite (`codeHash`/`stripComments`/`normalizeBody`).
+- **Similarity** — a faithful port of Python `difflib.SequenceMatcher.ratio` and
+  `unified_diff` for body similarity and patch text (`sequenceRatio`, `bodySimilarity`,
+  `unifiedDiff`, `unifiedBodyDiff`).
+- **Component-level diff** — classify each surviving/added/deleted component into
+  `added` / `deleted` / `interface` / `body` / `edge` / `renamed` (`diffGraphs`).
+
+Component IDs follow the upstream convention `<relativePath>#<symbolName>` (upstream
+uses `path::name`; `#` is chosen to avoid colliding with the Windows drive-colon, see
+`lib/graph-diff.js:8-10`). A Node record has this shape
+(`lib/graph-diff.js:9-10`, also asserted by `lib/symbols.js:13-14`):
+
+```
+{ id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn }
+```
+
+The whole module is a pure function library — no file IO, no global state — and is
+covered by a byte-for-byte golden test (`test-graphdiff.mjs`) that compares against the
+Python original (`test-fixtures/gen-graphdiff-golden.py` →
+`test-fixtures/graphdiff-golden.json`).
+
+## Key Components
+
+All exports live in `lib/graph-diff.js`. Line numbers reference that file's `行号| ` prefix.
+
+### Constants
+
+- `CLASS_ADDED = 'added'` (`lib/graph-diff.js:14`) — change-class label for newly-added components.
+- `CLASS_DELETED = 'deleted'` (`lib/graph-diff.js:15`) — change-class label for removed components.
+- `CLASS_IFACE = 'interface'` (`lib/graph-diff.js:16`) — signature changed (parameters / base classes / name).
+- `CLASS_BODY = 'body'` (`lib/graph-diff.js:17`) — implementation body changed but signature unchanged.
+- `CLASS_EDGE = 'edge'` (`lib/graph-diff.js:18`) — only the dependency set (`dependsOn`) changed.
+- `CLASS_RENAMED = 'renamed'` (`lib/graph-diff.js:19`) — a deletion paired with an addition by high body similarity.
+- `DIFF_TRUNCATED_MARKER = '... [diff truncated] ...'` (`lib/graph-diff.js:251`) — inserted between head/tail when a unified diff exceeds the token budget (see `truncateToTokens`).
+- `DEFAULT_TAU_REN = 0.8` (`lib/graph-diff.js:371`) — default body-similarity threshold for rename pairing (`pairRenames`).
+- `DEFAULT_MAX_DIFF_TOKENS = 2000` (`lib/graph-diff.js:369`) — default max tokens kept in a recorded unified diff before truncation.
+
+### Regular expressions / tokenizer config
+
+- `WS = /\s+/gu` (`lib/graph-diff.js:23`) — whitespace normalizer.
+- `TOKEN = /[\p{L}\p{N}_]+|[^\p{L}\p{N}_\s]/gu` (`lib/graph-diff.js:26`) — token splitter. The comment at `lib/graph-diff.js:24-25` notes this deliberately uses Unicode property classes to restore Python's `\w` semantics (which counts CJK as a single token); JS `\w` is only ASCII, so using it would over-split CJK and inflate similarity.
+- `LINE_COMMENT_MARKS = ['//', '///', '#', '--', ';', '%']` (`lib/graph-diff.js:35`) — line-leading comment prefixes.
+- `BLOCK_COMMENT_PAIRS = [['/*', '*/'], ['<!--', '-->'], ['"""', '"""'], ["'''", "'''"]]` (`lib/graph-diff.js:36`).
+- `TRAILING_COMMENT_MARKS = ['//', '#']` (`lib/graph-diff.js:39`) — only these are stripped mid-line.
+
+### Normalization & hashing (comment/whitespace-insensitive)
+
+- `normalizeBody(text)` (`lib/graph-diff.js:28-30`) — trim and collapse whitespace to single spaces.
+- `stripTrailingComment(line)` (`lib/graph-diff.js:43-62`) — remove a line comment that is *outside* quotes, tracking `' " \`` quotes and backslash escapes so `"http://x"` is not mistaken for a comment. `#` is only treated as a comment at line start or after whitespace (to avoid eating C preprocessor / JS private fields).
+- `stripComments(text)` (`lib/graph-diff.js:69-100`) — strip line and block comments and decorative whitespace, returning a single-space-joined string. Used by `codeHash` to tell "only comments/formatting changed" apart from "code changed". The comment at `lib/graph-diff.js:64-68` documents the known approximation (strings containing `//` may be stripped; acceptable because it only risks rare hash collisions, not correctness of the diff logic).
+- `codeHash(node)` (`lib/graph-diff.js:108-111`) — SHA1 of `stripComments(sourceCode)`. If a snapshotted node has no `sourceCode` but carries a frozen `codeHash`, it returns that directly. This is the "code body ignoring comments" hash used by the cosmetic-change downgrade in `lib/incremental.js` and `lib/update-planner.js`.
+- `documentedSource(node)` (`lib/graph-diff.js:114-119`) — `docstring` (trimmed) prepended to `sourceCode` when the docstring is not already contained in the code. Rust's `///` lives outside `sourceCode`, so this makes "only doc changed" visible. Note per `lib/graph-diff.js:105-107`: `codeHash` deliberately uses raw source, NOT `documentedSource` — docstrings are meaningful and compared separately; only ordinary comments are noise.
+- `bodyHash(node)` (`lib/graph-diff.js:121-126`) — SHA1 of `normalizeBody(documentedSource(node))`. The "full body including docs" hash. If a snapshotted node lacks `sourceCode` but has a frozen `bodyHash`, returns it directly (snapshot back-read nodes never carry full source, see `lib/incremental.js:24-26`).
+- `signature(node)` (`lib/graph-diff.js:128-134`) — extract `{ name, parameters[], baseClasses[] }` (copies of arrays).
+- `signatureChanged(a, b)` (`lib/graph-diff.js:136-145`) — true if name, parameter count/order, or base-class count/order differ.
+
+### difflib ports (similarity & unified diff)
+
+- `tokens(text)` (`lib/graph-diff.js:147-149`) — split text via `TOKEN`.
+- `buildB2J(b)` (`lib/graph-diff.js:156-164`) — build `value -> [indices]` map (port of `difflib` internal).
+- `findLongestMatch(a, b, b2j, alo, ahi, blo, bhi)` (`lib/graph-diff.js:166-189`) — port of `difflib.SequenceMatcher.find_longest_match`.
+- `getMatchingBlocks(a, b)` (`lib/graph-diff.js:191-226`) — port of `get_matching_blocks`, including the adjacent-block merge at `lib/graph-diff.js:209-224`.
+- `sequenceRatio(aArr, bArr)` (`lib/graph-diff.js:229-236`) — port of `difflib.SequenceMatcher.ratio`: `2*matches/(len(a)+len(b))`; returns `1.0` when both empty.
+- `bodySimilarity(a, b)` (`lib/graph-diff.js:239-245`) — tokenize both via `tokens`, then `sequenceRatio`. Returns `1.0` if both empty, `0.0` if one empty, else the ratio. This is the upstream `body_similarity`.
+- `approxTokens(text)` (`lib/graph-diff.js:247-249`) — `floor(len/4)+1` rough token count for truncation budget.
+- `truncateToTokens(text, maxTokens)` (`lib/graph-diff.js:251-257`) — if `approxTokens(text) <= maxTokens` return unchanged; else keep `budget = maxTokens*4` bytes as head + tail around `DIFF_TRUNCATED_MARKER`.
+- `splitKeepEnds(text)` (`lib/graph-diff.js:263-269`) — port of Python `splitlines(keepends=True)`.
+- `getOpcodes(a, b)` (`lib/graph-diff.js:271-287`) — derive `replace`/`delete`/`insert`/`equal` opcodes from matching blocks.
+- `getGroupedOpcodes(a, b, n)` (`lib/graph-diff.js:289-317`) — port of `get_grouped_opcodes` with `n` lines of context, trimming long equal runs.
+- `rangeUnified(start, stop)` (`lib/graph-diff.js:319-325`) — format a unified-diff range spec (`2` or `2,3`).
+- `unifiedDiff(aLines, bLines, fromFile, toFile, n = 3, lineterm = '\n')` (`lib/graph-diff.js:327-355`) — port of `difflib.unified_diff`, emitting `--- `/`+++ `/`@@ ` headers and prefixed lines.
+- `unifiedBodyDiff(oldNode, newNode, label)` (`lib/graph-diff.js:358-362`) — convenience wrapper that runs `unifiedDiff` over `documentedSource` of the two nodes with `a/<label>`/`b/<label>` labels and `n = 2` context lines. Either node may be `null` for pure add/delete.
+
+### Rename pairing
+
+- `pairRenames(deleted, added, oldGraph, newGraph, tauRen = DEFAULT_TAU_REN)` (`lib/graph-diff.js:371-407`) — greedy best-match rename detector. Only considers pairs of the **same kind** (`lib/graph-diff.js:448-453`). For each deleted component it computes a cheap length ratio (`lib/graph-diff.js:239-242`); if `ratio < tauRen*0.9` the pair is skipped (length gap too large to ever reach `tauRen`). Otherwise it computes `bodySimilarity` and keeps pairs `>= tauRen` (`lib/graph-diff.js:392-393`). Candidates are sorted by similarity descending; each old/new id is used at most once (`lib/graph-diff.js:396-405`).
+
+### Diff result container & main entry
+
+- `emptyGraphDiff()` (`lib/graph-diff.js:413-423`) — returns a fresh diff struct:
+  ```
+  {
+    added: Set(), deleted: Set(), interface: Set(), body: Set(), edge: Set(),
+    renamed: Map(),   // oldId -> newId
+    records: Map(),   // componentId -> record
+  }
+  ```
+- `graphDiffCounts(d)` (`lib/graph-diff.js:425-434`) — returns `{ added, deleted, interface, body, edge, renamed }` sizes.
+- `changedIds(d)` (`lib/graph-diff.js:436-440`) — union of all `added`/`deleted`/`interface`/`body`/`edge` ids plus every `renamed` value.
+- `isDiffEmpty(d)` (`lib/graph-diff.js:442-444`) — `changedIds(d).size === 0`.
+- `diffGraphs(oldGraph, newGraph, opts = {})` (`lib/graph-diff.js:447-564`) — **main entry**. See [Architecture](#architecture) and the record shape below.
+
+  The per-component `record` object written into `result.records` (built at `lib/graph-diff.js:450-464`, `506-520`, `528-542`, `546-560`) has these fields:
+
+  | field | type | meaning |
+  | --- | --- | --- |
+  | `componentId` | string | surviving id (for rename this is the `newId`) |
+  | `changeClass` | string | one of `CLASS_ADDED/DELETED/IFACE/BODY/EDGE/RENAMED` |
+  | `oldId` | string \| null | id in old graph (null for `added`) |
+  | `newId` | string \| null | id in new graph (null for `deleted`) |
+  | `relativePath` | string \| null | `node.relativePath` |
+  | `componentType` | string \| null | `node.kind` |
+  | `oldSignature` | object \| null | `signature(o)` |
+  | `newSignature` | object \| null | `signature(n)` |
+  | `similarity` | number \| null | rename body similarity (rounded to 4 dp, `lib/graph-diff.js:515`); null otherwise |
+  | `signatureChanged` | boolean | `signatureChanged(o, n)` |
+  | `edgesAdded` | string[] | sorted new `dependsOn` entries |
+  | `edgesRemoved` | string[] | sorted removed `dependsOn` entries |
+  | `diff` | string | truncated `unifiedBodyDiff` for `body`/`renamed`/added/deleted; `''` for interface/edge or when bodies are identical |
+
+  Classification rule for surviving ids (`lib/graph-diff.js:466-477`): if `signatureChanged` → `interface`; else if `bodyHash` changed → `body`; else if `dependsOn` set changed → `edge`. If nothing changed the id is skipped entirely (`lib/graph-diff.js:466`).
+
+  Rename handling (`lib/graph-diff.js:499-524`): each detected rename pair is removed from `deleted`/`added` and inserted into `renamed`. If its signature also changed, the new id is also added to `interface` (`lib/graph-diff.js:523`) so the rename is still treated as a structural change. Added/deleted components always get a diff recorded (`lib/graph-diff.js:541`, `559`).
+
+- `serializeDiff(d)` (`lib/graph-diff.js:567-578`) — convert the diff (Sets/Maps) into a JSON-friendly object: `counts`, plus `added`/`deleted`/`interface`/`body`/`edge` as sorted arrays, and `renamed`/`records` as sorted `Object.fromEntries` maps. Used for persistence and golden round-tripping (`test-graphdiff.mjs:84-104`).
+
+## Architecture
+
+The module is a layered pure-function pipeline. The lower layers (hashing, difflib ports)
+are byte-for-byte faithful to FSoft's Python; the top layer (`diffGraphs`) consumes them
+to emit the component-level change set consumed by the incremental subsystem.
+
+```text
+  oldGraph / newGraph         (Map<id, node>)   node = {id,name,kind,relativePath,
+       │                                                   sourceCode,docstring,
+       │                                                   parameters,baseClasses,dependsOn}
+       ▼
+┌──────────────────┐   ┌──────────────────┐   ┌─────────────────────────────┐
+│ codeHash         │   │ bodyHash         │   │ bodySimilarity / sequenceRatio│
+│ stripComments    │   │ documentedSource │   │  (difflib.SequenceMatcher)   │
+│ normalizeBody    │   │ stripComments    │   │ unifiedDiff / unifiedBodyDiff│
+└────────┬─────────┘   └────────┬─────────┘   └──────────────┬──────────────┘
+         │  (codeHash unchanged = cosmetic)   │  (similarity for renames)
+         ▼                                     ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ diffGraphs (lib/graph-diff.js:447)                                    │
+│   classify surviving ids: signatureChanged→INTERFACE                  │
+│                           bodyHash≠  → BODY                           │
+│                           edges≠    → EDGE                            │
+│   pairRenames(deleted, added, …, tauRen) → RENAMED                    │
+│   remaining deleted → DELETED, remaining added → ADDED                │
+│   emits records Map with unified diffs (truncateToTokens)             │
+└───────────────────────────────────────┬──────────────────────────────┘
+                                         ▼
+                            GraphDiffResult (Set/Map) → serializeDiff
+                                         ▼
+              lib/incremental.js:filterStaleTasks / lib/update-planner.js
+```
+
+The consumer-side downgrade is intentionally **outside** this module (documented at
+`lib/incremental.js:146-169` and `lib/update-planner.js:186-212`): `diffGraphs` stays
+byte-identical to the golden upstream, while callers downgrade "body changed but
+`codeHash` unchanged and docstring unchanged" (`cosmeticOnly`) at the judgment layer so
+that pure comment/whitespace edits do not force a rewrite.
+
+## Data Flow
+
+1. **Graphs in.** `diffGraphs(oldGraph, newGraph, opts)` (`lib/graph-diff.js:447`) receives two `Map<id, node>`. `opts.tauRen` (default `DEFAULT_TAU_REN`, `0.8`) and `opts.maxDiffTokens` (default `DEFAULT_MAX_DIFF_TOKENS`, `2000`) tune rename pairing and diff truncation.
+2. **Set diff.** Ids present only in `newGraph` go to `added`, only in `oldGraph` to `deleted` (`lib/graph-diff.js:454-455`).
+3. **Per-surviving-id classification.** For each id in both graphs, compute `signatureChanged`, `bodyHash` delta, and `dependsOn` delta (`lib/graph-diff.js:457-466`). Classify into `interface`/`body`/`edge`; skip if nothing changed. Build the `record` (`lib/graph-diff.js:480-494`), and for `body` changes compute `truncateToTokens(unifiedBodyDiff(o, n, cid), maxDiffTokens)` (`lib/graph-diff.js:495`).
+4. **Rename pairing.** Pass `deleted`/`added` sets to `pairRenames` (`lib/graph-diff.js:371`). It groups `added` by `kind` (`lib/graph-diff.js:373-378`), compares each deleted node's body to same-kind added nodes by `bodySimilarity`, keeps pairs `>= tauRen`, and greedily assigns best matches (`lib/graph-diff.js:239-248`). On success it removes both ends from `deleted`/`added`, stores `oldId→newId` in `renamed`, and writes a `renamed`/`interface` record (`lib/graph-diff.js:499-524`).
+5. **Added / deleted records.** Remaining `added` get an `added` record with all `dependsOn` as `edgesAdded` and a full `unifiedBodyDiff(null, n, …)` (`lib/graph-diff.js:526-543`); remaining `deleted` get a `deleted` record with `edgesRemoved` and `unifiedBodyDiff(o, null, …)` (`lib/graph-diff.js:544-561`).
+6. **Result out.** An `emptyGraphDiff()`-shaped object (`lib/graph-diff.js:413`) with populated `added`/`deleted`/`interface`/`body`/`edge`/`renamed` Sets and a `records` Map. `graphDiffCounts` / `changedIds` / `isDiffEmpty` summarize it; `serializeDiff` flattens it to JSON for `lib/incremental.js` and the planner.
+
+**Two hash tiers** drive the decisions: `bodyHash` (includes docs, normalized whitespace) detects *any* body change; `codeHash` (comments/whitespace stripped) detects *code* changes. A component whose `bodyHash` changed but `codeHash` is identical is a comment/format-only edit — downgraded by callers (not here) to avoid a rewrite, unless the `docstring` also changed (`lib/incremental.js:154-170`, `lib/update-planner.js:60-72`).
+
+**Golden verification.** `test-fixtures/gen-graphdiff-golden.py` uses Python's native `difflib`/`hashlib` to emit `test-fixtures/graphdiff-golden.json` (`similarity`/`hash`/`unified` cases). `test-graphdiff.mjs:28-42` replays each case against the JS ports and asserts `< 1e-12` / exact-match; `test-graphdiff.mjs:2-13` builds a two-graph scenario and checks that `diffGraphs`+`serializeDiff` correctly classify `body`/`edge`/`interface`/`added`/`renamed` (including that a renamed id is no longer flagged `deleted`/`added`).
+
+## Connections
+
+- [[incremental]] — `lib/incremental.js` imports `diffGraphs`, `changedIds`, `graphDiffCounts`, `bodyHash`, `codeHash` (`lib/incremental.js:17`) and is the primary consumer of `diffGraphs` via `filterStaleTasks` (`lib/incremental.js:140-193`), where the comment-only downgrade (`cosmeticOnly`) and snapshot slimming (`SLIM_FIELDS`, `lib/incremental.js:26`) live. It also defines `SNAPSHOT_REL`, `graphFromSnapshot`, and `sameSnapshotContent` that feed/compare graphs to this module.
+- [[update-planner]] — `lib/update-planner.js` imports the same `diffGraphs`/`changedIds`/`graphDiffCounts`/`codeHash` (`lib/update-planner.js:19`) and reuses the identical cosmetic-downgrade logic in `realChangedIds` (`lib/update-planner.js:57-81`); it builds the write/keep/delete/review plan and reverse-dependency (`dependentsOf`) views on top of this module's output.
+- [[symbols]] — `lib/symbols.js` produces the `graph` (`Map<id, node>`) and `dependsOn` edges (via `resolveImportEdges`, `lib/symbols.js:810-833`) that are the *input* to `diffGraphs`. Its stated output shape (`lib/symbols.js:13-14`) matches `lib/graph-diff.js:9-10`; `SymbolExtractor`/`extractRepoGraph` (`lib/symbols.js:785`, `785`) are the upstream producers.
+- [[change-set]] — `lib/change-set.js` collects the file-level ChangeSet (`committed`/`staged`/`unstaged`/`untracked`); it is the layer above which symbol graphs are built and diffed, and its `isWikiProduct`/`WIKI_PRODUCT_PREFIX` exclusion keeps wiki outputs from polluting the diff.
+- [[update-record]] — `lib/update-record.js` consumes the planner's `changedComponents`/`cosmeticComponents`/`structuralComponents` (derived from this module) when assembling `buildUpdateRecord` and judging `done`/`partial`/`failed` (`lib/update-record.js:177-179`).
+- [[engine-contract]] — `lib/engine/contract.js` defines the `graph` stage in `ENGINE_STAGES` (`lib/engine/contract.js:24-33`); the Python engine (`lib/engine/python/entry.py`) owns the FSoft-side graph build for the host-hosted migration, while this module is the Node-side equivalent for the incremental fast path.
+
+## Known Issues
+
+- **No comment/whitespace-insensitive downgrade inside this module.** `diffGraphs` flags any `bodyHash` change as `body`, which includes pure comment/whitespace edits. The downgrade lives in the callers (`lib/incremental.js:146-169`, `lib/update-planner.js:55-81`), which compare `codeHash` and `docstring`. Because the two callers re-implement the same loop, any change to the downgrade rule must be made in **both** places or they drift. Documented intent to keep `diffGraphs` byte-identical to the golden upstream (`lib/incremental.js:149-150`).
+- **Approximate comment stripping.** `stripComments` (`lib/graph-diff.js:69-100`) does not do real lexing; a `//` or `/* */` inside a string literal may be stripped, and quoted content is not tracked during block-comment scanning. The comment at `lib/graph-diff.js:64-68` accepts this as a harmless approximation (it can only occasionally shrink `codeHash`, not break diff correctness). `stripTrailingComment` does track quotes (`lib/graph-diff.js:43-62`), so the inconsistency between the two functions is notable.
+- **`codeHash` ignores docstrings by design** (`lib/graph-diff.js:105-107`). `bodyHash` (with docs) is the only signal that catches a docstring-only change; `diffGraphs` writes a `body` record for that, then callers downgrade it if `codeHash` is unchanged and the docstring *is* unchanged. A docstring-only change therefore still produces a `body` record here and relies on the caller's `docChanged` check (`lib/incremental.js:166`) to decide whether to rewrite.
+- **Length-ratio pre-filter in `pairRenames`** (`lib/graph-diff.js:371-374`) uses `min/max` length ratio `< tauRen*0.9` to skip expensive similarity calls. This is a heuristic cutoff, not a guarantee; pairs near the boundary still run `bodySimilarity`.
+- **Snapshot round-trips lose `sourceCode`/`docstring`.** `graphFromSnapshot` (`lib/incremental.js:69-88`) reconstructs nodes with empty `sourceCode`/`docstring`, so on the second run `codeHash`/`bodyHash` fall back to the frozen `codeHash`/`bodyHash` fields (`lib/graph-diff.js:121`, `124`). The slimming in `lib/incremental.js:26` deliberately omits `sourceCode` to keep `.codewiki/` repo-friendly; this is why the frozen-hash branches exist.
+- **No disabled/dead code paths** detected in this module — all exported functions are exercised by `test-graphdiff.mjs` (similarity/hash/unified golden checks at `test-graphdiff.mjs:28-42`, and classification checks at `test-graphdiff.mjs:86-94`).
+
+## Known Issues
+
+---
+title: graph_diff
+type: module
+source_files:
+  - lib/graph-diff.js
   - lib/symbols.js
   - test-graphdiff.mjs
   - test-fixtures/gen-graphdiff-golden.py
@@ -39,7 +256,7 @@ tags: [graph-diff, diff, similarity, unified-diff, incremental, fsoft, codewiki]
 - `CLASS_RENAMED = 'renamed'` — `lib/graph-diff.js:19`，变更类标签（删除+相似新增配对）。
 - `DIFF_TRUNCATED_MARKER = '... [diff truncated] ...'` — `lib/graph-diff.js:251`，超长 diff 被截断时插入的分隔符（`truncateToTokens` 用）。
 - `DEFAULT_TAU_REN = 0.8` — `lib/graph-diff.js:371`，改名配对的相似度阈值，给 `pairRenames` / `diffGraphs` 作默认。
-- `DEFAULT_MAX_DIFF_TOKENS = 2000` — `lib/graph-diff.js:447`，单条 `diff` 文本的 token 上限，给 `diffGraphs` 作默认（`lib/graph-diff.js:449`）。
+- `DEFAULT_MAX_DIFF_TOKENS = 2000` — `lib/graph-diff.js:447`，单条 `diff` 文本的 token 上限，给 `diffGraphs` 作默认（`lib/graph-diff.js:447`）。
 
 ### 注释/空白处理工具（单点函数）
 
