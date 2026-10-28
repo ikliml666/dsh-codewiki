@@ -107,8 +107,8 @@ tags: [incremental, snapshot, stale-tasks, symbol-graph, codewiki]
 
 ## Data Flow
 
-1. **落盘（全量编译收尾）**——`index.js` 的 `tickIndex`（约 lib/incremental.js 被调用的 index.js:3602-3611）：编译成功、`writtenCount>0`、且 `symbolIncremental` 开关开启时，`extractCurrentGraph(job.cwd)` 取当前图 → `slimGraph(cur.graph, { commit: currentCommit(...) })` 生成瘦快照 → 先 `loadSnapshot` 比对 `sameSnapshotContent`，内容没变就跳过写入（避免空转提交），否则 `saveSnapshot` 落到 `.codewiki/temp/symbol-graph.json`。写失败只记 note，下次 stale 退回文件级。
-2. **比对（逐篇更新）**——`index.js` 的 `runStaleUpdate`（`index.js:4132-4141` 与 `index.js:4263-4266`）：当 `symbolIncremental` 且 `loadSnapshot` 返回非 null 且当前符号提取可用（`cur.ready`）时，`graphFromSnapshot(snap)` → `oldGraph`，`extractCurrentGraph` → `newGraph`，交给 `planUpdate`（lib/update-planner.js:156）做更完整的规划（反向依赖、stale scan、无归属变更兜底）。在旧 wiki（无 module-map、无 plan）退化分支里则直接调 `filterStaleTasks`（index.js:21 等历史分支）。
+1. **落盘（全量编译收尾）**——`index.js` 的 `tickIndex`（约 lib/incremental.js 被调用的 index.js:3618-3627）：编译成功、`writtenCount>0`、且 `symbolIncremental` 开关开启时，`extractCurrentGraph(job.cwd)` 取当前图 → `slimGraph(cur.graph, { commit: currentCommit(...) })` 生成瘦快照 → 先 `loadSnapshot` 比对 `sameSnapshotContent`，内容没变就跳过写入（避免空转提交），否则 `saveSnapshot` 落到 `.codewiki/temp/symbol-graph.json`。写失败只记 note，下次 stale 退回文件级。
+2. **比对（逐篇更新）**——`index.js` 的 `runStaleUpdate`（`index.js:4148-4157` 与 `index.js:2236-2239`）：当 `symbolIncremental` 且 `loadSnapshot` 返回非 null 且当前符号提取可用（`cur.ready`）时，`graphFromSnapshot(snap)` → `oldGraph`，`extractCurrentGraph` → `newGraph`，交给 `planUpdate`（lib/update-planner.js:156）做更完整的规划（反向依赖、stale scan、无归属变更兜底）。在旧 wiki（无 module-map、无 plan）退化分支里则直接调 `filterStaleTasks`（index.js:21 等历史分支）。
 3. **纯函数判定**——`filterStaleTasks` 内部：文件级变更经 `diffGraphs` 折算成组件级变更集 → `componentsByFile` 把文章 `source_files` 映射到组件 → 纯注释降级过滤 → 产出 `keep`/`dropped`/`counts`/`cosmeticOnly`，供上层决定哪些任务真正提交、`describeChange` 产出摘要。
 
 ## Connections
@@ -116,7 +116,7 @@ tags: [incremental, snapshot, stale-tasks, symbol-graph, codewiki]
 - [[graph-diff]]：`lib/incremental.js` 的 diff 全部委托 `lib/graph-diff.js`（`diffGraphs`/`changedIds`/`graphDiffCounts`/`bodyHash`/`codeHash`/`stripComments`）。
 - [[update-planner]]：更上层的增量规划器。它 `import { normRel } from './incremental.js'`（lib/update-planner.js:57），并**重写了**一套与 `filterStaleTasks` 同判据的 `realChangedIds`（`lib/update-planner.js:57-81`，复用 `codeHash` 做纯注释降级）来补足 `filterStaleTasks` 看不到的反向依赖/无归属变更。`filterStaleTasks` 是上游「只回答要不要重写」的朴素版，其缺陷在 lib/update-planner.js:4-14 有审计说明。
 - [[symbols]]：`extractCurrentGraph` / `extractRepoGraph`（来自 lib/symbols.js）产出 `Map<id, node>`，是本模块 `oldGraph`/`newGraph` 的来源；`node` 形状契约见 lib/symbols.js:827-828 与 lib/graph-diff.js:9-10。
-- `index.js`：编排层。`symbolIncremental` 开关（见 index.js 配置）控制是否走符号级增量；落盘在 `tickIndex`（index.js:3602-3611），比对在 `runStaleUpdate`（index.js:4132-4141、4263-4266）。导入见 index.js:19-22。
+- `index.js`：编排层。`symbolIncremental` 开关（见 index.js 配置）控制是否走符号级增量；落盘在 `tickIndex`（index.js:3618-3627），比对在 `runStaleUpdate`（index.js:4148-4157、4263-4266）。导入见 index.js:19-22。
 - [[change-set]]：提供 `collectChangeSet`，与 `planUpdate` 配合做四路变更（committed/staged/unstaged/untracked+deleted+renamed）的归属，补偿 `cw status` 只查 `git diff <baseline>..HEAD` 的漏检（index.js:4136-4147）。
 
 ## Known Issues
@@ -236,7 +236,7 @@ tags: [incremental, snapshot, stale-tasks, symbol-graph, codewiki]
 ## Data Flow
 
 1. **编译收尾写入快照**（`index.js:3597-3618`，在 `tickIndex` 里）：本次全量/增量编译若写成文章，
-   在 `cw index` 之后调用 `extractCurrentGraph`（`index.js:2220`）+ `slimGraph`（`lib/incremental.js:37`）
+   在 `cw index` 之后调用 `extractCurrentGraph`（`index.js:2236`）+ `slimGraph`（`lib/incremental.js:37`）
    生成新快照；写盘前先 `loadSnapshot` 取得旧快照并用 `sameSnapshotContent`（`lib/incremental.js:53`）
    比对——内容没变就**跳过写入**（避免 `autoCommit` 空转提交）。写入路径
    `.codewiki/temp/symbol-graph.json`（`SNAPSHOT_REL`，`lib/incremental.js:22`）。
@@ -267,14 +267,14 @@ tags: [incremental, snapshot, stale-tasks, symbol-graph, codewiki]
   （`scanStaleArticle`，`lib/update-planner.js:106`）、unmapped/needsFull 兜底。其背景正是
   `lib/update-planner.js:4-14` 指出的 `filterStaleTasks` 的三个缺陷（反向依赖看不见、新文件无归属、
   未重写页不做 stale scan）。
-- [[symbols]]：`extractRepoGraph` / `extractCurrentGraph`（`index.js:2220`）产出 `newGraph` 的 `Map<id,node>`；
+- [[symbols]]：`extractRepoGraph` / `extractCurrentGraph`（`index.js:2236`）产出 `newGraph` 的 `Map<id,node>`；
   `SUPPORTED_EXTS`（`lib/update-planner.js:20` 导入）用于 `isSourcePath` 判断源码文件。
-- [[index]]（编排服务）：`codewiki_generate` 的 `runStaleUpdate`（`index.js:4132`）与 stale 分支
+- [[index]]（编排服务）：`codewiki_generate` 的 `runStaleUpdate`（`index.js:4148`）与 stale 分支
   （`index.js:4231-4296`）调用 `loadSnapshot`/`graphFromSnapshot`/`slimGraph`/`saveSnapshot`/
-  `sameSnapshotContent`/`describeChange`；`tickIndex`（`index.js:3650-3695`）在收尾阶段写符号快照。
+  `sameSnapshotContent`/`describeChange`；`tickIndex`（`index.js:3618-3663`）在收尾阶段写符号快照。
 - [[change-set]]：`collectChangeSet`（`index.js:4133`）产出文件级变更，先经 `planUpdate` 再影响任务，
   与符号级判定互补。
-- [[update-record]]：编译收尾 `saveRecord`（`index.js:2574`）把 `updatePlan` 复盘写进 `update-record.json`。
+- [[update-record]]：编译收尾 `saveRecord`（`index.js:2590`）把 `updatePlan` 复盘写进 `update-record.json`。
 
 ## Known Issues
 
