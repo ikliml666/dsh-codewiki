@@ -1,5 +1,6 @@
 # dsh-codewiki — CodeWiki (mraza007/codewiki) for DeepSeek Harness
-# （0.13.0 起吸入了 FSoft-AI4Code/CodeWiki 的 AST 聚类 / agentic 写作 / 符号级增量三层能力）
+# （0.13.0 起吸入了 FSoft-AI4Code/CodeWiki 的 AST 聚类 / agentic 写作 / 符号级增量三层能力；
+#   0.15.0 起另有可选的原生引擎通道，直接驱动上游 Python 引擎，默认关闭）
 # 挂载方式：本文件供 bundle 形式安装用；本地开发走 profiles/web/cordis.patch.yml 的
 # file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
 # 设置项（config 命名空间 = codewiki）：
@@ -16,6 +17,15 @@
 #   agenticMaxSteps: agentic 单篇步数上限（默认 30，1–100）
 #   symbolIncremental: 增量按 AST 符号级判定（默认开）：只重写接口真变了的模块，注释/空白改动跳过
 #   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）
+#   autoCommit:      编译完成后自动提交 wiki 产物（默认开）
+#   --- 原生引擎通道（0.15.0，可选；默认关闭，需要本机 Python 3.10+ 与闭合依赖环境）---
+#   nativeEngine:       true=编译交给上游 FSoft Python 引擎；false（默认）=走 Node 通道
+#   nativeEnginePython: venv 解释器绝对路径；留空 → 环境变量 DSH_CODEWIKI_PYTHON → 'python'
+#                       （不做「找一个能用的解释器」的启发式：猜错会把环境不闭合伪装成引擎坏了）
+#   nativeEngineEntry:  入口脚本路径（默认 lib/engine/python/entry.py，一般不用改）
+#   nativeEngineTimeoutMs: 单次引擎调用上限（默认 2700000 = 45 分钟）
+#   两条通道并存、互不回退：原生通道环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道。
+#   装法见 README「原生引擎通道（0.15.0）」，环境脚本 tools/fsoft-engine/setup-env.sh。
 - insert:
     - id: codewiki
       name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js

@@ -2,9 +2,11 @@
 
 把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：仓库内代码 wiki（`<repo>/.codewiki/`，随仓库提交共享）+ 智能体编排编译，支持为编译子代理指定模型。
 
-**0.13.0 起吸入了 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（MIT，ACL 2026）的三层能力**：AST 符号提取 + LLM 语义聚类（`planMode=auto`）、agentic 工具循环写作（`agenticArticles`）、符号级增量判定（`symbolIncremental`）。全部用 Node + tree-sitter WASM 在本插件内实现，不引入 Python 运行时，任一环节不可用都自动降级回旧行为。详见下文「编译流水线：吸收自 FSoft CodeWiki」。
+**0.13.0 起吸入了 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（MIT，ACL 2026）的三层能力**：AST 符号提取 + LLM 语义聚类（`planMode=auto`）、agentic 工具循环写作（`agenticArticles`）、符号级增量判定（`symbolIncremental`）。这一套全部用 Node + tree-sitter WASM 在本插件内实现，**默认通道因此不需要 Python 运行时**，任一环节不可用都自动降级回旧行为。详见下文「编译流水线：吸收自 FSoft CodeWiki」。
 
 **0.14.0 起补上「增量不丢、结果诚实、坏文章不入库」三层质量保证**（对应上游的 updater/ownership/完整性终态/write-set 与文章质量门）：变更采集覆盖工作区（未提交/已暂存/未跟踪/删除/改名），增量规划带反向依赖闭包与新文件 ownership，终态新增 `partial` 且只有完整成功才推进基线，所有写盘点统一走文章契约闸门。详见下文「增量与质量保证（0.14.0）」。
+
+**0.15.0 起多了一条可选的原生引擎通道**（`nativeEngine`，**默认关闭**）：直接把上游 FSoft CodeWiki 的 Python 引擎当子进程驱动，由它做依赖图、模块树、增量裁决与文章写作，插件这一侧只负责环境探测、模型桥、质量闸与落地事务。**这条通道需要本机有 Python 3.10+ 与闭合的依赖环境**，装法见「原生引擎通道（0.15.0）」。默认仍是上面的 Node 通道（`nativeEngine:false`），两条通道并存、互不回退——原生通道环境不闭合就 `engine-deps` 明确失败，不会悄悄改用 Node 通道冒充成功。
 
 ## 提供
 
@@ -72,6 +74,116 @@
 `error` 级问题一律不落盘（记 note 并计入终态阻塞）；`warning` 级（缺非必需章节）放行但记账。agentic 通道另有 **write-set 闸门**：父任务只能写自己那一篇、子模块只能写调度器分配的那条路径，越界返回 `stopReason='write-set'` 且不落盘。
 
 
+## 原生引擎通道（0.15.0，可选，默认关闭）
+
+上面那一整套是 Node 重写版。0.15.0 另加一条**直接驱动上游 Python 引擎**的通道：把
+[FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki) 装进一个独立 venv，
+用它的 `backend` 抽象跑依赖图 / 模块树 / 增量裁决 / 文章写作，插件只做四件事：
+
+| 环节 | 本插件负责 | 上游负责 |
+|------|-----------|---------|
+| 环境 | `doctor` 探针：python 版本 + `codewiki` 可导入 + `pip check` 闭合；指纹落 `.codewiki/engine-lock.json`，drift 直接 `engine-deps` 失败（**不自动 pip install**） | 版本自报（真实验收用 `codewiki.__version__ = 2.0.0`，上游锁 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca` 的源码树） |
+| 模型 | `lib/engine/llm-bridge.js` 在 `127.0.0.1` 上起一个 OpenAI 兼容端点，把宿主的 `ctx.llm.stream` 转成上游要的 `/v1/chat/completions`；上游只拿到 loopback URL + 占位 key | 用它自己的 prompt 与工具循环调模型 |
+| 质量 | `lib/engine/quality-gate.js` 逐篇体检（source_files 存在性、空证据、死链、frontmatter）+ 基线判定；终态四态 `done`/`partial`/`failed`/`cancelled` | 产出 docs 目录（`module_tree.json` / `metadata.json` / `*.md` / `update_record.json`） |
+| 落地 | `lib/engine/apply-plan.js`：写集封闭（只 `.codewiki/` 与根 `CodeWiki.md`）、pre-image 回滚、`cw index`、`cw meta update`、分支式自动提交、提交范围反查 | 不碰仓库 |
+
+### 运行要求（这是与 Node 通道最大的差别）
+
+1. **Python 3.10+ 独立 venv**，且 `python -m pip check` 必须零破损。上游的依赖集
+   （`openai` / `pydantic-ai-slim` / `pydantic` 的约束互相打架）正常解析必然
+   `ResolutionImpossible`，只能用锁定的 constraints 装——见
+   `tools/fsoft-engine/setup-env.sh` 与同目录的 `constraints.txt`（故意 `--no-deps -c`）。
+2. `nativeEnginePython` 指向那个 venv 的解释器（**绝对路径**；留空则读环境变量
+   `DSH_CODEWIKI_PYTHON`，再退到 `python`）。插件**不做**「找一个能用的解释器」的
+   启发式——猜错会把「环境不闭合」伪装成「引擎坏了」。
+3. Windows 上非 ASCII 仓库路径必须能正确进出子进程（0.15.0 修过两处：入口 stdin 按
+   locale 解码、上游内部 `text=True` 子进程按 gbk 解码 UTF-8 路径会拿到 `stdout=None`）。
+
+### 设置
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `nativeEngine` | `false` | 打开后 `codewiki_generate` / 面板 / Web API 的编译全部交给原生引擎裁决；关闭则完全走 Node 通道 |
+| `nativeEnginePython` | 空 | venv 解释器绝对路径；空 → `DSH_CODEWIKI_PYTHON` → `python` |
+| `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本，一般不用改 |
+| `nativeEngineTimeoutMs` | `2700000`（45 分钟） | 单次引擎调用上限，超时按 `failed` 记并杀进程树 |
+
+模型侧不新增设置：复用 `batchProvider` / `batchModel`（聚类与写文章都用它），经上面的
+llm bridge 转发。
+
+### 真实验收记录（0.15.0）
+
+用真实 venv（Python 3.12.10、`codewiki 2.0.0`、`pip check` 零破损）+ 真实 `workbuddy`
+凭证（经 llm bridge）跑完整生产链路（`codewiki_generate` 工具 → JobService →
+`runNativeJob`），fixture 是仓库内 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的
+临时 git 副本。八个场景的实际结果：
+
+| 场景 | 结果 |
+|------|------|
+| 全量编译（8 场景中的 6.1） | **done**，241s，written 13，提交范围校验 `ok:true`，工作区干净 |
+| 已提交改动的 stale 增量 | **done**，10.7s（约为全量的 4%），written 9 |
+| 工作区有未提交改动 | **partial**（正确）：`uncommitted-input` 记账、基线不推进、文章照写 |
+| 重命名文件（`git mv` + 类改名） | **done**，增量识别 3 条变化，新增/重写模块页 |
+| 删除模块 | **done**，孤儿页在同一提交里被清理（见下） |
+| 取消（面板 `/api/codewiki/control`） | **cancelled**，基线不推进，HEAD 不变 |
+| 引擎路径不存在 | **failed**（stage=env），错误原样带出 |
+| 无变化轮（连跑两轮） | **done 且零副作用**：`written 0`、`commit.noChanges:true`、HEAD 不变、工作区空 |
+
+### 真实验收中修掉的缺陷（都是假引擎测不出来的）
+
+1. **非 ASCII 路径被误判越界**：`git show/diff --name-only` 默认 `core.quotepath=true`，
+   中文路径输出成八进制转义串，提交范围校验按字面量判 `.codewiki/` 前缀失败 → 每次编译
+   都被拉成 `partial`。修法 `lib/git-paths.js`：所有读路径的 git 调用加
+   `-c core.quotepath=false`，并解码历史/外部传入的转义串。
+2. **引擎锁不在提交里**：`writeLock` 在 apply 之后写盘，锁永远落在提交外，下一轮变成
+   未跟踪脏文件（无变化轮也会因此产生提交）。改成与产物同批进写集（同一 pre-image、
+   同一回滚、同一提交）。
+3. **更新记录不在提交里**：原生通道的 apply 内部已提交，`saveRecord` 必然晚于提交 →
+   每轮留 `?? .codewiki/temp/update-record.json`。原生通道改为写到仓库外
+   （`$TMPDIR/dsh-codewiki-native-records/<jobId>/`），面板仍能读到路径。
+4. **协议字段位置不一致**：插件按平铺发 `{requestId, action, ...payload}`，入口只读
+   `msg.payload` → `docsDir` 丢失，引擎回退写进仓库 `.codewiki`，增量轮把受管状态水合成
+   `_native-state/docs/_native-state/docs/...` 逐轮自嵌套。入口改为两种形状都认。
+5. **入口 stdin 按 locale 解码**：客户端按 UTF-8 写请求行，Windows Python stdin 默认
+   cp936 → 中文路径必坏（`仓库路径不存在：...涓?鏂?...`）。入口把 stdin 也钉成 UTF-8。
+6. **上游内部子进程按 locale 解码**：`text=True` 下 gbk 解 UTF-8 路径会让 reader 线程
+   抛 `UnicodeDecodeError`、`stdout` 变 `None`，上游 `repo_analyzer.py:65` 直接
+   `AttributeError`。入口在 import 后给 `Popen.__init__` 补 UTF-8 编码兜底。
+7. **无变化轮仍产生提交**：上游把 `.codewiki/_meta.yaml` 当源码组件分析，图 diff 永远
+   非空 → 永远 `incremental`，每轮一笔纯记账提交。入口给依赖分析传
+   `agent_instructions.exclude_patterns = ['.codewiki', 'CodeWiki.md']`（实测扫描面 24 个
+   文件 → 4 个，wiki 产物命中 0）。
+8. **删除模块后孤儿页残留**：gate 只体检**本次产物**，而删除时上游可能回
+   `full_fallback` + `pages_removed: []`，不告诉我们哪篇该消失 → 描述已删代码的页永久
+   留在库里、还挂在 `_index.md` 上。新增 `findOrphanPages()`（source_files 非空且**全部**
+   失效才判孤儿，空 source_files 与部分失效一律不删）+ `applyNativeOutput({deleteFiles})`
+   走落地事务（同 pre-image、同回滚、同提交）。
+
+### 已知限制（如实记录）
+
+- 真实模型侧用 `workbuddy/glm-5.3` 完成验收：`workbuddy/hy3` 当期返回
+  `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”）。
+  这是上游配额，不是适配层问题；换额度可用后把 `batchModel` 改回 `hy3` 即可。
+- `doctor` 的 `engine.deps.ok` 在真机上恒为 `false`（该字段不带 `pip check` 明细，指纹
+  也刻意不含它）；判定以 `engineLock.status === 'match'` 为准。
+- 上游 rung3 增量语义：**单模块内的方法级新增**通常不触发重写（component id 不在
+  tracked 集 → `untracked` → 不进 ownership）。要验增量真的改了文章，得用结构性变化
+  （新增/删除/重命名文件或模块）。
+- `.codewiki/modules/` 的孤儿页清理只在**本轮真的落地**时执行；无变化轮不扫不删。
+
+### 旧 Node 通道的保留与退役（0.15.0 的决定）
+
+**两条通道都保留，`nativeEngine` 默认仍为 `false`。** 理由：
+
+- Node 通道是 `nativeEngine:false` 时的**唯一实现**，也是原生通道出问题时的现成回退——
+  删掉等于把用户的回退路径拿走，而原生通道的真实验收只覆盖了上面那张表的场景，没覆盖
+  大仓、多语言混合、超大输入分档等边界。
+- 两条通道共用同一套落地器（`apply-plan.js`）、质量闸（`quality-gate.js`）、变化集
+  （`change-set.js`）、受管状态与文章契约，所以「退役」不会减少维护面；真正独有的只有
+  上游引擎替我们做的那部分（依赖图/模块树/写作）。
+- 退役的前置条件（尚未满足，故未执行）：原生通道在大仓（>2000 文件）与多语言混合仓上
+  跑通，且 `test-wiki-anchors.mjs --strict` 在原生通道编译后全绿。
+
 ## 编译流水线：吸收自 FSoft CodeWiki（0.13.0）
 
 [mraza007/codewiki](https://github.com/mraza007/codewiki) 提供的是 Rust CLI 骨架（`status`/`init`/`index`/`meta update` + 文件级状态判定），**不含**「怎么划分模块」与「文章怎么写」这两件真正决定 wiki 质量的事。插件原先自己补的是最省事的两刀：模块清单按顶层目录分组（`localPlan`），每篇把源码整包内联进一个 prompt 写一次。[FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（ACL 2026，MIT）在这两处都做了工程化实现，0.13.0 把它的三层能力移植进来（Python 原版留在 `vendor/` 之外，不引入运行时）：
@@ -99,6 +211,7 @@ AST 能力依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`（0.10.4，0.10.8 全面启用）：大档模型——输入超 110k 普通预算的请求（写文章/横切/批量校对）改用该档在插件内一次写完。默认 `volces-ark` / `glm-5.3-flash`（512k 上下文），预算 420k token。`bigProvider` 留空=不启用大档。0.10.8 起大档同时是观察→合成分割的门槛：模块源码总量超 420k 才拆观察批。
 - `sessionTier`（0.9.2）：**仅超大输入兜底**时才用。0.10.8 起装填上限=大档预算（`bigTokenBudget`，默认 420k）：文章源码总量在 110k–420k 区间直接大档单请求写完；超 420k 才拆观察→合成批；只有连大档都装不下的单文件才转会话通道，此时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。
 
+- `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0）：原生引擎通道，默认关闭；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道（0.15.0）」。
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`，如免费 hy3）请求并发上限，默认 2（1–8，硬顶 8）。
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
@@ -139,18 +252,34 @@ client.js          插件页设置卡片（浏览器半侧；协议参照 ui-set
 
 验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
 
-全量测试（18 个文件，都直接 `node <file>`，无框架）：
+全量测试（34 个文件，都直接 `node <file>`，无框架；0.15.0 时逐个实跑全绿）：
 
 ```
 test-agentic.mjs / test-agentic-host.mjs / test-agentic-fallback.mjs / test-articles-agentic.mjs
-test-cluster.mjs / test-symbols.mjs / test-graphdiff.mjs / test-semantic-plan.mjs
-test-incremental.mjs / test-incremental-e2e.mjs / test-batch.mjs / test-prune-orphans.mjs
+test-article-contract.mjs / test-cluster.mjs / test-symbols.mjs / test-graphdiff.mjs
+test-semantic-plan.mjs / test-change-set.mjs / test-incremental.mjs / test-incremental-e2e.mjs
+test-update-planner.mjs / test-update-record.mjs / test-batch.mjs / test-prune-orphans.mjs
 test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs / test-cwd-paths.mjs
 test-wiki-entry.mjs / test-wiki-anchors.mjs
+
+# 原生引擎通道（0.15.0）
+test-engine-contract.mjs / test-engine-client.mjs / test-engine-manifest.mjs
+test-engine-python-entry.mjs / test-engine-output.mjs / test-engine-output-real.mjs
+test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.mjs
+test-engine-llm-bridge.mjs / test-engine-native-job.mjs
+test-engine-native-incremental.mjs / test-engine-process-tree.mjs
 ```
+
+测试用假引擎（`test-fixtures/fake-native-engine.mjs`）走真实子进程协议，所以能覆盖协议
+契约、终态裁决、落地不变量与受管状态；但它**读的是平铺字段、自报 `no_change`**，因此
+上面第 4、7 条那类「只有真实引擎才暴露」的缺陷它一条都测不出来——真实验收必须跑真引擎。
 
 `test-wiki-anchors.mjs` 校验 `.codewiki/` 里所有 `file:行号` 锚点是否指向真实代码，分两档：
 
 - **默认档**：结构事实（行号越界、区间倒序）永远硬断言；**符号绑定**按新鲜度分档——源文件自编译基线（`.codewiki/_meta.yaml` 的 `last_compiled_commit`）以来没变则硬断言，变了则记为「待重编译」不计失败（文档这时候本来就该滞后，跑一次 `codewiki_generate` 基线前移后自动升级为硬断言）。
-- **`--strict` 档**：符号绑定一律硬断言，用于发版前自查。当前有 18 处历史遗留失败（文档引用了已删除的符号，需下一次真实编译重写那几段，不由修正器猜）。
+- **`--strict` 档**：符号绑定一律硬断言，用于发版前自查。0.15.0 实测：默认档
+  `2196 过 / 8 败 / 55 待重编译`，`--strict` 下失败数显著更多——全部是**文档滞后**
+  （`README.md` 行号漂移、`.codewiki/modules/lib.md:518` 引用了 `client.js:223` 的
+  `runEngine`，而该符号在 client.js 里根本不存在），不是代码错误。这些必须由一次真实
+  全量重编译重写，**不手工改文章绕过**。
 

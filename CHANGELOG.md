@@ -1,6 +1,48 @@
 # Changelog
 
-## 未发布 — 2026-10-29
+## 0.15.0 — 2026-10-29
+
+### 原生引擎通道通过真实生产验收（阶段 6/7）：八场景真跑 + 修掉 8 个只有真机才暴露的缺陷
+
+用**真实** Python venv（Python 3.12.10、`codewiki 2.0.0`、`pip check` 零破损、源码锁上游 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`）+ **真实** `workbuddy` 模型（经 `lib/engine/llm-bridge.js` 转发真凭证真云端）跑完整生产链路（`codewiki_generate` 工具 → JobService → `lib/engine/native-run.js`），fixture 是 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（含中文与空格路径）。八场景实测：
+
+| 场景 | 终态 | 关键数字 |
+|------|------|----------|
+| 全量编译 | `done` | 241s、written 13、`commit.scope.ok=true`、工作区干净 |
+| 已提交改动的 stale 增量 | `done` | 10.7s（全量的 ~4%）、written 9、无 `_native-state` 自嵌套 |
+| 工作区未提交改动 | `partial` | `uncommitted-input` 记账、基线不推进、文章照写 |
+| 重命名（`git mv` + 类改名） | `done` | 3 条变化、新增并重写模块页 |
+| 删除模块 | `done` | 孤儿页在同提交清理（3 篇 → `fixture-boot.md`/`fixture-web.md`） |
+| 取消（`POST /api/codewiki/control`） | `cancelled` | 基线不推进、HEAD 不变 |
+| 解释器路径不存在 | `failed` | stage=env、原始 ENOENT 带出 |
+| 无变化轮（连跑两轮） | `done` 零副作用 | `written 0`、`commit.noChanges=true`、HEAD 不变、`git status` 空 |
+
+**真机才暴露、本轮修掉的 8 个缺陷**（假引擎测试一条都测不出，因为 `test-fixtures/fake-native-engine.mjs` 读平铺字段、自报 `no_change`、产物全是 ASCII 名）：
+
+1. **非 ASCII 路径被误判越界**。`git show/diff --name-only` 默认 `core.quotepath=true`，中文路径变成八进制转义串，`verifyCommitScope` 按字面量判 `.codewiki/` 前缀失败 → 每次编译都被拉成 `partial`。新增 `lib/git-paths.js`（`withQuotepathOff` / `decodeGitPath` / `decodeGitPaths`），`apply-plan.js`、`change-set.js`、`index.js` 的路径读取全部改走它；只加参数挡不住已写进历史或外部传入的转义串，所以两层都要。
+2. **引擎锁落在提交之外**。`writeLock` 在 apply（含自动提交）之后写盘，锁永远进不了提交、留成未跟踪脏文件，无变化轮也会因此产生提交。改为 `lockStatus==='absent'` 时把 `buildLockBody(doctor.current)` 塞进 apply 写集（与文章、受管状态共享同一 pre-image → 同回滚、同提交）。
+3. **更新记录落在提交之外**。原生通道的提交发生在落地器内部，`saveRecord` 必然晚于提交 → 每轮留 `?? .codewiki/temp/update-record.json`。原生通道改为写到仓库外 `os.tmpdir()/dsh-codewiki-native-records/<jobId>/`（可用 `DSH_CODEWIKI_NATIVE_RECORD_DIR` 覆盖），面板仍读得到路径；旧 Node 通道不变（它的 `saveRecord` 本就在 `tickCommit` 之前）。
+4. **协议字段位置不一致**。客户端按平铺发 `{requestId, action, ...payload}`（契约也是平铺），入口只读 `msg.payload` → `docsDir` 丢失，上游回退写进仓库 `.codewiki`，增量轮把受管状态水合成 `.codewiki/_native-state/docs/_native-state/docs/...` 逐轮自嵌套（实测 gate `unmapped:8 defects:14`）。`entry.py` 改为两种形状都认、平铺优先。
+5. **入口 stdin 按 locale 解码**。客户端按 UTF-8 写请求行，Windows Python stdin 默认 cp936 → 中文仓库路径读成 `涓?鏂? 绌烘牸` 后报「仓库路径不存在」。入口把 stdin 也钉成 UTF-8（stdout/stderr 仍 `errors="replace"`，stdin 用 strict：坏字节当场报错，别把乱码路径带下去）。
+6. **上游内部子进程按 locale 解码**。上游 `subprocess.run(..., text=True)` 在 Windows 用 gbk 解 UTF-8 路径，reader 线程抛 `UnicodeDecodeError` 使 `stdout` 变 `None`，`repo_analyzer.py:65` 直接 `AttributeError`。入口 import 后给 `subprocess.Popen.__init__` 补 UTF-8 编码兜底（只在 `text=True` 且未显式指定编码时生效）。
+7. **无变化轮仍产生提交**。上游把 `.codewiki/_meta.yaml` 当源码组件分析（`use_gitignore=True` 但不排除 `.codewiki/`），图 diff 永远有 `body:1` → 永远 `incremental`，每轮一笔纯记账提交 + 白花 routing 模型调用（~528 prompt tokens / 3.5s）。入口给依赖分析传 `agent_instructions.exclude_patterns = ['.codewiki', 'CodeWiki.md']`（实测扫描面 24 文件 → 4 文件，wiki 产物命中 0），不影响 git 变化集、`cw index`、基线或 docsDir 输出。
+8. **删除模块后孤儿页残留**。gate 只体检本次产物，而删除时上游可能回 `full_fallback` 且 `pages_removed: []`，描述已删代码的页永久留在库里还挂在 `_index.md` 上。新增 `apply-plan.js` 的 `findOrphanPages()`（`source_files` 非空且**全部**失效才判孤儿；空 source_files 与部分失效一律不动）与 `checkDeleteTargets()`，`applyNativeOutput({deleteFiles})` 让删除走落地事务（同 pre-image、同回滚、同提交、收空目录），`native-run.js` 在真的落地轮才扫（无变化轮不扫不删）。
+
+**测试**：34 套全绿——`test-engine-native-job.mjs` **99/99**（+3 条真机断言：引擎锁进同一提交、提交清单是真实路径而非转义写法、落地后 `.codewiki` 工作区干净）、`test-engine-native-incremental.mjs` **82/82**、`test-engine-apply-plan.mjs` **41/41**（+3 条孤儿页语义）、`test-engine-python-entry.mjs` **12/12**（+2 条：平铺字段、非 ASCII 请求行）、`test-change-set.mjs` **16/16**（+1 条非 ASCII 产物不被当成源码变化），其余各套与改前一致。`node --check index.js` 通过。
+
+**如实记录的未达成项**：
+
+- `workbuddy/hy3` 当期返回 `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”），故真实验收用 `workbuddy/glm-5.3`。属上游配额，不是适配层问题；额度恢复后把 `batchModel` 改回 `hy3` 即可。首两次重跑因此 `failed`（`Exceeded maximum output retries (3)`，engine 字段全空），未计入验收。
+- `test-wiki-anchors.mjs` 默认档 **2196 过 / 8 败 / 55 待重编译**（主代理此前记录 3135 过 / 36 败，数字随 `.codewiki/` 被自动编译改写而变）。8 条失败全是文档滞后：7 条 `README.md` 行号漂移（`.codewiki/concepts/cordis-config-injection.md:50/115/161/162` 指向空行）、1 条 `.codewiki/modules/lib.md:518` 引用了 `client.js:223` 的 `runEngine` 而该符号在 client.js 里根本不存在（文档写错）。**按纪律不手工改文章绕过**，留待真实全量重编译覆盖。
+- 上游 rung3 语义使**单模块内的方法级新增**不触发重写（component id 不在 tracked 集 → `untracked` → 不进 ownership），因此「增量改了文章」这一条用结构性变化（新增/删除/重命名）验证，而非方法级改动。
+
+### 文档与默认策略（阶段 7）
+
+- **旧 Node 流水线保留，`nativeEngine` 默认仍为 `false`。** Node 通道是默认路径也是原生通道的回退；两条通道共用落地器/质量闸/变化集/受管状态/文章契约，退役不会减少维护面。退役前置条件（尚未满足，故未执行）：原生通道在大仓（>2000 文件）与多语言混合仓跑通，且原生编译后 `--strict` 全绿。
+- `README.md` 新增「原生引擎通道（0.15.0，可选，默认关闭）」整节：四环节分工、运行要求（Python 3.10+ 独立 venv + `pip check` 零破损 + 非 ASCII 路径两处编码修复）、四个新设置项、八场景真实验收表、8 条修掉的缺陷、4 条已知限制、保留/退役决定。原「不引入 Python 运行时」的表述已按事实改写（默认通道仍不需要 Python，原生通道需要）。测试清单从 18 个文件更正为 34 个并分通道列出。
+- `docs/fsoft-native-engine.md` 新增「上游同步」章节：固定 commit 与如何升级、上游 changelog 要点、契约测试与 fixture 如何复现、真实编译怎么跑、回滚步骤。
+- `cordis.patch.yml` 注释补齐 `autoCommit` 与四个原生键（含「不做找可用解释器」与「不悄悄换通道」两条硬规则）；`index.js` 里 `nativeEngine` 系列字段的描述与阶段注释同步为最终语义（full 与 stale 都接管，决议权在 native-run）。
+- `package.json` `version` → **0.15.0**；`description` 改为如实描述两条通道与各自运行前提。
 
 ### 接入：FSoft 原生引擎统一增量与跨轮受管状态（阶段 5）
 

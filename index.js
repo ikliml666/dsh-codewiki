@@ -23,6 +23,7 @@ import {
 import { runAgenticArticles, markBigAgenticTasks, sourceTokensOf } from './lib/articles-agentic.js'
 import { buildOpeningPrompt, TOOL_SCHEMAS } from './lib/agentic.js'
 import { collectChangeSet } from './lib/change-set.js'
+import { withQuotepathOff } from './lib/git-paths.js'
 import {
   planUpdate, buildModuleMap, migrateModuleMap, sameModuleMap,
   MODULE_MAP_REL, realChangedIds, dependentsOf, scanStaleArticle,
@@ -96,7 +97,7 @@ export const Config = z.object({
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
   workspaceOnly: z.boolean().default(true).volatile().description('任务页只显示属于已添加 dsh 工作区（宿主工作区列表）的任务'),
-  nativeEngine: z.boolean().default(false).volatile().description('原生引擎通道（FSoft Python 引擎，阶段 4）：开启后 full 编译走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=沿用内置 Node 流水线（默认）。stale 增量仍走内置流水线（统一增量在下一阶段）'),
+  nativeEngine: z.boolean().default(false).volatile().description('原生引擎通道（上游 FSoft Python 引擎，0.15.0）：开启后编译（full 与 stale 增量）走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=沿用内置 Node 流水线（默认）。原生通道需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道'),
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
   nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 45 分钟；超时由进程树终止兜底'),
@@ -210,12 +211,14 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 }
 
 // ---------------------------------------------------------------------------
-// 原生引擎通道（阶段 4）：FSoft Python 引擎 + 薄适配层
+// 原生引擎通道（0.15.0，默认关闭）：上游 FSoft Python 引擎 + 薄适配层
 //
-// 两个独立开关的语义（务必分清，否则会「以为换了通道其实没换」）：
-//   nativeEngine          = 允许 full 编译走原生通道（默认 false → 旧 Node 流水线不变）
+// 语义（务必分清，否则会「以为换了通道其实没换」）：
+//   nativeEngine          = 允许编译走原生通道（默认 false → 旧 Node 流水线不变）
 //   nativeEnginePython    = 引擎解释器（装了 FSoft 的 venv python）
-// 增量（stale）本轮仍走内置流水线：统一增量是下一阶段的事，这里不半接。
+// full 与 stale 增量都接管；具体走 generate 还是 update 由 native-run.js 依 change-set
+// 与受管状态决议，这里只如实把 scope 传下去。环境不闭合以 engine-deps 明确失败，
+// 绝不中途悄悄换成 Node 通道冒充成功。
 // ---------------------------------------------------------------------------
 
 // 原生通道是否用于本次任务。只有「开关打开 + full 编译 + 有解释器」才走；
@@ -235,7 +238,7 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 export function nativeChannelFor(cfg, { kind = null, scope = null } = {}) {
   const c = cfg ?? {}
   if (c.nativeEngine !== true) return null
-  // 显式全量 / 未指明 scope：仍然接管（阶段 4 的行为不变）。
+  // 显式全量 / 未指明 scope：仍然接管。
   // stale / auto：接管，由 native-run 决定 update 还是 full。
   const effectiveScope = scope ?? (kind === 'stale' ? 'stale' : (kind === 'full' ? 'full' : 'auto'))
   const supported = effectiveScope === 'full' || effectiveScope === 'stale' || effectiveScope === 'auto'
@@ -1967,6 +1970,10 @@ const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
 // DSH_CODEWIKI_SESSION_TIMEOUT_MS 覆盖；任务文件与 job 记录同目录，宿主重启后仍可收割。
 const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_CODEWIKI_SESSION_TIMEOUT_MS) || 30 * 60 * 1000)
 const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')
+// 原生通道的「更新记录」记账目录（仓库外）：落地器已在内部提交，记录只能在结果出来后
+// 才写得成，写进 .codewiki/ 就成了提交之后的未跟踪文件（每轮都脏工作区）。
+const NATIVE_RECORD_DIR = path.join(os.tmpdir(), 'dsh-codewiki-native-records')
+const nativeRecordDir = () => process.env.DSH_CODEWIKI_NATIVE_RECORD_DIR || NATIVE_RECORD_DIR
 
 // ---------------------------------------------------------------------------
 // 会话内容记录（面板「会话」视图的数据底座）：把并发池每个 LLM 请求的 prompt 与
@@ -2587,7 +2594,13 @@ function createJobService(config, onSettled) {
   // 更新记录落盘（吸收自 FSoft updater 的 record）：一次编译做了什么、为什么、哪些变化
   // 没人管、最终是否完整，写成可机读 JSON 存 .codewiki/temp/update-record.json。
   // job 里只留摘要与路径（整张图塞进 jobs 文件会让 /tmp 里的任务文件无限膨胀）。
-  function saveRecord(job, judged) {
+  //
+  // `outDir` 例外通道（原生引擎用）：原生通道的提交发生在落地器内部，而这份记录要等
+  // 落地结果出来才写得成——写到 .codewiki/ 就必然晚于提交，于是每轮编译之后工作区都
+  // 留一个未跟踪的 `?? .codewiki/temp/update-record.json`（阶段 6 真实验收证据），
+  // 无变化轮「零副作用」也就无从谈起。所以原生通道把记录写到仓库外的记账目录，
+  // 路径随 job 出去，可复盘性不丢，工作区保持干净。
+  function saveRecord(job, judged, { outDir = null } = {}) {
     try {
       const rec = buildUpdateRecord({
         jobId: job.id,
@@ -2601,9 +2614,14 @@ function createJobService(config, onSettled) {
         notes: job.notes ?? [],
         startedAt: job.createdAt,
       })
-      const r = saveUpdateRecord(job.wikiPath, rec)
+      const r = saveUpdateRecord(outDir ? path.join(outDir, job.id) : job.wikiPath, rec)
       job.updateRecord = r.ok
-        ? { path: UPDATE_RECORD_REL, outcome: rec.outcome, blockers: rec.blockers.length, canAdvanceBaseline: rec.canAdvanceBaseline }
+        ? {
+          path: outDir ? r.path : UPDATE_RECORD_REL,
+          outcome: rec.outcome,
+          blockers: rec.blockers.length,
+          canAdvanceBaseline: rec.canAdvanceBaseline,
+        }
         : { path: null, outcome: rec.outcome, reason: r.reason }
       if (!r.ok) note(job, `更新记录写入失败 —— ${r.reason}`)
     } catch (err) {
@@ -2871,7 +2889,9 @@ function createJobService(config, onSettled) {
       }
       job.judged = judged
       job.canAdvanceBaseline = judged.canAdvanceBaseline
-      saveRecord(job, judged)
+      // 原生通道的记录写到仓库外（见 saveRecord 的 outDir 说明）：提交已经在落地器里
+      // 完成，此刻再往 .codewiki/temp/ 写就是「提交之后产生未跟踪文件」。
+      saveRecord(job, judged, { outDir: nativeRecordDir() })
       if (res.outcome === 'cancelled') {
         // 取消是终态：不走 finishJob（它只认 done/partial/failed，会把 cancelled 落成 done），
         // 也不覆盖任何已写好的终态。canAdvanceBaseline 恒 false——半成品基线绝不前移。
@@ -4993,7 +5013,9 @@ const commitHintCache = new Map() // cwd -> { at, text }
 // ---------------------------------------------------------------------------
 export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {
   const opts = { cwd, encoding: 'utf8', timeout: 20000, windowsHide: true }
-  const run = (...args) => spawnSync('git', args, opts)
+  // 统一关掉 core.quotepath：中文页名在默认设置下会被 git 输出成八进制转义串，
+  // 本函数下面所有「读回路径清单」的地方都要能当真实路径用（见 lib/git-paths.js）。
+  const run = (...args) => spawnSync('git', withQuotepathOff(args), opts)
   const out = (r) => String(r?.stdout ?? '').trim()
   // 只对磁盘上存在的路径操作：CodeWiki.md 尚未生成时固定 pathspec 会让 `git add` 直接
   // fatal（而不是安静地只提交 .codewiki/）。tracked 文件被删除的场景编译流程不会产生，

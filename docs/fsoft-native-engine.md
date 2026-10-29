@@ -83,10 +83,14 @@ update-planner 路径（阶段 7），旧实现只作为回退保留到真实验
 
 | 动作 | 入参 | 出参 | 说明 |
 | --- | --- | --- | --- |
-| `doctor` | `{cwd}` | `{ok, engine:{version,commit,python}, checks:[{name,ok,detail}]}` | 校验解释器、venv、依赖锁定、`pip check`、入口可导入 |
-| `generate` | `{cwd, scope, language, model:{baseUrl,model,apiKey}}` | `EngineResult` | 全量；`scope=full` 强制重编 |
-| `update` | `{cwd, scope, compareTo?}` | `EngineResult` | 增量；`--update` + `--compare-to` |
+| `doctor` | `{}` | `{ok, engine:{version,commit,python}, checks:[{name,ok,detail}]}` | 校验解释器、venv、依赖锁定、`pip check`、入口可导入 |
+| `generate` | `{repoPath, docsDir, commitId?, language?, updateOptions?, model:{baseUrl,model,apiKey}}` | `EngineResult` | 全量；缺 `docsDir` 会回退写进 `<repoPath>/.codewiki`（**不允许**，见下） |
+| `update` | `{repoPath, docsDir, commitId?, updateOptions?}` | `EngineResult` | 增量；`updateOptions.rung` 默认 `'3'` |
 | `cancel` | `{requestId}` | `{cancelled:boolean}` | 终止受管子进程树（不是只 kill 父进程） |
+
+**字段是平铺在请求行顶层的**（`lib/engine/client.js` 写 `JSON.stringify({requestId, action, ...payload})`）。
+入口（`lib/engine/python/entry.py`）同时接受 `{payload:{...}}` 嵌套形状与平铺形状，**平铺优先**；
+这条兼容是 0.15.0 真实验收逼出来的（详见「阶段 6 验收证据」第 4 条）。
 
 协议约束：
 
@@ -95,6 +99,9 @@ update-planner 路径（阶段 7），旧实现只作为回退保留到真实验
 - 每条消息带 `requestId`，Node 侧按 id 关联；乱序/未知 id 记 `engine-protocol`；
 - 退出码只表达进程层结果（0 正常结束、非 0 崩溃），**语义结果只看 `result` 消息**——
   这样「进程正常退出但引擎报 failed」不会被误读成成功。
+- 两侧编解码一律 UTF-8：入口把 stdin/stdout/stderr 都 reconfigure 成 UTF-8（stdin 用
+  strict、输出用 replace），并给 `subprocess.Popen.__init__` 补 `text=True` 时的编码兜底，
+  否则 Windows 下非 ASCII 仓库路径会以 locale(cp936/gbk) 解错。
 
 ## 产物映射
 
@@ -206,3 +213,97 @@ fixture 同 1A（Python + TypeScript 双语言、路径含中文空格）。全�
 `APIError: Documentation generation failed: The next request would exceed the
 request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分离**，Node 侧只看
 `result` 消息不会被误导。
+
+## 阶段 6 验收证据（2026-10-29，真实引擎 + 真实模型 + 生产链路）
+
+**这次不是探针，是生产链路**：`codewiki_generate` 工具 → JobService →
+`lib/engine/native-run.js`，用真实 venv（Python 3.12.10、`codewiki 2.0.0`、
+`pip check` 零破损、源码锁上游 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`）
+与真实 `workbuddy/glm-5.3`（经 `lib/engine/llm-bridge.js` 转发真凭证）。fixture 是
+`tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（路径含中文与空格）。
+
+| 场景 | 终态 | 关键数字 |
+| --- | --- | --- |
+| 全量 | `done` | 241s、written 13、`commit.scope.ok=true`、`git status` 空 |
+| 已提交改动的 stale 增量 | `done` | 10.7s、written 9、无 `_native-state` 自嵌套 |
+| 工作区未提交 | `partial` | `uncommitted-input` 记账、基线不推进、文章照写 |
+| 重命名（`git mv` + 类改名） | `done` | 3 条变化、新增并重写模块页 |
+| 删除模块 | `done` | 孤儿页同提交清理（4 篇 → 2 篇） |
+| 取消 | `cancelled` | 基线不推进、HEAD 不变 |
+| 解释器不存在 | `failed` | stage=env、原始 ENOENT 带出 |
+| 无变化轮（连跑两轮） | `done` 零副作用 | `written 0`、`noChanges`、HEAD 不变 |
+
+**真机才暴露的 8 个缺陷（已全部修掉，假引擎测不出）**：
+
+1. 非 ASCII 路径被 `core.quotepath` 转义误判越界 → 新增 `lib/git-paths.js`，
+   读路径的 git 调用统一 `-c core.quotepath=false` 并解码历史转义串。
+2. 引擎锁在自动提交之后写盘 → 落不进提交、留成脏文件。改为进 apply 写集（同 pre-image/回滚/提交）。
+3. 原生通道的 `saveRecord` 晚于内部提交 → 每轮留 `?? .codewiki/temp/update-record.json`。
+   原生通道改为写仓库外 `os.tmpdir()/dsh-codewiki-native-records/<jobId>/`。
+4. 协议字段位置不一致（客户端平铺、入口只读 `msg.payload`）→ `docsDir` 丢失，
+   引擎回退写 `.codewiki`，增量轮把受管状态水合成 `_native-state/docs/_native-state/docs/…`
+   逐轮自嵌套（gate `unmapped:8 defects:14`）。入口改为两种形状都认、平铺优先。
+5. 入口 stdin 按 locale 解码 → 中文路径读成 `涓?鏂? 绌烘牸` 后报「仓库路径不存在」。
+6. 上游内部 `text=True` 子进程用 gbk 解 UTF-8 → reader 线程 `UnicodeDecodeError`、
+   `stdout` 变 `None`，`repo_analyzer.py:65` 抛 `AttributeError`。入口给
+   `Popen.__init__` 补 UTF-8 兜底。
+7. 上游把 `.codewiki/_meta.yaml` 当源码组件 → 图 diff 永远非空、永远 `incremental`，
+   每轮一笔纯记账提交（+ ~528 prompt tokens routing）。入口传
+   `agent_instructions.exclude_patterns=['.codewiki','CodeWiki.md']`（扫描面 24 → 4 文件）。
+8. 删除模块后孤儿页残留（gate 只体检本次产物，上游可能回 `full_fallback` 且
+   `pages_removed: []`）→ 新增 `findOrphanPages()` + `applyNativeOutput({deleteFiles})`，
+   删除走落地事务。
+
+**未达成项（如实记录）**：`workbuddy/hy3` 当期 `429 quota_exceeded`
+（2026-10-29 14:23:38 UTC+8 重置）故用 `glm-5.3`；`test-wiki-anchors.mjs` 默认档
+2196 过 / 8 败 / 55 待重编译，8 条全是文档滞后（`README.md` 行号漂移 7 条 +
+`.codewiki/modules/lib.md:518` 引用不存在的 `client.js:223 runEngine` 1 条），
+按纪律不手改文章、留待真实全量重编译。
+
+## 上游同步
+
+上游仓库 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)，
+**锁定 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`**（2026-10-22T13:58:28+07:00，
+`Merge pull request #142 from FSoft-AI4Code/feat/zig-vue-autotools`），该源码树自报
+`codewiki.__version__ = 2.0.0`。
+
+### 升级步骤
+
+1. 在 `.probe-fsoft/src` 里 `git fetch && git checkout <新 commit>`，记下
+   `git rev-parse HEAD` 与 `git log -1 --format=%ci`。
+2. 重解依赖：正常解析必然 `ResolutionImpossible`（`openai` / `pydantic-ai-slim` /
+   `pydantic` 约束互相打架），必须用 `python make_locked_requirements.py` 重新生成
+   `locked-requirements.txt`，再 `pip install --no-deps -r locked-requirements.txt
+   -c constraints.txt`，最后 `pip check` 必须零破损。
+3. 跑 `tools/fsoft-engine/setup-env.sh` 从零重建 venv 复核（脚本就是这条流程的固化）。
+4. 跑契约与入口测试：`node test-engine-contract.mjs`、`node test-engine-client.mjs`、
+   `node test-engine-manifest.mjs`、`node test-engine-python-entry.mjs`、
+   `node test-engine-output.mjs`、`node test-engine-quality-gate.mjs`、
+   `node test-engine-apply-plan.mjs`。**入口面对上游 API 的假设集中在
+   `lib/engine/python/entry.py` 与 `stage_map.py` 两个文件**，升级时先看这两处。
+5. 跑真实编译：README「原生引擎通道」里的八场景（全量 → committed stale → 未提交 →
+   重命名 → 删除 → 取消 → 失败 → 无变化轮）。至少要有全量 + committed stale + 无变化轮
+   三条的真机输出，否则不算验证过。
+6. 更新 `docs/fsoft-native-engine.md` 的锁 commit、`README.md` 的验收记录、
+   `CHANGELOG.md` 的对应条目，最后 `codewiki_generate(scope=auto)` 重建 wiki。
+
+### 升级时最容易被上游悄悄改掉的四处
+
+| 上游位置（锁版本行号） | 我们依赖的语义 | 破了会怎样 |
+| --- | --- | --- |
+| `codewiki/src/config.py:121/133/147` | `use_gitignore`、`artifact_exclude`、`exclude_patterns`（读 `agent_instructions`） | 排除清单失效 → 无变化轮重新开始产提交 |
+| `codewiki/cli/adapters/doc_generator.py:163` | `agent_instructions` 被透传进 `BackendConfig.from_cli` | 同上 |
+| `codewiki/src/be/dependency_analyzer/analysis/repo_analyzer.py:178-200` | `user_exclude_patterns` 合并、`_matches_any` 支持目录整段匹配 | 排除写成 `.codewiki` 但只按文件名匹配，挡不住子树 |
+| `codewiki/cli/adapters/doc_generator.py:430-470` | `_last_update_record` 的 `outcome`（`incremental`/`no_change`/`full_fallback`）与 `pages_written`/`pages_removed` | 增量决议与孤儿页判定全部失准 |
+
+### 回滚
+
+原生通道是**运行期开关**，不涉及数据结构迁移，所以回滚只有一步：
+把 `nativeEngine` 设为 `false`（或删掉该配置项）即回到 0.14.0 的 Node 流水线。
+`.codewiki/_native-state/` 是原生通道的受管状态目录，Node 通道不读它；如要彻底清理，
+`git rm -r .codewiki/_native-state .codewiki/engine-lock.json` 后提交即可
+（`.codewiki/modules/` 与 `CodeWiki.md` 不受影响，它们两条通道共用）。
+
+若已升级过上游且新版本行为异常，按上表把 venv 重建回锁 commit 的依赖快照：
+`.codewiki/engine-lock.json` 会记录 `fingerprint`/`version`/`pythonVersion`，
+指纹不匹配时 `doctor` 直接报 `engine-deps` 而**不会自动 pip install**。
