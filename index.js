@@ -220,15 +220,31 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 
 // 原生通道是否用于本次任务。只有「开关打开 + full 编译 + 有解释器」才走；
 // 任一条件不成立都返回 null，调用方据此走旧路径 —— 绝不在中途悄悄换通道。
+/**
+ * 原生通道是否接管本次任务（null = 走旧流水线）。
+ *
+ * 阶段 4 只放 full：增量还没接，stale 交给原生就会「假装增量、实际全量」。
+ * 阶段 5 把 stale/auto 也放进来——但**决议权在 native-run.js**：它拿到 change-set
+ * 与受管状态后自己决定 update 还是 full，上层只负责把 scope 如实传下去。
+ * 这里不再按 kind 字面量猜「是不是全量」，否则 stale 永远进不来。
+ *
+ * @param {object} cfg liveConfig
+ * @param {{kind?:string|null, scope?:string|null}} o
+ * @returns {{python:string, entry:string, timeoutMs:number}|null}
+ */
 export function nativeChannelFor(cfg, { kind = null, scope = null } = {}) {
   const c = cfg ?? {}
   if (c.nativeEngine !== true) return null
-  const isFull = kind === 'full' || (kind == null && (scope == null || scope === 'full' || scope === 'auto'))
-  if (!isFull) return null
+  // 显式全量 / 未指明 scope：仍然接管（阶段 4 的行为不变）。
+  // stale / auto：接管，由 native-run 决定 update 还是 full。
+  const effectiveScope = scope ?? (kind === 'stale' ? 'stale' : (kind === 'full' ? 'full' : 'auto'))
+  const supported = effectiveScope === 'full' || effectiveScope === 'stale' || effectiveScope === 'auto'
+  if (!supported) return null
   return {
     python: resolveNativePython(c),
     entry: String(c.nativeEngineEntry ?? '').trim() || DEFAULT_ENGINE_ENTRY,
     timeoutMs: Number(c.nativeEngineTimeoutMs) > 0 ? Number(c.nativeEngineTimeoutMs) : DEFAULT_ENGINE_TIMEOUT_MS,
+    scope: effectiveScope,
   }
 }
 
@@ -2831,6 +2847,11 @@ function createJobService(config, onSettled) {
         gate: res.gate ?? null,
         apply: res.apply ?? null,
         engineLock: res.engineLock ?? null,
+        // 增量现场必须随结果出去：决议（full/update）、变化集、水合清单、
+        // 引擎自报的 updateOutcome、未消费凭据。面板与 codewiki_progress 靠它
+        // 回答「这一轮到底走了增量还是退了全量、变化有没有被吃干净」；
+        // 不搬过来的话，外层只能看到一个 outcome，增量语义又变成不可观测。
+        incremental: res.incremental ?? null,
         notes: (res.notes ?? []).slice(-10),
       }
       if (Array.isArray(res.gate?.articles) && res.gate.articles.length) {
@@ -4119,6 +4140,27 @@ function generateToolDefinition(cfg, svc) {
         notes.push('scope=stale 但尚无 wiki，自动升为全量编译')
       }
       const needsFullCompile = effectiveScope === 'full' || status.state === 'missing' || status.state === 'uncompiled'
+
+      // 原生通道接管 stale/auto：不跑旧 planner 的 needsFull/unmapped 判定。
+      // 旧 planner 见到「删除/改名导致文章归属缺失」一律推成全量，而原生引擎的组件级
+      // 增量本来就能处理删除与改名——让旧判定插在中间，等于把阶段 5 的增量能力废掉。
+      // 决议权归 runNativeJob：它读受管状态与四路 change-set，自己判 update / full / no_change。
+      // 注意 clean 也必须走这里：cw status 只看 committed，工作区未提交变化与「受管状态缺失」
+      // 它一概看不见，直接短路会让这些变化永远进不了引擎（丢变化）。
+      const nativeCh = nativeChannelFor(liveConfig(cfg), { kind: 'stale', scope: effectiveScope })
+      if (nativeCh && effectiveScope !== 'full' && status.state !== 'missing' && status.state !== 'uncompiled') {
+        notes.push(status.state === 'clean'
+          ? 'cw status 报 clean（只看 committed），原生通道仍需确认未提交变化与受管状态，交给原生引擎决议'
+          : '原生通道接管增量（决议权归原生引擎：update / full / no_change）')
+        const subN = await svc.submit({ kind: 'stale', cwd, wikiPath, scope: effectiveScope, language, auto, sessionId })
+        if (subN.skipped) { notes.push(subN.reason); return result }
+        const jobN = subN.job
+        notes.push(`已提交原生增量任务 ${jobN.id}（scope ${effectiveScope}，由引擎自行决议）`)
+        result.jobId = jobN.id
+        result.stage = jobN.stage
+        result.submitted = true
+        return result
+      }
 
       // clean：直接报告（scope=full 例外：强制全量重编）
       if (status.state === 'clean' && effectiveScope !== 'full') {

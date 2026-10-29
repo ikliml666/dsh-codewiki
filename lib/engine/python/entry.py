@@ -410,8 +410,20 @@ def action_generate(request_id, payload, is_update=False):
     config["agent_retries"] = 3
     config["use_gitignore"] = True
     config["prompt_caching"] = True
-
-    commit_id = _git_commit(repo_path) or None
+    # 阶段 5：增量参数由调用方显式给出（不在引擎里猜）。
+    #   updateOptions.rung 决定走哪条增量算法（3=组件级方法，0=旧的按文件失效）。
+    # 缺省时保持 FSoft 自己的默认行为（rung 3 + metadata.json 的 commit_id）。
+    update_options = payload.get("updateOptions")
+    if isinstance(update_options, dict) and update_options:
+        config["update_options"] = dict(update_options)
+    # 本轮「已消费到哪个 commit」由调用方给出（= cw 基线）。它被写进 adapter 的
+    # commit_id，最终落进 metadata.json 的 generation_info.commit_id，也就是**下一轮**
+    # 增量看到的 old_commit。不传时退回 HEAD（旧行为）。
+    #
+    # 为什么不用 `_detect_changed_files` 的 compare_to：那条是 CLI generate 的
+    # 按文件失效路径（rung 0）。组件级增量（rung 3）比较的是**依赖图**（旧图 vs 新图），
+    # 旧图由调用方持久化并水合进 docsDir，与 commit 号无关。所以这里只负责记账。
+    commit_id = str(payload.get("commitId") or "").strip() or (_git_commit(repo_path) or None)
     # 「最后一个真实到达的阶段」由进度回调记录。done 结果里的 stage 必须是实测值，
     # 不能写死——否则面板会永远说「停在校验」，而实际可能连聚类都没跑到。
     reached = {"stage": "env"}
@@ -434,7 +446,11 @@ def action_generate(request_id, payload, is_update=False):
         # 这不是失败：增量更新时「没有要改的」正是正常终态。
         code = exc.code if isinstance(exc.code, int) else 0
         if code == 0:
-            return _done_result(request_id, docs_dir, repo_path, started, written=_count_docs(docs_dir), stage=reached["stage"])
+            return _done_result(
+                request_id, docs_dir, repo_path, started,
+                written=_count_docs(docs_dir), stage=reached["stage"],
+                update_outcome=_update_outcome_of(adapter),
+            )
         return failure("engine-crashed", f"引擎以退出码 {code} 结束", reached["stage"], request_id)
     except Exception as exc:  # noqa: BLE001 — 必须把所有异常翻成契约终态
         return _classify_exception(exc, request_id, docs_dir, repo_path, started, stage=reached["stage"])
@@ -446,8 +462,16 @@ def action_generate(request_id, payload, is_update=False):
     except Exception:
         missing = []
 
+    # 阶段 5：本轮到底走了哪条路，必须由**引擎自己的记录**回答，不能让调用方猜。
+    #   incremental       —— 组件级增量成立（图 diff 非空，只改了该改的页）
+    #   no_change         —— 图 diff 为空：代码没变，文档已是最新（不重写任何页）
+    #   full_fallback     —— 想增量但阈值/可比性触发回退，已整份重建
+    #   detector_failure  —— 连旧状态都读不到，回退全量（我们水合过却读不到 = 我们的错）
+    # 这个字段是「基线能不能推进」与「增量是否真的生效」的唯一证据。
+    update_outcome = _update_outcome_of(adapter)
+
     if missing:
-        result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"])
+        result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome)
         result["outcome"] = "partial"
         result["blockers"] = [
             {"kind": "article-missing", "detail": f"计划内文章缺失：{name}.md", "target": f"{name}.md"}
@@ -456,7 +480,7 @@ def action_generate(request_id, payload, is_update=False):
         result["failedCount"] = len(missing)
         return result
 
-    result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"])
+    result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome)
     # 用量：FSoft 自己记在 job.statistics 上（doc_generator.py:559-580）
     try:
         stats = getattr(job, "statistics", None)
@@ -472,7 +496,56 @@ def action_generate(request_id, payload, is_update=False):
     return result
 
 
-def _done_result(request_id, docs_dir, repo_path, started, written=0, stage="articles"):
+def _update_outcome_of(adapter):
+    """本轮增量结局（引擎自己的 update_record 说的）。
+
+    为什么要有这个取值函数：`_last_update_record` 只在**真的进了增量分支**时才有值。
+    拿不到值不等于「没增量」——它可能是「这次跑的是全量 generate」。所以返回 None
+    而不是编一个 'full'：上层据此区分「引擎没说」（显式 full 请求）与「引擎说回退了」
+    （想要增量但 full_fallback），两者对基线的处置不同。
+    """
+    try:
+        record = getattr(adapter, "_last_update_record", None)
+        if record is None:
+            return None
+        return str(getattr(record, "outcome", "") or "") or None
+    except Exception:
+        return None
+
+
+def _state_files(docs_dir):
+    """列出引擎在 docsDir 里**真实产出**的跨轮状态文件（相对 docsDir，POSIX）。
+
+    只报磁盘上存在的文件，不按白名单编造：
+      · 顶层 *.json —— module_tree / first_module_tree / metadata / update_record
+      · temp/dependency_graphs/ 下的全部（旧图靠它，`snapshot_old_graph` 会复制成 .prev.json）
+      · temp/reference_index.json、temp/artifact_index.json —— updater 的失效索引
+    文章（*.md）不列：它们本来就在 docsDir 里，上层按扩展名自己采集，列出来只会重复。
+    """
+    out = []
+    try:
+        root = Path(docs_dir)
+        if not root.is_dir():
+            return out
+        for item in sorted(root.glob("*.json")):
+            if item.is_file():
+                out.append(item.name)
+        temp = root / "temp"
+        if temp.is_dir():
+            for name in ("reference_index.json", "artifact_index.json"):
+                if (temp / name).is_file():
+                    out.append(f"temp/{name}")
+            graphs = temp / "dependency_graphs"
+            if graphs.is_dir():
+                for item in sorted(graphs.iterdir()):
+                    if item.is_file():
+                        out.append(f"temp/dependency_graphs/{item.name}")
+    except Exception:
+        return out
+    return out
+
+
+def _done_result(request_id, docs_dir, repo_path, started, written=0, stage="articles", update_outcome=None):
     return {
         "contractVersion": 1,
         "outcome": "done",
@@ -490,7 +563,17 @@ def _done_result(request_id, docs_dir, repo_path, started, written=0, stage="art
             "docsDir": str(docs_dir),
             "rawTreeDir": str(Path(docs_dir) / "module_tree.json"),
             "updateRecord": str(Path(docs_dir) / "update_record.json"),
+            # 引擎**实际产出**的跨轮状态文件（相对 docsDir 的 POSIX 路径）。
+            # 为什么由这里给而不是让上层按白名单猜：白名单写错就会把「引擎其实没产出
+            # 依赖图」误记成「已持久化」，下一轮增量拿着空图跑，图 diff 恒为空，
+            # 于是永远 no_change、文章与源码脱节。这里只报磁盘上真实存在的文件，
+            # 上层拿它交叉校验自己的采集结果，对不上就记 missing（可见）。
+            "stateFiles": _state_files(docs_dir),
         },
+        # 引擎自报的增量结局（incremental/no_change/full_fallback/detector_failure/null）。
+        # 与 artifacts 并列而不是塞进 artifacts：artifacts 描述「产物在哪」，
+        # 这个字段描述「这次编译是什么性质」，上层据此决定基线能不能推进。
+        "updateOutcome": update_outcome,
         "startedAt": started,
         "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

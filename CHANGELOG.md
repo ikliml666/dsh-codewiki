@@ -1,5 +1,16 @@
 # Changelog
 
+## 未发布 — 2026-10-29
+
+### 接入：FSoft 原生引擎统一增量与跨轮受管状态（阶段 5）
+
+- **不再只查 committed diff**。`lib/change-set.js` 汇总基线至 HEAD、staged、unstaged、untracked、删除与改名；`.codewiki/` 与本轮临时 docs 排除在源码变化外。基线不可达时显式降级 full，不把失败当 clean。
+- **跨轮状态跟文章同一事务**。新增 `lib/engine/native-state.js`，把模块树、metadata、依赖图、`update_record` 和上一轮文章水合进引擎输入，并作为 `.codewiki/_native-state/` 的受管状态随文章同批写盘、回滚和提交；`state.json` 记录已消费基线及未提交路径，未提交改动跨轮保留直到对应源码提交后成功消费。
+- **增量走 FSoft `update`，不是重跑 generate**。引擎动作由 change-set 决议；缺图/树、版本变化显式 full 并记录原因；质量门/索引/基线失败回滚状态，自动提交失败保留产物并 partial。未提交输入诚实 partial、不推进基线。
+- **无变化轮零副作用**。引擎 `no_change` 且四路变化集与未消费路径都为空时，落地器走明确 no-op：不写盘、不建索引、不推基线、不创建提交。修复了原实现仍写 `update-record`/更新 `_meta.yaml` 导致每轮制造空提交的问题。
+- **生产接线**。`codewiki_update` 与 stale 任务在 `nativeEngine` 开启时进入原生通道；默认仍关闭，旧流水线保留。
+- **验证**：`test-engine-native-incremental.mjs` **82/82**、`test-engine-native-job.mjs` **96/96**、`test-engine-apply-plan.mjs` **37/37** 全过；独立无变化探针 HEAD 保持不变。真实 FSoft 生产全量→增量仍待阶段 6 验收，本阶段测试使用真实子进程协议下的假引擎。
+
 ## 未发布 — 2026-10-28
 
 ### 新增：FSoft 原生引擎迁移的契约层与三段门禁（0/1A/1B/1C），尚未接生产

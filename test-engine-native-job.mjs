@@ -503,13 +503,15 @@ console.log('== 用例 13：nativeEngine 默认关闭时完全走旧通道，原
   check(calls().length === 0, `原生引擎一次都没被调用（足迹 ${JSON.stringify(calls().map((c) => c.action))}）`)
 }
 
-// ============================ 用例 14：stale 不走原生（阶段边界） ============================
-console.log('== 用例 14：stale 增量仍走内置流水线（原生只接 full）==')
+// ============================ 用例 14：stale 的通道归属（阶段 5 变更点） ============================
+console.log('== 用例 14：stale 现在进原生通道，但无受管状态时决议为全量 ==')
 {
   const { nativeChannelFor } = await import('./index.js')
-  // 纯函数判据：stale 恒不走原生（统一增量在阶段 5+）。
+  // 阶段 4 时 stale 恒不走原生（增量还没接）；阶段 5 把决议权交给 native-run，
+  // 通道只负责「这个 scope 归不归我管」。所以断言从「返回 null」改成
+  // 「返回通道快照且 scope 如实透出」——否则这条用例会锁住阶段 4 的旧边界。
   const ch = nativeChannelFor({ nativeEngine: true, nativeEnginePython: process.execPath, nativeEngineEntry: FAKE_ENGINE }, { kind: 'stale', scope: 'stale' })
-  check(ch === null, `nativeChannelFor(kind=stale) 返回 null（实际 ${JSON.stringify(ch)}）`)
+  check(ch && ch.scope === 'stale', `nativeChannelFor(kind=stale) 返回通道且 scope=stale（实际 ${JSON.stringify(ch?.scope ?? ch)}）`)
   const chFull = nativeChannelFor({ nativeEngine: true, nativeEnginePython: process.execPath, nativeEngineEntry: FAKE_ENGINE }, { kind: 'full', scope: 'full' })
   check(chFull && typeof chFull.entry === 'string', 'nativeChannelFor(kind=full) 返回通道快照')
   const chOff = nativeChannelFor({ nativeEngine: false }, { kind: 'full', scope: 'full' })

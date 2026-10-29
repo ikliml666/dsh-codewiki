@@ -49,11 +49,42 @@ const REAL_STDOUT = process.stdout
 // 「环境失败/锁漂移时引擎根本没被生成调用」——那类断言只能由被动方提供证据。
 // 放仓库外与模式文件同理：写进仓库会变成一次未提交源码改动，质量门的
 // uncommitted-input 会把它判成产品缺陷。
-function logCall(repoPath, action) {
+function logCall(repoPath, action, extra = null) {
   try {
-    const line = `${JSON.stringify({ action, at: new Date().toISOString(), mode: MODE })}\n`
+    const line = `${JSON.stringify({ action, at: new Date().toISOString(), mode: MODE, ...(extra ?? {}) })}\n`
     fs.appendFileSync(path.join(path.dirname(path.resolve(String(repoPath ?? '.'))), `.native-calls-${path.basename(path.resolve(String(repoPath ?? '.')))}.log`), line, 'utf8')
   } catch { /* 足迹写不进去不影响引擎行为 */ }
+}
+
+// 引擎**真的读了哪些输入**——这是「水合进来的受管状态确实被引擎消费」的唯一硬证据。
+//
+// 为什么由引擎侧提供：调用方（native-run.js）只能证明「我复制了这些文件」，
+// 证明不了「引擎读了它们」。真实 FSoft 的 `_update_options()` 就是按
+// `module_tree.json` / 依赖图 / `metadata.json` 的存在决定走不走增量的
+// （doc_generator.py:415-427），所以这里逐项 stat 一遍，把 exists 结果写进足迹。
+function readStateInputs(docsDir, repoPath) {
+  const base = path.resolve(String(docsDir ?? ''))
+  const has = (rel) => {
+    try { return fs.statSync(path.join(base, ...rel.split('/'))).isFile() } catch { return false }
+  }
+  // 依赖图按 FSoft 的 sanitize 规则命名（Unicode 字母数字保留，其余换 _）。
+  const repoName = path.basename(path.resolve(String(repoPath ?? '.')))
+  const graphRel = `temp/dependency_graphs/${repoName.replace(/[^\p{L}\p{N}]/gu, '_')}_dependency_graph.json`
+  return {
+    readState: {
+      module_tree: has('module_tree.json'),
+      metadata: has('metadata.json'),
+      dependency_graph: has(graphRel),
+      update_record: has('update_record.json'),
+      docs_markdown: (() => {
+        try {
+          const walk = (d, p) => fs.readdirSync(d, { withFileTypes: true })
+            .flatMap((it) => (it.isDirectory() ? walk(path.join(d, it.name), `${p}${it.name}/`) : (it.name.endsWith('.md') ? [`${p}${it.name}`] : [])))
+          return walk(base, '').length
+        } catch { return 0 }
+      })(),
+    },
+  }
 }
 
 function emit(obj) {
@@ -97,26 +128,42 @@ function realSourceFiles(repoPath, limit = 4) {
   return out
 }
 
-function writeDocs(docsDir, repoPath) {
+function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {}) {
   fs.mkdirSync(path.join(docsDir, 'modules'), { recursive: true })
-  const sha = head(repoPath)
+  const sha = String(commitId || '') || head(repoPath)
+  // 依赖图：真实 FSoft 每轮都会重写 `<docs>/temp/dependency_graphs/<repo>_dependency_graph.json`
+  // （graph_store.build_dependency_graph）。**必须写**：下一轮组件级增量读的就是它，
+  // 缺了它 `isUpdateEligible()` 会判「缺图」退全量——夹具不写就等于自己让增量永远不可用。
+  const graphDir = path.join(docsDir, 'temp', 'dependency_graphs')
+  fs.mkdirSync(graphDir, { recursive: true })
+  const repoName = path.basename(path.resolve(String(repoPath ?? '.')))
+  const graphName = `${repoName.replace(/[^\p{L}\p{N}]/gu, '_')}_dependency_graph.json`
   // 先扫出仓库里真实存在的源码文件：模块树与页面都只能引用它们。
   const files = realSourceFiles(repoPath)
   const core = files[0] ?? ''
   const web = files[1] ?? ''
+  fs.writeFileSync(path.join(graphDir, graphName), JSON.stringify({
+    repo_path: String(repoPath ?? ''),
+    commit: sha,
+    nodes: files.map((f) => ({ path: f, symbols: [] })),
+    edges: [],
+  }), 'utf8')
   // 页内**不带 frontmatter**：真实 FSoft 产物就是纯 markdown（`.probe-fsoft/wiki_out_1c/docs`
   // 的页头是 `# 标题`）。frontmatter 由渲染层 renderArticle 合成——夹具若自带一份，
   // 正文里就会出现第二份头，article-contract 判 duplicate-frontmatter，done 用例永远 partial，
   // 测的就不再是接线而是夹具自己的格式错误。
-  fs.writeFileSync(path.join(docsDir, 'overview.md'),
-    '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](modules/core.md)。\n', 'utf8')
-  fs.writeFileSync(path.join(docsDir, 'modules', 'core.md'),
-    '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n', 'utf8')
+  //
+  // 增量（action=update）**不重写**已有页：真实 updater 是原地 patch，只动该动的页。
+  // 夹具照抄这一条，否则「无变化不重写」这条不变量在测试里根本不可能被观察到。
+  const keep = (name, body) => {
+    const abs = path.join(docsDir, name)
+    if (action === 'update' && fs.existsSync(abs)) return
+    fs.writeFileSync(abs, body, 'utf8')
+  }
+  keep('overview.md', '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](modules/core.md)。\n')
+  keep('modules/core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
   if (MODE !== 'partial') {
-    if (web) {
-      fs.writeFileSync(path.join(docsDir, 'modules', 'web.md'),
-        '# Web 层\n\n## 职责\n\nWeb 层把请求转成任务并回传进度。\n', 'utf8')
-    }
+    if (web) keep('modules/web.md', '# Web 层\n\n## 职责\n\nWeb 层把请求转成任务并回传进度。\n')
   } else if (web) {
     // partial：这一页**有文件但正文被掏空**。这比「整个文件不写」更接近真实的降级路径
     // （引擎写完标题就被截断），也正好落在质量门已有的 empty-body 判据上：
@@ -124,6 +171,9 @@ function writeDocs(docsDir, repoPath) {
     fs.writeFileSync(path.join(docsDir, 'modules', 'web.md'), '# Web 层\n\n', 'utf8')
   }
   fs.writeFileSync(path.join(docsDir, 'metadata.json'), JSON.stringify({
+    // generation_info.commit_id 就是**下一轮** updater 眼里的 old_commit：
+    // 真实引擎由 adapter 的 commit_id 参数写入（doc_generator.py:141-165），
+    // 夹具必须照此把调用方给的 commitId 原样记下，否则「记账」这条链路无法被断言。
     generation_info: { commit_id: MODE === 'bad-commit' ? 'b'.repeat(40) : sha, layout: 'hierarchical' },
     statistics: { total_components: 2, leaf_nodes: 2 },
     files_generated: ['overview.md', 'modules/core.md'],
@@ -135,8 +185,19 @@ function writeDocs(docsDir, repoPath) {
   if (core) tree.core = { path: path.posix.dirname(core), components: [`${core}::Engine`], children: {} }
   if (web) tree.web = { path: path.posix.dirname(web), components: [`${web}::Handler`], children: {} }
   fs.writeFileSync(path.join(docsDir, 'module_tree.json'), JSON.stringify(tree), 'utf8')
-  fs.writeFileSync(path.join(docsDir, 'first_module_tree.json'), '{}', 'utf8')
-  fs.writeFileSync(path.join(docsDir, 'update_record.json'), JSON.stringify({ outcome: 'full', pages_written: ['modules/core.md'], pages_removed: [] }), 'utf8')
+  if (!fs.existsSync(path.join(docsDir, 'first_module_tree.json'))) {
+    fs.writeFileSync(path.join(docsDir, 'first_module_tree.json'), '{}', 'utf8')
+  }
+  // update_record.json：引擎自报本轮走的是哪条路。真实实现由 updater 写出
+  // （orchestrator 的 IncrementalUpdateRecord），entry.py 读它算出 updateOutcome。
+  const recordOutcome = action === 'update'
+    ? (MODE === 'update-fallback' ? 'full_fallback' : (MODE === 'update-nochange' ? 'no_change' : 'incremental'))
+    : 'full'
+  fs.writeFileSync(path.join(docsDir, 'update_record.json'), JSON.stringify({
+    outcome: recordOutcome,
+    pages_written: action === 'update' ? ['modules/web.md'] : ['modules/core.md'],
+    pages_removed: [],
+  }), 'utf8')
 }
 
 function run(req) {
@@ -144,7 +205,13 @@ function run(req) {
   const action = String(req?.action ?? '')
   MODE = modeOf(req?.repoPath ?? process.cwd())
   emit({ type: 'hello', protocolVersion: 1, engine: 'fake-native' })
-  logCall(req?.repoPath ?? process.cwd(), action)
+  // 足迹里带上「这次收到的增量参数」与「真的读到了哪些受管状态输入」：
+  // 前者证明调用方把 updateOptions 传到了引擎侧，后者证明水合进来的旧图/旧树被消费。
+  logCall(req?.repoPath ?? process.cwd(), action, {
+    updateOptions: req?.updateOptions ?? null,
+    commitId: req?.commitId ?? null,
+    ...readStateInputs(req?.docsDir, req?.repoPath),
+  })
 
   if (action === 'doctor') {
     if (MODE === 'deps-bad') {
@@ -181,11 +248,12 @@ function run(req) {
     setTimeout(() => {
       try {
         const d = String(req?.docsDir ?? '')
-        if (d) writeDocs(d, String(req?.repoPath ?? process.cwd()))
+        if (d) writeDocs(d, String(req?.repoPath ?? process.cwd()), { action, commitId: String(req?.commitId ?? '') })
         result(requestId, {
           outcome: 'done', stage: 'articles', writtenCount: 2, failedCount: 0,
           engine: { version: VERSION, python: PYVER, deps: { ok: true, summary: 'pip check ok' } },
           artifacts: { docsDir: d, rawTreeDir: '', updateRecord: path.join(d, 'update_record.json') },
+          ...(action === 'update' ? { updateOutcome: 'incremental' } : {}),
         })
       } catch (err) {
         result(requestId, { outcome: 'failed', error: { code: 'engine-crashed', message: String(err?.message ?? err) } })
@@ -218,15 +286,30 @@ function run(req) {
   progress(requestId, 'graph', 10, '构建依赖图')
   progress(requestId, 'cluster', 30, '聚类')
   progress(requestId, 'articles', 60, '写文章')
-  writeDocs(docsDir, repoPath)
+  writeDocs(docsDir, repoPath, { action, commitId: String(req?.commitId ?? '') })
   progress(requestId, 'articles', 90, '产物已写出')
+  // updateOutcome：真实引擎从 update_record.json 的 outcome 读出来（entry.py
+  // `_update_outcome_of`），夹具照同一条路径自报，让「引擎说回退/无变化」这条
+  // 裁决链在测试里真的被走过——而不是由测试直接编一个字段喂进去。
+  const recordOutcome = action === 'update'
+    ? (MODE === 'update-fallback' ? 'full_fallback' : (MODE === 'update-nochange' ? 'no_change' : 'incremental'))
+    : null
   result(requestId, {
     outcome: 'done',
     stage: 'articles',
     writtenCount: MODE === 'partial' ? 1 : 2,
     failedCount: MODE === 'partial' ? 1 : 0,
     engine: { version: VERSION, python: PYVER, deps: { ok: true, summary: 'pip check ok' } },
-    artifacts: { docsDir, rawTreeDir: '', updateRecord: path.join(docsDir, 'update_record.json') },
+    artifacts: {
+      docsDir,
+      rawTreeDir: '',
+      updateRecord: path.join(docsDir, 'update_record.json'),
+      // 引擎自报的受管状态清单（entry.py `_state_files` 同形）：
+      // native-run 会与实际采集结果交叉核对，不一致要记进 notes。
+      stateFiles: ['module_tree.json', 'metadata.json', 'update_record.json',
+        `temp/dependency_graphs/${path.basename(path.resolve(repoPath)).replace(/[^\p{L}\p{N}]/gu, '_')}_dependency_graph.json`],
+    },
+    ...(recordOutcome ? { updateOutcome: recordOutcome } : {}),
   })
 }
 
