@@ -35,13 +35,12 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // 测试配置基线：0.10.1 起编译模型必须显式指向模型设置里的 provider/model
 // （插件已无自带直连通道与任何密钥，provider 留空即提交失败）。
-// 0.13.0 起新增三档「吸收自 FSoft CodeWiki」的能力：语义规划（AST 聚类）、agentic 写作、
-// 符号级增量。三者默认全开——但本套测试几乎全部断言的是**旧通道**的请求次数、装填方式
-// 与落盘时序（llm.stream 调用次数、单轮全文、core.md 直接落盘）。不钉住的话，规划阶段会
-// 多吃一次模型请求、agentic 通道会绕开装填，断言会因「通道换了」而不是「功能坏了」失败。
-// 因此基线显式关掉三档，让本文件继续守护旧通道；新通道的验证见 test-agentic-host.mjs、
-// test-semantic-plan.mjs、test-incremental*.mjs。
-const LEGACY_CHANNEL = { planMode: 'dirs', agenticArticles: false, symbolIncremental: false }
+// 本套测试全部断言的是**兼容通道**（nativeEngine=false，插件内 Node 流水线）的请求次数、
+// 装填方式与落盘时序（llm.stream 调用次数、单轮全文、core.md 直接落盘）。0.16.0 阶段 7
+// 起 nativeEngine 默认 true，不在这里钉住 false 的话整条链路会走原生引擎（需要真 Python
+// 环境），断言会因「通道换了」而不是「功能坏了」失败。原生通道的验证见
+// test-engine-native-job.mjs 与 test-engine-native-incremental.mjs。
+const LEGACY_CHANNEL = { nativeEngine: false, planMode: 'dirs', agenticArticles: false, symbolIncremental: false }
 const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...LEGACY_CHANNEL, ...extra })
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/tools/agents/llm 全部可捕获。
