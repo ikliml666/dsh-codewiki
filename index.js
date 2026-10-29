@@ -86,7 +86,7 @@ export const Config = z.object({
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
   workspaceOnly: z.boolean().default(true).volatile().description('任务页只显示属于已添加 dsh 工作区（宿主工作区列表）的任务'),
-  nativeEngine: z.boolean().default(false).volatile().description('原生引擎通道（上游 FSoft Python 引擎，0.15.0）：开启后编译（full 与 stale 增量）走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=沿用内置 Node 流水线（默认）。原生通道需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道'),
+  nativeEngine: z.boolean().default(true).volatile().description('编译通道（0.16.0 起默认开启）：原生引擎通道（上游 FSoft Python 引擎）走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=退回内置 Node 流水线（0.16.0 起降级为兼容通道，不再接收新能力）。原生通道需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道'),
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
   nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 45 分钟；超时由进程树终止兜底'),
@@ -139,7 +139,7 @@ function liveConfig(config) {
     workspaceOnly: val(c.workspaceOnly) !== false,
     // 原生通道（阶段 4）：必须经过 liveConfig 透出，否则 nativeChannelFor 永远读到
     // undefined——开关看起来打开了、实际一路走旧流水线，这种「静默不生效」比报错更难查。
-    nativeEngine: val(c.nativeEngine) === true,
+    nativeEngine: val(c.nativeEngine) !== false,
     nativeEnginePython: String(val(c.nativeEnginePython) ?? '').trim(),
     nativeEngineEntry: String(val(c.nativeEngineEntry) ?? '').trim(),
     nativeEngineTimeoutMs: Number(val(c.nativeEngineTimeoutMs)) || 0,
@@ -200,11 +200,11 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 }
 
 // ---------------------------------------------------------------------------
-// 原生引擎通道（0.15.0，默认关闭）：上游 FSoft Python 引擎 + 薄适配层
+// 原生引擎通道（0.16.0 起为默认通道）：上游 FSoft Python 引擎 + 薄适配层
 //
 // 语义（务必分清，否则会「以为换了通道其实没换」）：
-//   nativeEngine          = 允许编译走原生通道（默认 false → 旧 Node 流水线不变）
-
+//   nativeEngine          = 编译是否走原生通道（0.16.0 起默认 true；
+//                           false 显式退回内置 Node 流水线，即兼容通道）
 //   nativeEnginePython    = 引擎解释器（装了 FSoft 的 venv python）
 // full 与 stale 增量都接管；具体走 generate 还是 update 由 native-run.js 依 change-set
 // 与受管状态决议，这里只如实把 scope 传下去。环境不闭合以 engine-deps 明确失败，
