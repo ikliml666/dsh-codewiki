@@ -213,6 +213,7 @@ window.__ModuleLoader__.load({
       nextScan: '下次扫描',
       scannedLabel: '扫描',
       submittedLabel: '提交',
+      skippedLabel: '工作区外跳过',
       totalTimeLabel: '总耗时',
       copyPath: '复制路径',
       copiedLabel: '已复制',
@@ -398,6 +399,7 @@ window.__ModuleLoader__.load({
       nextScan: 'Next scan',
       scannedLabel: 'scanned',
       submittedLabel: 'submitted',
+      skippedLabel: 'skipped (outside workspace)',
       totalTimeLabel: 'total',
       copyPath: 'Copy path',
       copiedLabel: 'Copied',
@@ -1293,6 +1295,7 @@ window.__ModuleLoader__.load({
                     const remain = next - Date.now()
                     const stats = sched.lastScanRepos != null
                       ? ` · ${t('scannedLabel')} ${sched.lastScanRepos} · ${t('submittedLabel')} ${sched.lastScanSubmitted ?? 0}`
+                        + (sched.lastScanSkipped ? ` · ${t('skippedLabel')} ${sched.lastScanSkipped}` : '')
                       : ''
                     return el('div', { 'data-dscw-p-meta': '' },
                       `${t('nextScan')}: ${sched.scanning

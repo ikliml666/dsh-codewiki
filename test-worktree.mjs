@@ -8,6 +8,9 @@ import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `cw-wt-test-${process.pid}-${crypto.randomBytes(3).toString('hex')}.json`)
+// 空判定（has=false）的缓存 TTL 压到 50ms：本条测试要验证「补回源码后能很快恢复判定」，
+// 生产默认 60s（见 index.js 的 SOURCE_PROBE_EMPTY_TTL_MS）。
+process.env.DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS = '50'
 const { detectLinkedWorktree, isWorktreeCwd, hasCompilableSources, isDeadCompileTarget } = await import('./index.js')
 
 let failures = 0
@@ -68,6 +71,19 @@ fs.writeFileSync(path.join(shell, '.codewiki', '_meta.yaml'), 'commit: x\n')
 check(hasCompilableSources(main) === true, 'hasCompilableSources(有 a.txt 的仓库) === true')
 check(hasCompilableSources(shell) === false, 'hasCompilableSources(只剩 .codewiki) === false')
 check(hasCompilableSources(path.join(root, 'missing')) === false, 'hasCompilableSources(不存在路径) === false')
+
+// 空判定的缓存必须短暂：false 可能只是「刚 checkout 完的空窗」，不能钉住 10 分钟。
+// 旧实现把 false 与 true 一样缓存 10 分钟，且清缓存只发生在手动路径——自动调度一旦误判成
+// 空壳，就会连续 10 分钟静默跳过该仓库，用户补回源码也照样不编译。
+{
+  const revive = path.join(root, 'revive')
+  fs.mkdirSync(revive, { recursive: true })
+  check(hasCompilableSources(revive) === false, 'hasCompilableSources(空目录) === false')
+  fs.writeFileSync(path.join(revive, 'a.txt'), 'a\n')
+  check(hasCompilableSources(revive) === false, '空判定在 TTL 内仍走缓存（不立刻反转）')
+  await new Promise((r) => setTimeout(r, 120))
+  check(hasCompilableSources(revive) === true, '空判定 TTL 过后重新探测：补回源码即恢复 === true')
+}
 
 // isDeadCompileTarget：worktree 与空壳都算 dead；不存在的目录不算（保留历史记录）
 check(isDeadCompileTarget(main) === false, 'isDeadCompileTarget(主工作区) === false')

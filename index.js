@@ -464,7 +464,13 @@ export function detectLinkedWorktree(cwd) {
 // 新建/删除 worktree 在面板上最多延迟一分钟才反映，可以接受。
 const WORKTREE_CACHE_TTL_MS = 60000
 const worktreeCache = new Map() // normKey → { wt, at }
-const normPathKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
+// 路径身份 key：去尾分隔符 + 归一化；只在 win32 折叠大小写。
+// 旧实现无条件 toLowerCase，在 Linux/macOS 上会把 /home/u/Foo 与 /home/u/foo 两个
+// 不同仓库认成同一个——幂等判定会把其中一条任务的提交吞掉，仓库清单也会少登记一个。
+const normPathKey = (p) => {
+  const n = path.normalize(String(p ?? '')).replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? n.toLowerCase() : n
+}
 export function isWorktreeCwd(cwd) {
   const dir = String(cwd ?? '').trim()
   if (!dir) return false
@@ -481,8 +487,12 @@ export function isWorktreeCwd(cwd) {
 // 目录是否还有可编译的源码：扫不出任何源文件（空目录、只剩 .codewiki 骨架、全是黑名单
 // 目录如 node_modules 的残留）就没必要提交编译——本地规划阶段的 `仓库没有可编译的源码文件`
 // 失败会每分钟由自动调度重试一次，留下满屏同样的失败任务。
-// 带 10 分钟缓存：autoScan 每轮对每个历史仓库调用，大仓库文件树遍历不该每分钟重跑。
+// 带缓存：autoScan 每轮对每个历史仓库调用，大仓库文件树遍历不该每分钟重跑。
+// 「有源码」是稳定事实，缓存 10 分钟；「无源码」不是——它可能只是刚 checkout 完的空窗、
+// 编译中途的清理、换分支的瞬间。旧实现把 false 也缓存 10 分钟，且清缓存只发生在手动路径，
+// 自动调度一旦某轮误判成空壳，就会连续 10 分钟静默跳过该仓库（用户补回源码也照样不编译）。
 const SOURCE_PROBE_TTL_MS = 10 * 60 * 1000
+const SOURCE_PROBE_EMPTY_TTL_MS = Math.max(0, Number(process.env.DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS) || 60 * 1000)
 const sourceProbeCache = new Map() // normKey → { has, at }
 export function hasCompilableSources(cwd) {
   const dir = String(cwd ?? '').trim()
@@ -493,7 +503,10 @@ export function hasCompilableSources(cwd) {
   const key = normPathKey(dir)
   const now = Date.now()
   const hit = sourceProbeCache.get(key)
-  if (hit && now - hit.at < SOURCE_PROBE_TTL_MS) return hit.has
+  if (hit) {
+    const ttl = hit.has ? SOURCE_PROBE_TTL_MS : SOURCE_PROBE_EMPTY_TTL_MS
+    if (now - hit.at < ttl) return hit.has
+  }
   let has = false
   try { has = scanRepoFiles(dir).length > 0 } catch { has = false }
   sourceProbeCache.set(key, { has, at: now })
@@ -2032,9 +2045,8 @@ function loadKnownRepos() {
 function rememberRepo(cwd) {
   const dir = String(cwd ?? '').trim()
   if (!dir) return
-  const key = (p) => path.normalize(p).replace(/[\\/]+$/, '').toLowerCase()
   const list = loadKnownRepos()
-  if (list.some((p) => key(p) === key(dir))) return
+  if (list.some((p) => normPathKey(p) === normPathKey(dir))) return
   list.push(dir)
   try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: list }, null, 2), 'utf8') } catch { /* 不可写则放弃 */ }
 }
@@ -2043,9 +2055,9 @@ function rememberRepo(cwd) {
 export function forgetRepo(cwd) {
   const dir = String(cwd ?? '').trim()
   if (!dir) return false
-  const key = (p) => path.normalize(p).replace(/[\\/]+$/, '').toLowerCase()
+  const key = normPathKey(dir)
   const list = loadKnownRepos()
-  const kept = list.filter((p) => key(p) !== key(dir))
+  const kept = list.filter((p) => normPathKey(p) !== key)
   if (kept.length === list.length) return false
   try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: kept }, null, 2), 'utf8') } catch { return false }
   return true
@@ -2281,6 +2293,17 @@ function createJobService(config, onSettled) {
         saveJobs(jobs)
       }
       for (const dir of gone.values()) forgetRepo(dir)
+    }
+    // 已知仓库清单里那些「job 记录早已被截断、目录却已经变成空壳/worktree」的登记也要摘掉：
+    // 上面只遍历了 jobs，掉出历史的那批永远不会被看到，于是 autoScan 每轮都对它们重跑
+    // isWorktreeCwd / hasCompilableSources 再跳过，清单无界增长且面板上留着永远编译不出东西的行。
+    // 一次算完再整写，避免逐条 forgetRepo 反复读写 REPOS_FILE。
+    {
+      const known = loadKnownRepos()
+      const alive = known.filter((dir) => isDeadCompileTarget(dir) === false)
+      if (alive.length !== known.length) {
+        try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: alive }, null, 2), 'utf8') } catch { /* 不可写则放弃 */ }
+      }
     }
   }
   // 磁盘吸收：另一实例新增的 job、或同 id 但磁盘更新且本实例没动过的 job，并回内存——
@@ -3744,7 +3767,11 @@ function createJobService(config, onSettled) {
       throw new Error(msg)
     }
     rememberRepo(cwd)
-    const existing = jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage))
+    // 幂等判定必须走归一化 key：同一仓库在不同入口的写法并不一致（工具入参可能带尾分隔符、
+    // 盘符大小写不同；knownRepos 里存的是首次登记时的原样）。严格字符串相等会让同一仓库
+    // 各开一条任务，单项目串行闸门与自动调度幂等的前提当场失效。
+    const cwdKey = normPathKey(cwd)
+    const existing = jobs.find((j) => normPathKey(j.cwd) === cwdKey && !JOB_TERMINAL.has(j.stage))
     if (existing) return { job: existing, existed: true }
     // 占位先行：先落一条 submitting 占位，期间的并发提交靠非终态 stage 挡重复
     const job = {
@@ -3835,7 +3862,10 @@ function createJobService(config, onSettled) {
   }
 
   const list = () => { mergeFromDisk(); return jobs.map(jobSummary) }
-  const findActive = (cwd) => jobs.find((j) => j.cwd === cwd && !JOB_TERMINAL.has(j.stage)) ?? null
+  const findActive = (cwd) => {
+    const key = normPathKey(cwd)
+    return jobs.find((j) => normPathKey(j.cwd) === key && !JOB_TERMINAL.has(j.stage)) ?? null
+  }
 
   function start() {
     if (timer) return
@@ -4470,6 +4500,25 @@ export async function resolveModelEfforts(llm, provider, model) {
   }
 }
 
+// 工作区过滤清单（jobs/repos 展示与自动调度共用）：宿主注册表可用且 workspaceOnly 开启时
+// 返回工作区路径清单，否则 null（不过滤，行为与 0.4.8 一致）。
+// 语义：调用方用 isExcluded(cwd, paths) 判「在工作区内」——命中即属于某工作区或其子目录。
+export function workspaceFilterPaths(registry, config) {
+  if (!registry || typeof registry.list !== 'function') return null
+  if (liveConfig(config ?? {}).workspaceOnly === false) return null
+  let wsList
+  try {
+    wsList = registry.list() ?? []
+  } catch (err) {
+    // 宿主注册表内部不一致（如 order references missing workspace）时降级不过滤：
+    // 过滤是体验优化，不能拖垮 jobs/repos 端点。
+    console.warn('[codewiki] workspaceRegistry.list() 抛错，工作区过滤降级停用：', err?.message ?? err)
+    return null
+  }
+  const wsPaths = wsList.map((w) => w?.path).filter((p) => typeof p === 'string' && p)
+  return wsPaths.length ? wsPaths : null
+}
+
 export function installWebServer(ctx, service, extra = {}) {
   const { config, schedState, compile } = extra
   if (typeof ctx.inject !== 'function') return
@@ -4486,22 +4535,7 @@ export function installWebServer(ctx, service, extra = {}) {
   // 工作区过滤清单（jobs 与 repos 总览共用）：宿主注册表可用且开关开启时返回路径清单，否则 null。
   // cwd 等于某工作区或位于其子目录内（isExcluded 命中判定，语义同 hindsight withinPath）；
   // 宿主未注册任何工作区时返回 null——不过滤，行为与 0.4.8 一致。
-  const wsFilterPaths = () => {
-    const wr = workspaceRegistry
-    if (!wr || typeof wr.list !== 'function') return null
-    if (liveConfig(config ?? {}).workspaceOnly === false) return null
-    let wsList
-    try {
-      wsList = wr.list() ?? []
-    } catch (err) {
-      // 宿主注册表内部不一致（如 order references missing workspace）时降级不过滤：
-      // 过滤是体验优化，不能拖垮 jobs/repos 端点。
-      console.warn('[codewiki] workspaceRegistry.list() 抛错，工作区过滤降级停用：', err?.message ?? err)
-      return null
-    }
-    const wsPaths = wsList.map((w) => w?.path).filter((p) => typeof p === 'string' && p)
-    return wsPaths.length ? wsPaths : null
-  }
+  const wsFilterPaths = () => workspaceFilterPaths(workspaceRegistry, config ?? {})
   // cordis：webServer 服务缺失时 inject 回调整体跳过（静默降级，面板查不到进度但不报错）
   ctx.inject(['webServer'], (rc) => {
     const ws = rc?.webServer ?? rc
@@ -4631,6 +4665,13 @@ export function installWebServer(ctx, service, extra = {}) {
               lastError: schedState?.lastError ?? null,
               lastScanRepos: schedState?.lastScanRepos ?? null,
               lastScanSubmitted: schedState?.lastScanSubmitted ?? null,
+              // 分工口径：本轮扫到但已有活动任务（幂等命中）、以及判态干净/无变更可做的仓数。
+              // 只暴露 submitted 时，「扫到 N 仓、提交 0」无法区分「正在编译」与「无事可做」。
+              lastScanBusy: schedState?.lastScanBusy ?? null,
+              lastScanNoop: schedState?.lastScanNoop ?? null,
+              // 因 workspaceOnly 被跳过（不在已添加工作区里）的仓数：否则「清单里有 N 个仓库、
+              // 扫到 M 个」的缺口在面板上无法解释，用户会以为调度器丢了仓库。
+              lastScanSkipped: schedState?.lastScanSkipped ?? null,
             },
           }
           reposCacheAt = Date.now()
@@ -4965,6 +5006,11 @@ function installUpdateReminder(ctx, config) {
 export function apply(ctx, config) {
   if (typeof ctx.inject === 'function') ctx.inject(['agents'], (rc) => { agentsRef = rc?.agents ?? rc })
   if (typeof ctx.inject === 'function') ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })
+  // 自动调度也要读宿主工作区注册表：workspaceOnly（默认开）的语义是「只处理已添加的
+  // dsh 工作区」，如果只有面板过滤遵守它，被移出工作区的仓库仍会被后台定时编译并写入
+  // 产物——面板上看不见它在编译，用户也无从取消（0.16.3 修复）。
+  let schedWorkspaceRegistry = null
+  if (typeof ctx.inject === 'function') ctx.inject(['workspaceRegistry'], (rc) => { schedWorkspaceRegistry = rc?.workspaceRegistry ?? rc })
   const service = createJobService(config, wakeCompileSession)
   service.start()
   // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，
@@ -4976,7 +5022,7 @@ export function apply(ctx, config) {
   // 必须合并持久仓库清单与 job 历史：后者最多保留 MAX_JOBS_KEPT 条，且启动会清理
   // Temp 终态；只扫历史会让清单里仍然过期的仓库永久退出自动更新。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
-  const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null }
+  const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null, lastScanBusy: null, lastScanNoop: null, lastScanSkipped: null }
   let scanning = false
   const autoScan = async () => {
     const c = liveConfig(config)
@@ -4987,12 +5033,21 @@ export function apply(ctx, config) {
     schedState.lastScan = Date.now()
     schedState.lastScanRepos = 0
     schedState.lastScanSubmitted = 0
+    schedState.lastScanBusy = 0
+    schedState.lastScanNoop = 0
+    schedState.lastScanSkipped = 0
     try {
       const cwds = [...new Set([
         ...loadKnownRepos(),
         ...service.list().map((j) => j.cwd),
       ].filter(Boolean))]
+      // workspaceOnly（默认开）：只自动处理属于已添加 dsh 工作区（含子目录）的仓库。
+      // 只让面板过滤遵守它，会出现「被移出工作区的仓库仍被后台定时编译、产物悄悄写进
+      // 它的 .codewiki/，而面板上根本看不到这条任务」——用户既不知道它在编译也取消不了。
+      // 已有活动任务不受影响（这里只决定「是否新提交」，不打断进行中的编译）。
+      const wsPaths = workspaceFilterPaths(schedWorkspaceRegistry, config ?? {})
       for (const cwd of cwds) {
+        if (wsPaths && !isExcluded(cwd, wsPaths)) { schedState.lastScanSkipped++; continue }
         if (isExcluded(cwd, c.excludePaths)) continue
         // worktree 目录静默跳过（1.2.0）：历史任务里可能留着 worktree 路径，不编译也不记错误
         if (isWorktreeCwd(cwd)) continue
@@ -5002,7 +5057,12 @@ export function apply(ctx, config) {
         schedState.lastScanRepos++
         try {
           const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})
+          // 三个口径分开计：submitted=本轮真提交了编译；busy=已有活动任务（幂等命中，不是没扫到，
+          // 也不该算作提交）；noop=判态干净/无变更可做。旧实现只认 submitted，面板上会出现
+          // 「扫到 N 仓、提交 0」却看不出到底是在编译还是无事可做。
           if (r?.submitted === true) schedState.lastScanSubmitted++
+          else if (r?.jobId) schedState.lastScanBusy++
+          else schedState.lastScanNoop++
         } catch (err) {
           schedState.lastError = `${new Date().toISOString()} ${String(err?.message ?? err).slice(0, 200)}`
         }

@@ -1592,6 +1592,74 @@ console.log('== 自动调度：过期检测触发真实心跳提交，历史外�
   fs.rmSync(scanRepo, { recursive: true, force: true })
 }
 
+// ============================ 幂等：同一仓库的不同路径写法 ============================
+console.log('== 幂等：同一仓库以不同路径写法提交只允许一条活动任务 ==')
+{
+  // 已知仓库清单与工具入参走的是两套路径形态：REPOS_FILE 用归一化 key 去重，
+  // 而 submit/findActive 曾用严格字符串相等，尾分隔符或盘符大小写一变就认不出同一仓库，
+  // 于是同仓库并发两条任务，直接破坏单项目串行与自动调度幂等的前提。
+  const idemRepo = makeFixtureRepo()
+  const mockIdem = makeBatchMock()
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  const idemCtx = makeCtx()
+  apply(idemCtx.ctx, batchCfg({ autoUpdate: false }))
+  try {
+    const idemGen = idemCtx.registered.get('codewiki_generate')
+    const r1 = await idemGen.execute({ cwd: idemRepo, scope: 'auto' }, {})
+    check(r1.submitted === true, `幂等前置：首次提交成功（submitted=${r1.submitted}）`)
+    const variants = [
+      ['尾分隔符', idemRepo + path.sep],
+      ['盘符大小写不同', idemRepo.toLowerCase()],
+    ]
+    for (const [label, variant] of variants) {
+      const r = await idemGen.execute({ cwd: variant, scope: 'auto' }, {})
+      check(
+        r.submitted === false && r.jobId === r1.jobId,
+        `幂等命中：cwd ${label} 仍返回同一任务（实际 submitted=${r.submitted} jobId=${r.jobId}，期望 ${r1.jobId}）`,
+      )
+    }
+  } finally {
+    for (const dispose of idemCtx.disposers) dispose()
+    mockIdem.restore()
+    fs.rmSync(idemRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 自动调度遵守 workspaceOnly ============================
+console.log('== 自动调度遵守 workspaceOnly：工作区外仓库不被后台编译 ==')
+{
+  // 现场：knownRepos 里有一个「已移出 dsh 工作区」的仓库，且 autoUpdate 开着。
+  // 若只有面板过滤遵守 workspaceOnly，这个仓库会被后台定时编译、产物悄悄写进它的
+  // .codewiki/，而面板上根本看不到这条任务——用户既不知道它在编译，也取消不了。
+  const outsideRepo = makeFixtureRepo()
+  const wsOnlyRepo = makeFixtureRepo()
+  const mockWs = makeBatchMock()
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  fs.writeFileSync(repoFile, JSON.stringify({ repos: [outsideRepo] }), 'utf8')
+  // 只把 wsOnlyRepo 登记为已添加工作区；outsideRepo 不在清单里（含子目录判定见 isExcluded）
+  const wsCtx = makeCtx({ workspaces: [wsOnlyRepo] })
+  apply(wsCtx.ctx, batchCfg({ autoUpdate: true, autoUpdateMin: 5 }))
+  try {
+    // 心跳压到 100ms（见文件顶部），但 autoUpdateMin 闸门只看首轮：lastScan=0 立即放行
+    await new Promise((r) => setTimeout(r, 1200))
+    const jobs = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []
+    const outsideJobs = jobs.filter((j) => j.cwd === outsideRepo)
+    check(outsideJobs.length === 0, `工作区外仓库未被自动提交（实际 ${outsideJobs.length} 条：${JSON.stringify(outsideJobs.map((j) => ({ kind: j.kind, stage: j.stage })))}）`)
+    const reposEp = wsCtx.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const res = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+    const sched = JSON.parse(res.out)?.scheduler
+    // 面板必须能解释「清单里有 N 个仓库、扫到 M 个」的缺口，否则用户以为调度器丢了仓库
+    check(sched?.lastScanSkipped >= 1, `面板可见工作区外跳过计数（实际 ${sched?.lastScanSkipped}）`)
+  } finally {
+    for (const dispose of wsCtx.disposers) dispose()
+    mockWs.restore()
+    fs.rmSync(outsideRepo, { recursive: true, force: true })
+    fs.rmSync(wsOnlyRepo, { recursive: true, force: true })
+  }
+}
+
 // 清理主 fixture（wiki 在仓库内 .codewiki/，随目录一起删）
 fs.rmSync(mainRepo, { recursive: true, force: true })
 // 清理本次运行的 jobs 文件（随机 token 命名的临时文件，不留给下次运行与 tmp 目录）
