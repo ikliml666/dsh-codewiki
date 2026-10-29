@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.16.3 — 2026-10-30
+
+### 修复：自动更新链路的五处缺陷（幂等、缓存、清单清理、口径、工作区语义）
+
+**背景**：0.16.2 修好「调度器只扫 job 历史」之后，继续逐项审查自动更新链路，发现仍有五处会让「过期了却没人编译 / 编译了却看不见」的问题。
+
+**修改**：
+
+| 位置 | 缺陷 | 改动 |
+| --- | --- | --- |
+| `index.js:467` `normPathKey` | 无条件 `toLowerCase()`，在 Linux/macOS 上把 `/home/u/Foo` 与 `/home/u/foo` 判成同一仓库，幂等吞任务、清单少登记 | 只在 `process.platform === 'win32'` 时小写化 |
+| `index.js` `submit` / `findActive`（`index.js:3838`） | 用严格 `j.cwd === cwd` 比较，未归一化；同一仓库以尾分隔符或盘符大小写不同写法出现时并发两条任务，破坏单项目串行与自动调度幂等 | 统一用 `normPathKey` 比较 |
+| `index.js:484-506` `hasCompilableSources` | 「无源码」也缓存 600s，自动路径不调用 `clearSourceProbeCache`；一旦误判成空壳就静默跳过 10 分钟 | 新增 `DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS`（默认 60s）：`has=true` 仍缓存 10 分钟，`has=false` 只缓存 60s |
+| `index.js` 启动清理 | `rememberRepo` 只追加；掉出 `MAX_JOBS_KEPT` 的失效目录永久留在 `REPOS_FILE`，每轮被重扫、清单无界增长 | 启动时整写一次 `loadKnownRepos().filter((dir) => isDeadCompileTarget(dir) === false)` |
+| `index.js` `schedState` + `/api/codewiki/repos` | 幂等命中不设 `submitted`，面板「扫到 N 仓、提交 0」看不出是在编译还是无事可做 | 拆成 `lastScanSubmitted` / `lastScanBusy` / `lastScanNoop` / `lastScanSkipped` 四个口径 |
+
+### 修复：自动调度现在遵守 `workspaceOnly`（默认开）
+
+**问题**：`wsFilterPaths()` 只用于 `/api/codewiki/jobs` 与 `/api/codewiki/repos` 的**展示过滤**，`autoScan` 完全不用它。于是被移出 dsh 工作区清单的仓库仍会被后台定时编译、产物悄悄写进它的 `.codewiki/`，而面板上根本看不到这条任务——用户既不知道它在编译，也无法取消。
+
+**修改**：
+
+- 新增导出函数 `workspaceFilterPaths(registry, config)`（`index.js:4506`）：注册表不可用或 `workspaceOnly === false` 时返回 null，`list()` 抛错时告警降级（过滤是体验优化，不能拖垮端点）。`installWebServer` 内改为复用它，端点行为不变。
+- `apply()` 新增 `schedWorkspaceRegistry`，经 `ctx.inject(['workspaceRegistry'], ...)` 取宿主注册表；`autoScan` 在排除清单判定**之前**加闸门：命中工作区外则 `lastScanSkipped++` 并跳过。只影响「是否新提交」，不打断进行中的编译。
+- `client.js` 面板统计串新增「工作区外跳过 N」，中英词表各补 `skippedLabel`——否则「清单里有 N 个仓库、扫到 M 个」的缺口无法解释。
+
+**验证**（当轮输出）：
+
+- 新增用例「幂等：同一仓库以不同路径写法提交只允许一条活动任务」（`test-orchestration.mjs:1595` 起）：首轮实测红（`✗ 幂等命中：cwd 尾分隔符 ... 实际 submitted=true jobId=job-mvtqhcrj-1`、`✗ ...盘符大小写不同...`、`FAIL：2 项未通过`），修复后转绿（`✓ ... submitted=false jobId=job-mvtqjzyq-0`、`PASS：编排冒烟全部通过`）。
+- 新增用例「空判定缓存必须短暂」（`test-worktree.mjs`）：`✓ 空判定在 TTL 内仍走缓存（不立刻反转）`、`✓ 空判定 TTL 过后重新探测：补回源码即恢复 === true`。
+- 新增用例「自动调度遵守 workspaceOnly：工作区外仓库不被后台编译」：**反向验证**——把闸门临时短路成 `if (false && ...)`，立刻红（`✗ 工作区外仓库未被自动提交（实际 1 条：[{"kind":"full","stage":"crosscut"}]）`、`✗ 面板可见工作区外跳过计数（实际 0）`、`FAIL：2 项未通过`）；恢复后转绿（`✓ 实际 0 条`、`✓ 跳过计数 1`）。
+- 全量：27/28 套件 `ok`；唯一 FAIL 是 `test-wiki-anchors.mjs`（wiki 文章引用的 `index.js` 行号越界，源码已从 5079 行长到 5095 行），属文档滞后于源码，重新编译后消失。
+
+---
+
 ## 0.16.2 — 2026-10-29
 
 ### 修复：自动更新只扫任务历史，已编译仓库被截断后再也不自动编译
