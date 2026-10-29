@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.16.2 — 2026-10-29
+
+### 修复：自动更新只扫任务历史，已编译仓库被截断后再也不自动编译
+
+**问题**：自动更新调度器（`autoUpdate`）在 `index.js:4989` 只从 `service.list()` 取 cwd——也就是**当前 job 历史**里的工作区。但 job 记录会被 `MAX_JOBS_KEPT=30` 截断、启动时还会清掉 Temp 目录的终态任务，于是「编译过一次、后来没再手动编译」的仓库一旦掉出历史，就永久退出自动扫描：面板上仍显示它 `state: stale`、过期文章数一屏，可 `lastScanRepos` 里根本没有它，`lastScanSubmitted` 恒为 0。用户看到的现象正是「过期了却不会自动更新文章」。
+
+同一份插件里早有独立的持久清单 `REPOS_FILE`（`loadKnownRepos()` / `rememberRepo()`，`index.js:2028-2050`），`/api/codewiki/repos` 总览接口也一直是用「job 历史 ∪ 已知仓库」拼出来的（`index.js:4591`）——只有调度器漏用了它。
+
+**修改**：
+
+| 文件 | 改动 |
+| --- | --- |
+| `index.js:4991` | 扫描来源改为 `loadKnownRepos() ∪ service.list()`（去重），并注释说明为何必须合并（历史会截断、启动会清 Temp 终态） |
+| `index.js:5012` | 心跳间隔支持 `DSH_CODEWIKI_AUTO_SCAN_MS` 覆盖（下限 100ms），生产默认仍 60s——否则真实心跳没法在测试里等 |
+| `test-orchestration.mjs:16` | 压到 100ms 的真实心跳，仍走 `apply()` 里那套 `autoScan`，不 mock 调度器 |
+
+**验证**（当轮输出）：
+
+- 新增用例「历史清空后，真实心跳仍扫描已知仓库并自动提交过期编译」：真 git fixture + mock LLM，先 `scope=auto` 全量编译一次并确认 `REPOS_FILE` 里有它 → **dispose 旧服务**再清空 `JOBS_FILE`（`mergeFromDisk()` 只增不删，运行中清盘造不出「历史为空」现场）→ 新起 `autoUpdate:true, autoUpdateMin:5` 的服务 → 改 `core/core.py` → 断言 `cw status` 已是 stale，再等心跳。
+- **反向验证**：把 `index.js:4991` 临时改回旧实现（只扫 `service.list()`），该用例立刻红（`✗ ...（现场 []）`，`FAIL：1 项未通过`）；恢复修复后转绿（`✓ ...（现场 [{"scope":"auto","kind":"stale","stage":"articles"}]）`）。证明它抓的正是这条缺陷，而不是恰好通过。
+- 全量：`node test-orchestration.mjs` → `PASS：编排冒烟全部通过`（exit 0）。前序用例遗留的活动态 fixture 任务会占住单项目串行闸门（初始化一直 `queued`、wiki 从未编译出来），因此本用例把清盘动作放在 `apply` 之前，并新增「初始化必须到 done」与「心跳前判态必须已过期」两条前置断言，避免把排队失败伪装成判态 bug。
+
+---
+
 ## 0.16.1 — 2026-10-29
 
 ### 修复：允许 partial 推进基线，打破编译死循环
