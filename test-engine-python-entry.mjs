@@ -13,7 +13,7 @@
 // 证明入口不会自己去读 ~/.codewiki 的凭证库）。
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -420,6 +420,150 @@ print(json.dumps(P))
   const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
   assert.equal(raw.status, 0, `读取 stage_map.ENGINE_STAGES 失败：${raw.stderr}`)
   assert.deepEqual(JSON.parse(String(raw.stdout).trim()), ENGINE_STAGES)
+})
+
+// ── 进度桥接 ──────────────────────────────────────────────────────────────
+
+await check('进度帧：writtenCount 必须是本轮真实改动篇数（超时全靠它判 partial）', async () => {
+  // 真机事故（0.16.4 及以前）：bridge_progress 三处 emit 都不带 written，
+  // 进度帧恒为 0；而 client.js 判「超时但有进度 → partial」的唯一依据就是最后
+  // 一条 progress 的 writtenCount。于是「已写 20 篇后超时」被当成「一篇没写」
+  // 判成 failed —— 0.16.1 为打破死循环加的 partial 自救在真机上从未生效，
+  // 六次 job 全部 45 分钟超时、writtenCount=0、状态不落盘、下一轮又退全量。
+  //
+  // 另两条同样致命的语义：
+  //   · 不能报 docs 目录**绝对篇数**——增量轮进场时 docsDir 已被灌入上一轮的文章
+  //     （Node 侧 hydrateDocsDir 在启动解释器之前就做完了），绝对篇数会让「一篇
+  //     没写的一轮」报出几十篇，把零进展的超时误判成 partial 并推进基线，比不报更坏；
+  //   · 也不能只报**篇数净差**——增量轮通常不改篇数（原地重写同一批路径），
+  //     净差会把真实改动记成零进展，partial 自救同样失效。
+  const docs = join(sandbox, 'probe-docs')
+  mkdirSync(join(docs, 'modules'), { recursive: true })
+  // 进场基线：2 篇「上一轮留下的」文章
+  writeFileSync(join(docs, 'modules', 'old-a.md'), '# old a\n')
+  writeFileSync(join(docs, 'modules', 'old-b.md'), '# old b\n')
+  const outFile = join(sandbox, 'probe-progress.json')
+  const probe = `
+import json, sys, pathlib
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+
+docs = pathlib.Path(${JSON.stringify(docs)})
+
+class Tracker:
+    def __init__(self):
+        self.current_stage = 3
+        self.stage_progress = 0.0
+    def start_stage(self, stage, description=None):
+        self.current_stage = stage
+        self.stage_progress = 0.0
+    def update_stage(self, progress, message=None):
+        self.stage_progress = progress
+    def complete_stage(self, message=None):
+        self.stage_progress = 1.0
+
+class Adapter:
+    def __init__(self):
+        self.progress_tracker = Tracker()
+
+frames = []
+def spy(request_id, stage, percent, message="", written=0, failed=0, total=0):
+    frames.append({"stage": stage, "percent": percent, "written": written})
+entry.emit_progress = spy
+
+ad = Adapter()
+entry.bridge_progress(ad, "req-probe", docs_dir=str(docs))
+mods = docs / "modules"
+# start_stage / complete_stage 是 force 帧：必须按当前真实产物重算，不吃节流缓存。
+ad.progress_tracker.start_stage(3, "Documentation Generation")
+
+# ① 原地改写一篇（篇数净差 = 0，但确实改动了）
+import time
+time.sleep(0.01)
+(mods / "old-a.md").write_text("# old a rewritten in place", encoding="utf-8")
+# 普通 update 走节流（_WRITTEN_RECOUNT_SEC 内复用上次结果），所以这里用
+# 阶段完成（force 帧）来验真实改动数；节流本身的行为由下面的帧数断言覆盖。
+ad.progress_tracker.complete_stage("改完一篇")
+
+# ② 再新增两篇，再来一个 force 帧
+(mods / "new-1.md").write_text("# new 1", encoding="utf-8")
+(mods / "new-2.md").write_text("# new 2", encoding="utf-8")
+ad.progress_tracker.start_stage(4, "Validation")
+
+# ③ 记账文件不是文章，不能算进 written
+(docs / "temp").mkdir(exist_ok=True)
+(docs / "temp" / "update-record.json").write_text("{}", encoding="utf-8")
+(docs / "temp" / "scratch.md").write_text("# 记账不是文章", encoding="utf-8")
+ad.progress_tracker.complete_stage("完成")
+
+pathlib.Path(${JSON.stringify(outFile)}).write_text(json.dumps({"frames": frames}, ensure_ascii=False), encoding="utf-8")
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `进度桥接探针失败：${raw.stderr}${raw.stdout}`)
+  const frames = JSON.parse(readFileSync(outFile, 'utf8')).frames
+  assert.ok(frames.length >= 4, `三个阶段方法都必须发进度帧：${JSON.stringify(frames)}`)
+  assert.equal(frames[0].written, 0, `进场时那 2 篇都是上一轮的旧文章，本轮改动数必须是 0：${JSON.stringify(frames[0])}`)
+  assert.equal(frames[1].written, 1, `原地改写 1 篇必须报 1（篇数净差为 0 也要认出来）：${JSON.stringify(frames[1])}`)
+  assert.equal(frames[2].written, 3, `累计改写 1 篇 + 新增 2 篇 = 3，不是 docs 绝对篇数 4：${JSON.stringify(frames[2])}`)
+  assert.equal(frames[3].written, 3, `记账文件不是文章，不能计入 written：${JSON.stringify(frames[3])}`)
+})
+
+await check('进度帧：普通 update 帧节流（不能让每帧都全树遍历拖慢编译）', async () => {
+  // 节流的存在理由：writtenCount 靠递归遍历 docsDir，而 FSoft 进度条一秒能调好几次
+  // update_stage。真机 45 分钟预算里若每帧都遍历数百篇，会把编译时间啃掉一块。
+  // 但**不能**节流掉 force 帧（start/complete）——那是超时判 partial 的关键帧。
+  const docs = join(sandbox, 'probe-throttle')
+  mkdirSync(join(docs, 'modules'), { recursive: true })
+  const outFile = join(sandbox, 'probe-throttle.json')
+  const probe = `
+import json, sys, pathlib
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+
+docs = pathlib.Path(${JSON.stringify(docs)})
+
+class Tracker:
+    current_stage = 3
+    stage_progress = 0.0
+    def start_stage(self, stage, description=None):
+        self.current_stage = stage
+        self.stage_progress = 0.0
+    def update_stage(self, progress, message=None):
+        self.stage_progress = progress
+    def complete_stage(self, message=None):
+        self.stage_progress = 1.0
+
+class Adapter:
+    def __init__(self):
+        self.progress_tracker = Tracker()
+
+calls = {"fingerprints": 0}
+real_fp = entry._doc_fingerprints
+def counting_fp(p):
+    calls["fingerprints"] += 1
+    return real_fp(p)
+entry._doc_fingerprints = counting_fp
+
+frames = []
+def spy(request_id, stage, percent, message="", written=0, failed=0, total=0):
+    frames.append({"written": written})
+entry.emit_progress = spy
+
+ad = Adapter()
+entry.bridge_progress(ad, "req-throttle", docs_dir=str(docs))
+# 12 次紧凑的普通 update：节流生效时只该真正遍历少数几次
+for i in range(12):
+    ad.progress_tracker.update_stage(i / 12.0, "tick")
+pathlib.Path(${JSON.stringify(outFile)}).write_text(
+    json.dumps({"frames": len(frames), "traversals": calls["fingerprints"]}, ensure_ascii=False),
+    encoding="utf-8",
+)
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `节流探针失败：${raw.stderr}${raw.stdout}`)
+  const got = JSON.parse(readFileSync(outFile, 'utf8'))
+  assert.equal(got.frames, 12, `进度帧本身一篇都不能少（节流只影响计数，不影响上报）：${got.frames}`)
+  assert.ok(got.traversals < got.frames, `紧凑 update 必须节流掉遍历：${got.traversals} 次遍历 / ${got.frames} 帧`)
 })
 
 // ── 收尾 ──────────────────────────────────────────────────────────────────

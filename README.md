@@ -109,7 +109,7 @@
 | `nativeEngine` | `true` | 编译通道。`true`（默认，0.16.0 起）= 原生引擎裁决全流程；`false` = 兼容通道（插件内 Node 流水线，仅按顶层目录分组 + 文件级归属判定） |
 | `nativeEnginePython` | 空 | venv 解释器绝对路径；空 → `DSH_CODEWIKI_PYTHON` → `python` |
 | `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本，一般不用改 |
-| `nativeEngineTimeoutMs` | `2700000`（45 分钟） | 单次引擎调用上限，超时按 `failed` 记并杀进程树 |
+| `nativeEngineTimeoutMs` | `10800000`（180 分钟） | 单次引擎调用上限；超时杀进程树，**已写出的文章按 partial 抢救**（不会白跑）。默认值按真机全量实测（约 174 分钟）给，不是按小 fixture 估的 |
 
 模型侧不新增设置：复用 `batchProvider` / `batchModel`（聚类与写文章都用它），经上面的
 llm bridge 转发。
@@ -244,7 +244,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`（0.10.4，0.10.8 全面启用）：大档模型——输入超 110k 普通预算的请求（写文章/横切/批量校对）改用该档在插件内一次写完。默认 `volces-ark` / `glm-5.3-flash`（512k 上下文），预算 420k token。`bigProvider` 留空=不启用大档。0.10.8 起大档同时是观察→合成分割的门槛：模块源码总量超 420k 才拆观察批。
 - `sessionTier`（0.9.2）：**仅超大输入兜底**时才用。0.10.8 起装填上限=大档预算（`bigTokenBudget`，默认 420k）：文章源码总量在 110k–420k 区间直接大档单请求写完；超 420k 才拆观察→合成批；只有连大档都装不下的单文件才转会话通道，此时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。
 
-- `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0 引入，**0.16.0 起 `nativeEngine` 默认 `true`**）：原生引擎通道；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道」。
+- `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0 引入，**0.16.0 起 `nativeEngine` 默认 `true`**）：原生引擎通道；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道」。**0.16.5 起默认超时从 45 分钟改为 180 分钟**：45 分钟是早期按小 fixture（约 1 分钟）估的，真机全量实测约 174 分钟（`job-mvt1mrvu-6`：articles 66.0min + crosscut 10.0min + review 68.9min），预算低于物理耗时意味着每次都在阶段 3 刚开头被砍、一篇都写不出来，重试多少次都一样。
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`，如免费 hy3）请求并发上限，默认 2（1–8，硬顶 8）。
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。

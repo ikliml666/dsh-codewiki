@@ -133,6 +133,14 @@ sys.stdout = _ProtocolOnly()
 PROTOCOL_VERSION = 1
 ACTIONS = ("doctor", "generate", "update", "cancel")
 
+# 进度帧里 writtenCount 的重新清点间隔（秒）。
+#
+# 为什么要节流：writtenCount 靠递归遍历 docsDir 算（_doc_fingerprints），而 FSoft 的
+# 进度条一秒可能调好几次 update_stage。真机上 docs 有数百篇时，不节流的每次遍历会
+# 把 45 分钟的编译预算啃掉一块。阶段切换/阶段完成走 force=True 必算（那是超时判
+# partial 的关键帧），普通 update 按这个间隔算。
+_WRITTEN_RECOUNT_SEC = 2.0
+
 # 模型通道的环境变量名。Node 侧桥注入，密钥只活在进程环境里。
 ENV_BASE_URL = "CODEWIKI_BASE_URL"
 ENV_API_KEY = "CODEWIKI_API_KEY"
@@ -408,7 +416,7 @@ def _model_config():
 # ── 进度桥接：把 FSoft 五段翻成八段契约 ─────────────────────────────────────
 
 
-def bridge_progress(adapter, request_id, on_stage=None):
+def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
     """替换 adapter.progress_tracker 的三个阶段方法，把事件转成协议行。
 
     为什么用替换而不是继承：FSoft 在 ``CLIDocumentationGenerator.__init__`` 里
@@ -418,6 +426,19 @@ def bridge_progress(adapter, request_id, on_stage=None):
 
     ``on_stage`` 收到每一个到达的引擎阶段；调用方用它记录「最后一个真实到达
     的阶段」，这样 done 结果里的 stage 是实测值而不是写死的常量。
+
+    ``docs_dir`` 是必给的**进度事实来源**：``writtenCount`` 必须每帧都带真实
+    已写篇数。理由（0.16.5 真机事故）：``client.js`` 判「超时但有进度 → partial」
+    的唯一依据就是最后一条 progress 的 ``writtenCount``；此前这里压根不传
+    written，进度帧恒为 0，于是「已写 20 篇后超时」被当成「一篇没写」判成
+    failed —— 0.16.1 那次为打破死循环加的 partial 自救在真机上从未生效。
+    计数用 ``_count_docs`` 递归真实清点，不去猜 FSoft 的内部计数器。
+
+    上报的是**本轮真实改动篇数**（进场指纹表 vs 当前指纹表的差），不是 docs 目录的
+    绝对篇数、也不是单纯篇数净差：增量轮进场时 docsDir 已被灌入上一轮的文章
+    （Node 侧 hydrateDocsDir 在启动解释器之前就做完了），拿绝对篇数当 written 会让
+    「一篇没写的一轮」也报出几十篇；而只看篇数净差又会把「原地重写 20 篇」的增量轮
+    记成零进展。按路径比对 (size, mtime_ns) 两种都能算对。
     """
     from stage_map import map_stage, percent_of
 
@@ -427,21 +448,51 @@ def bridge_progress(adapter, request_id, on_stage=None):
         tracker.update_stage,
         tracker.complete_stage,
     )
+    baseline = _doc_fingerprints(docs_dir) if docs_dir else {}
+    counted = {"n": 0, "at": 0.0}
 
     def note(stage):
         if on_stage:
             on_stage(map_stage(stage))
 
+    def written_now(force=False):
+        # 清点失败一律当 0：进度是观测值，不能因为它把编译搞崩。
+        if not docs_dir:
+            return 0
+        # 节流：FSoft 的进度条一秒可能调好几次 update_stage，而每次对数百篇做递归
+        # 遍历会把编译拖慢。阶段切换与阶段完成必须重算（那是 partial 判定的关键帧），
+        # 普通 update 每 _WRITTEN_RECOUNT_SEC 才算一次。
+        now = time.monotonic()
+        if not force and counted["at"] > 0 and now - counted["at"] < _WRITTEN_RECOUNT_SEC:
+            return counted["n"]
+        fingerprints = _doc_fingerprints(docs_dir)
+        changed = 0
+        for rel, sig in fingerprints.items():
+            if baseline.get(rel) != sig:
+                changed += 1
+        # 被删掉的文章也算本轮动过账
+        for rel in baseline:
+            if rel not in fingerprints:
+                changed += 1
+        counted["n"] = changed
+        counted["at"] = now
+        return changed
+
+    def emit(stage, percent, message, force=False):
+        emit_progress(
+            request_id, map_stage(stage), percent, message, written=written_now(force)
+        )
+
+
     def start_stage(stage, description=None):
         orig_start(stage, description)
-        emit_progress(request_id, map_stage(stage), percent_of(stage, 0.0), description or "")
+        emit(stage, percent_of(stage, 0.0), description or "", force=True)
         note(stage)
 
     def update_stage(progress, message=None):
         orig_update(progress, message)
-        emit_progress(
-            request_id,
-            map_stage(tracker.current_stage),
+        emit(
+            tracker.current_stage,
             percent_of(tracker.current_stage, tracker.stage_progress),
             message or "",
         )
@@ -449,17 +500,42 @@ def bridge_progress(adapter, request_id, on_stage=None):
 
     def complete_stage(message=None):
         orig_complete(message)
-        emit_progress(
-            request_id,
-            map_stage(tracker.current_stage),
-            percent_of(tracker.current_stage, 1.0),
-            message or "",
-        )
+        # 阶段完成是超时判 partial 的关键帧，必须按当前真实产物重算，不吃节流缓存。
+        emit(tracker.current_stage, percent_of(tracker.current_stage, 1.0), message or "", force=True)
         note(tracker.current_stage)
 
     tracker.start_stage = start_stage
     tracker.update_stage = update_stage
     tracker.complete_stage = complete_stage
+
+
+def _doc_fingerprints(docs_dir):
+    """产物指纹表：`{相对路径: (size, mtime_ns)}`。
+
+    为什么不只数篇数（0.16.5 真机事故）：增量轮**通常不改篇数**——它重写的是
+    已有文章（同一批路径、内容变了）。只比篇数净差会把这类轮次记成「零进展」，
+    于是超时后的 partial 自救又不生效，而真正的零进展轮反而可能蒙混过关。
+    比 (size, mtime_ns) 能同时抓住「新增一篇」「改写一篇」「删掉一篇」，成本只是
+    一次目录遍历，且不需要读文件内容。mtime 在这里是可信的：整个 docsDir 是本轮
+    引擎刚写出来的临时目录，不存在跨文件系统的 mtime 精度问题。
+    """
+    out = {}
+    try:
+        root = Path(docs_dir)
+        for p in root.rglob("*.md"):
+            rel = p.relative_to(root)
+            parts = rel.parts
+            if any(part.startswith(".") for part in parts[:-1]):
+                continue
+            if parts and parts[0] == "temp":
+                continue
+            if not p.is_file():
+                continue
+            st = p.stat()
+            out[rel.as_posix()] = (st.st_size, st.st_mtime_ns)
+    except Exception:
+        return out
+    return out
 
 
 # ── generate / update ──────────────────────────────────────────────────────
@@ -586,7 +662,12 @@ def action_generate(request_id, payload, is_update=False):
             generate_html=False,
             commit_id=commit_id,
         )
-        bridge_progress(adapter, request_id, on_stage=lambda s: reached.__setitem__("stage", s))
+        bridge_progress(
+            adapter,
+            request_id,
+            on_stage=lambda s: reached.__setitem__("stage", s),
+            docs_dir=docs_dir,
+        )
         job = adapter.generate()
     except SystemExit as exc:
         # FSoft 在「无变更」等路径会 sys.exit(0)（generate.py:640 附近）。

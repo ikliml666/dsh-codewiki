@@ -207,6 +207,18 @@ elif mode == "slow":
     time.sleep(30)
     emit({"type": "result", "requestId": req, "result": {"outcome": "done"}})
     sys.exit(0)
+elif mode == "slow-with-progress":
+    # 真机事故形态：引擎写出一批文章后卡住直到超时。进度帧带真实 writtenCount。
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 54, "writtenCount": 0})
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 60, "writtenCount": 17})
+    time.sleep(30)
+    emit({"type": "result", "requestId": req, "result": {"outcome": "done", "writtenCount": 17}})
+    sys.exit(0)
+elif mode == "slow-zero-written":
+    # 反向对照：同样卡住超时，但一篇都没写出来（writtenCount 恒 0）。
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 54, "writtenCount": 0})
+    time.sleep(30)
+    sys.exit(0)
 elif mode == "late":
     emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 50})
     time.sleep(0.6)
@@ -294,6 +306,41 @@ await check('进程：未知 requestId 的 result 不算本次结果', async () 
   assert.equal(res.outcome, 'failed')
   assert.equal(res.error.code, 'engine-protocol')
   assert.ok(res.protocolViolations.some((v) => v.kind === 'unknown-request'))
+})
+
+await check('进程：超时但有进度 → partial（已写的文章要救回来，不能判 failed）', async () => {
+  // 0.16.1 起 client.js 就有这条自救逻辑，但真机上从未生效过：引擎入口
+  // bridge_progress 三处 emit 都不带 written，进度帧恒为 0，于是「已写 17 篇后
+  // 超时」被当成「一篇没写」判成 failed，状态不落盘 → 下一轮又退全量 → 死循环。
+  // 这条用例钉的是 client 侧的契约：只要进度帧带了 written，就必须判 partial
+  // 并把篇数与阶段如实带出来（上层靠它决定是否推进基线）。
+  const seen = []
+  const res = await runEngine({
+    engine: pyEngine('slow-with-progress'),
+    requestId: 'p-tp',
+    action: 'generate',
+    timeoutMs: 1200,
+    onProgress: (p) => seen.push(p),
+  })
+  assert.equal(res.outcome, 'partial', `超时但有进度必须判 partial，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 17, `必须如实带出已写篇数，实际 ${res.writtenCount}`)
+  assert.equal(res.stage, 'articles')
+  assert.equal(res.error.code, 'engine-timeout')
+  assert.ok(String(res.error.message).includes('17'), `错误信息要说明救回了几篇：${res.error.message}`)
+  assert.ok(seen.some((p) => Number(p.writtenCount) === 17), '进度帧必须原样透传给 onProgress')
+})
+
+await check('进程：超时且零进展 → 仍判 failed（不能把空轮伪装成 partial）', async () => {
+  // partial 的另一面：零进展轮必须老实判失败。判成 partial 会推进基线，
+  // 把「什么都没编译出来」记成「已消化」，从此那一轮的变化永久丢失。
+  const res = await runEngine({
+    engine: pyEngine('slow-zero-written'),
+    requestId: 'p-tz',
+    action: 'generate',
+    timeoutMs: 1200,
+  })
+  assert.equal(res.outcome, 'failed', `零进展超时必须判 failed，实际 ${res.outcome}`)
+  assert.equal(res.error.code, 'engine-timeout')
 })
 
 await check('进程：超时 → engine-timeout，且进程树被终止', async () => {

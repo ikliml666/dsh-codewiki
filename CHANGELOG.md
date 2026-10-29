@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.16.5 — 2026-10-30
+
+### 修复：原生通道超时预算低于真机耗时（45 分钟 → 180 分钟），且超时抢救一直失效
+
+**现象**：本仓库连续 25 条原生通道任务**没有一条成功**，最近六条 `kind=stale` 全部卡在同一处：`nativePercent: 54`、`nativeMessage: "Documentation Generation"`、articles 阶段 45.0~48.1 分钟后 `引擎在 2700000ms 内未完成（进程树已终止）`、`writtenCount: 0`、一篇都没写出来就失败。面板上永远是「过期 → 自动编译 → 又失败 → 还是过期」，看起来像自动更新根本没生效。
+
+**根因（两条独立缺陷叠加）**：
+
+1. **超时预算低于物理耗时**。`DEFAULT_ENGINE_TIMEOUT_MS = 45 * 60 * 1000` 是阶段 1C 按小 fixture（约 1 分钟）估的。真机实测 `job-mvt1mrvu-6`（本仓库唯一一次真正跑完的编译，走旧兼容通道）分阶段耗时：`articles 66.0min` + `crosscut 10.0min` + `review 68.9min` + `queued 29.2min` ≈ **174 分钟**。按 45 分钟给预算，等于在阶段 3「Documentation Generation」刚开头（`percent_of(3, 0.0)` = (0.40+0.20)×90 = **54%**）就砍掉进程——这不是编译失败，是预算低于物理耗时，重试多少次都必然一样。
+2. **超时抢救路径在真机上从未生效**。0.16.1 已给 `lib/engine/client.js:368` 加了「超时但有进度 → partial」，判据是 `reader.progress.at(-1)?.writtenCount > 0`。但 `lib/engine/python/entry.py` 的 `bridge_progress()` 三处 `emit_progress(...)` 都**没传 `written` 参数**（默认 0），进度帧里的 `writtenCount` 恒为 0，于是这条分支永远走不进去——即使引擎真的写出了文章，也被记成 `failed` + `writtenCount: 0`。
+
+**修改**：
+
+| 位置 | 改动 |
+| --- | --- |
+| `lib/engine/native-run.js:83` | `DEFAULT_ENGINE_TIMEOUT_MS`：`45 * 60 * 1000` → `180 * 60 * 1000`，注释写清实测数据与「预算低于物理耗时等于永远失败」的教训 |
+| `index.js:92` | `nativeEngineTimeoutMs` 配置描述同步（0=默认 180 分钟），并说明超时按 partial 抢救已写文章 |
+| `lib/engine/python/entry.py:411-497` | `bridge_progress(..., docs_dir)` 新增必给 `docs_dir`；新增 `_doc_fingerprints(docs_dir)` 与 `written_now(force=False)`，每帧带**本轮真实改动篇数** |
+| `test-engine-native-job.mjs` | 新增用例「默认引擎超时必须覆盖真机全量实测耗时」 |
+| `test-engine-client.mjs` | 新增「超时但有进度 → partial」「超时且零进展 → 仍 failed」两条协议用例 |
+| `test-engine-python-entry.mjs` | 新增「writtenCount 必须是本轮真实改动篇数」与「普通 update 帧节流」两条用例 |
+
+**为什么 `writtenCount` 用「指纹差」而不是篇数净差**：增量轮通常**原地重写**同一批路径、篇数不变，净差会把真实改动记成零进展；也不能直接用 docs 目录的绝对篇数——增量轮进场时 docsDir 已被 Node 侧 `hydrateDocsDir` 灌入上一轮文章，零进展轮也会报几十篇，导致误判 partial 并推进基线，比不报更坏。所以按「进场时的 `(size, mtime_ns)` 指纹表 vs 当前指纹表」算真实改动（新增/改写/删除都计），并加 2 秒节流（start/complete 帧强制重算，普通 update 帧复用）避免每帧全树遍历拖慢编译。
+
+**验证**（当轮输出）：
+
+- `node test-engine-native-job.mjs` → `102/102 通过`，含 `✓ 默认超时 180 分钟 ≥ 真机实测 174 分钟`、`✓ 未显式配置时通道沿用默认超时（实际 10800000）`、`✓ 显式 nativeEngineTimeoutMs 仍优先（实际 12345）`。
+- `node test-engine-client.mjs` → `26 passed, 0 failed`，含 `✓ 进程：超时但有进度 → partial（已写的文章要救回来，不能判 failed）`、`✓ 进程：超时且零进展 → 仍判 failed（不能把空轮伪装成 partial）`。
+- `node test-engine-python-entry.mjs` → `15 passed, 0 failed`，含 `✓ 进度帧：writtenCount 必须是本轮真实改动篇数（超时全靠它判 partial）`、`✓ 进度帧：普通 update 帧节流（不能让每帧都全树遍历拖慢编译）`。
+- **反向验证**（每条都先红后绿）：把默认超时改回 `45 * 60 * 1000` → `✗ 默认超时 45 分钟 ≥ 真机实测 174 分钟`、`101/102 通过，1 失败`，恢复后 `102/102`；把 `emit_progress(..., written=written_now())` 还原成不传 written → `FAIL 进度帧：writtenCount 必须是本轮真实改动篇数`、`13 passed, 1 failed`；改成只算净篇数差 → 同样 `FAIL`；把节流条件改 `if False:` → `FAIL 进度帧：普通 update 帧节流（紧凑 update 必须节流掉遍历：13 次遍历 / 12 帧）`。三次 `cp` 备份恢复后均回到 `15 passed, 0 failed`。
+- 全量：27/28 套件 `ok`；唯一 FAIL 仍是 `test-wiki-anchors.mjs`（wiki 文章引用的 `index.js` 行号越界 / 符号已不存在），属文档滞后于源码，重新编译后消失。
+
+---
+
 ## 0.16.4 — 2026-10-30
 
 ### 修复：孤立 gitlink 被当成源码，引擎编译超时零产出

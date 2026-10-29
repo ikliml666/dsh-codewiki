@@ -36,7 +36,7 @@ const FAKE_ENGINE = path.join(here, 'test-fixtures', 'fake-native-engine.mjs')
 const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE
 
 const { apply } = await import('./index.js')
-const { runNativeJob } = await import('./lib/engine/native-run.js')
+const { runNativeJob, DEFAULT_ENGINE_TIMEOUT_MS } = await import('./lib/engine/native-run.js')
 
 let failures = 0
 let checks = 0
@@ -620,6 +620,31 @@ console.log('== 用例 16：假 runEngine 的 cancelled / failed 分支短路，
   ac.abort()
   const rp = await runNativeJob({ ...base, signal: ac.signal, deps: { ...base.deps, runEngine: async () => { throw new Error('不该被调用') } } })
   check(rp.outcome === 'cancelled', `提交前已 abort → cancelled（实际 ${rp.outcome}）`)
+}
+
+// ============================ 用例 17：默认超时必须容得下真机全量耗时 ============================
+//
+// 45 分钟是阶段 1C 按小 fixture 估的，真机上根本不成立：`job-mvt1mrvu-6` 是本仓库
+// 唯一一次真正跑完的编译，分阶段实测 articles 66.0min + crosscut 10.0min +
+// review 68.9min ≈ 174 分钟。预算低于物理耗时不是「编译失败」，而是「永远失败」：
+// 每次都在阶段 3 刚开头（percent 54）被砍，一篇都写不出来，重试多少次都一样。
+// 这条用例守的就是「别再有人凭直觉把默认值调回去」。
+console.log('== 用例 17：默认引擎超时必须覆盖真机全量实测耗时 ==')
+{
+  const MEASURED_FULL_COMPILE_MS = 174 * 60 * 1000
+  check(
+    DEFAULT_ENGINE_TIMEOUT_MS >= MEASURED_FULL_COMPILE_MS,
+    `默认超时 ${Math.round(DEFAULT_ENGINE_TIMEOUT_MS / 60000)} 分钟 ≥ 真机实测 ${Math.round(MEASURED_FULL_COMPILE_MS / 60000)} 分钟`,
+  )
+  const { nativeChannelFor } = await import('./index.js')
+  const ch = nativeChannelFor({ nativeEngine: true }, { kind: 'stale', scope: 'auto' })
+  check(
+    ch?.timeoutMs === DEFAULT_ENGINE_TIMEOUT_MS,
+    `未显式配置时通道沿用默认超时（实际 ${ch?.timeoutMs}）`,
+  )
+  // 显式配置必须仍然优先：这条上限是兜底，不能被默认值架空
+  const ch2 = nativeChannelFor({ nativeEngine: true, nativeEngineTimeoutMs: 12345 }, { kind: 'stale', scope: 'auto' })
+  check(ch2?.timeoutMs === 12345, `显式 nativeEngineTimeoutMs 仍优先（实际 ${ch2?.timeoutMs}）`)
 }
 
 // ============================ 收尾 ============================

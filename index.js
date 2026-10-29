@@ -89,7 +89,7 @@ export const Config = z.object({
   nativeEngine: z.boolean().default(true).volatile().description('编译通道（0.16.0 起默认开启）：原生引擎通道（上游 FSoft Python 引擎）走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=退回内置 Node 流水线（0.16.0 起降级为兼容通道，不再接收新能力）。原生通道需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道'),
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
-  nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 45 分钟；超时由进程树终止兜底'),
+  nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 180 分钟（真机全量实测约 174 分钟）；超时由进程树终止兜底，已写文章按 partial 抢救'),
 })
 
 function val(x) {
