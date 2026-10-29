@@ -82,7 +82,7 @@
 
 | 环节 | 本插件负责 | 上游负责 |
 |------|-----------|---------|
-| 环境 | `doctor` 探针：python 版本 + `codewiki` 可导入 + `pip check` 闭合；指纹落 `.codewiki/engine-lock.json`，drift 直接 `engine-deps` 失败（**不自动 pip install**） | 版本自报（真实验收用 `codewiki.__version__ = 2.0.0`，上游锁 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca` 的源码树） |
+| 环境 | `doctor` 探针：python 版本 + `codewiki` 可导入 + `pip check` 闭合；指纹（含上游锁 commit）落 `.codewiki/engine-lock.json`，drift 直接 `engine-deps` 失败（**不自动 pip install**） | 版本自报（真实验收用 `codewiki.__version__ = 2.0.0`，上游锁 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca` 的源码树） |
 | 模型 | `lib/engine/llm-bridge.js` 在 `127.0.0.1` 上起一个 OpenAI 兼容端点，把宿主的 `ctx.llm.stream` 转成上游要的 `/v1/chat/completions`；上游只拿到 loopback URL + 占位 key | 用它自己的 prompt 与工具循环调模型 |
 | 质量 | `lib/engine/quality-gate.js` 逐篇体检（source_files 存在性、空证据、死链、frontmatter）+ 基线判定；终态四态 `done`/`partial`/`failed`/`cancelled` | 产出 docs 目录（`module_tree.json` / `metadata.json` / `*.md` / `update_record.json`） |
 | 落地 | `lib/engine/apply-plan.js`：写集封闭（只 `.codewiki/` 与根 `CodeWiki.md`）、pre-image 回滚、`cw index`、`cw meta update`、分支式自动提交、提交范围反查 | 不碰仓库 |
@@ -122,7 +122,7 @@ llm bridge 转发。
 |------|------|
 | 全量编译（8 场景中的 6.1） | **done**，241s，written 13，提交范围校验 `ok:true`，工作区干净 |
 | 已提交改动的 stale 增量 | **done**，10.7s（约为全量的 4%），written 9 |
-| 工作区有未提交改动 | **partial**（正确）：`uncommitted-input` 记账、基线不推进、文章照写 |
+| 工作区有未提交改动 | **partial**（正确）：把四路改动合成临时 commit 交给引擎（`workspaceSnapshot`，不挂 ref），产物与内容对齐；`uncommitted-input` 记账、基线不推进、文章照写 |
 | 重命名文件（`git mv` + 类改名） | **done**，增量识别 3 条变化，新增/重写模块页 |
 | 删除模块 | **done**，孤儿页在同一提交里被清理（见下） |
 | 取消（面板 `/api/codewiki/control`） | **cancelled**，基线不推进，HEAD 不变 |
@@ -163,7 +163,17 @@ llm bridge 转发。
 
 - 真实模型侧用 `workbuddy/glm-5.3` 完成验收：`workbuddy/hy3` 当期返回
   `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”）。
-  这是上游配额，不是适配层问题；换额度可用后把 `batchModel` 改回 `hy3` 即可。
+  这是上游配额，不是适配层问题。**规格的 hy3 硬门禁因此没有通过**：换额度可用后必须把
+  `batchModel` 改回 `hy3` 重跑八场景，才算闭环；在那之前这里是「替代验证」而非「符合规格」。
+- `node test-wiki-anchors.mjs --strict` 实测 **3354 过 / 59 败 / 32 待重编译**（默认档
+  3354 过 / 5 败 / 86 待重编译）。59 条失败里 34 条「指向空行」（`test-engine-apply-plan.mjs`
+  26 条、`index.js` 8 条、`README.md` 6 条）、20 条「符号未绑定」（`idleRound`/
+  `symbolIncremental`/`runEngine`/`normalizeIndexLinks` 等不在所引区间内）、4 条
+  「符号不存在」、1 条「起始行越界」。**主体是 `.codewiki/` 文章滞后于本轮代码**，
+  不是校验器缺陷；按纪律不手改文章，留待一次真实全量重编译覆盖。
+- 阶段 7 的退役**未执行**（`nativeEngine` 默认仍 `false`，旧 Node 路径一行未删）：
+  规格要求「真实通过后才删除」，且是否把原生通道切成默认通道**由用户决策**，本仓库不擅自
+  切换。退役前置条件见下节。
 - `doctor` 的 `engine.deps.ok` 在真机上恒为 `false`（该字段不带 `pip check` 明细，指纹
   也刻意不含它）；判定以 `engineLock.status === 'match'` 为准。
 - 上游 rung3 增量语义：**单模块内的方法级新增**通常不触发重写（component id 不在

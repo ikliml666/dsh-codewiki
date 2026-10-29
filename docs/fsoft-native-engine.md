@@ -197,14 +197,31 @@ fixture 同 1A（Python + TypeScript 双语言、路径含中文空格）。全�
 | 公开接口 | `build_engine` 加 `verbose` 参数 | `interface: 1` | `outcome: incremental`，`pages_written: ['overview']` |
 | 新文件 | 新增 `src/web/queue.ts`（`QueueItem` + `drain`） | `added: 2` | `outcome: incremental`，`pages_written: ['overview']` |
 | 删除 + 改名 | `git rm handler.py`、`git mv queue.ts queue_v2.ts` | `deleted`/`renamed` | `stale_scan.fixed` 命中 `web_layer`，页面里旧符号名 0 次、新名 20 次 |
-| 工作区变更 | 改名 `normalize` → `normalizeTask` 但**不提交** | — | FSoft 只认 committed diff，此路不通（见下） |
+| 工作区变更 | 改名 `normalize` → `normalizeTask` 但**不提交** | — | 0.15.0 起由 Node 侧合成临时 commit 交给引擎（见下） |
 
 未变页面保留：`core_engine` 页 mtime 未动，说明增量没有重写无关文章。
 
 **工作区变更这条是 FSoft 的真实限制，不是薄桥缺陷**：`generate.py` 只从
 `<old_commit>..<new_commit>` 取 diff，未提交改动不进 `update_record`。插件侧的
-`lib/change-set.js`（0.14.0 已实现）本来就能采四路变更，所以阶段 5 的做法是
-**由 Node 侧把工作区变更合成一个临时 change-set 交给引擎**，而不是让 FSoft 去读工作区。
+`lib/change-set.js`（0.14.0 已实现）本来就采四路变更，所以做法是
+**由 Node 侧把工作区变更合成一棵真实的树（临时 commit）交给引擎**，
+而不是让 FSoft 去读工作区。
+
+实现（0.15.0，`lib/engine/workspace-snapshot.js` + `lib/engine/native-run.js` 的 1.9 段）：
+
+1. 四路变化集里 `staged`/`unstaged`/`untracked` 任一路非空时，用**独立的临时 index**
+   （`GIT_INDEX_FILE` 指向 `os.tmpdir()`，不碰用户 index）跑 `read-tree <parent>` →
+   `add -A -- .` → `write-tree`，再用 `commit-tree` 造一个挂在 HEAD 上的 commit。
+   **不写任何 ref**：`git for-each-ref --contains <sha>` 为空，`HEAD` 不变，工作区仍然脏，
+   `git diff --cached` 仍然空——编译不会因快照在仓库里留下任何痕迹。
+2. 本轮交给引擎的 `commitId` 改成这个快照 sha（无快照时仍用 HEAD），于是
+   `metadata.json` 的 `generation_info.commit_id` 与实际产物内容**对齐**。下一轮拿它当
+   `old_commit`，diff 起点就是「工作区那份内容」，未提交改动不会被当成已消化。
+3. 质量门按 `consumedInputCommit` 认可产物对得上快照（不再误报 `commit-mismatch`），
+   但 `uncommitted-input` 照旧判 defect：快照不挂 ref，把它记成已提交基线是不可逆的，
+   终态仍 `partial`、基线不推进。
+4. 造不出快照不算失败——退回用 HEAD 记账并记 note。快照是**对齐精度**的改进，不是
+   编译成立的前提；把「git 太旧 / 对象只读」升级成编译失败是本末倒置。
 
 取消与异常退出：`lib/engine/process-tree.js` 的 `terminateProcessTree` 在真实模型
 调用中途（桥请求计数 196→197 的那一瞬）用 `taskkill /T /F` 终止整棵进程树，
@@ -218,7 +235,7 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
 
 **这次不是探针，是生产链路**：`codewiki_generate` 工具 → JobService →
 `lib/engine/native-run.js`，用真实 venv（Python 3.12.10、`codewiki 2.0.0`、
-`pip check` 零破损、源码锁上游 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`）
+`pip check` 零破损、源码锁上游 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`）
 与真实 `workbuddy/glm-5.3`（经 `lib/engine/llm-bridge.js` 转发真凭证）。fixture 是
 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（路径含中文与空格）。
 
@@ -254,18 +271,43 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
    `pages_removed: []`）→ 新增 `findOrphanPages()` + `applyNativeOutput({deleteFiles})`，
    删除走落地事务。
 
-**未达成项（如实记录）**：`workbuddy/hy3` 当期 `429 quota_exceeded`
-（2026-10-29 14:23:38 UTC+8 重置）故用 `glm-5.3`；`test-wiki-anchors.mjs` 默认档
-2196 过 / 8 败 / 55 待重编译，8 条全是文档滞后（`README.md` 行号漂移 7 条 +
-`.codewiki/modules/lib.md:518` 引用不存在的 `client.js:223 runEngine` 1 条），
-按纪律不手改文章、留待真实全量重编译。
+**未达成项（如实记录）**：
+
+- **hy3 硬门禁未通过**。阶段 1B 第 4 条要求实测 `workbuddy/hy3`；当期 hy3 返回
+  `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8
+  重置”），故八场景真实验收用 `workbuddy/glm-5.3`。这是**上游配额**不是适配层问题，
+  但规格的硬门禁确实没满足——额度恢复后把 `batchModel` 改回 `hy3` 重跑八场景
+  才算闭环。
+- **strict 锚点未全绿**。`node test-wiki-anchors.mjs --strict` 实测
+  **3354 过 / 59 败 / 32 待重编译**（默认档 3354 过 / 5 败 / 86 待重编译）。59 条
+  失败构成：34 条「指向空行」（锚点行落在空行或区间内无代码，`test-engine-apply-plan.mjs`
+  占 26 条、`index.js` 8 条、`README.md` 6 条）、20 条「符号未绑定」（`idleRound`/
+  `symbolIncremental`/`runEngine`/`normalizeIndexLinks`/`normalizeArticlePath`/
+  `resolveBinary`/`numberLines` 等不在所引区间内）、4 条「符号不存在」（该符号在
+  目标文件里 0 次出现）、1 条「起始行越界」（`test-wiki-anchors.mjs:778` 超出该文件
+  当前 404 行）。**绝大多数是 `.codewiki/` 文章滞后于本轮代码**，属文档滞后而非
+  校验器缺陷：按纪律不手改文章，留待一次真实全量重编译覆盖（重编译后基线前移，
+  这些会自动升级为硬断言）。
+- **阶段 7 退役未执行，待用户决策**。`nativeEngine` 默认仍为 `false`，旧 Node 流水线
+  是默认路径也是回退路径；`symbols`/`cluster`/`graph-diff`/`incremental`/`update-planner`
+  一行未删（规格 L93「真实通过后才删除」）。是否把原生通道切成默认、以及随后删旧路径，
+  **由用户决策后再动**，本仓库不擅自切换。
 
 ## 上游同步
 
 上游仓库 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)，
-**锁定 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`**（2026-10-22T13:58:28+07:00，
+**锁定 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`**（2026-10-22T13:58:28+07:00，
 `Merge pull request #142 from FSoft-AI4Code/feat/zig-vue-autotools`），该源码树自报
 `codewiki.__version__ = 2.0.0`。
+
+**这个 commit 是机器可读的锁定，不只是一行文档**：`lib/engine/manifest.js` 导出
+`UPSTREAM_COMMIT` 常量，`probeEnvironment()` 把它带进环境 facts，`fingerprintOf()`
+把 `upstream:<40 位 sha>` 一起哈希，`buildLockBody()` 写进
+`.codewiki/engine-lock.json` 的 `upstreamCommit` 字段，`compareLock()` 逐字段比对。
+理由：`codewiki 2.0.0` 这个版本号写在 pyproject 里，换 commit 不会变——只看版本会让
+「换了引擎源码」静默 match 到旧锁。升级上游 = 改这一个常量 + 重建 venv + 跑契约测试，
+指纹与锁会自己漂移，`doctor()` 报 `engine-deps` 直到重新落锁。声明不合法（非 40 位）
+时 `doctor()` 的 advice 会明确写「本轮不构成有效锁定」。
 
 ### 升级步骤
 

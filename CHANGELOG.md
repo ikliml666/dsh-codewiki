@@ -4,7 +4,7 @@
 
 ### 原生引擎通道通过真实生产验收（阶段 6/7）：八场景真跑 + 修掉 8 个只有真机才暴露的缺陷
 
-用**真实** Python venv（Python 3.12.10、`codewiki 2.0.0`、`pip check` 零破损、源码锁上游 commit `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`）+ **真实** `workbuddy` 模型（经 `lib/engine/llm-bridge.js` 转发真凭证真云端）跑完整生产链路（`codewiki_generate` 工具 → JobService → `lib/engine/native-run.js`），fixture 是 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（含中文与空格路径）。八场景实测：
+用**真实** Python venv（Python 3.12.10、`codewiki 2.0.0`、`pip check` 零破损、源码锁上游 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`）+ **真实** `workbuddy` 模型（经 `lib/engine/llm-bridge.js` 转发真凭证真云端）跑完整生产链路（`codewiki_generate` 工具 → JobService → `lib/engine/native-run.js`），fixture 是 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（含中文与空格路径）。八场景实测：
 
 | 场景 | 终态 | 关键数字 |
 |------|------|----------|
@@ -32,8 +32,9 @@
 
 **如实记录的未达成项**：
 
-- `workbuddy/hy3` 当期返回 `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”），故真实验收用 `workbuddy/glm-5.3`。属上游配额，不是适配层问题；额度恢复后把 `batchModel` 改回 `hy3` 即可。首两次重跑因此 `failed`（`Exceeded maximum output retries (3)`，engine 字段全空），未计入验收。
-- `test-wiki-anchors.mjs` 默认档 **2196 过 / 8 败 / 55 待重编译**（主代理此前记录 3135 过 / 36 败，数字随 `.codewiki/` 被自动编译改写而变）。8 条失败全是文档滞后：7 条 `README.md` 行号漂移（`.codewiki/concepts/cordis-config-injection.md:50/115/161/162` 指向空行）、1 条 `.codewiki/modules/lib.md:518` 引用了 `client.js:223` 的 `runEngine` 而该符号在 client.js 里根本不存在（文档写错）。**按纪律不手工改文章绕过**，留待真实全量重编译覆盖。
+- **`workbuddy/hy3` 硬门禁未通过**。阶段 1B 第 4 条要求实测 `workbuddy/hy3`；当期 hy3 返回 `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”），故八场景真实验收用 `workbuddy/glm-5.3`。这属上游配额、不是适配层问题，但规格的硬门禁确实没满足——额度恢复后必须把 `batchModel` 改回 `hy3` 重跑八场景才算闭环。首两次重跑因此 `failed`（`Exceeded maximum output retries (3)`，engine 字段全空），未计入验收。
+- **`test-wiki-anchors.mjs --strict` 未全绿**。本轮实测（2026-10-29，11 项修复全部落盘后重跑）：strict **3354 过 / 59 败 / 32 待重编译**，默认档 **3354 过 / 5 败 / 86 待重编译**。59 条构成：**34 条「指向空行」**（锚点行号落在空行、或区间内无代码）、**20 条「符号未绑定」**（`idleRound`/`symbolIncremental`/`runEngine`/`normalizeIndexLinks`/`normalizeArticlePath`/`resolveBinary`/`numberLines`/`reminderText`/`tickIndex` 等符号不在所引区间内）、**4 条「符号不存在」**（该符号在目标文件里 0 次出现）、**1 条「起始行越界」**（`test-wiki-anchors.mjs:778` 超出该文件当前 404 行）。按目标文件分布：`test-engine-apply-plan.mjs` 26 条、`index.js` 8 条、`README.md` 6 条，其余零散分布在各 `.codewiki/modules/*.md`。**主体是 `.codewiki/` 文章滞后于本轮代码，不是校验器缺陷**——按纪律不手改文章，留待一次真实全量重编译覆盖（重编译后基线前移，这些会自动升级为硬断言）。此前记录的「严格档 3234 过 / 63 败 / 33 待重编译」「默认档 2196 过 / 8 败」均已过期，以本次实测为准（总数从 3234 涨到 3354 是本轮新增测试断言带来的有效锚点增量，失败数 63→59 是修复过程中 `.codewiki` 基线随提交前移的结果）。
+- **阶段 7 退役未执行，待用户决策**。规格 L93 要求「真实通过后才删除被替代的 Node 路径」；`nativeEngine` 当前默认仍为 `false`，旧 Node 流水线仍是主路，`symbols`/`cluster`/`graph-diff`/`incremental`/`update-planner` 一行未删。是否把原生通道切成默认通道、以及何时删旧路径，**由用户决策后再动**，本仓库不擅自切换。
 - 上游 rung3 语义使**单模块内的方法级新增**不触发重写（component id 不在 tracked 集 → `untracked` → 不进 ownership），因此「增量改了文章」这一条用结构性变化（新增/删除/重命名）验证，而非方法级改动。
 
 ### 文档与默认策略（阶段 7）
@@ -43,6 +44,31 @@
 - `docs/fsoft-native-engine.md` 新增「上游同步」章节：固定 commit 与如何升级、上游 changelog 要点、契约测试与 fixture 如何复现、真实编译怎么跑、回滚步骤。
 - `cordis.patch.yml` 注释补齐 `autoCommit` 与四个原生键（含「不做找可用解释器」与「不悄悄换通道」两条硬规则）；`index.js` 里 `nativeEngine` 系列字段的描述与阶段注释同步为最终语义（full 与 stale 都接管，决议权在 native-run）。
 - `package.json` `version` → **0.15.0**；`description` 改为如实描述两条通道与各自运行前提。
+
+### 修复：main...HEAD 双轴 code-review 的 11 项发现（Spec 7 项 + Standards 4 项）
+
+一轮 Standards + Spec 双轴审查（`main...HEAD`）在原生引擎通道上找出 11 项问题，本轮逐项处理：
+
+**Spec 轴**
+
+- **S1 上游锁 commit 抄错 38 位**。规格锁 `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`（40 位），仓库四处写成 38 位的 `03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca`（缺 `d58`）——那不是合法 git sha，锁定无从对账。四处（`docs/fsoft-native-engine.md:221`/`:266`、`CHANGELOG.md:7`、`README.md:85`）全部改为 40 位。
+- **S2 manifest 指纹不含上游 commit**。原 `fingerprintOf()` 只哈希 `manifestVersion+version+pythonVersion`，而 `codewiki 2.0.0` 这个版本号写在上游 pyproject 里、换 commit 不变 → **换了引擎源码会被静默判成 match**。现在 `lib/engine/manifest.js` 导出 `UPSTREAM_COMMIT` 常量 + `normalizeUpstreamCommit()`（只认 40 位十六进制），`probeEnvironment()` 把它带进 facts、`fingerprintOf()` 哈希进指纹、`buildLockBody()` 落进 `.codewiki/engine-lock.json` 的 `upstreamCommit` 字段、`compareLock()` 逐字段比对（仅上游变也判 drift 并点名 `upstreamCommit`）；声明不合法时 `doctor()` 的 advice 明确写「本轮不构成有效锁定」。`test-engine-manifest.mjs` 新增 8 条（合法性、38 位/大写/空白归一、上游变化→指纹变化、锁可读回、drift 字段、doctor advice）。上游锁是**声明**不是探测结果，所以 `native-run.js` 显式透传 `upstreamCommit` 而不是等 probe 自报。
+- **S3 阶段 7 退役未执行**（不是缺陷，是待决策项）。规格 L93 要求「真实通过后才删除被替代的 Node 路径」，当前 `nativeEngine` 默认 `false`、旧流水线仍是主路。本轮**没有删旧代码**：是否切成默认通道、何时删旧路径由用户决策。状态已写进本文件与 `README.md` 的「保留与退役」节。
+- **S4 四路变更只落了 committed**。原实现把 staged/unstaged/untracked 记进 `state.json` 的 unconsumed，却仍让引擎按 HEAD 记账——产物反映工作区内容、账本指向 HEAD，正是「变化悄悄丢」的入口。新增 `lib/engine/workspace-snapshot.js`：`createWorkspaceSnapshot()` 用**独立的临时 `GIT_INDEX_FILE`**（在 `os.tmpdir()`，不碰用户 index）跑 `read-tree <parent>` → `add -A -- .` → `write-tree` → `commit-tree`，造一个挂在 HEAD 上的 commit 而**不写任何 ref**（实测 `git for-each-ref --contains <sha>` 为空、HEAD 不变、工作区仍脏、`git diff --cached` 仍空）；`native-run.js` 的 1.9 段在引擎启动前造快照，把本轮 `commitId` 指向它（无快照时退回 HEAD）。质量门相应增加 `consumedInputCommit`：产物对得上快照不再误报 `commit-mismatch`，但 `uncommitted-input` 照旧判 defect —— 快照不挂 ref，把它记成已提交基线是不可逆的，终态仍 `partial`、基线不推进。造不出快照不算失败（退回 HEAD 记账 + note）：快照是「对齐精度」的改进，不是编译成立的前提。`test-engine-native-incremental.mjs` 用例 3 新增 5 条断言（40 位 sha、parent 是 HEAD 祖先、快照本身不进 HEAD、引擎收到的 commitId 就是快照、无 `commit-mismatch`、无跳过文件）。
+- **S5 strict 锚点未绿**。实测已如实记录并分析构成（见上文「如实记录的未达成项」第 2 条）：最新实测 59 败（34 指向空行 / 20 符号未绑定 / 4 符号不存在 / 1 越界），主体是 `.codewiki/` 文章滞后，**校验器代码不改**，留待真实全量重编译。
+- **S6 原始树未独立保留**。原 `artifacts.rawTreeDir` 只指向 `module_tree.json` 单个文件，FSoft 整棵 docs 树被原地消费、无法回溯引擎原始输出。`lib/engine/native-state.js` 新增 `archiveDocsTree({docsDir, destDir})`（逐文件复制、双向重叠校验、失败只记 note——留档是证据不是产物），`native-run.js` 的 2.9 段在质量门前把 `outDocsDir` 整棵拷到仓库外（`os.tmpdir()/dsh-codewiki-native-raw/<requestId>`，可用 `DSH_CODEWIKI_NATIVE_RAW_TREE_DIR` 覆盖），`artifacts` 增 `rawTree`/`rawTreeFiles` 两字段（`contract.js` 同步），`index.js` 的 `job.nativeResult.artifacts` 一并带出，finally 只清临时 docsDir 不清留档。`test-engine-native-incremental.mjs` 用例 1 新增 8 条断言（落点在仓库外、不与落地产物重叠、含 `module_tree.json`/`metadata.json`/`modules/*.md`）。
+- **S7 hy3 硬门禁被绕过**。已按事实写入「如实记录的未达成项」第 1 条：hy3 `429 quota_exceeded`，改用 `glm-5.3` 完成八场景，属**替代验证**而非符合规格，额度恢复后需重跑。
+
+**Standards 轴**
+
+- **R1 路径归一函数重复 5 份**（实为 6 处）。`String(p ?? '').replace(/\\/g,'/')` 复制在 `apply-plan.js`、`manifest.js`、`mapping.js`、`native-state.js`、`output.js`、`quality-gate.js`；全部收口到 `lib/git-paths.js:34` 的唯一 `export function toPosix(p)`，六模块改为 import（`toPosix` 或 `toPosix as posix`）。**故意不并的三处**语义不同，已在代码注释里写明理由：`article-contract.js` 的 `normalizeWritePath` 额外 `trim()+posix.normalize`、`change-set.js` 的 `normChangePath` 额外 trim + 越界判据、`incremental.js` 的 `normRel` 额外去 `./` + trim。
+- **R2 写集/删除集越界校验重复**。`checkWriteTargets` 与 `checkDeleteTargets` 四段同形 if 抽成 `checkTargetPath(original, { scopeLabel })`（空 → 绝对路径/盘符/前导斜杠 → `..` 上跳 → 白名单），两侧只保留各自的特有判据（content 类型与重复投递 / 目录不许当删除目标与幂等跳过）。
+- **R3 双提交器漂移**（`apply-plan.js` 的 `commitWikiArtifacts` 与 `index.js` 的 `autoCommitWiki`）。**本轮不改**：牵涉阶段 4 的通道切换，属另一张票。已知差异点：安全边界（只 add wiki 两路径、不 amend/push、无 HEAD 与冲突拒绝）两者一致，差异集中在 stage 前置条件与返回值形状，当前由两条通道各自使用、没有交叉调用。
+- **R4 巨函数**（`index.js` 的 `createJobService` 1655 行、`native-run.js` 的 `runNativeJob` 710 行）。**本轮不改**：属架构级重构，另开票处理；拆分需要先固定八段管线的输入输出契约，否则拆完只是把耦合搬个位置。
+
+**测试**：R1+R2 后 `test-engine-apply-plan.mjs` **41/41**；S2 后 `test-engine-manifest.mjs` **27/27**（21 → 27）；S6/S4 后 `test-engine-native-incremental.mjs` **96/96**（82 → 96）；`test-engine-quality-gate.mjs` **29/29**；`node --check` 对 `git-paths.js`/`manifest.js`/`mapping.js`/`native-state.js`/`output.js`/`quality-gate.js`/`apply-plan.js`/`native-run.js`/`contract.js`/`workspace-snapshot.js`/`index.js` 全部通过。
+
+**全量复跑**（11 项修完后，2026-10-29）：34 套功能测试**全部通过、总退出码 0**——`test-engine-native-job.mjs` **99/99**、`test-engine-native-incremental.mjs` **96/96**、`test-engine-apply-plan.mjs` 41、`test-engine-manifest.mjs` 27、`test-engine-quality-gate.mjs` 29、`test-engine-contract.mjs` 19、`test-engine-client.mjs` 24、`test-engine-bridge.mjs` 24、`test-engine-llm-bridge.mjs` 17、`test-engine-output.mjs` 20、`test-engine-output-real.mjs` 11、`test-engine-python-entry.mjs` 12、`test-engine-process-tree.mjs` 5、`test-agentic.mjs` 55、`test-agentic-host.mjs` 16、`test-agentic-fallback.mjs` 10、`test-articles-agentic.mjs` 20、`test-article-contract.mjs` 29、`test-change-set.mjs` 16、`test-cluster.mjs` 30、`test-incremental.mjs` 20、`test-incremental-e2e.mjs` 8、`test-prune-orphans.mjs` 12、`test-semantic-plan.mjs` 11、`test-symbols.mjs` 24、`test-update-planner.mjs` 20、`test-update-record.mjs` 18，其余（`test-batch`/`test-cwd-paths`/`test-graphdiff`/`test-orchestration`/`test-sessions`/`test-wiki-entry`/`test-worktree`）无失败。锚点：strict **3354 过 / 59 败 / 32 待重编译**、默认档 **3354 过 / 5 败 / 86 待重编译**（构成与处置见上文「如实记录的未达成项」第 2 条）。
 
 ### 接入：FSoft 原生引擎统一增量与跨轮受管状态（阶段 5）
 

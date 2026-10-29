@@ -1974,6 +1974,13 @@ const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-sessio
 // 才写得成，写进 .codewiki/ 就成了提交之后的未跟踪文件（每轮都脏工作区）。
 const NATIVE_RECORD_DIR = path.join(os.tmpdir(), 'dsh-codewiki-native-records')
 const nativeRecordDir = () => process.env.DSH_CODEWIKI_NATIVE_RECORD_DIR || NATIVE_RECORD_DIR
+// 引擎原始 docs 树的留档根（仓库外）：引擎产物接着会被映射、改写、裁剪，被消费掉的
+// 那棵树就再也回不来了。设计文档 L20 要求「保留 FSoft 输出原始树作为事实来源」，
+// 所以在消费之前拷一份到这里，按 jobId 分目录。它是**证据**不是产物：不进 .codewiki/
+// （否则 cw index 会把它收成第二套文章）、不进仓库（否则污染 git 状态）。
+// 同一 job 重跑会覆盖同名目录（幂等）；目录生命周期由操作系统的临时目录清理兜底。
+const NATIVE_RAW_TREE_DIR = path.join(os.tmpdir(), 'dsh-codewiki-native-raw')
+const nativeRawTreeDir = () => process.env.DSH_CODEWIKI_NATIVE_RAW_TREE_DIR || NATIVE_RAW_TREE_DIR
 
 // ---------------------------------------------------------------------------
 // 会话内容记录（面板「会话」视图的数据底座）：把并发池每个 LLM 请求的 prompt 与
@@ -2778,6 +2785,9 @@ function createJobService(config, onSettled) {
         signal: ac.signal,
         timeoutMs: channel.timeoutMs,
         docsDir,
+        // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
+        // 失败只记 note 不影响终态——它是事实来源，不是交付物。
+        rawTreeRoot: nativeRawTreeDir(),
         deps: {
           config: {
             ...c,
@@ -2827,6 +2837,8 @@ function createJobService(config, onSettled) {
       .finally(() => {
         nativeRuns.delete(job.id); nativeAborters.delete(job.id)
         // 引擎原始产物是临时件（落地后就不再需要）：留着只会在系统临时目录里堆垃圾。
+        // 注意：这里清的是 `docsDir`（被消费的工作副本），**不清** rawTreeRoot 下那份
+        // 留档 —— 留档存在的意义正是「消费之后还能回看引擎原样」。
         try { fs.rmSync(docsDir, { recursive: true, force: true }) } catch { /* 清不掉不影响终态 */ }
         touch(job)
       })
@@ -2865,6 +2877,10 @@ function createJobService(config, onSettled) {
         gate: res.gate ?? null,
         apply: res.apply ?? null,
         engineLock: res.engineLock ?? null,
+        // 产物位置要随结果出去：`rawTree` 是引擎原始 docs 树在被消费之前的留档
+        // （设计文档 L20 的事实来源）。不搬出来的话，留档虽然写成了，却没有任何
+        // 人能从 job 结果里找到它 —— 等于没留。
+        artifacts: res.artifacts ?? null,
         // 增量现场必须随结果出去：决议（full/update）、变化集、水合清单、
         // 引擎自报的 updateOutcome、未消费凭据。面板与 codewiki_progress 靠它
         // 回答「这一轮到底走了增量还是退了全量、变化有没有被吃干净」；

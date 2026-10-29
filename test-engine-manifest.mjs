@@ -10,6 +10,8 @@ import { join } from 'node:path'
 import {
   MANIFEST_VERSION,
   ENGINE_LOCK_REL,
+  UPSTREAM_COMMIT,
+  normalizeUpstreamCommit,
   probeEnvironment,
   fingerprintOf,
   readLock,
@@ -60,6 +62,75 @@ await check('fingerprintOf：pip check 状态不进指纹（修依赖不算换�
   const ok = fingerprintOf({ version: '2.0.0', pythonVersion: '3.12.10', pipCheckOk: true })
   const bad = fingerprintOf({ version: '2.0.0', pythonVersion: '3.12.10', pipCheckOk: false })
   assert.equal(ok, bad)
+})
+
+// ── 上游源码锁（规格 L221/L266：上游锁定 commit，经契约测试升级）──────────────
+//
+// 这一组的失败后果很具体：`codewiki 2.0.0` 是从上游源码 git 安装的，版本号写在
+// pyproject 里、换了 commit 也不变。指纹若只看版本，「上游悄悄换了源码」就会报
+// match，产物差异被误诊成模型问题，而那是最难查的一类。
+
+await check('UPSTREAM_COMMIT：仓库声明的上游锁是合法 40 位十六进制', async () => {
+  assert.match(UPSTREAM_COMMIT, /^[0-9a-f]{40}$/)
+  assert.equal(normalizeUpstreamCommit(UPSTREAM_COMMIT), UPSTREAM_COMMIT)
+})
+
+await check('normalizeUpstreamCommit：38 位/大写/空白都不构成有效锁', async () => {
+  // 38 位就是这次 code-review 抓到的那个抄错值（少了 d58）
+  assert.equal(normalizeUpstreamCommit('03d0a294adf3c878bd8aeb0ef5e95a2ff8c3ca'), '')
+  assert.equal(normalizeUpstreamCommit(`  ${UPSTREAM_COMMIT.toUpperCase()}  `), UPSTREAM_COMMIT)
+  assert.equal(normalizeUpstreamCommit(''), '')
+  assert.equal(normalizeUpstreamCommit(null), '')
+})
+
+await check('fingerprintOf：上游 commit 变化 → 指纹变化（版本号不动也算换引擎）', async () => {
+  const a = fingerprintOf({ version: '2.0.0', pythonVersion: '3.12.10', upstreamCommit: UPSTREAM_COMMIT })
+  const b = fingerprintOf({ version: '2.0.0', pythonVersion: '3.12.10', upstreamCommit: 'a'.repeat(40) })
+  assert.notEqual(a, b)
+  // 同一份声明重复算必须稳定
+  assert.equal(a, fingerprintOf({ version: '2.0.0', pythonVersion: '3.12.10', upstreamCommit: UPSTREAM_COMMIT }))
+})
+
+await check('probeEnvironment：缺省带上游锁，并把上游锁写进 facts（不是只进指纹）', async () => {
+  const env = await probeEnvironment({ probe: fakeProbe() })
+  assert.equal(env.upstreamCommit, UPSTREAM_COMMIT)
+  const custom = await probeEnvironment({ probe: fakeProbe(), upstreamCommit: 'b'.repeat(40) })
+  assert.equal(custom.upstreamCommit, 'b'.repeat(40))
+  assert.notEqual(custom.fingerprint, env.fingerprint)
+})
+
+await check('writeLock：上游 commit 落进 lock，可读回（文档锁 ≠ 机器可查的锁）', async () => {
+  const repo = join(root, 'lock-upstream')
+  const env = await probeEnvironment({ probe: fakeProbe() })
+  writeLock({ repoRoot: repo, current: env })
+  const back = readLock({ repoRoot: repo })
+  assert.equal(back.upstreamCommit, UPSTREAM_COMMIT)
+})
+
+await check('compareLock：只有上游 commit 变了 → drift，字段是 upstreamCommit', async () => {
+  const env = await probeEnvironment({ probe: fakeProbe() })
+  const lock = { ...env, upstreamCommit: 'c'.repeat(40) }
+  const r = compareLock({ current: env, lock })
+  assert.equal(r.status, 'drift')
+  assert.deepEqual(r.diffs.map((d) => d.field), ['upstreamCommit'])
+  assert.equal(r.diffs[0].locked, 'c'.repeat(40))
+  assert.equal(r.diffs[0].current, UPSTREAM_COMMIT)
+})
+
+await check('doctor：改了上游声明 → drift（升级上游必须被看见，而不是静默 match）', async () => {
+  const repo = join(root, 'doc-upstream-drift')
+  const first = await doctor({ probe: fakeProbe(), repoRoot: repo })
+  writeLock({ repoRoot: repo, current: first.current })
+  const r = await doctor({ probe: fakeProbe(), repoRoot: repo, upstreamCommit: 'd'.repeat(40) })
+  assert.equal(r.status, 'drift')
+  assert.equal(r.ok, false)
+  assert.equal(r.diffs[0].field, 'upstreamCommit')
+})
+
+await check('doctor：上游声明不合法 → advice 里明确说「本轮不构成有效锁定」', async () => {
+  const repo = join(root, 'doc-upstream-bad')
+  const r = await doctor({ probe: fakeProbe(), repoRoot: repo, upstreamCommit: 'not-a-sha' })
+  assert.match(r.advice, /不构成有效锁定/)
 })
 
 await check('readLock：没有 lock 文件返回 null（首次运行不是错误）', async () => {

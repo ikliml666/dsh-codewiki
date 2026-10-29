@@ -55,6 +55,10 @@ function mkTmp(prefix) {
   madeDirs.push(d)
   return d
 }
+// 原始树留档根（S6）：index.js 的 nativeRawTreeDir() 读这个环境变量，
+// 不指走的话留档会落进系统临时目录，测试既找不到也清不掉。
+const RAW_TREE_ROOT = mkTmp('cw-inc-raw-')
+process.env.DSH_CODEWIKI_NATIVE_RAW_TREE_DIR = RAW_TREE_ROOT
 
 // ── fixture：带 git、已 cw init 并提交过 wiki 的临时仓库 ──────────────────────
 // 模式文件必须放**仓库外**：放进仓库会变成一次未提交源码改动，质量门的
@@ -219,6 +223,22 @@ if (want(1)) { console.log('== 用例 1：生产链两轮（full → stale updat
   const indexText = fs.readFileSync(path.join(repo, '.codewiki', '_index.md'), 'utf8')
   check(!indexText.includes('_native-state'), 'cw index 未把 _native-state 下的文章副本收进索引')
 
+  // 原始树留档（S6）：引擎产出的那棵树在被映射/改写/裁剪之前必须留一份。
+  // 这条断言守的是「事实来源」这条设计约束——没有它，「这一轮的差异是引擎给的
+  // 还是我们落地时加工出来的」永远回答不了。
+  const rawDir = String(first.job?.nativeResult?.artifacts?.rawTree ?? '')
+  const rawFiles = Number(first.job?.nativeResult?.artifacts?.rawTreeFiles ?? 0)
+  check(rawDir !== '', `原始树已留档并随结果出去（rawTree=${rawDir || '（空）'}）`)
+  check(rawDir !== '' && norm(rawDir).startsWith(norm(RAW_TREE_ROOT)), '留档落在仓库外（不污染 git、不被 cw index 收成第二套文章）')
+  check(rawDir !== '' && !norm(rawDir).startsWith(norm(repo)), '留档目录不在被测仓库内')
+  check(rawFiles > 0, `留档文件数 > 0（实际 ${rawFiles}）`)
+  check(rawDir !== '' && exists(path.join(rawDir, 'module_tree.json')), '留档里有 module_tree.json（引擎原始产物）')
+  check(rawDir !== '' && exists(path.join(rawDir, 'metadata.json')), '留档里有 metadata.json')
+  check(rawDir !== '' && fs.readdirSync(path.join(rawDir, 'modules')).some((f) => f.endsWith('.md')),
+    '留档里有引擎写的模块页正文（不是只有一份清单）')
+  // 留档是「消费之前」的快照：它必须与落地后的 .codewiki/modules 分开两份，不是同一个目录。
+  check(norm(path.join(rawDir, 'modules')) !== norm(path.join(repo, '.codewiki', 'modules')), '留档与落地产物是两个目录')
+
   // 第二轮：提交一次源码改动，然后 stale
   fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
   git('add', '.')
@@ -298,6 +318,28 @@ if (want(3)) { console.log('== 用例 3：四路变化与 delete/rename 都被 c
   check(r.job?.nativeResult?.apply?.baseline?.advanced !== true, '基线未推进（未提交变化不会被记成已消化）')
   const blockersText = JSON.stringify(r.job?.blockers ?? [])
   check(/uncommitted-input|quality-gate/.test(blockersText), `阻塞原因说清是未提交输入（${blockersText.slice(0, 160)}）`)
+  // ── S4：未提交的三路不止「记账」，而是被合成成一棵真实的树交给引擎 ──
+  //
+  // 规格 L82 的症结是 FSoft 只从 `<old>..<new>` 取 diff：Node 侧若只把工作区路径
+  // 记进 unconsumed、却仍让引擎按 HEAD 记账，产物反映的内容就永远不在账本里。
+  // 这四条断言钉住的正是「内容与账本对齐」这件事本身，而不是中间的实现手段。
+  const snap = inc.workspaceSnapshot
+  check(snap && /^[0-9a-f]{40}$/.test(String(snap.sha)), `工作区改动合成 40 位快照（实际 ${JSON.stringify(snap)}）`)
+  // parent 必须是本轮产物提交之前的那次 HEAD：apply 阶段会提交 wiki 产物，
+  // 所以「等于现在的 HEAD」是错断言，只能问「是不是当前历史的祖先」。
+  const isAncestorOfHead = (sha) => {
+    try { gitOut(repo, 'merge-base', '--is-ancestor', sha, 'HEAD'); return true } catch { return false }
+  }
+  check(Boolean(snap?.parent) && isAncestorOfHead(snap.parent),
+    `快照挂在 HEAD 之上（parent=${String(snap?.parent).slice(0, 12)} 是当前历史祖先）`)
+  check(snap?.sha !== gitOut(repo, 'rev-parse', 'HEAD'),
+    `快照本身不被提交、不进 HEAD（HEAD=${gitOut(repo, 'rev-parse', 'HEAD').slice(0, 12)}，快照 ${String(snap?.sha).slice(0, 12)}）`)
+  const engineCall = readCalls(base, 'fourway').filter((c) => c.action === 'update').pop()
+  check(engineCall?.commitId === snap?.sha,
+    `引擎收到的 commitId 就是快照（实际 ${String(engineCall?.commitId).slice(0, 12)}，快照 ${String(snap?.sha).slice(0, 12)}）`)
+  check(!/commit-mismatch/.test(blockersText),
+    `产物对得上快照后不再报 commit-mismatch（${blockersText.slice(0, 200)}）`)
+  check(Array.isArray(snap?.skipped) && snap.skipped.length === 0, `快照没有跳过的文件（${JSON.stringify(snap?.skipped ?? [])}）`)
 }
 // ============================ 用例 4：未提交变化两轮不丢 ============================
 if (want(4)) { console.log('== 用例 4：未提交改动连续两轮不丢（第三轮提交后消费成立才移出） ==')
