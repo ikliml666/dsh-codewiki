@@ -1,150 +1,36 @@
 {
   "version": 1,
-  "jobId": "job-mvsv1tn2-0",
+  "jobId": "job-mvsxcbru-1",
   "scope": "auto",
-  "startedAt": "2026-10-29T01:24:28.622Z",
-  "finishedAt": "2026-10-29T03:04:35.413Z",
+  "startedAt": "2026-10-29T02:28:37.914Z",
+  "finishedAt": "2026-10-29T03:52:58.238Z",
   "baseCommit": null,
   "headCommit": null,
   "changeSet": null,
   "plan": null,
   "results": [
     {
-      "name": "modules/symbol_extraction.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/graph_diff.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/change_set_git.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/incremental.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/clustering.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/update_planning.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/engine_core.md",
+      "name": "modules/tools.md",
       "ok": false,
-      "stopReason": "max-steps",
+      "stopReason": "error",
       "error": null
     },
     {
-      "name": "modules/engine_state.md",
+      "name": "modules/test-fixtures.md",
+      "ok": false,
+      "stopReason": "error",
+      "error": null
+    },
+    {
+      "name": "modules/lib.md",
       "ok": true,
-      "stopReason": "finished",
+      "stopReason": "completed",
       "error": null
     },
     {
-      "name": "modules/engine_openai_bridge.md",
+      "name": "modules/root.md",
       "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/engine_llm_bridge.md",
-      "ok": true,
-      "stopReason": "max-steps",
-      "error": null
-    },
-    {
-      "name": "modules/engine_quality.md",
-      "ok": true,
-      "stopReason": "finished",
-      "error": null
-    },
-    {
-      "name": "modules/tests_engine_apply.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/tests_agentic.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/tests_engine_native_inc.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/tests_orchestration_batch.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/tests_engine_native_job.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/tests_orchestration_jobs.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/root_scripts.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/article_contract.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/fsoft_tools.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/agentic_lib.md",
-      "ok": false,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/engine_apply.md",
-      "ok": true,
-      "stopReason": "stream-error",
-      "error": null
-    },
-    {
-      "name": "modules/engine_python.md",
-      "ok": true,
-      "stopReason": "stream-error",
+      "stopReason": "completed",
       "error": null
     },
     {
@@ -162,28 +48,12 @@
   ],
   "qualityIssues": [
     {
-      "name": "modules/agentic_tools.md",
-      "issue": "存量文章未过契约：frontmatter 缺必填字段 tags（没有标签也要写成 tags: []）"
-    },
-    {
       "name": "modules/article_contract.md",
       "issue": "存量文章未过契约：source_files 指向不存在的文件：agentic.js"
     },
     {
-      "name": "modules/engine_apply_plan.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/index.js"
-    },
-    {
       "name": "modules/engine_python.md",
       "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "name": "modules/fsoft_probes.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：.probe-run-all-tests.mjs"
-    },
-    {
-      "name": "modules/mock_utils.md",
-      "issue": "存量文章未过契约：重复章节：Key Components；必需章节 Key Components 是空的"
     },
     {
       "name": "modules/update_planning.md",
@@ -214,53 +84,13 @@
   "blockers": [
     {
       "kind": "article-failed",
-      "name": "modules/engine_core.md",
-      "detail": "max-steps"
+      "name": "modules/tools.md",
+      "detail": "error"
     },
     {
       "kind": "article-failed",
-      "name": "modules/tests_engine_apply.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/tests_agentic.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/tests_engine_native_inc.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/tests_orchestration_batch.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/tests_engine_native_job.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/tests_orchestration_jobs.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/root_scripts.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/fsoft_tools.md",
-      "detail": "stream-error"
-    },
-    {
-      "kind": "article-failed",
-      "name": "modules/agentic_lib.md",
-      "detail": "stream-error"
+      "name": "modules/test-fixtures.md",
+      "detail": "error"
     },
     {
       "kind": "article-failed",
@@ -274,33 +104,13 @@
     },
     {
       "kind": "quality",
-      "name": "modules/agentic_tools.md",
-      "detail": "存量文章未过契约：frontmatter 缺必填字段 tags（没有标签也要写成 tags: []）"
-    },
-    {
-      "kind": "quality",
       "name": "modules/article_contract.md",
       "detail": "存量文章未过契约：source_files 指向不存在的文件：agentic.js"
     },
     {
       "kind": "quality",
-      "name": "modules/engine_apply_plan.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/index.js"
-    },
-    {
-      "kind": "quality",
       "name": "modules/engine_python.md",
       "detail": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/fsoft_probes.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：.probe-run-all-tests.mjs"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/mock_utils.md",
-      "detail": "存量文章未过契约：重复章节：Key Components；必需章节 Key Components 是空的"
     },
     {
       "kind": "quality",
@@ -334,26 +144,26 @@
     }
   ],
   "canAdvanceBaseline": false,
-  "writtenCount": 13,
-  "failedCount": 12,
+  "writtenCount": 2,
+  "failedCount": 4,
   "notes": [
-    "proof-batch-8 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 1fcb39d4-9910-46da-8a8f-a2822f21dc6e）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
-    "modules/symbol_extraction.md：批量校对输出缺席，保留原文",
-    "modules/graph_diff.md：批量校对输出缺席，保留原文",
-    "modules/change_set_git.md：批量校对输出缺席，保留原文",
-    "modules/incremental.md：批量校对输出缺席，保留原文",
-    "modules/clustering.md：批量校对输出缺席，保留原文",
-    "modules/update_planning.md：批量校对输出缺席，保留原文",
-    "modules/engine_state.md：批量校对输出缺席，保留原文",
-    "modules/engine_openai_bridge.md：批量校对输出缺席，保留原文",
-    "modules/engine_llm_bridge.md：批量校对输出缺席，保留原文",
-    "modules/engine_quality.md：批量校对输出缺席，保留原文",
-    "modules/article_contract.md：批量校对输出缺席，保留原文",
-    "modules/engine_apply.md：批量校对输出缺席，保留原文",
-    "modules/engine_python.md：批量校对输出缺席，保留原文",
-    "存量文章体检：12 篇未过契约（modules/agentic_tools.md、modules/article_contract.md、modules/engine_apply_plan.md 等）",
-    "完整性未成立（部分完成（24 项未满足：max-steps））—— max-steps；stream-error；stream-error",
-    "清理孤儿模块文章 14 篇（模块划分已变，旧文件无人重写）—— agentic_tools.md、articles_agentic.md、engine_apply_plan.md、engine_bridges.md、engine_contract_client.md 等",
+    "文章 modules/lib.md 行号锚点存疑（未改）：lib/engine/native-run.js:19-20 符号未找到未改；lib/engine/native-run.js:679 符号未找到未改；lib/engine/python/entry.py:257-289 符号未找到未改 等",
+    "文章 modules/root.md 自动修正 5 处行号锚点",
+    "文章 modules/root.md 行号锚点存疑（未改）：client.js:7 符号未找到未改；client.js:28-29 符号未找到未改；client.js:127-137 符号歧义未改 等",
+    "阶段已启动：2 个请求（模型 workbuddy/hy3，并发 6）",
+    "横切批次已提交：_architecture/_patterns + 0 个概念",
+    "_architecture.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 2e0da839-6b0b-42b7-b58f-22089052aab8）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "_patterns.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId baa3f09a-9c0c-4909-8fe4-da1f9e7117a5）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "1 个请求输入超单请求预算（110k），按大档装填",
+    "阶段已启动：2 个请求（模型 workbuddy/hy3 + 大档 volces-ark/glm-5.3-flash（1 个），并发 6 + 大档 2）",
+    "校对批次已提交：2 篇合并为 2 个请求",
+    "proof-batch-1 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 4f44e25f-c69a-482c-bbfd-2d2e1dac9fbd）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "modules/root.md：自动修正 4 处行号锚点",
+    "modules/root.md：行号锚点存疑（未改）—— client.js:7 符号未找到未改；client.js:28-29 符号未找到未改；client.js:127-137 符号歧义未改 等",
+    "modules/lib.md：批量校对输出缺席，保留原文",
+    "存量文章体检：8 篇未过契约（modules/article_contract.md、modules/engine_python.md、modules/update_planning.md 等）",
+    "完整性未成立（部分完成（12 项未满足：error））—— error；error；error",
+    "清理孤儿模块文章 13 篇（模块划分已变，旧文件无人重写）—— article_contract.md、change_set_git.md、clustering.md、engine_apply.md、engine_llm_bridge.md 等",
     "cw index exit 0",
     "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
     "符号快照已写入（691 个组件），下次增量按组件级判定"
