@@ -44,7 +44,7 @@ tags: [lib, agentic, 增量编译, 原生引擎, 符号图, 质量门]
 - **机读契约词表**：所有问题类别（`BLOCKER_KINDS`、`SEVERITY`、`GATE_DEFECT_KINDS` 等）都是稳定枚举，新增只许追加。
 - **诚实终态**：done 不许带 blockers、partial 必须带 blockers（`lib/engine/contract.js:122-127`）；基线只有完整成功才推进；「采不到变更」绝不当成「没变化」（`lib/change-set.js:106-107`）。
 
-外部依赖仅两个：`@deepseek-ai/dsh-llm`（`lib/agentic-host.js:11-13`）与装在 `vendor/tree-sitter` 的 web-tree-sitter WASM 语法包（`lib/symbols.js:21-25`，不放插件根 node_modules 是因为那里由宿主注入、不能跑 npm install）。
+外部依赖仅两个：`@deepseek-ai/dsh-llm`（`lib/agentic-host.js:11-13`）与装在 `vendor/tree-sitter` 的 web-tree-sitter WASM 语法包（`lib/symbols.js`，不放插件根 node_modules 是因为那里由宿主注入、不能跑 npm install）。
 
 ## Key Components
 
@@ -65,7 +65,7 @@ tags: [lib, agentic, 增量编译, 原生引擎, 符号图, 质量门]
 
 | 符号 | 行号 | 用途 |
 | --- | --- | --- |
-| `TOOL_SCHEMAS` | 27-87 | 四个 JSON Schema：`read_code`（27-42）/ `list_files`（43-53）/ `edit_article`（54-71，view/str_replace/insert）/ `generate_sub_module`（72-86） |
+| `TOOL_SCHEMAS` | 27-87 | 四个 JSON Schema：`read_code`（28-42）/ `list_files`（43-53）/ `edit_article`（54-71，view/str_replace/insert）/ `generate_sub_module`（72-86） |
 | `MAX_READ_LINES` | 93 | 单次 read_code 行数上限 2000 |
 | `MAX_READ_CHARS` | 94-96 | 字符上限 40000（只限行数挡不住压缩产物：单行 20 万字符实测回吐 5.7 万 token） |
 | `IGNORED_DIRS` | 97-98 | node_modules/.git/dist/build/.next/target/vendor/__pycache__/.venv/venv 一律不列 |
@@ -172,7 +172,7 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 | `RETRYABLE_CODES` | 90 | engine-timeout / engine-model / engine-unknown 可重试，其余确定性失败 |
 | `engineResult(input)` | 116-180 | **构造即校验**：done 带 blockers 抛错（122-124）、partial 无 blockers 抛错（125-127）、failed 缺 error 抛错（128-131）、updateOutcome 未登记抛错（133-141） |
 | `engineProgress(input)` | 183-201 | 推进快照；stage 必须在枚举内（184-187），percent 夹 0-100 |
-| `engineError(input)` | 204-215 | 未登记 code 归 engine-unknown 并保留 rawCode（211-213） |
+| `engineError(input)` | 204-215 | 未登记 code 归 engine-unknown 并保留 rawCode（205-213） |
 | `validateEngineResult(value)` | 219-260 | 反序列化边界校验（磁盘残留/旧版本），不抛返回逐条 errors |
 | `describeEngineResult(result)` | 263-280 | 四态人类文案 |
 
@@ -234,17 +234,17 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 
 ### lib/engine/output.js — 产物读取与自洽校验
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `OUTPUT_PROBLEM_KINDS` | 22-34 | 11 类：missing-docs-dir / missing-metadata / missing-module-tree / empty-module-tree / bad-json / entry-missing / empty-body / article-missing / unmapped-page / source-missing / dead-link |
-| `listMarkdownPages(rootDir, rel)` | 44-62 | **递归**收 md（hierarchical 布局页在子目录，113-115）；跳过 temp/ 与隐藏目录 |
-| `readJsonIfExists(file, problems, kind, {optional})` | 64-82 | 必需文件缺失/坏 JSON 都报；存在但坏了永远要报（78-80） |
-| `collectOutput({docsDir})` | 91-124 | 读 docs 成结构化事实 `{docsDir, exists, pages[], json{metadata, moduleTree, firstModuleTree, updateRecord}, problems[]}` |
-| `bodyLength(text)` | 127-137 | 剥首个标题后的正文字符数（判「只有标题的空壳页」） |
-| `relativeLinks(text)` | 140-152 | 正文相对 md 链接（跳过外链/锚点/data URI） |
-| `buildWritePlan({...})` | 162-173 | collectOutput + mapFsoftOutput 组合 |
-| `validateOutput({...})` | 184-282 | 校验产物自洽：入口缺失（197）、空 module_tree（202-207）、逐页空正文（209-224）、未映射页（227-228）、模块树有但无页（230-233）、source_files 存在性（235-248）、docs 内死链（250-265）。返回 `{ok, problems, mapped, collected, stats}` |
-| `emptyStats()` | 284-286 | `{pages:0, articles:0, unmapped:0, problems:0}` |
+| 符号 | 用途 |
+| --- | --- |
+| `OUTPUT_PROBLEM_KINDS` | 11 类：missing-docs-dir / missing-metadata / missing-module-tree / empty-module-tree / bad-json / entry-missing / empty-body / article-missing / unmapped-page / source-missing / dead-link |
+| `listMarkdownPages(rootDir, rel)` | **递归**收 md（hierarchical 布局页在子目录）；跳过 temp/ 与隐藏目录 |
+| `readJsonIfExists(file, problems, kind, {optional})` | 必需文件缺失/坏 JSON 都报；存在但坏了永远要报 |
+| `collectOutput({docsDir})` | 读 docs 成结构化事实 `{docsDir, exists, pages[], json{metadata, moduleTree, firstModuleTree, updateRecord}, problems[]}` |
+| `bodyLength(text)` | 剥首个标题后的正文字符数（判「只有标题的空壳页」） |
+| `relativeLinks(text)` | 正文相对 md 链接（跳过外链/锚点/data URI） |
+| `buildWritePlan({...})` | collectOutput + mapFsoftOutput 组合 |
+| `validateOutput({...})` | 校验产物自洽：入口缺失、空 module_tree、逐页空正文、未映射页、模块树有但无页、source_files 存在性、docs 内死链。返回 `{ok, problems, mapped, collected, stats}` |
+| `emptyStats()` | `{pages:0, articles:0, unmapped:0, problems:0}` |
 
 ### lib/engine/process-tree.js — 受管子进程树终止
 
@@ -256,24 +256,24 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 
 ### lib/engine/python/entry.py — FSoft JSON-lines 薄入口
 
-**不是算法实现**（1-10）：依赖图/聚类/写作/增量全由 FSoft 做；本文件只做请求分发、进度翻译、终态翻译，并守两条红线：不读本机凭证库、不让 FSoft 打印污染协议流。
+**不是算法实现**：依赖图/聚类/写作/增量全由 FSoft 做；本文件只做请求分发、进度翻译、终态翻译，并守两条红线：不读本机凭证库、不让 FSoft 打印污染协议流。
 
 关键结构：
 
-- **stdout 守卫**（14-36、46-106）：FSoft 大量 print/click.secho 且 click 缓存 stdout 包装器，事后替换无效；故在 import codewiki **之前** `sys.stdout = _ProtocolOnly()`（106）——`_ProtocolOnly` 类（73-103）普通 write 全改道 stderr，协议行走保存的 `_REAL_STDOUT`（48），连 flush 也转（88-92）。
-- **三流钉 UTF-8**（50-70）：Windows 下 Python 默认 cp936，中文路径请求行会被误解码成乱码；stdout/stderr 用 replace、stdin 用 strict（59-61）。
-- `PROTOCOL_VERSION=1`（108）、`ACTIONS=("doctor","generate","update","cancel")`（109）、模型通道环境变量 `ENV_BASE_URL/ENV_API_KEY/ENV_MAIN_MODEL/ENV_CLUSTER_MODEL`（112-115）。
-- 协议输出：`emit`（118-122）/ `emit_hello`（125-126）/ `emit_progress`（129-142）/ `emit_result`（145-146）/ `failure(code, message, stage, request_id)`（149-167）。
-- `action_doctor(request_id, payload)` 212-251：`_engine_version`（173-187）+ `_pip_check(timeout=120)`（190-209，装到一半的 venv 会让 FSoft 生成中途崩，先问清楚 191-195）；依赖未闭合返回带 engine.deps 证据的 failed（221-229）。
-- `_model_config()` 257-289：只读进程环境，不碰 ConfigManager/凭证库（23-29）；错误信息只说「环境变量」不打印值（258-262）；`fallback_model` 必须显式给——缺省 None 会让 FSoft 在 `model_name.lower()` 上抛 AttributeError 且崩在 graph 阶段开头（277-281）。
-- `bridge_progress(adapter, request_id, on_stage)` 295-346：替换 ProgressTracker 的三个阶段方法做旁路观察（替换而非继承：FSoft 直接构造无注入点，297-306）。
-- `_count_docs(docs_dir)` 352-377：递归清点产物页数（只 glob 根层会漏掉 hierarchical 子树——「1 篇成功 + 19 篇失败也报 done」的误判来源之一，354-358）；排除 temp/ 与隐藏目录。
-- `action_generate(request_id, payload, is_update)` 398-510：config 构造（417-429）；`updateOptions` 显式传入（430-432）；`commitId` 记账（434-440，落进 metadata.json 的 generation_info.commit_id = 下一轮 old_commit）；`CLIDocumentationGenerator` 实例化并跑 `generate()`（445-457）；`SystemExit` code 0 视为正常完成（458-467，FSoft 无变更路径会 sys.exit(0)）；缺页 → partial + article-missing blockers（487-495）；usage 从 job.statistics.usage_totals 取（498-509）。
-- `_update_outcome_of(adapter)` 513-527：增量结局取自引擎 `_last_update_record`；拿不到返回 None 而非编造（区分「引擎没说」与「引擎说回退了」515-519）。
-- `_state_files(docs_dir)` 530-559：只报磁盘真实存在的跨轮状态文件（顶层 *.json、temp/reference_index.json、temp/artifact_index.json、temp/dependency_graphs/*），供上层交叉核对——白名单写错会把「引擎没产出依赖图」误记成已持久化（580-585）。
-- `_done_result(...)` 562-593（含 `artifacts.stateFiles` 与 `updateOutcome`，587-590）；`_classify_exception(exc, ...)` 596-623：按异常**类型**分类——IncompleteGenerationError → partial + article-missing、APIError → engine-model、RepositoryError → engine-missing、KeyboardInterrupt → cancelled、其余 engine-crashed；`_cancelled_result(...)` 626-643。
-- `handle_request(msg)` 649-682：**平铺 payload 优先、嵌套 payload 兜底**（657-668：曾只读 `msg["payload"]`，真引擎的 repoPath/docsDir/commitId 全丢——docsDir 丢失 → 增量轮把状态目录写回自身，长出 `_native-state/docs/_native-state/docs/...` 自嵌套；假引擎按平铺读所以测试看不出来）。
-- `main()` 685-698：hello → 读一行请求 → result；顶层 KeyboardInterrupt 也尽量回 cancelled（701-711）。
+- **stdout 守卫**：FSoft 大量 print/click.secho 且 click 缓存 stdout 包装器，事后替换无效；故在 import codewiki **之前** `sys.stdout = _ProtocolOnly()`——`_ProtocolOnly` 类普通 write 全改道 stderr，协议行走保存的 `_REAL_STDOUT`，连 flush 也转。
+- **三流钉 UTF-8**：Windows 下 Python 默认 cp936，中文路径请求行会被误解码成乱码；stdout/stderr 用 replace、stdin 用 strict。
+- `PROTOCOL_VERSION=1`、`ACTIONS=("doctor","generate","update","cancel")`、模型通道环境变量 `ENV_BASE_URL/ENV_API_KEY/ENV_MAIN_MODEL/ENV_CLUSTER_MODEL`。
+- 协议输出：`emit` / `emit_hello` / `emit_progress` / `emit_result` / `failure(code, message, stage, request_id)`。
+- `action_doctor(request_id, payload)`：`_engine_version` + `_pip_check(timeout=120)`（装到一半的 venv 会让 FSoft 生成中途崩，先问清楚）；依赖未闭合返回带 engine.deps 证据的 failed。
+- `_model_config()`：只读进程环境，不碰 ConfigManager/凭证库；错误信息只说「环境变量」不打印值；`fallback_model` 必须显式给——缺省 None 会让 FSoft 在 `model_name.lower()` 上抛 AttributeError 且崩在 graph 阶段开头。
+- `bridge_progress(adapter, request_id, on_stage)`：替换 ProgressTracker 的三个阶段方法做旁路观察（替换而非继承：FSoft 直接构造无注入点）。
+- `_count_docs(docs_dir)`：递归清点产物页数（只 glob 根层会漏掉 hierarchical 子树——「1 篇成功 + 19 篇失败也报 done」的误判来源之一）；排除 temp/ 与隐藏目录。
+- `action_generate(request_id, payload, is_update)`：config 构造；`updateOptions` 显式传入；`commitId` 记账（落进 metadata.json 的 generation_info.commit_id = 下一轮 old_commit）；`CLIDocumentationGenerator` 实例化并跑 `generate()`；`SystemExit` code 0 视为正常完成（FSoft 无变更路径会 sys.exit(0)）；缺页 → partial + article-missing blockers；usage 从 job.statistics.usage_totals 取。
+- `_update_outcome_of(adapter)`：增量结局取自引擎 `_last_update_record`；拿不到返回 None 而非编造（区分「引擎没说」与「引擎说回退了」）。
+- `_state_files(docs_dir)`：只报磁盘真实存在的跨轮状态文件（顶层 *.json、temp/reference_index.json、temp/artifact_index.json、temp/dependency_graphs/*），供上层交叉核对——白名单写错会把「引擎没产出依赖图」误记成已持久化。
+- `_done_result(...)`（含 `artifacts.stateFiles` 与 `updateOutcome`）；`_classify_exception(exc, ...)`：按异常**类型**分类——IncompleteGenerationError → partial + article-missing、APIError → engine-model、RepositoryError → engine-missing、KeyboardInterrupt → cancelled、其余 engine-crashed；`_cancelled_result(...)`。
+- `handle_request(msg)`：**平铺 payload 优先、嵌套 payload 兜底**（曾只读 `msg["payload"]`，真引擎的 repoPath/docsDir/commitId 全丢——docsDir 丢失 → 增量轮把状态目录写回自身，长出 `_native-state/docs/_native-state/docs/...` 自嵌套；假引擎按平铺读所以测试看不出来）。
+- `main()`：hello → 读一行请求 → result；顶层 KeyboardInterrupt 也尽量回 cancelled。
 
 ### lib/engine/python/stage_map.py — 进度映射
 
@@ -289,27 +289,27 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 
 ### lib/engine/quality-gate.js — 采用门
 
-三类问题必须分开（15-33）：**defect** = 本次产物自身的问题；**degradation** = 产物可用但证据不足（页照写、基线不推进）；**stale** = wiki 状态陈旧（不是本次的错）。
+三类问题必须分开：**defect** = 本次产物自身的问题；**degradation** = 产物可用但证据不足（页照写、基线不推进）；**stale** = wiki 状态陈旧（不是本次的错）。
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `GATE_VERSION` | 42 | 版本 = 1 |
-| `GATE_DEFECT_KINDS` | 45-59 | 13 类（missing-docs-dir … uncommitted-input） |
-| `GATE_DEGRADATION_KINDS` | 61-66 | empty-module-tree / no-source-evidence / missing-section / empty-section-optional |
-| `GATE_STALE_KINDS` | 68-72 | baseline-behind-head / baseline-uncommitted / baseline-absent |
-| `NATIVE_REQUIRED_SECTIONS` | 86 | `[]`——原生通道章节名由上游 prompt 决定（`## Introduction and Purpose` 等），用本仓库 Overview/Key Components 判它等于每条不可修复 warning、闸门退化成噪声（80-85） |
-| `readCommittedBaseline({repoRoot})` | 117-151 | 读 `git show HEAD:.codewiki/_meta.yaml` 而非工作区文件——未提交基线不能当已消化（111-116）；返回 `{ok, source, commit, worktreeCommit, dirty, reason}` |
-| `uncommittedSourceChanges({repoRoot})` | 158-174 | git status porcelain 解析，排除 wiki 自身路径（156） |
-| `assessBaseline({...})` | 188-244 | commit_id 必须是 40 位 sha 且 == HEAD（207-213）；工作区有未提交源码 → uncommitted-input defect（215-220）；stale 里只有 baseline-uncommitted 阻止推进（240-242） |
-| `yamlScalar(value)` | 269-288 | YAML 标量安全序列化：只在确实不安全时 JSON.stringify 引号化（`: `、` #`、保留字 true/false/null、数字形、反斜杠、控制字符、首尾空格等，264-267）——serde_yaml 对 plain scalar 的解析陷阱（253-263） |
-| `titleOf(bodyText, fallback)` | 291-297 | 正文 H1 → frontmatter title |
-| `renderArticle({article, body})` | 316-340 | 合成 frontmatter + FSoft 原文**一字不动**（302-310）；`fsoft_page` 记溯源（333）；结束 `---` 后**不插空行**——保证「wiki 里这篇 = 引擎产出的那篇」可逐字复核（335-338） |
-| `checkRendered({content, article, cwd, fsoftPage})` | 346-373 | inspectArticle（requiredSections=[]、allowEmptySourceFiles=true）+ 剥掉自己合成的 frontmatter 后再算 bodyLength（362-368：直接喂全文会把 8 行 frontmatter 当正文，空壳页判不出） |
-| `gateNativeOutput({...})` | 390-568 | 主入口：validateOutput 分流（empty-module-tree 是 degradation 不是 defect，417-421）→ 入口检查（440-462）→ 逐篇渲染 + 契约（464-515；空 source_files → no-source-evidence degradation 496-501）→ assessBaseline（517-523）→ **三类皆空才 done**（525-536）。返回 GateReport |
-| `toContractBlockers(report)` | 589-596 | gate blockers → contract BLOCKER_KINDS（TO_CONTRACT_KIND 572-587，对不上一律 quality-gate 宁粗勿漏） |
-| `toQualityIssues(report)` | 610-624 | gate 结论 → judgeOutcome 的 qualityIssues——两条判定路径不能一个严一个松（599-609） |
+| 符号 | 用途 |
+| --- | --- |
+| `GATE_VERSION` | 版本 = 1 |
+| `GATE_DEFECT_KINDS` | 13 类（missing-docs-dir … uncommitted-input） |
+| `GATE_DEGRADATION_KINDS` | empty-module-tree / no-source-evidence / missing-section / empty-section-optional |
+| `GATE_STALE_KINDS` | baseline-behind-head / baseline-uncommitted / baseline-absent |
+| `NATIVE_REQUIRED_SECTIONS` | `[]`——原生通道章节名由上游 prompt 决定（`## Introduction and Purpose` 等），用本仓库 Overview/Key Components 判它等于每条不可修复 warning、闸门退化成噪声 |
+| `readCommittedBaseline({repoRoot})` | 读 `git show HEAD:.codewiki/_meta.yaml` 而非工作区文件——未提交基线不能当已消化；返回 `{ok, source, commit, worktreeCommit, dirty, reason}` |
+| `uncommittedSourceChanges({repoRoot})` | git status porcelain 解析，排除 wiki 自身路径 |
+| `assessBaseline({...})` | commit_id 必须是 40 位 sha 且 == HEAD；工作区有未提交源码 → uncommitted-input defect；stale 里只有 baseline-uncommitted 阻止推进 |
+| `yamlScalar(value)` | YAML 标量安全序列化：只在确实不安全时 JSON.stringify 引号化（`: `、` #`、保留字 true/false/null、数字形、反斜杠、控制字符、首尾空格等）——serde_yaml 对 plain scalar 的解析陷阱 |
+| `titleOf(bodyText, fallback)` | 正文 H1 → frontmatter title |
+| `renderArticle({article, body})` | 合成 frontmatter + FSoft 原文**一字不动**；`fsoft_page` 记溯源；结束 `---` 后**不插空行**——保证「wiki 里这篇 = 引擎产出的那篇」可逐字复核 |
+| `checkRendered({content, article, cwd, fsoftPage})` | inspectArticle（requiredSections=[]、allowEmptySourceFiles=true）+ 剥掉自己合成的 frontmatter 后再算 bodyLength（直接喂全文会把 8 行 frontmatter 当正文，空壳页判不出） |
+| `gateNativeOutput({...})` | 主入口：validateOutput 分流（empty-module-tree 是 degradation 不是 defect）→ 入口检查 → 逐篇渲染 + 契约（空 source_files → no-source-evidence degradation）→ assessBaseline → **三类皆空才 done**。返回 GateReport |
+| `toContractBlockers(report)` | gate blockers → contract BLOCKER_KINDS（TO_CONTRACT_KIND，对不上一律 quality-gate 宁粗勿漏） |
+| `toQualityIssues(report)` | gate 结论 → judgeOutcome 的 qualityIssues——两条判定路径不能一个严一个松 |
 
-**GateReport 字段**（538-567）：`version, ok, outcome, writable, canAdvanceBaseline, entry, articles[{source, wikiPath, type, pageKind, moduleName, sourceFiles, attribution, action(write/skip), defects, degradations}], rendered[{source, wikiPath, type, content}], defects[], degradations[], stale[], blockers[], counts{pages, articles, writable, skipped, unmapped, defects, degradations, stale}, baseline{headCommit, artifactCommit, source}`。
+**GateReport 字段**：`version, ok, outcome, writable, canAdvanceBaseline, entry, articles[{source, wikiPath, type, pageKind, moduleName, sourceFiles, attribution, action(write/skip), defects, degradations}], rendered[{source, wikiPath, type, content}], defects[], degradations[], stale[], blockers[], counts{pages, articles, writable, skipped, unmapped, defects, degradations, stale}, baseline{headCommit, artifactCommit, source}`。
 
 ### lib/engine/apply-plan.js — 落地器
 
@@ -318,43 +318,43 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 | 符号 | 行号 | 用途 |
 | --- | --- | --- |
 | `APPLY_VERSION` / `APPLY_WRITE_ROOTS` / `APPLY_STAGES` | 44-50 | 版本 1；写集白名单 `['.codewiki', 'CodeWiki.md']`；落地阶段 write/index/baseline/commit |
-| `APPLY_PROBLEM_KINDS` / `APPLY_RESULT_KINDS` | 53-74 | 写集校验 6 类 / 落地结果 9 类（含 gate-partial：不许把裁决 partial 洗成 done，71-74） |
+| `APPLY_PROBLEM_KINDS` / `APPLY_RESULT_KINDS` | 53-74 | 写集校验 6 类 / 落地结果 8 类（含 gate-partial：不许把裁决 partial 洗成 done，71-74） |
 | `checkWriteTargets(items)` | 87-132 | 空路径/绝对路径/`..` 上跳/白名单外/重复且内容不同/content 非字符串——整批拒写（80-84：残缺写集落盘后缺的那几篇没人知道，比整批拒危险） |
 | `capturePre(repoRoot, rels)` / `restorePre(snapshot)` | 139-177 | pre-image 快照与回滚（逆序恢复 160；pre-image 不存在 = 本次新建，回滚即删除 167-171） |
 | `writeAll(repoRoot, targets)` | 179-194 | 内容与磁盘逐字节相同的不重写——避免 mtime 抖动与「无改动轮」变假提交（184-187） |
 | `verifyCommitScope(repoRoot, sha, {...})` | 234-247 | `git show --name-only` 反查提交内容是否只含 wiki 路径（pathspec 有了 ≠ 提交里真的只有，224-227） |
 | `commitWikiArtifacts(cwd, {...})` | 260-308 | 内置提交器：merge/rebase/cherry-pick 进行中拒绝（275-278）；`.codewiki/` 被 .gitignore 忽略时拒绝（280-284）；无 HEAD 拒绝（274）；pathspec 限定两路径（293-295）；`--no-verify` 不跑仓库钩子（301-302）。安全边界逐条对齐 index.js 的 autoCommitWiki（248-255） |
 | `toApplyBlockers(problems)` | 322-333 | → contract BLOCKER_KINDS（TO_CONTRACT_KIND 311-320；未登记 kind 直接抛错 326） |
-| `findArticlesMissingFromIndex(repoRoot, written)` | 351-372 | **cw index 对 frontmatter 解析失败静默 continue 且 exit 0**（336-343、773-778：serde_yaml 把 `title: 核心: 引擎` 当嵌套映射 → 索引只剩占位文字但退出码 0）；按 `_index.md` 链接反查缺页 |
-| `collectPruneTargets(repoRoot, pruneRoots, keepRels)` | 405-419 | 受管状态目录里「本次写集没有的」都删——留着会让下一轮水合复活旧页/旧图（392-398）；裁剪根必须落在白名单内（410-412） |
-| `pruneEmptyDirs` / `normalizeIndexLinksIn` | 423-468 | 删空目录；`_index.md` 链接头 `\` → `/`（cw 在 Windows 写出 `[[modules\a|x]]` 会让 stale 判定与链接校验按不同字符串比较同一篇，439-449） |
-| `applyNativeOutput({...})` | 502-870 | 主流程：writable 检查（573-584）→ 收集写集（文章 + extraFiles + 入口页，586-629）→ checkWriteTargets 整批拒（631-638）→ dryRun（640-646）→ pre-image 含 `_index.md`/`_meta.yaml`/裁剪对象（654-677）→ 缺 `_meta.yaml` 先 `cw init`（679-702；有 .codewiki 却没 _meta.yaml = 人工破坏的半截库，拒绝自动初始化 684-689）→ 写盘 + 裁剪 + 清空目录（704-732）→ `cw index`（734-751）→ 链接规范化失败按索引失败回滚（752-770）→ **缺页反查**（773-792）→ `cw meta update` 基线（794-823，失败连文章一起回滚——「文章比基线新」会让下一轮重复消费，794-797）→ 自动提交（825-850，失败不回滚；未提交在任何分支下都不许 done，852-857） |
+| `findArticlesMissingFromIndex(repoRoot, written)` | 351-372 | **cw index 对 frontmatter 解析失败静默 continue 且 exit 0**（336-343、905-910：serde_yaml 把 `title: 核心: 引擎` 当嵌套映射 → 索引只剩占位文字但退出码 0）；按 `_index.md` 链接反查缺页 |
+| `collectPruneTargets(repoRoot, pruneRoots, keepRels)` | 505-519 | 受管状态目录里「本次写集没有的」都删——留着会让下一轮水合复活旧页/旧图（493-498）；裁剪根必须落在白名单内（510-512） |
+| `pruneEmptyDirs` / `normalizeIndexLinksIn` | 523-568 | 删空目录；`_index.md` 链接头 `\` → `/`（cw 在 Windows 写出 `[[modules\a|x]]` 会让 stale 判定与链接校验按不同字符串比较同一篇，542-544） |
+| `applyNativeOutput({...})` | 602-1003 | 主流程：writable 检查（674-678）→ 收集写集（文章 + extraFiles + 入口页，688-731）→ checkWriteTargets 整批拒（733-740）→ dryRun（743-748）→ pre-image 含 `_index.md`/`_meta.yaml`/裁剪对象（757-793）→ 缺 `_meta.yaml` 先 `cw init`（795-818；有 .codewiki 却没 _meta.yaml = 人工破坏的半截库，拒绝自动初始化 801-806）→ 写盘 + 裁剪 + 清空目录（820-864）→ `cw index`（866-883）→ 链接规范化失败按索引失败回滚（884-903）→ **缺页反查**（905-924）→ `cw meta update` 基线（926-955，失败连文章一起回滚——「文章比基线新」会让下一轮重复消费，926-929）→ 自动提交（957-989，失败不回滚；未提交在任何分支下都不许 done，984-989） |
 
-**ApplyResult 字段**（525-542）：`version, startedAt, repoRoot, applied, outcome, written[], pruned[], entry, index, baseline, commit, rolledBack, problems[], blockers[], notes[], canAdvanceBaseline, finishedAt`（另有合并进来的 `ok, unchangedFiles, dryRun, writeSetViolation` 等）。
+**ApplyResult 字段**（626-644）：`version, startedAt, repoRoot, applied, outcome, written[], pruned[], deleted[], entry, index, baseline, commit, rolledBack, problems[], blockers[], notes[], canAdvanceBaseline, finishedAt`（另有合并进来的 `ok, unchangedFiles, dryRun` 等）。
 
 ### lib/engine/native-state.js — 跨轮受管状态
 
-为什么必须有（1-18）：FSoft 组件级增量要读上一轮的 module_tree.json / 依赖图 / metadata.json / 旧文章四样东西，缺任何一样 `_update_options()` 返回 None → 每轮白退全量。
+为什么必须有：FSoft 组件级增量要读上一轮的 module_tree.json / 依赖图 / metadata.json / 旧文章四样东西，缺任何一样 `_update_options()` 返回 None → 每轮白退全量。
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `NATIVE_STATE_VERSION` / `NATIVE_STATE_DIR` / `NATIVE_STATE_FILE` | 45-48 | 版本 1；`.codewiki/_native-state/`（首段以 `_` 开头——`cw index` 只跳过 `_` 开头路径，否则持久化的原始文章会被收成第二份文章，20-28）；`state.json` |
-| `STATE_REQUIRED_DOCS` | 52 | `['module_tree.json', 'metadata.json']`（引擎增量硬依赖） |
-| `STATE_TEMP_FILES` / `STATE_TEMP_DIRS` | 56-60 | temp/ 白名单（reference_index、artifact_index、dependency_graphs） |
-| `graphFileName(repoRoot)` | 77-81 | 依赖图文件名必须逐字符对齐 Python `sanitize_repo_name`——它用 Unicode `isalnum()`，故这里用 `\p{L}\p{N}` 而非 `[A-Za-z0-9]`（后者把中文仓库名的图判缺失 → 每轮白退全量，64-76） |
-| `isStateDocPath(rel)` | 101-110 | 哪些 docs 文件进受管状态（所有 .md / 顶层 .json / temp 白名单 / 其他子目录） |
-| `stateDocFiles(stateDir)` | 118-123 | 状态文件仓库相对路径清单（审计用） |
-| `readState(stateDir, repoRoot)` | 135-162 | 反序列化边界必须被检查：absent/unreadable/corrupt/version 四类失败都显式带 reason |
-| `readStateText` | 165-171 | 原始文本（字节比较用） |
-| `isUpdateEligible({...})` | 187-234 | 能不能增量：硬依赖缺失（194-208）/ 引擎版本变更（210-219）→ eligible:false + reason（「悄悄退全量」会让用户以为增量生效，175-177）；基线不一致仍 eligible 但记 reason（221-233） |
-| `hydrateDocsDir({stateDir, repoRoot, docsDir})` | 265-283 | **复制**不是移动：源在仓库受 git 管理，目标在临时目录被引擎就地改写；移动会让本轮失败毁掉下一轮输入（36-37、253-257） |
-| `captureDocsDir({docsDir, stateDir})` | 300-333 | 采集引擎产物 → `{rel, content}` 写集（非 utf8 检测 U+FFFD，316-320；硬依赖缺失单独报 324-331） |
-| `buildStatePayload({...})` | 352-406 | 组装 state.json。**不记录本轮结局**——结局权威在 `_meta.yaml`，state.json 在 apply 前落盘，写结局就得 apply 后再改文件、造出第二个提交（336-350） |
-| `stateFileItem(payload, stateDir)` | 409-414 | state.json 作为一条写集项 |
-| `stateFingerprint(text)` | 425-435 | 去掉 updatedAt/notes 的实质指纹——防「无变化轮因时间戳变化产生空转提交」 |
-| `mergeUnconsumed({changeSet, prevUnconsumed})` | 455-497 | 未提交改动的账：已读进产物但没进 commit 的路径（staged/unstaged/untracked）一直携带，直到出现在 `git diff base..HEAD` 才算消费成立（437-449）；否则「文章已覆盖未提交改动、基线停在 HEAD」，下一轮这些改动再也算不进变化集 |
+| 符号 | 用途 |
+| --- | --- |
+| `NATIVE_STATE_VERSION` / `NATIVE_STATE_DIR` / `NATIVE_STATE_FILE` | 版本 1；`.codewiki/_native-state/`（首段以 `_` 开头——`cw index` 只跳过 `_` 开头路径，否则持久化的原始文章会被收成第二份文章）；`state.json` |
+| `STATE_REQUIRED_DOCS` | `['module_tree.json', 'metadata.json']`（引擎增量硬依赖） |
+| `STATE_TEMP_FILES` / `STATE_TEMP_DIRS` | temp/ 白名单（reference_index、artifact_index、dependency_graphs） |
+| `graphFileName(repoRoot)` | 依赖图文件名必须逐字符对齐 Python `sanitize_repo_name`——它用 Unicode `isalnum()`，故这里用 `\p{L}\p{N}` 而非 `[A-Za-z0-9]`（后者把中文仓库名的图判缺失 → 每轮白退全量） |
+| `isStateDocPath(rel)` | 哪些 docs 文件进受管状态（所有 .md / 顶层 .json / temp 白名单 / 其他子目录） |
+| `stateDocFiles(stateDir)` | 状态文件仓库相对路径清单（审计用） |
+| `readState(stateDir, repoRoot)` | 反序列化边界必须被检查：absent/unreadable/corrupt/version 四类失败都显式带 reason |
+| `readStateText` | 原始文本（字节比较用） |
+| `isUpdateEligible({...})` | 能不能增量：硬依赖缺失 / 引擎版本变更 → eligible:false + reason（「悄悄退全量」会让用户以为增量生效）；基线不一致仍 eligible 但记 reason |
+| `hydrateDocsDir({stateDir, repoRoot, docsDir})` | **复制**不是移动：源在仓库受 git 管理，目标在临时目录被引擎就地改写；移动会让本轮失败毁掉下一轮输入 |
+| `captureDocsDir({docsDir, stateDir})` | 采集引擎产物 → `{rel, content}` 写集（非 utf8 检测 U+FFFD；硬依赖缺失单独报） |
+| `buildStatePayload({...})` | 组装 state.json。**不记录本轮结局**——结局权威在 `_meta.yaml`，state.json 在 apply 前落盘，写结局就得 apply 后再改文件、造出第二个提交 |
+| `stateFileItem(payload, stateDir)` | state.json 作为一条写集项 |
+| `stateFingerprint(text)` | 去掉 updatedAt/notes 的实质指纹——防「无变化轮因时间戳变化产生空转提交」 |
+| `mergeUnconsumed({changeSet, prevUnconsumed})` | 未提交改动的账：已读进产物但没进 commit 的路径（staged/unstaged/untracked）一直携带，直到出现在 `git diff base..HEAD` 才算消费成立；否则「文章已覆盖未提交改动、基线停在 HEAD」，下一轮这些改动再也算不进变化集 |
 
-**state.json 字段**（371-405）：`stateVersion, repoRoot, consumedRange{baseCommit, headCommit}, pendingChanges{state, baseCommit, headCommit, committed, staged, unstaged, untracked, deleted, renamed, reason}, unconsumed, engineVersion, scope, effectiveScope, updateOutcome, fallbackReason, notes, updatedAt`。
+**state.json 字段**：`stateVersion, repoRoot, consumedRange{baseCommit, headCommit}, pendingChanges{state, baseCommit, headCommit, committed, staged, unstaged, untracked, deleted, renamed, reason}, unconsumed, engineVersion, scope, effectiveScope, updateOutcome, fallbackReason, notes, updatedAt`。
 
 ### lib/engine/native-run.js — 原生编译编排
 
@@ -366,106 +366,106 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 | `RANK` / `weakest(a, b)` | 74-76 | 终态强弱：合成只能取最弱，绝不允许被后续步骤提升 |
 | `RESOLUTION` | 87 | full / update。**变化集为空不是跳过引擎的理由**——「有没有变」由引擎图 diff 说了算（重命名/跨文件重构能让路径集非空而图不变，80-86） |
 | `applyBlockersOf(applyRes)` | 90-96 | apply blockers → 契约形状 |
-| `runNativeJob({...})` | 111-778 | 主编排。统一出口 `settle`（141-175）：所有分支都过 `engineResult` 硬校验，`canAdvanceBaseline = outcome === 'done'`，增量现场证据 `incremental` 随终态出去。流程：① env：doctor + lock（184-277），probe-failed/drift/unhealthy 直接 failed 不跑引擎（230-269）；锁不在 doctor 阶段写——会让 `.codewiki/` 早于 `cw init` 存在、落地器判 wiki-missing 整批失败（270-277）。② 增量决议（284-380）：collectChangeSet + mergeUnconsumed + isUpdateEligible → update 则 hydrateDocsDir（水合不进独立 docsDir 会污染用户库，315-318）；决议现场进 `inc`（362-380）。③ 模型桥（382-408）；引擎 action update/generate **不可互换**（411-421）；桥在 finally 里关（455-458，先关桥引擎还在读流会拿 502）。④ gate（504-527）。⑤ 受管状态采集（529-604）：`idleRound` = update + no_change + 变化集空 + 无未消费账（537-547），无变化轮不重写状态不裁剪（否则每次状态查询制造一次纯记账提交）；引擎自报 stateFiles 与实际采集交叉核对（554-562）；stateFingerprint 相同沿用旧文本（593-596）；首落锁进写集（606-628）。⑥ apply（630-660，`pruneRoots` 只在非 idleRound 给 `[<stateDir>/docs]`，645-648）。⑦ 终态合成（662-777）：`weakest(engine, gate, apply)`（679）；gate/apply blockers 一律进终态（682-687，曾只带注入 gate 的 blockers 等于老缺陷换位置复发）；增量降级/引擎自报回退 → incremental-fallback blocker（689-702，产物完整时只进 notes 689-693）；done 带 blockers 降 partial（704-708） |
+| `runNativeJob({...})` | 111-815 | 主编排。统一出口 `settle`（141-175）：所有分支都过 `engineResult` 硬校验，`canAdvanceBaseline = outcome === 'done'`，增量现场证据 `incremental` 随终态出去。流程：① env：doctor + lock（184-277），probe-failed/drift/unhealthy 直接 failed 不跑引擎（230-269）；锁不在 doctor 阶段写——会让 `.codewiki/` 早于 `cw init` 存在、落地器判 wiki-missing 整批失败（270-277）。② 增量决议（284-380）：collectChangeSet + mergeUnconsumed + isUpdateEligible → update 则 hydrateDocsDir（水合不进独立 docsDir 会污染用户库，315-318）；决议现场进 `inc`（362-380）。③ 模型桥（382-408）；引擎 action update/generate **不可互换**（411-421）；桥在 finally 里关（455-458，先关桥引擎还在读流会拿 502）。④ gate（504-527）。⑤ 受管状态采集（529-604）：`idleRound` = update + no_change + 变化集空 + 无未消费账（537-547），无变化轮不重写状态不裁剪（否则每次状态查询制造一次纯记账提交）；引擎自报 stateFiles 与实际采集交叉核对（554-562）；stateFingerprint 相同沿用旧文本（593-596）；首落锁进写集（606-628）。⑥ apply（661-693，前置孤儿页扫描 630-659；`pruneRoots` 只在非 idleRound 给 `[<stateDir>/docs]`，677-681）。⑦ 终态合成（695-814）：`weakest(engine, gate, apply)`（712）；gate/apply blockers 一律进终态（713-720，曾只带注入 gate 的 blockers 等于老缺陷换位置复发）；增量降级/引擎自报回退 → incremental-fallback blocker（终态非 done 才加，726-735）；done 带 blockers 降 partial（736-741） |
 
 ### lib/git-paths.js — git 路径解码
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `GIT_QUOTEPATH_OFF` | 20 | `['-c', 'core.quotepath=false']`（必须紧跟 git 之后子命令之前） |
-| `withQuotepathOff(args)` | 23-27 | 参数表前置 quotepath 关闭（幂等） |
-| `decodeGitPath(p)` | 37-72 | 解开八进制转义：**按字节**重拼 Buffer 再 UTF-8 解码（一个中文字符是三个 `\NNN`，8-9）；非「双引号包裹转义串」幂等原样返回；不认识的转义保留反斜杠本体不猜（59-61） |
-| `decodeGitPaths(list)` | 75-79 | 清单整体解码（保序、丢空行） |
+| 符号 | 用途 |
+| --- | --- |
+| `GIT_QUOTEPATH_OFF` | `['-c', 'core.quotepath=false']`（必须紧跟 git 之后子命令之前） |
+| `withQuotepathOff(args)` | 参数表前置 quotepath 关闭（幂等） |
+| `decodeGitPath(p)` | 解开八进制转义：**按字节**重拼 Buffer 再 UTF-8 解码（一个中文字符是三个 `\NNN`）；非「双引号包裹转义串」幂等原样返回；不认识的转义保留反斜杠本体不猜 |
+| `decodeGitPaths(list)` | 清单整体解码（保序、丢空行） |
 
 ### lib/graph-diff.js — 符号级增量 diff
 
-移植自 FSoft codewiki/src/be/updater/graph_diff.py（1-6）：最值钱的判定全是纯标准库算法，逐位移植保持纯 Node、零外部运行时、判定精度与上游一致。
+移植自 FSoft codewiki/src/be/updater/graph_diff.py：最值钱的判定全是纯标准库算法，逐位移植保持纯 Node、零外部运行时、判定精度与上游一致。
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `CLASS_ADDED/DELETED/IFACE/BODY/EDGE/RENAMED` | 14-19 | 六种变更类 |
-| `DIFF_TRUNCATED_MARKER` | 21 | diff 截断标记 |
-| `TOKEN` | 24-26 | `\p{L}\p{N}` 还原 Python `\w` 的 Unicode 语义——JS 的 `\w` 会把中文按字切碎、相似度整体偏高 |
-| `normalizeBody(text)` | 28-30 | trim + 空白归一 |
-| `stripComments(text)` | 69-100 | 剥注释与装饰空白（区分「只改注释」与「实质变化」）；字符串内 `//` 误剥是可接受近似（66-68） |
-| `stripTrailingComment(line)` | 43-62 | 引号外的行注释（跟踪三种引号与转义，`"http://x"` 不误判）；`#` 只在行首/空白后才算注释（55-57） |
-| `codeHash(node)` | 108-111 | 代码本体哈希（剥注释）——**不含 docstring**：普通注释是噪音，docstring 是有意义文档（103-107） |
-| `documentedSource(node)` | 114-119 | 源码 + docstring（Rust `///` 在节点外） |
-| `bodyHash(node)` | 121-126 | 整段哈希；快照回读无源码时用固化哈希（122-124） |
-| `signature(node)` / `signatureChanged(a, b)` | 128-145 | name + parameters + baseClasses |
-| difflib 移植 | 156-236 | `buildB2J`/`findLongestMatch`/`getMatchingBlocks`（autojunk=False 逐位对齐）/ `sequenceRatio`（229-236） |
-| `bodySimilarity(a, b)` | 239-245 | token 序列 ratio |
-| `approxTokens` / `truncateToTokens` | 247-257 | token 估算与首尾截断 |
-| `unifiedDiff(...)` / `unifiedBodyDiff(oldNode, newNode, label)` | 259-362 | difflib.unified_diff 移植（263-325：splitKeepEnds/getOpcodes/getGroupedOpcodes/rangeUnified）；上游 unified_body_diff 上下文 2 行（357-362） |
-| `DEFAULT_TAU_REN` / `DEFAULT_MAX_DIFF_TOKENS` | 368-369 | 0.8 / 2000 |
-| `pairRenames(deleted, added, oldGraph, newGraph, tauRen)` | 371-407 | 改名配对：body 相似度贪心最佳匹配；长度比预过滤 `tauRen*0.9` 够不到阈值就跳过（388-392） |
-| `emptyGraphDiff()` / `graphDiffCounts(d)` / `changedIds(d)` / `isDiffEmpty(d)` | 413-444 | diff 容器与统计 |
-| `diffGraphs(oldGraph, newGraph, opts)` | 447-564 | 主入口：同名组件按 签名变→interface > 实现变→body > 仅依赖变→edge 分类（461-477），records 带 old/newSignature、edgesAdded/Removed、截断后的 unified diff；deleted+added 配对成 renamed（499-524）；added/deleted 生成独立 records（526-561） |
-| `serializeDiff(d)` | 567-578 | Set/Map → 数组（落盘与对拍） |
+| 符号 | 用途 |
+| --- | --- |
+| `CLASS_ADDED/DELETED/IFACE/BODY/EDGE/RENAMED` | 六种变更类 |
+| `DIFF_TRUNCATED_MARKER` | diff 截断标记 |
+| `TOKEN` | `\p{L}\p{N}` 还原 Python `\w` 的 Unicode 语义——JS 的 `\w` 会把中文按字切碎、相似度整体偏高 |
+| `normalizeBody(text)` | trim + 空白归一 |
+| `stripComments(text)` | 剥注释与装饰空白（区分「只改注释」与「实质变化」）；字符串内 `//` 误剥是可接受近似 |
+| `stripTrailingComment(line)` | 引号外的行注释（跟踪三种引号与转义，`"http://x"` 不误判）；`#` 只在行首/空白后才算注释 |
+| `codeHash(node)` | 代码本体哈希（剥注释）——**不含 docstring**：普通注释是噪音，docstring 是有意义文档 |
+| `documentedSource(node)` | 源码 + docstring（Rust `///` 在节点外） |
+| `bodyHash(node)` | 整段哈希；快照回读无源码时用固化哈希 |
+| `signature(node)` / `signatureChanged(a, b)` | name + parameters + baseClasses |
+| difflib 移植 | `buildB2J`/`findLongestMatch`/`getMatchingBlocks`（autojunk=False 逐位对齐）/ `sequenceRatio` |
+| `bodySimilarity(a, b)` | token 序列 ratio |
+| `approxTokens` / `truncateToTokens` | token 估算与首尾截断 |
+| `unifiedDiff(...)` / `unifiedBodyDiff(oldNode, newNode, label)` | difflib.unified_diff 移植（splitKeepEnds/getOpcodes/getGroupedOpcodes/rangeUnified）；上游 unified_body_diff 上下文 2 行 |
+| `DEFAULT_TAU_REN` / `DEFAULT_MAX_DIFF_TOKENS` | 0.8 / 2000 |
+| `pairRenames(deleted, added, oldGraph, newGraph, tauRen)` | 改名配对：body 相似度贪心最佳匹配；长度比预过滤 `tauRen*0.9` 够不到阈值就跳过 |
+| `emptyGraphDiff()` / `graphDiffCounts(d)` / `changedIds(d)` / `isDiffEmpty(d)` | diff 容器与统计 |
+| `diffGraphs(oldGraph, newGraph, opts)` | 主入口：同名组件按 签名变→interface > 实现变→body > 仅依赖变→edge 分类，records 带 old/newSignature、edgesAdded/Removed、截断后的 unified diff；deleted+added 配对成 renamed；added/deleted 生成独立 records |
+| `serializeDiff(d)` | Set/Map → 数组（落盘与对拍） |
 
 ### lib/incremental.js — 图快照与文件级判定
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `SNAPSHOT_VERSION` / `SNAPSHOT_REL` | 19-22 | 版本 1；`temp/symbol-graph.json`（随 wiki 入库，换机器不退化成全量，20-22） |
-| `SLIM_FIELDS` | 26 | 快照瘦身字段——**不存 sourceCode**（.codewiki/ 会进仓库），bodyHash/codeHash 固化 |
-| `slimComponent(node)` / `slimGraph(graph, {...})` | 28-48 | 现场节点算一次哈希固化进快照 |
-| `sameSnapshotContent(a, b)` | 53-66 | 忽略 generatedAt/commit 的实质比较——代码没变不覆盖快照，否则 autoCommit 为「只改时间戳」生成空转提交（50-52） |
-| `graphFromSnapshot(snap)` | 69-88 | 快照 → Map（graph-diff 直接输入） |
-| `snapshotPath` / `loadSnapshot` / `saveSnapshot` | 90-115 | 版本不符当没有——宁可重写不误判（98） |
-| `normRel(p)` | 118-120 | 路径归一（`temp/module-map.json` 等多处引用） |
-| `componentsByFile(graph)` | 123-132 | 文件 → 组件 id 清单 |
-| `filterStaleTasks(tasks, oldGraph, newGraph, opts)` | 140-194 | 核心判定（纯函数）：diff → realChanged；**纯注释降级**（146-170：bodyHash 变但 codeHash 未变且 docstring 未变 → cosmeticOnly，只降 body 类，interface/added/deleted/renamed 一律放行 152-153）；无符号可判的文章保守 keep（179-183）；只命中 cosmetic 的 dropped 带原因（189-190） |
-| `describeChange(counts)` | 197-206 | 「接口变 N、新增 N…」摘要 |
+| 符号 | 用途 |
+| --- | --- |
+| `SNAPSHOT_VERSION` / `SNAPSHOT_REL` | 版本 1；`temp/symbol-graph.json`（随 wiki 入库，换机器不退化成全量） |
+| `SLIM_FIELDS` | 快照瘦身字段——**不存 sourceCode**（.codewiki/ 会进仓库），bodyHash/codeHash 固化 |
+| `slimComponent(node)` / `slimGraph(graph, {...})` | 现场节点算一次哈希固化进快照 |
+| `sameSnapshotContent(a, b)` | 忽略 generatedAt/commit 的实质比较——代码没变不覆盖快照，否则 autoCommit 为「只改时间戳」生成空转提交 |
+| `graphFromSnapshot(snap)` | 快照 → Map（graph-diff 直接输入） |
+| `snapshotPath` / `loadSnapshot` / `saveSnapshot` | 版本不符当没有——宁可重写不误判 |
+| `normRel(p)` | 路径归一（`temp/module-map.json` 等多处引用） |
+| `componentsByFile(graph)` | 文件 → 组件 id 清单 |
+| `filterStaleTasks(tasks, oldGraph, newGraph, opts)` | 核心判定（纯函数）：diff → realChanged；**纯注释降级**（bodyHash 变但 codeHash 未变且 docstring 未变 → cosmeticOnly，只降 body 类，interface/added/deleted/renamed 一律放行）；无符号可判的文章保守 keep；只命中 cosmetic 的 dropped 带原因 |
+| `describeChange(counts)` | 「接口变 N、新增 N…」摘要 |
 
 ### lib/symbols.js — AST 级符号提取
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `DEFAULT_VENDOR_DIR` | 25 | `vendor/tree-sitter`（独立 npm 根，21-24） |
-| `LANG_RULES` | 36-271 | 16 种语言的声明化规则表（javascript/typescript/python/rust/go/java/c/cpp/csharp/ruby/php/kotlin/scala/dart/bash/lua）——上游每语言一个 800 行 Python 模块，这里加语言只加一行（5-8）。含容器/函数节点类型、名称/参数字段、imports、docstring 取法（python `first_string_in_body` 80、rust `preceding_line_comment` 95）、Go `receiverField`（112） |
-| `SUPPORTED_EXTS` | 273-276 | 扩展名 → 语言 Map |
-| `WASM_FILE_OVERRIDE` / `wasmFileFor` | 279-283 | csharp 的 wasm 文件名是 `tree-sitter-c_sharp` |
-| `REGEX_RULES` / `regexExtract(relPath, content, lang)` | 302-440 | 正则兜底：WASM 语法没装/ABI 不匹配时的「有损但不丢」路径（288-301：早期直接 return [] 导致整块语言静默消失，日志只见 skipped +N）；跳过块注释（386-393）；类优先于函数（409-411）；符号源码取「定义行到下一定义行」末符号最多 60 行（420-426）；`REGEX_MAX_LINES = 4000`（371） |
-| `parseParamList(text)` | 443-466 | 顶层逗号切分（跳过嵌套括号/泛型）、去默认值与类型标注 |
-| `SymbolExtractor` 类 | 472-779 | 解析器池（语法只加载一次，468-470）：`constructor`（473-481，parsers Map + stats）/ `vendorImport`（484-495，createRequire 从 vendor 树解析）/ `init`（498-519，惰性导入 web-tree-sitter，依赖没装插件照常启动 497）/ `getParser`（521-542，语法加载失败记 null 降级 537-540）/ `resolveWasmDir`（544-547）/ `extractFile`（551-594，AST 失败或**零符号**都退正则兜底并记 `stats.regex`，557-565、584-593）/ `walk`（597-695，容器+成员方法成组；C/C++ 函数名与参数在 function_declarator 子节点需下探 631-638；Go 方法名拼接收者类型 639-648；箭头函数赋值 668-690）/ `findArrow`（697-707）/ `findDeclarator`（710-719）/ `stripCallSuffix`（722-727）/ `fieldText`（729-737）/ `parseParams`（739-741）/ `parseBases`（743-748）/ `sliceSource`（751-757，按节点字节区间多字节安全）/ `extractDoc`（759-774，python docstring 与 rust `///`）/ `componentId`（776-778，`relPath#name`，方法为 `relPath#Class.method`） |
-| `extractRepoGraph(files, opts)` | 785-805 | 批量提取 → `{graph, byFile, skipped, extractor, ready, stats}` |
-| `resolveImportEdges(graph, byFile, files)` | 810-833 | import → 仓库内相对路径 → 落到组件 `dependsOn`（文件级边，807-809：调用级边留待扩充） |
-| `IMPORT_RE` / `extractImportSpecs` / `resolveSpec` | 835-884 | 多语言 import 正则；spec 解析：相对路径尝试多扩展名与 index 文件（853-864）、Python 点号模块 `a.b.c → a/b/c.py`（866-875）、Rust `crate::` 与 C 头文件按 basename 匹配（877-884） |
+| 符号 | 用途 |
+| --- | --- |
+| `DEFAULT_VENDOR_DIR` | `vendor/tree-sitter`（独立 npm 根） |
+| `LANG_RULES` | 16 种语言的声明化规则表（javascript/typescript/python/rust/go/java/c/cpp/csharp/ruby/php/kotlin/scala/dart/bash/lua）——上游每语言一个 800 行 Python 模块，这里加语言只加一行。含容器/函数节点类型、名称/参数字段、imports、docstring 取法（python `first_string_in_body`、rust `preceding_line_comment`）、Go `receiverField` |
+| `SUPPORTED_EXTS` | 扩展名 → 语言 Map |
+| `WASM_FILE_OVERRIDE` / `wasmFileFor` | csharp 的 wasm 文件名是 `tree-sitter-c_sharp` |
+| `REGEX_RULES` / `regexExtract(relPath, content, lang)` | 正则兜底：WASM 语法没装/ABI 不匹配时的「有损但不丢」路径（早期直接 return [] 导致整块语言静默消失，日志只见 skipped +N）；跳过块注释；类优先于函数；符号源码取「定义行到下一定义行」末符号最多 60 行；`REGEX_MAX_LINES = 4000` |
+| `parseParamList(text)` | 顶层逗号切分（跳过嵌套括号/泛型）、去默认值与类型标注 |
+| `SymbolExtractor` 类 | 解析器池（语法只加载一次）：`constructor`（parsers Map + stats）/ `vendorImport`（createRequire 从 vendor 树解析）/ `init`（惰性导入 web-tree-sitter，依赖没装插件照常启动）/ `getParser`（语法加载失败记 null 降级）/ `resolveWasmDir` / `extractFile`（AST 失败或**零符号**都退正则兜底并记 `stats.regex`）/ `walk`（容器+成员方法成组；C/C++ 函数名与参数在 function_declarator 子节点需下探；Go 方法名拼接收者类型；箭头函数赋值）/ `findArrow` / `findDeclarator` / `stripCallSuffix` / `fieldText` / `parseParams` / `parseBases` / `sliceSource`（按节点字节区间多字节安全）/ `extractDoc`（python docstring 与 rust `///`）/ `componentId`（`relPath#name`，方法为 `relPath#Class.method`） |
+| `extractRepoGraph(files, opts)` | 批量提取 → `{graph, byFile, skipped, extractor, ready, stats}` |
+| `resolveImportEdges(graph, byFile, files)` | import → 仓库内相对路径 → 落到组件 `dependsOn`（文件级边，调用级边留待扩充） |
+| `IMPORT_RE` / `extractImportSpecs` / `resolveSpec` | 多语言 import 正则；spec 解析：相对路径尝试多扩展名与 index 文件、Python 点号模块 `a.b.c → a/b/c.py`、Rust `crate::` 与 C 头文件按 basename 匹配 |
 
-组件记录形状（与 graph-diff 契约一致，13-14）：`{id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn}`。
+组件记录形状（与 graph-diff 契约一致）：`{id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn}`。
 
 ### lib/update-planner.js — 增量计划器
 
-背景缺陷（4-14）：旧实现只回答「这篇要不要重写」——反向依赖看不见、新文件无归属、未重写页不做 stale scan。本模块升级为每篇显式 action（write/keep/delete/review）+ reason，无归属变更单独列出绝不静默丢弃。
+背景缺陷：旧实现只回答「这篇要不要重写」——反向依赖看不见、新文件无归属、未重写页不做 stale scan。本模块升级为每篇显式 action（write/keep/delete/review）+ reason，无归属变更单独列出绝不静默丢弃。
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `UPDATE_PLAN_VERSION` / `MODULE_MAP_VERSION` / `MODULE_MAP_REL` | 23-27 | 版本 1；`temp/module-map.json` |
-| `isSourcePath(p)` | 33-36 | 只看扩展名；非源码文件（笔记/文档）无归属只记 warning 不触发全量重编（31-32） |
-| `commonDir(a, b)` | 44-53 | 最长公共目录（至少一级才算同模块） |
-| `realChangedIds(diff, oldGraph, newGraph, {...})` | 57-81 | 与 incremental.js 同一套纯注释降级（复用 codeHash，55）；`structural` = interface/added/deleted/renamed/edge |
-| `dependentsOf(graph, ids)` | 85-101 | 反向依赖索引；dependsOn 里的组件 id 与文件路径两种形态都认（84-86） |
-| `scanStaleArticle(article, {...})` | 106-145 | 单篇 stale scan：正文引用已删/已改名符号（110-124，文章通常写名字非完整 id）；wiki 死链（126-138）；引用已删/改名符号 → needsRewrite，死链只 review（139-144） |
-| `planUpdate({...})` | 156-436 | 主入口（纯函数）：structural 反向依赖闭包 → `impactByFile`（206-219，只对 structural 做——实现细节变了不该连带重写所有引用方）；逐篇判定链（238-347）：文件删除（270-279）/改名（280-289）→ write；无符号可判 → 文件级降级（290-303）；ownHit/depHit → write（305-317）；stale scan → write/review/keep（319-346）；无归属变更按公共目录最长前缀路由给最相关文章（349-382）；`needsFull` 只算**源码**变更（383-392）；图里没有任何 dependsOn 边时如实警告反向依赖不可用（393-397）；**必需清单 = write 动作**（399-408，把 keep 算进必需曾让完整成功落 partial，400-403） |
-| `buildModuleMap({...})` | 442-468 | 文章 → 源码/组件/模块关系（模块归属优先取 full plan，其次 source_files 公共目录 457-464） |
-| `migrateModuleMap({...})` | 472-481 | 旧 wiki 无 module-map 时从 frontmatter 保守迁移（绝不因缺文件当无归属，470-471） |
-| `sameModuleMap(a, b)` | 484-492 | 实质比较（忽略 generatedAt） |
+| 符号 | 用途 |
+| --- | --- |
+| `UPDATE_PLAN_VERSION` / `MODULE_MAP_VERSION` / `MODULE_MAP_REL` | 版本 1；`temp/module-map.json` |
+| `isSourcePath(p)` | 只看扩展名；非源码文件（笔记/文档）无归属只记 warning 不触发全量重编 |
+| `commonDir(a, b)` | 最长公共目录（至少一级才算同模块） |
+| `realChangedIds(diff, oldGraph, newGraph, {...})` | 与 incremental.js 同一套纯注释降级（复用 codeHash）；`structural` = interface/added/deleted/renamed/edge |
+| `dependentsOf(graph, ids)` | 反向依赖索引；dependsOn 里的组件 id 与文件路径两种形态都认 |
+| `scanStaleArticle(article, {...})` | 单篇 stale scan：正文引用已删/已改名符号（文章通常写名字非完整 id）；wiki 死链；引用已删/改名符号 → needsRewrite，死链只 review |
+| `planUpdate({...})` | 主入口（纯函数）：structural 反向依赖闭包 → `impactByFile`（只对 structural 做——实现细节变了不该连带重写所有引用方）；逐篇判定链：文件删除/改名 → write；无符号可判 → 文件级降级；ownHit/depHit → write；stale scan → write/review/keep；无归属变更按公共目录最长前缀路由给最相关文章；`needsFull` 只算**源码**变更；图里没有任何 dependsOn 边时如实警告反向依赖不可用；**必需清单 = write 动作**（把 keep 算进必需曾让完整成功落 partial） |
+| `buildModuleMap({...})` | 文章 → 源码/组件/模块关系（模块归属优先取 full plan，其次 source_files 公共目录） |
+| `migrateModuleMap({...})` | 旧 wiki 无 module-map 时从 frontmatter 保守迁移（绝不因缺文件当无归属） |
+| `sameModuleMap(a, b)` | 实质比较（忽略 generatedAt） |
 
-**UpdatePlan 字段**（410-435）：`version, fileLevel, changedComponents[], cosmeticComponents[], structuralComponents[], counts, actions[{name, articlePath, sources, changedComponents, impactedBy, reasons, action, reason, newFiles?, staleIssues?, needsFull?, fileLevel?}], summary{write, keep, delete, review}, unmappedChanges[], unmappedSourceChanges[], routedTo[{file, name}], missingSources[], missingRequired[], requiredNames[], warnings[], needsFull, fullReason, hasChanges`。
+**UpdatePlan 字段**：`version, fileLevel, changedComponents[], cosmeticComponents[], structuralComponents[], counts, actions[{name, articlePath, sources, changedComponents, impactedBy, reasons, action, reason, newFiles?, staleIssues?, needsFull?, fileLevel?}], summary{write, keep, delete, review}, unmappedChanges[], unmappedSourceChanges[], routedTo[{file, name}], missingSources[], missingRequired[], requiredNames[], warnings[], needsFull, fullReason, hasChanges`。
 
 ### lib/update-record.js — 更新记录
 
-| 符号 | 行号 | 用途 |
-| --- | --- | --- |
-| `UPDATE_RECORD_VERSION` / `UPDATE_RECORD_REL` | 17-18 | 版本 1；`temp/update-record.json` |
-| `TERMINAL` / `isTerminalStage(stage)` | 24-28 | done/partial/failed/cancelled 四态语义（20-23） |
-| `judgeOutcome({plan, results, options})` | 37-128 | 终态判定：缺页与失败分开记（56-75，处置不同）；unmapped 只算源码——非源码文件无文章引用是常态，混进来会让正常增量永远 partial（80-91）；qualityIssues / indexOk / extraBlockers（99-110）；0 篇成功且有失败/缺页/阻塞才 failed，写过一部分就是 partial（112-118）；`canAdvanceBaseline = outcome==='done' && blockers 空`（120-124） |
-| `buildUpdateRecord({...})` | 131-211 | ChangeSet + Plan + 逐篇结果收成版本化记录（job 里只存路径与摘要不塞整图，130） |
-| `recordPath` / `saveUpdateRecord` / `loadUpdateRecord` | 213-238 | 路径与读写（版本不符返回 null 233） |
-| `describeOutcome(outcome, blockers)` | 241-253 | 三态文案（与 describeEngineResult 同口径，240） |
+| 符号 | 用途 |
+| --- | --- |
+| `UPDATE_RECORD_VERSION` / `UPDATE_RECORD_REL` | 版本 1；`temp/update-record.json` |
+| `TERMINAL` / `isTerminalStage(stage)` | done/partial/failed/cancelled 四态语义 |
+| `judgeOutcome({plan, results, options})` | 终态判定：缺页与失败分开记（处置不同）；unmapped 只算源码——非源码文件无文章引用是常态，混进来会让正常增量永远 partial；qualityIssues / indexOk / extraBlockers；0 篇成功且有失败/缺页/阻塞才 failed，写过一部分就是 partial；`canAdvanceBaseline = outcome==='done' && blockers 空` |
+| `buildUpdateRecord({...})` | ChangeSet + Plan + 逐篇结果收成版本化记录（job 里只存路径与摘要不塞整图） |
+| `recordPath` / `saveUpdateRecord` / `loadUpdateRecord` | 路径与读写（版本不符返回 null） |
+| `describeOutcome(outcome, blockers)` | 三态文案（与 describeEngineResult 同口径） |
 
-**UpdateRecord 字段**（145-210）：`version, jobId, scope, startedAt, finishedAt, baseCommit, headCommit, changeSet{state, ok, fallback, reason, counts{committed, staged, unstaged, untracked, deleted, renamed, ignored}, sourceChanges[], ignored[]}, plan{version, fileLevel, needsFull, fullReason, summary, counts, changedComponents[], cosmeticComponents[], structuralComponents[], actions[{name, action, reason, sources, changedComponents, impactedBy, newFiles, staleIssues}], unmappedChanges[], routedTo[], missingSources[], warnings[]}, results[{name, ok, stopReason, error}], qualityIssues[{name, issue}], outcome, blockers[], canAdvanceBaseline, writtenCount, failedCount, notes[], wikiPath`。
+**UpdateRecord 字段**：`version, jobId, scope, startedAt, finishedAt, baseCommit, headCommit, changeSet{state, ok, fallback, reason, counts{committed, staged, unstaged, untracked, deleted, renamed, ignored}, sourceChanges[], ignored[]}, plan{version, fileLevel, needsFull, fullReason, summary, counts, changedComponents[], cosmeticComponents[], structuralComponents[], actions[{name, action, reason, sources, changedComponents, impactedBy, newFiles, staleIssues}], unmappedChanges[], routedTo[], missingSources[], warnings[]}, results[{name, ok, stopReason, error}], qualityIssues[{name, issue}], outcome, blockers[], canAdvanceBaseline, writtenCount, failedCount, notes[], wikiPath`。
 
 ## Architecture
 
@@ -493,9 +493,9 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 
 分层要点：
 
-- **判定与执行分离**：符号提取、diff、计划、终态判定全是纯函数；IO 集中在各自的末尾（`incremental.js:13`、`update-planner.js:16`、`update-record.js:12`）。
-- **两条执行通道**：插件自有 agentic 通道（模型自己读码写作）与 FSoft 原生通道（引擎整树产出后映射+落地）。`article-contract.js` 是两者共用的文章格式闸门（`quality-gate.js:39` 复用 `inspectArticle`）。
-- **裁决链直线化**（native-run.js:76-78）：env → 引擎 → validate(gate) → index/baseline/commit(apply)，每一步的结论都不能被下一步洗白；终态取 `weakest(engine, gate, apply)`（native-run.js:679）。
+- **判定与执行分离**：符号提取、diff、计划、终态判定全是纯函数；IO 集中在各自的末尾。
+- **两条执行通道**：插件自有 agentic 通道（模型自己读码写作）与 FSoft 原生通道（引擎整树产出后映射+落地）。`article-contract.js` 是两者共用的文章格式闸门（`quality-gate.js` 复用 `inspectArticle`）。
+- **裁决链直线化**（native-run.js:76-79）：env → 引擎 → validate(gate) → index/baseline/commit(apply)，每一步的结论都不能被下一步洗白；终态取 `weakest(engine, gate, apply)`（native-run.js:712）。
 - **依赖注入边界**：`apply-plan.js` 刻意不 import index.js（加载它会拉起宿主服务与 webServer，24-27），默认自带同语义提交器 `commitWikiArtifacts`（29-34），阶段 4 由 index.js 注入 `runCw`/`autoCommitWiki` 替换。
 
 ## Data Flow
@@ -503,28 +503,28 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 ### 通道 A：插件自有 agentic 编译
 
 1. `collectChangeSet`（change-set.js:108）四路采集变更，`.codewiki/` 产物被排除进 `ignored`（change-set.js:189-190）。
-2. `extractRepoGraph`（symbols.js:785）用 tree-sitter WASM 提取组件图；AST 不可用或零符号时退 `regexExtract`（symbols.js:557-593），import 语句解析成组件 `dependsOn` 边（symbols.js:810-833）。
-3. 增量判定：`loadSnapshot`（incremental.js:94）读旧图 → `filterStaleTasks`（incremental.js:140）或 `planUpdate`（update-planner.js:156）产出 write/keep/review 计划；无归属源码变更 → `needsFull` 退全量（update-planner.js:391-392）。
+2. `extractRepoGraph` 用 tree-sitter WASM 提取组件图；AST 不可用或零符号时退 `regexExtract`，import 语句解析成组件 `dependsOn` 边。
+3. 增量判定：`loadSnapshot` 读旧图 → `filterStaleTasks` 或 `planUpdate` 产出 write/keep/review 计划；无归属源码变更 → `needsFull` 退全量。
 4. `clusterComponents`（cluster.js:291）LLM 聚类出模块树（失败降级 `heuristicCluster`），只有叶子模块成文。
 5. `runAgenticArticles`（articles-agentic.js:231）双池并发 → `runOneArticle` → `runAgenticArticle`（agentic.js:331）工具循环：`read_code`/`list_files` 读源码、`edit_article` 增量写文、`generate_sub_module` 派发子任务；streamFn 由 `makeHostStream`（agentic-host.js:83）适配宿主 `llm.stream`。
 6. 落盘：写集闸门 `isWritable`（articles-agentic.js:155-167）→ `fixAnchors` → `writeFileSync`；契约由 `inspectArticle`（article-contract.js:213）在外层判。
-7. `judgeOutcome`（update-record.js:37）判 done/partial/failed → `buildUpdateRecord`（update-record.js:131）落 `temp/update-record.json`。
+7. `judgeOutcome` 判 done/partial/failed → `buildUpdateRecord` 落 `temp/update-record.json`。
 
 ### 通道 B：FSoft 原生编译（`runNativeJob`，native-run.js:111）
 
 1. **env**：doctor（manifest.js:156）探测版本 + pip check + 与 engine-lock 比对；drift/unhealthy 直接 failed，不跑引擎（native-run.js:244-269）。
-2. **增量决议**：`collectChangeSet` + `mergeUnconsumed`（native-state.js:455）+ `isUpdateEligible`（native-state.js:187）→ full 或 update；update 则 `hydrateDocsDir`（native-state.js:265）把上一轮状态**复制**进独立 docsDir。
-3. **模型桥**：`startLlmBridge`（llm-bridge.js:90）起 `127.0.0.1:<随机端口>` 端点；entry.py 从环境变量读 `CODEWIKI_BASE_URL/API_KEY`（entry.py:257-289），FSoft 的 OpenAI 客户端打向桥，桥转成宿主 `llm.stream`（真凭证全程只在宿主内）。
-4. **引擎**：`runEngine`（client.js:223）spawn entry.py，写一行请求 JSON；entry.py 调 `CLIDocumentationGenerator`（entry.py:446-457），进度经 stage_map.py 映射成八段协议行；引擎自报 `updateOutcome` 与 `stateFiles`（entry.py:580-590）。
-5. **gate**：`gateNativeOutput`（quality-gate.js:390）= 产物自洽 + 渲染（frontmatter 合成、正文一字不动）+ 契约 + 基线裁决，产出 defect/degradation/stale 三分类。
-6. **apply**：`applyNativeOutput`（apply-plan.js:502）写盘 → `cw index`（含缺页反查回滚）→ `cw meta update` 基线 → `commitWikiArtifacts`；受管状态（`captureDocsDir` + state.json + 首落锁）作为 `extraFiles` 与文章**同事务**写/回滚/提交（native-run.js:529-628）。
+2. **增量决议**：`collectChangeSet` + `mergeUnconsumed` + `isUpdateEligible` → full 或 update；update 则 `hydrateDocsDir` 把上一轮状态**复制**进独立 docsDir。
+3. **模型桥**：`startLlmBridge`（llm-bridge.js:90）起 `127.0.0.1:<随机端口>` 端点；entry.py 从环境变量读 `CODEWIKI_BASE_URL/API_KEY`，FSoft 的 OpenAI 客户端打向桥，桥转成宿主 `llm.stream`（真凭证全程只在宿主内）。
+4. **引擎**：`runEngine`（client.js:223）spawn entry.py，写一行请求 JSON；entry.py 调 `CLIDocumentationGenerator`，进度经 stage_map.py 映射成八段协议行；引擎自报 `updateOutcome` 与 `stateFiles`。
+5. **gate**：`gateNativeOutput` = 产物自洽 + 渲染（frontmatter 合成、正文一字不动）+ 契约 + 基线裁决，产出 defect/degradation/stale 三分类。
+6. **apply**：`applyNativeOutput`（apply-plan.js:602）写盘 → `cw index`（含缺页反查回滚）→ `cw meta update` 基线 → `commitWikiArtifacts`；受管状态（`captureDocsDir` + state.json + 首落锁）作为 `extraFiles` 与文章**同事务**写/回滚/提交（native-run.js:529-628）。
 7. **终态**：`weakest(engine, gate, apply)`；增量降级记 `incremental-fallback` blocker；partial/failed 一律不推进基线。
 
 ## Connections
 
-- [[index]]：插件主入口，是 lib 全部导出的最终消费者——Config 的 `agenticMaxSteps` 必须与 `DEFAULT_MAX_STEPS`（agentic.js:325）一致（agentic.js:321-324 记录了曾两处各写 24/30 的缺陷）；原生通道由它注入 `runCw`/`autoCommitWiki`/`normalizeIndexLinks`（apply-plan.js:26-34、444-449）。
+- [[index]]：插件主入口，是 lib 全部导出的最终消费者——Config 的 `agenticMaxSteps` 必须与 `DEFAULT_MAX_STEPS`（agentic.js:325）一致（agentic.js:321-324 记录了曾两处各写 24/30 的缺陷）；原生通道由它注入 `runCw`/`autoCommitWiki`/`normalizeIndexLinks`（apply-plan.js:26-34、540-549）。
 - [[tests]]：lib 的「纯逻辑 + 依赖注入」设计直接服务离线单测——cluster 注入 `llmCall`（cluster.js:20）、agentic 注入 `streamFn`/假 workspace（agentic.js:12-15）、change-set 注入 `execFile`（change-set.js:15）、client 用假引擎逐字节喂协议（client.js:13）、apply 注入 `deps.runCw/commit`（apply-plan.js:24-27）。
-- 外部依赖：`@deepseek-ai/dsh-llm`（BlockAssembler 与三种 Message 构造器，agentic-host.js:11-13）；`vendor/tree-sitter` 下的 web-tree-sitter 与 `tree-sitter-wasms`（symbols.js:25、545）；上游实现对照 FSoft-AI4Code/CodeWiki（cluster.js:1-3、graph-diff.js:1-2、update-planner.js:1-2、agentic.js:1-5）。
+- 外部依赖：`@deepseek-ai/dsh-llm`（BlockAssembler 与三种 Message 构造器，agentic-host.js:11-13）；`vendor/tree-sitter` 下的 web-tree-sitter 与 `tree-sitter-wasms`（symbols.js）；上游实现对照 FSoft-AI4Code/CodeWiki（cluster.js:1-3、agentic.js:1-5）。
 
 ## Known Issues
 
@@ -533,18 +533,18 @@ ChangeSet 字段（79-99）：`version, ok, state, fallback, reason, baseCommit,
 - **JSON 围栏包裹的工具参数**：一律解析失败 → 参数退化 `{}` → 工具空参执行 → 模型重试同一错（agentic.js:476-480）。修复：`parseToolArgs` 三级抢救（476-500）。
 - **generate_sub_module 谎报成功**：无论什么原因不可用都回「已派发」，模型在父文写「详见 xxx.md」造成死链且父任务仍记 ok（agentic.js:290-294）。修复：区分 max-depth / unsupported 如实报错并指示「写成普通小节」。另：dispatchSub 闭包原样下传会使子层永远用父层深度判定、subDepth 封顶失效（articles-agentic.js:113-117）。
 - **子模块重名互相覆盖**（上游 issue #76/#113）：同一次父任务共享已用名集合，重名加前缀、仍重则跳过（articles-agentic.js:71-74）。
-- **旧契约闸门只查 frontmatter 开合**：重复贴头/空章节/死链/坏围栏全入库（article-contract.js:213-222）；`inspectArticle` 现按 16 类问题分级拦截。
-- **cw index 缺页静默成功**：frontmatter 解析失败就 continue 且 exitCode 0（apply-plan.js:351-358、773-778）。修复：`findArticlesMissingFromIndex` 反查 `_index.md`，缺页按索引失败整体回滚。
-- **git quotepath 转义**：非 ASCII 路径默认输出成 `"a/\344\270\255.md"`，按字面量比较的代码全部失配（git-paths.js:23-37）；apply 的提交范围校验必须 `withQuotepathOff`（apply-plan.js:211-218），否则中文模块名的合法产物会被判「混进 wiki 之外」整轮拉成 partial。
-- **未提交改动对增量隐形**：cw status 只看 committed diff，改完就编译会把未消化的变化当已消化（change-set.js:1-13）；native 侧用 state.json 的 `unconsumed` 账本携带直到真的进 commit（native-state.js:437-497）。
-- **0.14.0「1 篇成功 + 19 篇失败也报 done」**：由此确立 contract.js 硬不变量（done 无 blockers / partial 必有 blockers，122-131）、apply 三不变量（apply-plan.js:10-22）、gate 三分类（quality-gate.js:15-33）与终态取最弱（native-run.js:679）。
-- **FSoft 打印污染协议流**：click 缓存 stdout 包装器，事后替换无效（entry.py:14-21）；必须在 import 前接管 `sys.stdout`。Windows cp936 编码让中文路径请求行变乱码（entry.py:50-61）；三流钉 UTF-8。
-- **嵌套 payload 读取 bug**：entry.py 曾只读 `msg["payload"]`，真引擎按平铺发送导致 repoPath/docsDir/commitId 全丢，docsDir 自嵌套长出重复页（entry.py:657-665）；假引擎按平铺读所以测试看不出来——现两种形状都认。
+- **旧契约闸门只查 frontmatter 开合**：重复贴头/空章节/死链/坏围栏全入库（article-contract.js:213-224）；`inspectArticle` 现按 16 类问题分级拦截。
+- **cw index 缺页静默成功**：frontmatter 解析失败就 continue 且 exitCode 0（apply-plan.js:351-358、905-910）。修复：`findArticlesMissingFromIndex` 反查 `_index.md`，缺页按索引失败整体回滚。
+- **git quotepath 转义**：非 ASCII 路径默认输出成 `"a/\344\270\255.md"`，按字面量比较的代码全部失配（git-paths.js）；apply 的提交范围校验必须 `withQuotepathOff`（apply-plan.js:211-218），否则中文模块名的合法产物会被判「混进 wiki 之外」整轮拉成 partial。
+- **未提交改动对增量隐形**：cw status 只看 committed diff，改完就编译会把未消化的变化当已消化（change-set.js:1-13）；native 侧用 state.json 的 `unconsumed` 账本携带直到真的进 commit。
+- **0.14.0「1 篇成功 + 19 篇失败也报 done」**：由此确立 contract.js 硬不变量（done 无 blockers / partial 必有 blockers，122-131）、apply 三不变量（apply-plan.js:10-22）、gate 三分类与终态取最弱（native-run.js:712）。
+- **FSoft 打印污染协议流**：click 缓存 stdout 包装器，事后替换无效；必须在 import 前接管 `sys.stdout`。Windows cp936 编码让中文路径请求行变乱码；三流钉 UTF-8。
+- **嵌套 payload 读取 bug**：entry.py 曾只读 `msg["payload"]`，真引擎按平铺发送导致 repoPath/docsDir/commitId 全丢，docsDir 自嵌套长出重复页；假引擎按平铺读所以测试看不出来——现两种形状都认。
 - **engine-lock 落盘时机**：在 doctor 阶段直接写盘会让 `.codewiki/` 早于 `cw init` 存在，落地器判 wiki-missing 拒初始化、首次编译整批失败还回滚（native-run.js:270-277）；改为与产物同事务进写集（native-run.js:606-628、manifest.js:117-124）。
-- **状态目录命名**：放在 `.codewiki/temp/native-state/` 会被 cw index 收成第二份文章（同页两条链接）；必须 `.codewiki/_native-state/`（native-state.js:20-28）。
-- **中文仓库名的依赖图被判缺失**：Python `sanitize_repo_name` 是 Unicode 感知，JS 侧用 `[A-Za-z0-9]` 会对不上文件名 → 每轮白退全量（native-state.js:64-76）。
-- **无变化轮空转提交**：state.json 的 `updatedAt` 与引擎 metadata 的 commit_id 每轮都变，照写就产生纯记账提交（native-state.js:416-424、native-run.js:537-547）；修复：`stateFingerprint` 相同沿用旧文本 + `idleRound` 三条件短路。
-- **WASM 语法不可用时静默丢语言**：早期 AST 路径直接 `return []`，整块语言从模块划分消失（symbols.js:288-301）；现退正则兜底并记 `stats.regex`。
-- **反向依赖/新文件/stale 三类丢失**（update-planner.js:4-14）：util 变签名引用方不重写、新文件被静默丢、未重写页引用已删符号；planUpdate 以显式 action + reason + unmappedChanges 兜底。
+- **状态目录命名**：放在 `.codewiki/temp/native-state/` 会被 cw index 收成第二份文章（同页两条链接）；必须 `.codewiki/_native-state/`。
+- **中文仓库名的依赖图被判缺失**：Python `sanitize_repo_name` 是 Unicode 感知，JS 侧用 `[A-Za-z0-9]` 会对不上文件名 → 每轮白退全量。
+- **无变化轮空转提交**：state.json 的 `updatedAt` 与引擎 metadata 的 commit_id 每轮都变，照写就产生纯记账提交（native-run.js:537-547）；修复：`stateFingerprint` 相同沿用旧文本 + `idleRound` 三条件短路。
+- **WASM 语法不可用时静默丢语言**：早期 AST 路径直接 `return []`，整块语言从模块划分消失；现退正则兜底并记 `stats.regex`。
+- **反向依赖/新文件/stale 三类丢失**：util 变签名引用方不重写、新文件被静默丢、未重写页引用已删符号；planUpdate 以显式 action + reason + unmappedChanges 兜底。
 - **模型桥关闭顺序**：先关桥会让还在读流的引擎拿 502；桥在 `finally` 中引擎退出后才关（native-run.js:455-458）。
 - **消息身份漂移**：工具循环每轮重造 Message 会换新 UUID，违反宿主 MessageId 稳定身份契约（agentic-host.js:26-32）；`IDENTITY` WeakMap 缓存修复，循环结束自动释放。

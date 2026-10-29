@@ -112,7 +112,7 @@ tags: [root, client, dsh-codewiki, tests, probes]
 | `setPath` | `client.js:618-625` | 不可变更新 draft 的单键 |
 | `dirty` | `client.js:627-630` | `JSON.stringify` 比对 draft 与 snapshot.value |
 | `useEfforts(provider, model)` | `client.js:642-673` | Hook：GET `EFFORTS_PATH?provider&model`，返回 `{for, efforts, defaultEffort, error, loading}`；普通档与大档各调一份（`client.js:674-675`） |
-| `modelTrio` | `client.js:680-784` | provider/model/effort 三联渲染：换 provider 清空 model 与旧档位（`client.js:30-33`）；目录里没有的 provider/model 保留 `__custom` 选项防静默丢配置（`client.js:708-711`、`client.js:732`）；模型未声明档位时给 `GENERIC_EFFORTS` 手选（`client.js:747-763`） |
+| `modelTrio` | `client.js:680-784` | provider/model/effort 三联渲染：换 provider 清空 model 与旧档位（`client.js:30-36`）；目录里没有的 provider/model 保留 `__custom` 选项防静默丢配置（`client.js:708-711`、`client.js:732`）；模型未声明档位时给 `GENERIC_EFFORTS` 手选（`client.js:747-763`） |
 | `save()` | `client.js:786-825` | 校验：`maxConcurrency` 1–8（788-792）、`bigConcurrency` 0 或 1–8（794-798，0=跟随默认档）、`agenticMaxSteps` 1–100（800-804）、`planMode` 仅 `['auto','dirs']`（806-809）；对 25 个键（`client.js:812`）diff 出 `{op:'set'}` 列表后 `form.mutate(ops, snapshot.revision)`；`accepted=false` → 冲突提示（820） |
 | `discard()` | `client.js:827-831` | 还原草稿 |
 | 表单渲染 | `client.js:837-1057` | 五节：运行（启用/提醒/自动提交/工作区过滤/并发/串行/并行/语言/binaryPath）、编译模型（+ `sessionTier`，940-948）、大档模型（+ `bigTokenBudget`）、编译流程（planMode/agentic/agenticMaxSteps/symbolIncremental）、调度与排除（autoUpdate/autoUpdateMin/excludePaths 文本域 1039-1044）、保存条（1050-1056） |
@@ -283,7 +283,7 @@ tags: [root, client, dsh-codewiki, tests, probes]
 | `.probe-inc.mjs` | 两轮 native 增量在生产链的真实行为 | 走 `index.js` 的 `apply` + 独立 JOBS_FILE（9-14）；硬编码本机 REPO 路径（8）；打印两轮 incremental/apply/blockers 与引擎足迹（66-78） |
 | `.probe-nochange-commit.mjs` | 无变化轮到底提交了什么 | mode `update-nochange`（34），打印 HEAD diff（38-43） |
 | `.probe-nochange.mjs` | 用例 2（update-nochange）为何卡住 | 完整服务链 + 90s 超时打印现场（55-69），两轮 full/stale（71-83） |
-| `.probe-two-round.mjs` | 确认第二轮真的进了 update 分支 | runNativeJob 两轮，打印 outcome/gate/apply/incremental 与引擎调用（37-70） |
+| `.probe-two-round.mjs` | 确认第二轮真的进了 update 分支 | runNativeJob 两轮，打印 outcome/engineLock/apply/incremental 与引擎调用（37-70） |
 | `.probe3.mjs` | staged 文件场景 | JOBS_FILE + `gen.execute`，`staged.py` add 后 stale（54-61） |
 
 ## Architecture
