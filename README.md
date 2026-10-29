@@ -2,11 +2,13 @@
 
 把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：仓库内代码 wiki（`<repo>/.codewiki/`，随仓库提交共享）+ 智能体编排编译，支持为编译子代理指定模型。
 
-**0.13.0 起吸入了 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)（MIT，ACL 2026）的三层能力**：AST 符号提取 + LLM 语义聚类（`planMode=auto`）、agentic 工具循环写作（`agenticArticles`）、符号级增量判定（`symbolIncremental`）。这一套全部用 Node + tree-sitter WASM 在本插件内实现，**默认通道因此不需要 Python 运行时**，任一环节不可用都自动降级回旧行为。详见下文「编译流水线：吸收自 FSoft CodeWiki」。
+**0.16.0 起默认通道是 FSoft 原生引擎**（`nativeEngine` 默认 `true`）：直接把上游 FSoft CodeWiki 的 Python 引擎当子进程驱动，由它做符号图、模块树、增量裁决与文章写作，插件这一侧只负责环境探测、模型桥、质量闸与落地事务。**这条通道需要本机有 Python 3.10+ 与闭合的依赖环境**（`tools/fsoft-engine/setup-env.sh`）。环境不闭合时以 `engine-deps` 明确失败，不会悄悄改走 Node 通道冒充成功。
+
+**0.13.0 曾经在 Node 侧重写过一遍 FSoft 的三层能力**（AST 符号提取 `lib/symbols.js`、LLM 语义聚类 `lib/cluster.js`、符号级增量 `lib/graph-diff.js` + `lib/incremental.js` + `lib/update-planner.js`）。**这五个模块已在 0.16.0 阶段 7 受控退役中删除**——同一套算法维护两份没有意义。它们守护的行为现在由原生引擎在 Python 侧承担；`nativeEngine:false` 的兼容通道只保留按顶层目录分组 + 文件级 `source_files` 归属判定这两项最小能力。
 
 **0.14.0 起补上「增量不丢、结果诚实、坏文章不入库」三层质量保证**（对应上游的 updater/ownership/完整性终态/write-set 与文章质量门）：变更采集覆盖工作区（未提交/已暂存/未跟踪/删除/改名），增量规划带反向依赖闭包与新文件 ownership，终态新增 `partial` 且只有完整成功才推进基线，所有写盘点统一走文章契约闸门。详见下文「增量与质量保证（0.14.0）」。
 
-**0.15.0 起多了一条可选的原生引擎通道**（`nativeEngine`，**默认关闭**）：直接把上游 FSoft CodeWiki 的 Python 引擎当子进程驱动，由它做依赖图、模块树、增量裁决与文章写作，插件这一侧只负责环境探测、模型桥、质量闸与落地事务。**这条通道需要本机有 Python 3.10+ 与闭合的依赖环境**，装法见「原生引擎通道（0.15.0）」。默认仍是上面的 Node 通道（`nativeEngine:false`），两条通道并存、互不回退——原生通道环境不闭合就 `engine-deps` 明确失败，不会悄悄改用 Node 通道冒充成功。
+**0.15.0 引入、0.16.0 转正的原生引擎通道**（`nativeEngine`，**0.16.0 起默认开启**）：装法见「原生引擎通道」。`nativeEngine:false` 仍然可用，是一条**兼容通道**（插件内 Node 流水线），只服务「本机装不了 Python 依赖」这一种场景，**不再接收新能力**；两条通道互不回退。
 
 ## 提供
 
@@ -39,16 +41,16 @@
 
 取不到基线（非 git 仓库、基线 commit 不可达、git 出错）时**明确退回全量**并记原因，不会假装「干净」。
 
-### 增量规划：依赖影响与 ownership
+### 增量判定：符号级在原生引擎，文件级在兼容通道
 
-`lib/update-planner.js` 的 `planUpdate({changeSet, oldGraph, newGraph, articles, moduleMap})` 是纯函数（可离线单测），产出每篇文章的 `write`/`keep`/`review` 与**逐条原因**：
+原生通道的符号级/依赖级增量由上游 `updater/graph_diff.py` 完成，能力边界见「编译流水线：吸收自 FSoft CodeWiki」。**0.16.0 阶段 7 起本仓不再维护 Node 侧的增量 planner**（`lib/update-planner.js`、`lib/graph-diff.js`、`lib/incremental.js`、`lib/symbols.js` 均已删除）。
 
-- **反向依赖闭包**：接口级变更（签名/新增/删除/改名/导入边）会连带重写「使用方」的文章，不再只更新 source_files 里直接命中那一篇。函数体内部的实现细节变更只重写自身文章，不波及依赖方。
-- **纯注释仍跳过**：`codeHash`（剥离注释后的哈希）不变即视为纯注释改动，`keep`，与 0.13.2 行为一致。
-- **新文件 ownership**：新增文件按最长公共目录归给最匹配的文章（该篇升级为 write）；完全无法归属的**源码**文件会让规划退回全量并记 warning；非源码文件（笔记、数据）无归属只记 warning，不拖累增量。
-- **未重写页 stale scan**：保留下来的文章会检查正文是否引用了已删除/已改名的组件、内部链接是否指向已不存在的文章，命中则升级为 write 或 review。
-- **缺 `source_files`** 的文章不再静默跳过，而是 `review` + 要求全量重编。
-- 规划关系存 `.codewiki/temp/module-map.json`（版本化，随 wiki 入库）；老 wiki 没有该文件时从 frontmatter 保守迁移。
+`nativeEngine:false` 的兼容通道只剩下**文件级归属判定**（`index.js` 内的 `attributeChanges`）：
+
+- 变更集里每个源码路径，只要被某篇既有文章的 `source_files` 认领（或它是一次 `git mv` 改名的源路径），就算「已消化」。
+- 需要重写的文章 = 「`source_files` 命中变更的文章」∪「`cw status` 报出的过期文章」。
+- 有变更没有任何文章认领时**不推进基线**，并在 `blockers` 里列出来，下次编译还会重新看见它们——不会把没读懂的变化永久基线化。
+- 没有符号图、没有 `module-map.json`、没有反向依赖闭包：改一个被 10 篇引用的函数，兼容通道只会重写直接认领它的那一篇。**这是退役带来的已知能力损失**，需要符号级增量请用原生通道。
 
 ### 终态诚实：`partial` 不是 `done`
 
@@ -103,7 +105,7 @@
 
 | 键 | 默认 | 说明 |
 |----|------|------|
-| `nativeEngine` | `false` | 打开后 `codewiki_generate` / 面板 / Web API 的编译全部交给原生引擎裁决；关闭则完全走 Node 通道 |
+| `nativeEngine` | `true` | 编译通道。`true`（默认，0.16.0 起）= 原生引擎裁决全流程；`false` = 兼容通道（插件内 Node 流水线，仅按顶层目录分组 + 文件级归属判定） |
 | `nativeEnginePython` | 空 | venv 解释器绝对路径；空 → `DSH_CODEWIKI_PYTHON` → `python` |
 | `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本，一般不用改 |
 | `nativeEngineTimeoutMs` | `2700000`（45 分钟） | 单次引擎调用上限，超时按 `failed` 记并杀进程树 |
@@ -171,9 +173,11 @@ llm bridge 转发。
   `symbolIncremental`/`runEngine`/`normalizeIndexLinks` 等不在所引区间内）、4 条
   「符号不存在」、1 条「起始行越界」。**主体是 `.codewiki/` 文章滞后于本轮代码**，
   不是校验器缺陷；按纪律不手改文章，留待一次真实全量重编译覆盖。
-- 阶段 7 的退役**未执行**（`nativeEngine` 默认仍 `false`，旧 Node 路径一行未删）：
-  规格要求「真实通过后才删除」，且是否把原生通道切成默认通道**由用户决策**，本仓库不擅自
-  切换。退役前置条件见下节。
+- **阶段 7 受控退役已执行**（0.16.0）：`nativeEngine` 默认 `true`；`lib/symbols.js`、
+  `lib/cluster.js`、`lib/graph-diff.js`、`lib/incremental.js`、`lib/update-planner.js`
+  与对应 7 套测试已删除。已知能力损失：兼容通道失去符号级增量与语义聚类（都只剩最小
+  文件级/目录级判定），`planMode` 与 `symbolIncremental` 两个开关**保留但已无实际效果**
+  （仅为兼容既有 `settings.json` 而存在）。
 - `doctor` 的 `engine.deps.ok` 在真机上恒为 `false`（该字段不带 `pip check` 明细，指纹
   也刻意不含它）；判定以 `engineLock.status === 'match'` 为准。
 - 上游 rung3 增量语义：**单模块内的方法级新增**通常不触发重写（component id 不在
@@ -181,18 +185,36 @@ llm bridge 转发。
   （新增/删除/重命名文件或模块）。
 - `.codewiki/modules/` 的孤儿页清理只在**本轮真的落地**时执行；无变化轮不扫不删。
 
-### 旧 Node 通道的保留与退役（0.15.0 的决定）
+### 阶段 7 受控退役（0.16.0 已执行）
 
-**两条通道都保留，`nativeEngine` 默认仍为 `false`。** 理由：
+0.15.0 曾决定「两条通道都保留、`nativeEngine` 默认 `false`」，理由是要留住回退路径并且
+符号级增量只有 Node 侧实现。**0.16.0 推翻了这个决定**，用户明确指示「可以删除」，于是：
 
-- Node 通道是 `nativeEngine:false` 时的**唯一实现**，也是原生通道出问题时的现成回退——
-  删掉等于把用户的回退路径拿走，而原生通道的真实验收只覆盖了上面那张表的场景，没覆盖
-  大仓、多语言混合、超大输入分档等边界。
-- 两条通道共用同一套落地器（`apply-plan.js`）、质量闸（`quality-gate.js`）、变化集
-  （`change-set.js`）、受管状态与文章契约，所以「退役」不会减少维护面；真正独有的只有
-  上游引擎替我们做的那部分（依赖图/模块树/写作）。
-- 退役的前置条件（尚未满足，故未执行）：原生通道在大仓（>2000 文件）与多语言混合仓上
-  跑通，且 `test-wiki-anchors.mjs --strict` 在原生通道编译后全绿。
+**切了默认值。** `nativeEngine` 默认 `true`，`codewiki_generate` / 面板 / Web API 的
+编译默认全交给原生引擎。
+
+**删了被替代的实现。** 同一套算法（符号提取、聚类、图 diff、增量裁决、更新规划）在
+Node 侧维护一份、Python 侧再由上游维护一份，等于每次算法演进都要改两处、验证两遍。
+
+| 删除的模块 | 被谁替代 |
+| --- | --- |
+| `lib/symbols.js`（AST 符号提取，884 行） | 原生引擎 Python 侧的符号图 |
+| `lib/cluster.js`（LLM 语义聚类，467 行） | 原生引擎的模块树构建 |
+| `lib/graph-diff.js`（符号级 diff，578 行） | 上游 `updater/graph_diff.py` |
+| `lib/incremental.js`（快照与增量折算，206 行） | 原生引擎的增量裁决 |
+| `lib/update-planner.js`（更新规划，492 行） | 原生引擎的 ownership/stale scan |
+
+连带删除 7 套测试（`test-symbols` / `test-cluster` / `test-graphdiff` / `test-incremental`
+/ `test-incremental-e2e` / `test-update-planner` / `test-semantic-plan`）。
+
+**保留了什么。** `lib/agentic.js` / `lib/agentic-host.js` / `lib/articles-agentic.js`
+（agentic 写作通道，兼容通道仍在用）、`lib/article-contract.js`（文章契约，两条通道共用）、
+`lib/change-set.js`（四路变更采集，两条通道共用）、`lib/update-record.js`（更新记录）、
+`lib/git-paths.js`、`lib/engine/`（原生引擎适配层，全部保留）。
+
+**代价，如实记录。** `nativeEngine:false` 从「功能对等的第二套实现」降级为「最小兼容
+通道」：只按顶层目录分组、只做文件级归属判定，没有反向依赖闭包、没有纯注释跳过、没有
+新文件 ownership 路由。本机装不了 Python 依赖时它还能出文章，但质量与省时都不如原生通道。
 
 ## 编译流水线：吸收自 FSoft CodeWiki（0.13.0）
 
@@ -200,16 +222,16 @@ llm bridge 转发。
 
 | 层 | 上游做法 | 本插件实现 | 不可用时 |
 |----|----------|-----------|----------|
-| 符号提取 | `tree-sitter` 原生绑定，逐语言 analyzer 提取函数/类/方法 + 调用关系（约 800 行/语言） | `lib/symbols.js`：**表驱动** `LANG_RULES`，web-tree-sitter + WASM 语法，16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name,kind,parameters,baseClasses,dependsOn,bodyHash,sourceCode}>` | 该语言退回正则级符号（`REGEX_RULES` + `regexExtract`，16 种语言表驱动，命中数记 `stats.regex`），不影响其它语言 |
-| 模块划分 | `cluster_modules.py`：LLM 两阶段聚类 + 递归下钻 + super-group 合并 | `lib/cluster.js`：同样的两阶段（先按组件职责聚类，再对超大模块递归下钻）+ `heuristicCluster` 兜底（单顶层目录时自动下探到第二层） | 模型请求失败 → 直接退回 `localPlan` 顶层目录分组，并记 note |
+| 符号提取 | `tree-sitter` 原生绑定，逐语言 analyzer 提取函数/类/方法 + 调用关系（约 800 行/语言） | ~~`lib/symbols.js`~~（**0.16.0 已删**，由原生引擎直接承担）：**表驱动** `LANG_RULES`，web-tree-sitter + WASM 语法，16 种语言（js/ts/py/rs/go/java/c/cpp/c#/rb/php/kotlin/scala/dart/bash/lua），产出 `Map<id, {name,kind,parameters,baseClasses,dependsOn,bodyHash,sourceCode}>` | 该语言退回正则级符号（`REGEX_RULES` + `regexExtract`，16 种语言表驱动，命中数记 `stats.regex`），不影响其它语言 |
+| 模块划分 | `cluster_modules.py`：LLM 两阶段聚类 + 递归下钻 + super-group 合并 | ~~`lib/cluster.js`~~（**0.16.0 已删**，由原生引擎直接承担）：同样的两阶段（先按组件职责聚类，再对超大模块递归下钻）+ `heuristicCluster` 兜底（单顶层目录时自动下探到第二层） | 模型请求失败 → 直接退回 `localPlan` 顶层目录分组，并记 note |
 | 写文章 | module agent 工具循环：模型自己 `read_code`/`list_files`/`edit_article`/`generate_sub_module`，多轮增量写作 | `lib/agentic.js`（纯逻辑循环）+ `lib/agentic-host.js`（接宿主 llm）+ `lib/articles-agentic.js`（接 job 生命周期）：工具 `read_code`/`list_files`/`edit_article`（`view`/`str_replace`/`insert` 三种命令）/`generate_sub_module`（递归派生子模块成文），单篇步数上限 `agenticMaxSteps`；0.14.0 起带 write-set 闸门（父文只准写自己那篇、子模块只准写调度器分配的路径） | 单篇失败只记账；失败率过半时自动退回单轮整包装填通道重跑 |
-| 增量判定 | `updater/graph_diff.py`：组件级 hash + 签名比对，区分 interface/added/deleted/renamed/body/edge；updater 另有 ownership/stale scan/update record | `lib/graph-diff.js`（逐位移植，含 78 条与 Python 原版的黄金对拍；0.13.2 另加 `codeHash`＝剥离注释后的哈希）+ `lib/incremental.js`（快照存取、文件级→组件级折算、「`bodyHash` 变但 `codeHash` 没变」判为纯注释改动不重写）+ 0.14.0 的 `lib/change-set.js`（工作区/暂存/未跟踪/删除/改名四路采集）、`lib/update-planner.js`（反向依赖闭包 + 新文件 ownership + stale scan + module-map）、`lib/update-record.js`（可机读更新记录） | 无快照/版本不符/提取失败 → 退回文件级判定（仍含工作区与新增文件），并记 note |
+| 增量判定 | `updater/graph_diff.py`：组件级 hash + 签名比对，区分 interface/added/deleted/renamed/body/edge；updater 另有 ownership/stale scan/update record | 原生通道直接用上游实现。Node 侧的 ~~`lib/graph-diff.js`~~ + ~~`lib/incremental.js`~~ + ~~`lib/update-planner.js`~~ **已于 0.16.0 删除**；仍保留 `lib/change-set.js`（四路变更采集）与 `lib/update-record.js`（可机读更新记录），兼容通道用它们做文件级归属判定 | 兼容通道（`nativeEngine:false`）退回文件级判定，无符号级能力 |
 
-三个开关（设置页「编译流程（吸收自 FSoft CodeWiki）」一节，也可在 `cordis.patch.yml`/profile patch 里改）：`planMode`（`auto`/`dirs`）、`agenticArticles`（+ `agenticMaxSteps`）、`symbolIncremental`。**默认全开**；想要 0.12.x 的旧行为，把三者分别设成 `dirs`/`false`/`false`。
+三个开关（设置页「编译流程（吸收自 FSoft CodeWiki）」一节，也可在 `cordis.patch.yml`/profile patch 里改）：`planMode`（`auto`/`dirs`）、`agenticArticles`（+ `agenticMaxSteps`）、`symbolIncremental`。**0.16.0 起 `planMode` 与 `symbolIncremental` 已失去实际效果**（对应实现在阶段 7 删除，字段仅为兼容既有 `settings.json` 保留）；`agenticArticles` 仍对兼容通道生效。
 
 子模块成文（0.13.1 起真的生效）：模型写作时若发现模块内有一整块子能力值得单独成文（通常 ≥3 个组件、有自己的职责边界），可调 `generate_sub_module` 把它派出去，插件递归跑一次写作并落到 `<wiki>/modules/<父模块>/<子模块>.md`，父文章里只留概述与链接。递归深度默认封顶 2 层（`subDepth`），子模块名全局去重（重名加父前缀，仍重则跳过），子模块失败只记账、不影响父文章。
 
-AST 能力依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`，56MB，独立于插件根 `node_modules`——后者是宿主注入的，在那装包会顶掉宿主依赖）。`vendor/tree-sitter/node_modules/` 按 `.gitignore` 的 `node_modules/` 规则不入库，新机器上按需 `cd vendor/tree-sitter && npm i`；没装时插件照常启动，只是没有 AST 能力、三层全部降级。
+AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`，56MB）。**0.16.0 阶段 7 起插件内不再有 AST 消费者**（`lib/symbols.js` 已删），该目录下只剩历史记录，不再需要 `npm i`；原生通道用 Python 侧的 tree-sitter。
 
 ## 设置（插件行 config，命名空间 `codewiki`）
 
@@ -221,16 +243,16 @@ AST 能力依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-wasms`
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`（0.10.4，0.10.8 全面启用）：大档模型——输入超 110k 普通预算的请求（写文章/横切/批量校对）改用该档在插件内一次写完。默认 `volces-ark` / `glm-5.3-flash`（512k 上下文），预算 420k token。`bigProvider` 留空=不启用大档。0.10.8 起大档同时是观察→合成分割的门槛：模块源码总量超 420k 才拆观察批。
 - `sessionTier`（0.9.2）：**仅超大输入兜底**时才用。0.10.8 起装填上限=大档预算（`bigTokenBudget`，默认 420k）：文章源码总量在 110k–420k 区间直接大档单请求写完；超 420k 才拆观察→合成批；只有连大档都装不下的单文件才转会话通道，此时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。
 
-- `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0）：原生引擎通道，默认关闭；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道（0.15.0）」。
+- `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0 引入，**0.16.0 起 `nativeEngine` 默认 `true`**）：原生引擎通道；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道」。
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
 - `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`，如免费 hy3）请求并发上限，默认 2（1–8，硬顶 8）。
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
 - `articleLanguage`：文章语言，默认中文。
-- `planMode`（0.13.0）：模块划分方式。`auto`（默认）= tree-sitter 提取全仓符号 → 模型按职责聚成层级模块树（单文件目录会细分、跨目录同一职能会合并）；`dirs` = 只按顶层目录分组（0.12.x 旧行为）。模型请求失败或 AST 不可用时自动退回 `dirs` 并在任务 note 里写明原因。
+- `planMode`（0.13.0，**0.16.0 起已无实际效果**）：语义聚类的实现在阶段 7 删除，兼容通道一律按顶层目录分组（等价于 `dirs`）。字段保留仅为兼容既有 `settings.json`，改它不会改变行为。
 - `agenticArticles`（0.13.0，默认开）：文章写作走 agentic 工具循环——模型在写作过程中自己 `read_code` 读指定文件的指定行、`list_files` 找文件、`edit_article` 增量改写，不再把整个模块源码内联进单个 prompt。好处：prompt 小（不再触发 110k/420k 装填分级）、可以多轮回看精修、大文件不必拆观察批。0.13.2 起该通道也走双池并发：模块源文本量超 `bigTokenBudget` 的任务打 `bigTier` 标记走大档（`bigProvider`/`bigModel`），其余走默认档。关闭则走单轮整包装填的旧通道。0.13.3 起 `read_code` 带重复读抑制：模型反复读同一段（真实运行里出现过同一文件读 13 次）时不再回吐正文，只提示「你已经在第 N 步读过这段」，去重判定发生在读盘之前；同一探针实测重复读 12 → 5 次、上下文 2144 → 1413KB、步数 45 → 17，`stopReason` 由 `max-steps` 变为 `finished`。0.13.4 起工具层补齐四个翻车点：`str_replace`/`insert` 按行尾归一化匹配（仓库 `core.autocrlf=true`，`.codewiki` 下 28/36 篇是 CRLF，跨行替换原先必然失败且模型会反复重试到步数耗尽）；子模块到嵌套上限时不再谎称「已记录」而是报错并要求写成普通小节（原先会产出指向不存在文件的死链、父任务仍记 `ok:true`）；`read_code` 加 40000 字符上限（原先单行超长文件一次可灌 5.7 万 token）；`list_files` 隐藏 `node_modules`/`.git` 等目录。
 - `agenticMaxSteps`（0.13.0，默认 30，1–100）：单篇文章最多允许几轮「读源码 → 改文章」。到上限会强制收尾（写回当前文章并记 note）。
-- `symbolIncremental`（0.13.0，默认开；0.13.2 起注释改动判定生效；0.14.0 起接上反向依赖）：增量编译按 AST 符号级判定——只重写「函数签名/类结构/导出接口/导入边/函数体」真变了的模块；纯注释、空白、格式化改动直接跳过（0.13.2 前只跳过空白，注释改动仍会触发重写；现按 `codeHash`＝剥离注释后的哈希判定，文档注释/docstring 改动仍算真改动）。快照存 `.codewiki/temp/symbol-graph.json`（随 wiki 入库，换机器/换会话仍有效）；快照缺失或版本不符时退回文件级判定（**仍覆盖工作区变更与新增文件**，并照常做完整性检查）。0.14.0 起增量判定由 `lib/update-planner.js` 统一负责，`scope=stale` 与 `scope=auto` 走同一套规划；关闭本开关只是从符号级降为文件级，不会绕过完整性检查。
+- `symbolIncremental`（0.13.0，**0.16.0 起已无实际效果**）：符号级增量的实现（`lib/graph-diff.js` + `lib/incremental.js`）在阶段 7 删除，兼容通道统一按 `source_files` 归属做文件级判定；符号级增量请用原生通道（由上游 `graph_diff.py` 承担）。字段保留仅为兼容既有 `settings.json`。
 - `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
 - `autoCommit`（0.10.9，0.10.10 修正文档与三态）：编译产物自动提交，默认开。编译终态（done 且有文章写成功）后由插件自己 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`，带任务 id 与篇数），把「等编译完成 → 会话模型代跑 git」这件事彻底收回插件侧——会话模型因此不必等待编译、不必轮询、不必提交。安全边界：改动由 pathspec 限定在这两个路径（不是 `-A`/`--all`/`.`，因此不会卷进工作区其它改动）、不 amend/push/改写历史、不跑仓库钩子；以下情形一律**拒绝并降级**为一次性「产物待提交」提醒（不会半个提交、不会静默丢产物）：非 git 仓库、仓库无 HEAD、merge/rebase/cherry-pick 进行中、目标路径存在未解决冲突、`.codewiki/`（或未 tracked 的 `CodeWiki.md`）被 `.gitignore` 忽略、缺 `user.name`/`user.email`、`git add`/`git commit` 失败（含 `index.lock` 被并发占用）。结果写入 job 的 `autoCommit`（`committed`/`sha`/`message`/`reason`/`noChanges`），`codewiki_progress` 输出与侧边栏任务卡直接显示；三条通道（唤醒、系统提示提醒、面板）统一按 `autoCommitState()` 判定三态：已提交 → 静默、产物无改动 → 静默不催、未提交 → 才提醒一次。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
@@ -262,15 +284,13 @@ client.js          插件页设置卡片（浏览器半侧；协议参照 ui-set
 
 验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
 
-全量测试（34 个文件，都直接 `node <file>`，无框架；0.15.0 时逐个实跑全绿）：
+全量测试（28 个文件，都直接 `node <file>`，无框架；0.16.0 阶段 7 后逐个实跑，27 套全绿）：
 
 ```
 test-agentic.mjs / test-agentic-host.mjs / test-agentic-fallback.mjs / test-articles-agentic.mjs
-test-article-contract.mjs / test-cluster.mjs / test-symbols.mjs / test-graphdiff.mjs
-test-semantic-plan.mjs / test-change-set.mjs / test-incremental.mjs / test-incremental-e2e.mjs
-test-update-planner.mjs / test-update-record.mjs / test-batch.mjs / test-prune-orphans.mjs
-test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs / test-cwd-paths.mjs
-test-wiki-entry.mjs / test-wiki-anchors.mjs
+test-article-contract.mjs / test-change-set.mjs / test-update-record.mjs / test-batch.mjs
+test-prune-orphans.mjs / test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs
+test-cwd-paths.mjs / test-wiki-entry.mjs / test-wiki-anchors.mjs
 
 # 原生引擎通道（0.15.0）
 test-engine-contract.mjs / test-engine-client.mjs / test-engine-manifest.mjs

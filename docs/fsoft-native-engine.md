@@ -21,8 +21,10 @@ FSoft-AI4Code/CodeWiki 的三层能力（AST 符号、LLM 语义聚类、符号�
 | mraza `cw`（Rust CLI） | `init` / `status` / `index` / `meta update` / 索引与基线 |
 | DSH 插件（Node） | 宿主模型通道、JobService、排队/取消/恢复、面板、自动提交、安全边界 |
 
-**不长期维护两套编译器**：迁移完成后删除 Node 侧的 cluster/graph-diff/incremental/
-update-planner 路径（阶段 7），旧实现只作为回退保留到真实验收通过为止。
+**不长期维护两套编译器**：阶段 7 已执行完毕（0.16.0），Node 侧的 symbols/cluster/
+graph-diff/incremental/update-planner 五个模块及其 7 套测试**已删除**，`nativeEngine`
+默认为 `true`。`nativeEngine:false` 保留为最小兼容通道（顶层目录分组 + 文件级
+`source_files` 归属判定），不再接收新能力。
 
 ## 版本化契约
 
@@ -288,10 +290,25 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
   当前 404 行）。**绝大多数是 `.codewiki/` 文章滞后于本轮代码**，属文档滞后而非
   校验器缺陷：按纪律不手改文章，留待一次真实全量重编译覆盖（重编译后基线前移，
   这些会自动升级为硬断言）。
-- **阶段 7 退役未执行，待用户决策**。`nativeEngine` 默认仍为 `false`，旧 Node 流水线
-  是默认路径也是回退路径；`symbols`/`cluster`/`graph-diff`/`incremental`/`update-planner`
-  一行未删（规格 L93「真实通过后才删除」）。是否把原生通道切成默认、以及随后删旧路径，
-  **由用户决策后再动**，本仓库不擅自切换。
+- **阶段 7 受控退役已执行（0.16.0）**，用户明确指示「可以删除」。切换与删除内容：
+  - `nativeEngine` 默认值 `false` → `true`（`index.js` Config 与 `liveConfig`、
+    `client.js` 提示文案、README/docs/CHANGELOG 同步）。
+  - 删除 `lib/symbols.js`（884 行）、`lib/cluster.js`（467 行）、`lib/graph-diff.js`
+    （578 行）、`lib/incremental.js`（206 行）、`lib/update-planner.js`（492 行）；
+    连带删除 `test-symbols.mjs`、`test-cluster.mjs`、`test-graphdiff.mjs`、
+    `test-incremental.mjs`、`test-incremental-e2e.mjs`、`test-update-planner.mjs`、
+    `test-semantic-plan.mjs`。
+  - `index.js` 侧清理：删 `semanticPlan()`、`extractCurrentGraph()`、`slimPlanForJob()`、
+    `loadModuleMap()`、`saveModuleMap()`、`tickIndex` 里的符号快照写入、以及两处
+    增量规划分支（`runStaleUpdate` 与「stale 但解析不出过期文章」）里的
+    `loadSnapshot`/`planUpdate`/`updatePlan` 路径；新增 `attributeChanges(changeSet,
+    articles)` 做文件级归属判定（`{unmapped, touched}`）。
+  - `job.updatePlan` 字段保留但恒为 `null`（兼容已落盘旧 jobs 与面板读法），
+    终态判定由 `judgeOutcome` 的 `expectedNames` 通道承担。
+  - `planMode`、`symbolIncremental` 两个配置项**保留但已无实际效果**，仅为兼容既有
+    `settings.json`；`client.js` 里的表单提示已改写为「已退役」。
+  - 已知能力损失：兼容通道没有反向依赖闭包、没有纯注释跳过、没有新文件 ownership
+    路由——改一个被多篇引用的函数只重写直接认领它的那一篇。这是退役的对价。
 
 ## 上游同步
 

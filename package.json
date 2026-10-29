@@ -1,7 +1,7 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.15.0",
-  "description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline with a sidebar panel. Two channels: (1) the in-plugin Node pipeline (default, no Python runtime needed) absorbing FSoft-AI4Code/CodeWiki's AST symbol extraction + LLM clustering, agentic tool-loop writing and symbol-level incremental updates via tree-sitter WASM; (2) an optional native engine channel (nativeEngine, off by default) that drives the upstream FSoft Python engine as a subprocess, which requires a local Python 3.10+ venv with closed deps. Default model workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k, zero subagents, single-project serial.",
+  "version": "0.16.0",
+  "description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline with a sidebar panel. Default channel since 0.16.0 is the native engine (nativeEngine: true) which drives the upstream FSoft-AI4Code/CodeWiki Python engine as a subprocess and requires a local Python 3.10+ venv with closed deps; the in-plugin Node pipeline remains as a minimal compatibility channel (nativeEngine: false, top-level directory grouping + file-level source_files attribution only, no new features). The Node-side reimplementation of FSoft algorithms (symbols/cluster/graph-diff/incremental/update-planner) was retired and deleted in 0.16.0 phase 7. Default model workbuddy/hy3 192k, large tier volces-ark/glm-5.3-flash 512k, zero subagents, single-project serial.",
   "private": true,
   "type": "module",
   "main": "index.js",

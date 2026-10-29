@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.16.0 — 2026-10-29
+
+### 阶段 7 受控退役：原生引擎转正为默认通道，删除 Node 侧重写的 FSoft 算法
+
+用户明确指示「可以删除」。0.15.0 时的决定是「两条通道都保留、`nativeEngine` 默认 `false`」，
+理由是留住回退路径且符号级增量只有 Node 侧实现——本版推翻该决定：同一套算法（符号提取、
+聚类、图 diff、增量裁决、更新规划）在 Node 侧维护一份、Python 侧再由上游维护一份，等于
+每次算法演进要改两处、验证两遍，而 Node 版无法自证与上游一致（0.13.2 那次靠 78 条黄金
+对拍才发现偏差）。真实验收（0.15.0 八场景）已覆盖迁移目标，退役前置条件解除。
+
+**默认值切换**
+
+- `index.js` Config：`nativeEngine: z.boolean().default(false)` → `default(true)`；
+  `liveConfig` 判定 `val(c.nativeEngine) === true` → `val(c.nativeEngine) !== false`
+  （未设置即视为开启，与其它布尔项口径一致）。
+- `client.js` 提示文案同步：`nativeEngine` 相关说明改为「0.16.0 起默认开启」。
+
+**删除被替代的实现**（合计 2627 行）
+
+| 删除文件 | 行数 | 被谁替代 |
+| --- | --- | --- |
+| `lib/symbols.js` | 884 | 原生引擎 Python 侧符号图 |
+| `lib/cluster.js` | 467 | 原生引擎模块树构建 |
+| `lib/graph-diff.js` | 578 | 上游 `updater/graph_diff.py` |
+| `lib/incremental.js` | 206 | 原生引擎增量裁决 |
+| `lib/update-planner.js` | 492 | 原生引擎 ownership / stale scan |
+
+连带删除 7 套测试：`test-symbols.mjs`、`test-cluster.mjs`、`test-graphdiff.mjs`、
+`test-incremental.mjs`、`test-incremental-e2e.mjs`、`test-update-planner.mjs`、
+`test-semantic-plan.mjs`（该套测的是 `cluster.js` 的 `semanticPlan`）。
+
+**`index.js` 侧清理**
+
+- 删 `semanticPlan()`（AST 提取 → LLM 聚类 → 模块清单）与 `extractCurrentGraph()`。
+- 删 `slimPlanForJob()`、`loadModuleMap()`、`saveModuleMap()`、`tickIndex` 里的符号快照写入。
+- 新增 `attributeChanges(changeSet, articles)`：文件级归属判定，返回 `{unmapped, touched}`
+  ——变更集里每个源码路径只要被某篇既有文章的 `source_files` 认领（或它是一次 `git mv`
+  改名的源路径）就算「已消化」；`touched` 是认领了变更的文章名集合。
+- `runStaleUpdate` 与「stale 但解析不出过期文章」两条分支重写：任务清单 = 「`source_files`
+  命中变更的文章」∪「`cw status` 报出的过期文章」；`blockers` 只保留未归属源码变更；
+  两处 `svc.submit` 不再传 `updatePlan`。
+- `job.updatePlan` 字段保留但恒为 `null`（兼容已落盘旧 jobs、面板与 `update-record` 的读法），
+  终态判定由 `judgeOutcome` 的 `expectedNames` 通道承担。
+- `localPlan()` 由 `buildPlan()` 直接调用（不再有 `planMode==='auto'` 分支），注释写明它只
+  服务 `nativeEngine=false` 兼容通道。
+- `planMode`、`symbolIncremental` 两个配置项**保留但已无实际效果**（仅兼容既有
+  `settings.json`），`description` 与 `client.js` 表单提示改写为「已退役」，不再声称提供
+  语义聚类/符号级增量。
+
+**保留**：`lib/agentic.js`、`lib/agentic-host.js`、`lib/articles-agentic.js`（agentic 写作
+通道，兼容通道仍用）、`lib/article-contract.js`（两条通道共用的文章契约）、
+`lib/change-set.js`（四路变更采集）、`lib/update-record.js`（可机读更新记录）、
+`lib/git-paths.js`、`lib/engine/`（原生引擎适配层，全部保留）。
+
+**已知能力损失**（如实记录）：`nativeEngine:false` 从「功能对等的第二套实现」降级为
+「最小兼容通道」——只按顶层目录分组、只做文件级 `source_files` 归属判定，没有反向依赖
+闭包、没有纯注释跳过、没有新文件 ownership 路由。改一个被 10 篇引用的函数，兼容通道只会
+重写直接认领它的那一篇。需要符号级增量请用原生通道。
+
+**测试**：`node --check index.js client.js` 通过；`import('./index.js')` 成功（46 个导出）。
+剩余 28 套测试逐个实跑：**27 套全绿、退出码 0**。`test-orchestration.mjs` 需把
+`LEGACY_CHANNEL` 补上 `nativeEngine: false`（该文件守护的是兼容通道的请求次数与落盘时序，
+不钉住会被默认值切换带到原生引擎上）；`test-wiki-anchors.mjs` 默认档
+**3315 过 / 7 败 / 123 待重编译**，7 条失败全部是 `.codewiki/` 文章引用了已删除的符号
+（`saveSnapshot`/`sameSnapshotContent`/`runEngine`/`rawCode`/`ENGINE_CONTRACT_VERSION`/
+`inspectArticle`）或行号越界，属文档滞后，按纪律不手改文章、留待重编译覆盖——与 0.15.0
+的基线（5 败）相比新增的 2 条正是本次删除造成的，重编译后消失。
+
 ## 0.15.0 — 2026-10-29
 
 ### 原生引擎通道通过真实生产验收（阶段 6/7）：八场景真跑 + 修掉 8 个只有真机才暴露的缺陷
