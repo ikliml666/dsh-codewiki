@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url'
 
 // 测试加速：tick 间隔压到下限（生产默认 10s）
 process.env.DSH_CODEWIKI_TICK_MS = '300'
+// 自动调度测试不真等一分钟：心跳压缩到 100ms，仍走 apply 里的真实 autoScan。
+process.env.DSH_CODEWIKI_AUTO_SCAN_MS = '100'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 // 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写。
@@ -1539,6 +1541,55 @@ console.log('== 服务启动清理：Temp 目录终态任务自动移除，活�
   check(!ids.includes('job-tmp-done'), 'Temp 目录终态任务已被启动清理移除')
   check(ids.includes('job-tmp-active'), 'Temp 目录活动任务保留')
   check(ids.includes('job-ws-done'), '工作区终态任务保留')
+}
+
+// ============================ 自动调度：历史任务截断后仍扫描已知仓库 ============================
+console.log('== 自动调度：过期检测触发真实心跳提交，历史外已知仓库不丢 ==')
+{
+  // 回归现场：REPOS_FILE 已有编译过的工作区，但 JOBS_FILE 为空（历史被 MAX_JOBS_KEPT
+  // 截断）。自动扫描必须仍对它执行 scope=auto，而不是把调度器变成只扫任务历史的摆设。
+  const scanRepo = makeFixtureRepo()
+  const mockScan = makeBatchMock()
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  // 干净现场：前序用例会往同一个 JOBS_FILE 里留 fixture 任务（如「Temp 目录活动任务保留」
+  // 的 job-tmp-active 仍是活动态），单项目串行闸门会被它永久占住——本仓库的初始化任务只会
+  // 一直 queued，根本没编译出 wiki，后面的 stale 判定自然退化成 missing/full。
+  // 因此必须在 apply 之前就把历史清空，而不是等初始化跑完再清。
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  fs.writeFileSync(repoFile, JSON.stringify({ repos: [] }), 'utf8')
+  const initCtx = makeCtx()
+  apply(initCtx.ctx, batchCfg({ autoUpdate: false }))
+  const initGen = initCtx.registered.get('codewiki_generate')
+  const submit = await initGen.execute({ cwd: scanRepo, scope: 'auto' }, {})
+  check(submit.submitted === true, '自动调度前置：新仓库可提交全量初始化')
+  const initJob = await waitJob(scanRepo)
+  check(initJob?.stage === 'done', `自动调度前置：初始化编译至终态 done（实际 ${initJob?.stage}）`)
+  check(JSON.parse(fs.readFileSync(repoFile, 'utf8')).repos.includes(scanRepo), '已编译仓库进入独立持久清单')
+  for (const dispose of initCtx.disposers) dispose()
+  // 先停掉持有旧任务内存的服务，再清空磁盘历史；否则 mergeFromDisk 只增不删，
+  // 会把内存里的终态任务带回来，根本没测到「只剩 knownRepos」这个现场。
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  const scanCtx = makeCtx()
+  apply(scanCtx.ctx, batchCfg({ autoUpdate: true, autoUpdateMin: 5 }))
+  // 让判态从 missing 变成 stale；真实 cw CLI 给出过期清单，不经 mock generate。
+  fs.writeFileSync(path.join(scanRepo, 'core', 'core.py'), 'def run():\n    return "changed"\n')
+  const scanCw = scanCtx.registered.get('cw')
+  // 判定必须真的走到 stale：cw status 看到 core/core.py 变更，自动调度才会走增量而非全量。
+  const preStatus = await scanCw.execute({ cwd: scanRepo, args: ['status'] }, {})
+  check(/Changed since last compile|Stale articles/.test(String(preStatus?.stdout ?? '')), `自动调度前置：心跳前判态已是过期（实际 ${String(preStatus?.stdout ?? '').split('\n')[0]}）`)
+  let autoJob = null
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 150))
+    const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+    autoJob = (data.jobs ?? []).find((j) => j.cwd === scanRepo && j.auto === true && j.kind === 'stale') ?? null
+    if (autoJob) break
+  }
+  check(autoJob !== null, `历史清空后，真实心跳仍扫描已知仓库并自动提交过期编译（现场 ${JSON.stringify((JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).filter((j) => j.cwd === scanRepo).map((j) => ({ scope: j.scope, kind: j.kind, stage: j.stage, notes: j.notes }))) }）`)
+  if (autoJob) check(autoJob.scope === 'auto' && autoJob.kind === 'stale', `自动提交保留 scope=auto 与增量 kind（实际 ${autoJob.scope}/${autoJob.kind}）`)
+  for (const dispose of scanCtx.disposers) dispose()
+  mockScan.restore()
+  fs.rmSync(scanRepo, { recursive: true, force: true })
 }
 
 // 清理主 fixture（wiki 在仓库内 .codewiki/，随目录一起删）

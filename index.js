@@ -4972,7 +4972,9 @@ export function apply(ctx, config) {
   if (typeof ctx.effect === 'function') ctx.effect(() => () => service.stop())
   const generateDef = generateToolDefinition(config, service)
   const updateDef = updateToolDefinition(config, generateDef)
-  // 自动更新调度器：60s 心跳，到点对历史工作区逐个 scope=auto 判态提交。
+  // 自动更新调度器：60s 心跳，到点对已知工作区逐个 scope=auto 判态提交。
+  // 必须合并持久仓库清单与 job 历史：后者最多保留 MAX_JOBS_KEPT 条，且启动会清理
+  // Temp 终态；只扫历史会让清单里仍然过期的仓库永久退出自动更新。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
   const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null }
   let scanning = false
@@ -4986,7 +4988,10 @@ export function apply(ctx, config) {
     schedState.lastScanRepos = 0
     schedState.lastScanSubmitted = 0
     try {
-      const cwds = [...new Set(service.list().map((j) => j.cwd).filter(Boolean))]
+      const cwds = [...new Set([
+        ...loadKnownRepos(),
+        ...service.list().map((j) => j.cwd),
+      ].filter(Boolean))]
       for (const cwd of cwds) {
         if (isExcluded(cwd, c.excludePaths)) continue
         // worktree 目录静默跳过（1.2.0）：历史任务里可能留着 worktree 路径，不编译也不记错误
@@ -5004,7 +5009,7 @@ export function apply(ctx, config) {
       }
     } finally { scanning = false; schedState.scanning = false }
   }
-  const scanTimer = setInterval(() => { void autoScan() }, 60000)
+  const scanTimer = setInterval(() => { void autoScan() }, Math.max(100, Number(process.env.DSH_CODEWIKI_AUTO_SCAN_MS) || 60000))
   scanTimer.unref?.()
   if (typeof ctx.effect === 'function') ctx.effect(() => () => clearInterval(scanTimer))
   ctx.inject?.(['tools'], (rc) => {
