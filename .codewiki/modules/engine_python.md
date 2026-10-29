@@ -8,6 +8,159 @@ source_files:
   - lib/engine/contract.js
   - lib/engine/client.js
   - lib/engine/native-run.js
+tags: [python, native-engine, entrypoint, stage-mapping, protocol]
+---
+
+## Overview
+
+`engine_python` 是原生引擎（FSoft / `codewiki`）的 Python JSON-lines 薄入口，对应迁移的「阶段 2」。它**不是算法实现**：依赖图、聚类、文章写作、增量 diff 全部由 FSoft 自己的 `CLIDocumentationGenerator` 完成（见 `entry.py` 第 2–10 行模块 docstring）。本模块只负责四件事：
+
+1. 把 stdin 的一行 JSON 请求变成一次 FSoft 调用（`doctor` / `generate` / `update` / `cancel`）；
+2. 把 FSoft 的**五段**进度翻译成引擎**八段**契约（`stage_map.py`），以 JSON 行推给 Node；
+3. 把成功 / 失败 / 取消翻译成 `EngineResult`（与 `lib/engine/contract.js` 同一份语义）；
+4. 守住两条红线：**不读本机凭证库**、**不让 FSoft 的打印污染协议流**。
+
+它由 Node 侧的 `lib/engine/client.js` 通过受管子进程启动：写一行请求 JSON，读回 JSON-lines（`hello` → `progress*` → `result`）。本模块是整条迁移里唯一一处「我们写的 Python」（见 `test-engine-python-entry.mjs` 第 1–14 行注释）。
+
+核心设计约束：
+
+- **stdout 接管必须在 `import codewiki` 之前**（`entry.py` 第 46–92 行）：FSoft 用 `print` / `click.secho` / `print_banner` 往 stdout 写人类文案，且 click 会缓存 text stdout 包装器，事后替换 `sys.stdout` 拦不住已缓存的引用。所以入口先把 `sys.stdout` 换成 `_ProtocolOnly()` 守卫，协议行走保存下来的 `_REAL_STDOUT`。
+- **不用 `ConfigManager`**（`entry.py` 第 23–29 行）：它会读 `~/.codewiki/config.json` 或系统 keyring。迁移后模型通道由 Node 侧 loopback 桥注入（环境变量），密钥只活在进程环境里，构造 config dict 直接交给 adapter 即可。
+
+## Key Components
+
+### entry.py
+
+文件 `lib/engine/python/entry.py`（共 687 行）。
+
+**模块级常量：**
+
+- `PROTOCOL_VERSION = 1`（第 94 行）— 协议版本，与 `client.js` 的 `ENGINE_PROTOCOL_VERSION` 对账。
+- `ACTIONS = ("doctor", "generate", "update", "cancel")`（第 95 行）— 登记的四个动作，由 `handle_request` 校验。
+- `ENV_BASE_URL = "CODEWIKI_BASE_URL"`（第 98 行）、`ENV_API_KEY = "CODEWIKI_API_KEY"`（第 99 行）、`ENV_MAIN_MODEL = "CODEWIKI_MAIN_MODEL"`（第 100 行）、`ENV_CLUSTER_MODEL = "CODEWIKI_CLUSTER_MODEL"`（第 101 行）— 模型通道环境变量名，由 Node 侧桥注入，密钥只活在进程环境里。
+
+**类：**
+
+- `class _ProtocolOnly`（第 59–89 行）— `sys.stdout` 的替身：只允许协议写出走真 stdout，其余一律改道 stderr。方法：
+  - `write(self, text)`（第 66–72 行）— 普通文本写 stderr（变成日志），返回 `len(text or "")`。
+  - `flush(self)`（第 74–78 行）— 转 stderr，防进度条 flush 把半行日志挤进协议流。
+  - `isatty(self)`（第 80–81 行）— 返回 `False`。
+  - `fileno(self)`（第 83–85 行）— 返回 `sys.stderr.fileno()`，避免某些库因拿不到终端句柄抛错。
+  - 属性 `encoding`（第 87–89 行）— 返回 `"utf-8"`。
+
+**函数 / 方法：**
+
+- `emit(obj)`（第 104–108 行）— 写一行协议 JSON 到真 stdout；所有协议消息必须经这里（`json.dumps(obj, ensure_ascii=False)` + `\n` + flush）。
+- `emit_hello()`（第 111–112 行）— 发 `{"type": "hello", "protocolVersion": PROTOCOL_VERSION, "engine": "fsoft-native"}`。
+- `emit_progress(request_id, stage, percent, message="", written=0, failed=0, total=0)`（第 115–128 行）— 发一条 `progress` 协议行（含 `contractVersion: 1`、`writtenCount`/`failedCount`/`totalCount`）。
+- `emit_result(request_id, result)`（第 131–132 行）— 发一条 `result` 协议行。
+- `failure(code, message, stage=None, request_id="")`（第 135–153 行）— 构造 `failed` 终态；`message` 只放给人看的说明，绝不拼凭证；截断到 4000 字符。
+- `_engine_version()`（第 159–173 行）— 读 codewiki 版本：`codewiki.__version__` 优先，否则回退 `importlib.metadata.version("codewiki")`。
+- `_pip_check(timeout=120)`（第 176–195 行）— 跑 `pip check`，返回 `(ok, 输出摘要)`；这是 1A 门禁的运行时版本，装到一半的 venv 会让生成中途崩。
+- `action_doctor(request_id, payload)`（第 198–237 行）— 环境可信性探测：发 `env` 进度、读版本、跑 `pip check`；缺 codewiki 回 `engine-missing`，依赖不闭合回 `engine-deps`（带 `deps` 明细），正常回 `done`（带 `engine.deps`）。
+- `_model_config()`（第 243–275 行）— 从进程环境读模型通道，缺任何一项回 `(None, 原因)`；必须显式给 `fallback_model`（否则 FSoft 的 `create_fallback_models` 在 `model_name.lower()` 抛 `AttributeError`）。返回 dict 含 `base_url/api_key/main_model/cluster_model/fallback_model/provider`。
+- `bridge_progress(adapter, request_id, on_stage=None)`（第 281–332 行）— 替换 `adapter.progress_tracker` 的 `start_stage`/`update_stage`/`complete_stage` 三个方法，把 FSoft 五段事件转成协议行（`map_stage` + `percent_of`）；`on_stage` 回调记录「最后一个真实到达的引擎阶段」。用替换而非继承，因为 FSoft 在 `__init__` 里直接 `ProgressTracker(total_stages=5)` 无注入点。
+- `_count_docs(docs_dir)`（第 338–363 行）— 递归清点产物 `*.md` 页数，排除 `.` 开头目录与 `temp/`；必须递归，否则 hierarchical 布局子目录页会被漏计导致误判 `done`。
+- `_git_commit(repo_path)`（第 366–381 行）— `git rev-parse HEAD`，取 commit 供 `engine.commit` 与 commit_id 记账。
+- `action_generate(request_id, payload, is_update=False)`（第 384–496 行）— 跑一次 FSoft 生成/增量更新：准备 config（`update`/`max_tokens=32768`/`max_depth=2`/`request_limit=100`/`agent_retries=3`/`use_gitignore`/`prompt_caching` 等，第 403–418 行）→ 构造 `CLIDocumentationGenerator`（`entry.py` 第 432–441 行）→ `bridge_progress` → `adapter.generate()`。捕获 `SystemExit`（`code==0` 视为正常无变更，`code!=0` 回 `engine-crashed`）、其他异常走 `_classify_exception`。最后用 `_count_docs` 与 `adapter.validate_generated_docs` 判定 `done`/`partial`，并填 `usage`（读 `job.statistics.usage_totals`，第 485–494 行）。
+- `_update_outcome_of(adapter)`（第 499–513 行）— 读 `adapter._last_update_record.outcome`；只有真的进了增量分支才有值，拿不到返回 `None`（区分「引擎没说」与「引擎说回退了」）。
+- `_state_files(docs_dir)`（第 516–545 行）— 列出引擎在 docsDir 真实产出的跨轮状态文件（顶层 `*.json`、`temp/reference_index.json`、`temp/artifact_index.json`、`temp/dependency_graphs/*`），只报磁盘上存在的文件，不按白名单编造。
+- `_done_result(request_id, docs_dir, repo_path, started, written=0, stage="articles", update_outcome=None)`（第 548–579 行）— 构造 `done` 终态，含 `engine`/`artifacts`（`docsDir`/`rawTreeDir`/`updateRecord`/`stateFiles`）与并列的 `updateOutcome` 字段。
+- `_classify_exception(exc, request_id, docs_dir, repo_path, started, stage="articles")`（第 582–609 行）— 按异常**类型**分类：`IncompleteGenerationError`/`IncompleteDocumentationError` → `partial` + `article-missing` blockers；`*APIError`/`ConfigurationError` → `engine-model`；`RepositoryError` → `engine-missing`；`KeyboardInterrupt` → `cancelled`；其余 → `engine-crashed`。
+- `_cancelled_result(request_id, written=0, stage="articles")`（第 612–629 行）— 构造 `cancelled` 终态。
+- `handle_request(msg)`（第 635–657 行）— 处理一条请求，返回 `(requestId, result)`：校验 JSON 对象 / `requestId` / `action ∈ ACTIONS`；`doctor`→`action_doctor`，`cancel`→`_cancelled_result`（立即回，不跑实际工作），`update`→`action_generate(is_update=True)`，其余→`action_generate(is_update=False)`。
+- `main()`（第 660–673 行）— 先 `emit_hello()`，读一行 stdin，解析 JSON，调 `handle_request`，发 `result`；非法 JSON / 空行回 `engine-protocol` 失败。
+- `__main__` 守卫（第 676–686 行）— 捕获 `KeyboardInterrupt`，尽量补发一条 `cancelled` 终态再 `sys.exit(0)`。
+
+### stage_map.py
+
+文件 `lib/engine/python/stage_map.py`（共 98 行）。纯函数、无副作用，是 Node 与 Python 唯一共享的**枚举口径**（见第 1–17 行模块 docstring）。`test-engine-python-entry.mjs` 第 236–247 行反向断言两边集合完全一致。
+
+**常量：**
+
+- `ENGINE_STAGES`（第 20–29 行）— 引擎八段契约阶段名列表：`["env","graph","cluster","articles","validate","index","baseline","commit"]`，必须与 `contract.js` 的 `ENGINE_STAGES` 完全一致（测试双向对账）。
+- `FSOFT_STAGE_NAMES`（第 33–39 行）— FSoft `ProgressTracker` 五段名的镜像：`{1:"Dependency Analysis", 2:"Module Clustering", 3:"Documentation Generation", 4:"HTML Generation", 5:"Finalization"}`，权重与 FSoft 保持一致。
+- `FSOFT_STAGE_WEIGHTS`（第 40–46 行）— 五段权重：`{1:0.40, 2:0.20, 3:0.30, 4:0.05, 5:0.05}`。
+- `FSOFT_TO_ENGINE`（第 50–56 行）— 五段 → 四段映射：`{1:"graph", 2:"cluster", 3:"articles", 4:"validate", 5:"validate"}`（4/5 都落在 `validate`，因为 HTML 我们不做、finalization 是产物整理）。
+- `DEFAULT_ENGINE_STAGE = "articles"`（第 60 行）— 未知阶段归到 `articles`（耗时最长、最需要让用户看见的阶段），不抛错。
+- `FSOFT_PROGRESS_CEILING = 90`（第 63 行）— 引擎内部进度只占到 90%，剩下 10% 留给 Node 侧收尾（`index`/`baseline`/`commit`），避免「引擎说 100% 但 wiki 还没索引/没提交」这种假完成。
+
+**函数：**
+
+- `map_stage(fsoft_stage)`（第 66–72 行）— FSoft 阶段号 → 引擎契约阶段名；`int()` 失败或不在映射表时归到 `DEFAULT_ENGINE_STAGE`。
+- `percent_of(fsoft_stage, stage_progress)`（第 75–97 行）— FSoft `(阶段号, 阶段内进度 0..1)` → 整体百分数 `0..90`。算法与 FSoft `ProgressTracker.get_overall_progress` 同构（已完成阶段权重之和 + 当前阶段权重×阶段内进度），再乘 `CEILING` 并夹到 `[0,100]`；非法输入夹紧。
+
+## Architecture
+
+本模块是「Node 编排层 → FSoft 引擎」之间的跨语言薄边界，组件 ≥3 且流程非平凡，框图如下（≤20 行）：
+
+```text
+┌─────────────────────────┐   request JSON (1 line)   ┌──────────────────────────┐
+│ lib/engine/client.js    │ ─────────────────────────► │ python/entry.py  main()  │
+│ (spawn 子进程, 读 JSONL)│ ◄───────────────────────── │ emit_hello / handle_      │
+└───────────┬─────────────┘   hello/progress/result    │ request → action_*()      │
+            │                                          └────────────┬─────────────┘
+            │                                                       │ doctor / generate / update
+            │                                          ┌────────────┴─────────────┐
+            │                                          │ _model_config (env vars) │
+            │                                          │ _ProtocolOnly (stdout 守卫)│
+            │                                          └────────────┬─────────────┘
+            │                                                       │ CLIDocumentationGenerator
+            │                                          ┌────────────┴─────────────┐
+            │                                          │ bridge_progress 替换      │
+            │                                          │ progress_tracker 三方法   │
+            │                                          └────────────┬─────────────┘
+            │                                                       │ FSoft 5 段进度事件
+            │                                          ┌────────────┴─────────────┐
+            │                                          │ stage_map.py             │
+            │                                          │ map_stage / percent_of   │
+            │                                          │ (5段→8段契约, 0..90%)     │
+            └──────────────────────────────────────────┘ emit_progress → client.js
+```
+
+职责切分说明：
+
+- `entry.py` 是「请求分发 + 结果成形」薄壳；它不持有任何算法，只把 FSoft 公共 API 包成协议行。
+- `stage_map.py` 是纯函数枚举映射，被 `bridge_progress` 调用（第 292 行 `from stage_map import map_stage, percent_of`）。
+- `_ProtocolOnly`（第 59–89 行）与 `_model_config`（第 243–275 行）是两条红线的落实点：前者保证协议流纯净，后者保证不读本机凭证库。
+- FSoft 只覆盖八段中的前四段（`env` 由 doctor 承担，不在生成流程里；`index`/`baseline`/`commit` 由 Node 侧后续执行），故进度上限压在 90%（`FSOFT_PROGRESS_CEILING`，第 63 行）。
+
+## Data Flow
+
+单次 `generate` 请求的数据流（对应 `action_generate`，`entry.py` 第 384–496 行）：
+
+1. **读取请求** — Node 侧 `client.js` 写一行 `{"requestId","action":"generate","payload":{...}}`；`main()`（第 660 行）读一行 stdin，`handle_request`（第 635 行）校验 `requestId`/`action`，路由到 `action_generate(is_update=False)`。
+2. **解析路径** — `repoPath`/`docsDir` 解析（第 390–391 行）；仓库不存在回 `engine-missing`；`_model_config()`（第 396 行）读环境变量，缺通道回 `engine-model`（`cluster` 阶段）。
+3. **构造 adapter** — 发 `env/100` 进度后，构造 `CLIDocumentationGenerator(repo_path, output_dir=docs_dir, config, commit_id)`（第 432–441 行）。`config` 含模型通道 + 生成参数（`max_tokens=32768`、`max_depth=2`、`request_limit=100`、`agent_retries=3`、`use_gitignore=True`、`prompt_caching=True`，第 403–418 行）；`commit_id` 由 `payload.commitId` 或 `_git_commit` 退回 HEAD（第 426 行），最终落进 `metadata.json` 的 `generation_info.commit_id`，即下轮增量的 `old_commit`。
+4. **进度旁路** — `bridge_progress`（第 442 行）替换 `progress_tracker` 三方法，`on_stage` 回调把「最后一个真实到达的引擎阶段」记进 `reached["stage"]`（第 429 行起）。FSoft 五段事件 → `map_stage`+`percent_of` → `emit_progress`（0..90%）。
+5. **跑引擎** — `job = adapter.generate()`（第 443 行）。`SystemExit(0)`（FSoft「无变更」路径）视为正常终态；`SystemExit(non-0)` 回 `engine-crashed`；异常走 `_classify_exception`（第 456 行）。
+6. **成形结果** — `written = _count_docs(docs_dir)`（递归清点，第 458 行）；`adapter.validate_generated_docs`（第 461 行）缺失则 `partial` + `article-missing` blockers；否则 `done`。`usage` 读 `job.statistics.usage_totals`（第 485–494 行）。`updateOutcome` 由 `_update_outcome_of(adapter)`（第 471 行）填 —— `incremental`/`no_change`/`full_fallback`/`detector_failure`/`null`。
+7. **发回** — `emit_result(request_id, result)`（第 131 行）写一条 `result` 协议行；`client.js` 的 `createProtocolReader` 把它翻译成 `contract.js` 的 `EngineResult`。
+
+`doctor` 数据流更短（`action_doctor`，第 198 行）：发 `env` 进度 → `_engine_version()` → `_pip_check()` → 回 `done`（带 `engine.deps`）或 `engine-missing`/`engine-deps` 失败。`cancel` 由 Node 侧直接杀进程树（`client.js` 依赖 `process-tree.js`），入口侧 `cancel` 仅用于「已受理未开跑」，立即回 `_cancelled_result`（第 654 行）。
+
+## Connections
+
+- [[engine-contract]] — `entry.py` 产出的 `EngineResult`/进度/错误与 `lib/engine/contract.js` 同一份语义；`ENGINE_STAGES`、`UPDATE_OUTCOMES`、`BLOCKER_KINDS`、`ENGINE_ERROR_CODES` 全部对应。阶段枚举的双向对账由 `test-engine-python-entry.mjs` 第 236–247 行保证。
+- [[engine-client]] — `lib/engine/client.js` 是启动本入口的子进程管理 + 协议读取层（`spawn` + `createProtocolReader`），`ENGINE_PROTOCOL_VERSION = 1` 与入口 `PROTOCOL_VERSION` 对齐；取消由 `client.js` 经 `process-tree.js` 杀进程树实现。
+- [[engine-native-run]] — `lib/engine/native-run.js` 是生产通道编排层（`DEFAULT_ENGINE_ENTRY = path.join(here,'python','entry.py')`，第 56 行），把 `env → 增量决议 → 引擎(full|update) → gate → apply` 串成裁决链。
+- [[engine-llm-bridge]] — 模型通道由 Node 侧 loopback 桥注入本入口环境变量（`CODEWIKI_BASE_URL/API_KEY/MAIN_MODEL/CLUSTER_MODEL`），密钥只活在进程环境、不落盘。
+- [[engine-manifest]] — `doctor` 动作的运行时版本是 1A 门禁（`_pip_check` 对应 `manifest.js` 的锁校验）；依赖不闭合回 `engine-deps`。
+- [[engine-quality-gate]] — 入口只负责前四段（到 `validate`），质量门（`validate`/`index`/`baseline`/`commit` 后续三段的落地）由 Node 侧 `quality-gate.js` + `apply-plan.js` 完成。
+- [[engine-process-tree]] — `cancel` 真实取消靠 `process-tree.js` 杀进程树；入口的 `cancel` action 仅用于「已受理未开跑」立即回 `cancelled`。
+
+## Known Issues
+
+---
+title: engine_python
+type: module
+source_files:
+  - lib/engine/python/entry.py
+  - lib/engine/python/stage_map.py
+  - test-engine-python-entry.mjs
+  - lib/engine/contract.js
+  - lib/engine/client.js
+  - lib/engine/native-run.js
   - lib/engine/process-tree.js
   - lib/engine/llm-bridge.js
   - lib/engine/manifest.js

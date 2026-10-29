@@ -13,7 +13,7 @@ tags: [article, contract, validation, frontmatter, gate]
 
 `lib/article-contract.js` 是 CodeWiki 的「文章契约闸门」：定义一篇 wiki 文章要落盘前必须满足的最低结构，并集中在这里判定。它是一个**纯函数模块**（不碰文件系统，只在调用方传入 `fsImpl` 时由调用方提供 `exists` 能力，见 `inspectArticle` 的 `fsImpl` 参数，第 213–232 行），因此可以被单测（`test-article-contract.mjs`）。真正的「落盘闸门」由 `index.js` 在写入前调用本模块完成拦截。
 
-设计动机（第 1–11 行注释）：旧闸门 `validateArticleEnvelope`（index.js:1169 一带）只检查「frontmatter 有没有开头、有没有闭合」，于是下列真实缺陷都能入库：
+设计动机（第 1–11 行注释）：旧闸门 `validateArticleEnvelope`（index.js:1170 一带）只检查「frontmatter 有没有开头、有没有闭合」，于是下列真实缺陷都能入库：
 
 - `concepts/wiki-generation-flow.md` 从第 64 行起又贴了一份 frontmatter 与整段正文；
 - 必需章节存在但正文是空的（只有标题）；
@@ -142,7 +142,7 @@ tags: [article, contract, validation, frontmatter, gate]
 
 ## Connections
 
-- [[index]]：旧闸门 `validateArticleEnvelope`（`index.js:1169` 一带）只查 frontmatter 开合，是本模块要替代的对象；`lib/article-contract.js` 第 3–11 行注释记录了被它放过的真实缺陷。本模块由 `index.js` 在写入前调用形成落盘闸门。
+- [[index]]：旧闸门 `validateArticleEnvelope`（`index.js:1170` 一带）只查 frontmatter 开合，是本模块要替代的对象；`lib/article-contract.js` 第 3–11 行注释记录了被它放过的真实缺陷。本模块由 `index.js` 在写入前调用形成落盘闸门。
 - [[agentic]]：`makeArticleEditor`（agentic.js:200）负责文章的精确编辑，`allowedWritePaths` 闸门复用本模块的 `makeWriteSet`/`isWritable`/`normalizeWritePath`（article-contract.js:357–378）做路径越界防护。
 - [[articles-agentic]]：agentic 文章执行器，是 `inspectArticle` 的主要调用方之一，把文章契约作为质量关卡。
 - [[engine-contract]] / [[engine-mapping]]：FSoft 原生引擎通道的 `requiredSections`/`allowEmptySourceFiles` 覆盖参数（article-contract.js:217–231 注释）正是为适配 `documentation_generator.py` 的产物章节形态与 `module_tree.json` 的 `{}` 边界而设；`mapFsoftOutput` 决定文章落点与 `type`。

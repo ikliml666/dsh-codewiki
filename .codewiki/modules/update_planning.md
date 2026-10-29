@@ -4,6 +4,252 @@ type: module
 source_files:
   - lib/update-planner.js
   - lib/update-record.js
+  - test-update-planner.mjs
+  - test-update-record.mjs
+  - index.js
+tags: [incremental, planning, update-record, terminal-state, module-map]
+---
+
+## Overview
+
+`update_planning` 是增量编译的「规划 + 复盘」模块，由两个纯函数文件组成：
+
+- `lib/update-planner.js`（493 行）：把变更集（change set）与新旧符号图（symbol graphs）收成一
+  份**增量更新计划**（`planUpdate`），为每篇文章判出显式的 `write / keep / delete / review` 四类
+  action，每类都带 `reason`；无法归属的变更单列成 `unmappedChanges`，由调用方决定退回全量编译
+  还是记 partial——**绝不静默丢弃**（审计确认，旧实现 `lib/incremental.js:140-193` 的
+  `filterStaleTasks` 只从文章既有 source_files 取组件，命中就写、没命中就丢，导致反向依赖看不见、
+  新文件被丢弃、未重写页不检查过期）。
+- `lib/update-record.js`（254 行）：把 `ChangeSet + UpdatePlan + 逐篇结果` 收成一份**版本化更新记录**
+  （`buildUpdateRecord`），并据计划与结果判定终态 `done / partial / failed / cancelled`
+  （`judgeOutcome`）。旧实现（见 `index.js` 注释 `test-update-record.mjs:1-6`）只留
+  `writtenCount/failedCount` 两个数字，于是「1 篇成功、19 篇失败」也被判 `done` 并推进编译基线，
+  未消化的变化从此永久失明。
+
+两文件都坚持**纯函数 + 两个 IO 助手**的设计：`planUpdate`、`judgeOutcome`、`buildUpdateRecord`
+不碰文件系统，磁盘读写（`saveUpdateRecord`/`loadUpdateRecord`/`recordPath`）单独抽出便于单测。
+模块边界就是「决定要做什么 + 记录做完什么、能否推进基线」。
+
+## Key Components
+
+### `lib/update-planner.js`
+
+常量：
+
+- `UPDATE_PLAN_VERSION = 1`（第 23 行）：更新计划的版本号，`planUpdate` 产物里的 `version` 取自它。
+- `MODULE_MAP_VERSION = 1`（第 26 行）：module-map 状态文件的版本号。
+- `MODULE_MAP_REL = 'temp/module-map.json'`（第 27 行）：module-map 相对 wiki 根的路径。
+- `SOURCE_EXTS`（第 30 行，由 `SUPPORTED_EXTS` 的 key 集构造）：判定「源码扩展名」的集合。
+
+导出函数：
+
+- `isSourcePath(p)`（第 33-36 行）：只看扩展名判断是否为源码文件；非源码（.md/.json/.log…）
+  无归属时只记 warning 不触发全量，避免「随手写的笔记」让增量永远退回 full。
+- `realChangedIds(diff, oldGraph, newGraph, { ignoreCommentOnly = true })`（第 57-81 行）：从
+  `diffGraphs` 的变更 id 里分离出 `changed / cosmetic / real / structural`。纯注释改动（body 变了但
+  `codeHash` 没变、docstring 也没变）降到 `cosmetic`；interface/added/deleted/renamed/edge 一律算
+  `structural`（实质变化，会触发反向依赖重写）。
+- `dependentsOf(graph, ids)`（第 85-101 行）：反向边索引，返回 `{ 变更组件id → 使用方组件id[] }`。
+  `node.dependsOn` 里既可能是组件 id 也可能是文件路径，两种都认——保证「被依赖方变了 → 使用方
+  文章要重写」这条成立。
+- `scanStaleArticle(article, { deletedComponents, renamedComponents, linkExists })`（第 106-145 行）：
+  单篇文章的 stale scan，纯函数。`linkExists(target)` 由调用方注入（wiki 里是否有这篇）。返回
+  `{ issues, needsRewrite }`：`issues` 含 `deleted-symbol` / `renamed-symbol` / `dead-link` 三类；
+  正文引用已删/改名符号 ⇒ `needsRewrite: true`（内容已错，必须重写）；死链只进 `review`（链接目标
+  可能只是改名成等价标题）。
+- `planUpdate({ changeSet, oldGraph, newGraph, articles, moduleMap, options })`（第 156-436 行）：主入口
+  （详见下「Data Flow」）。返回 `UpdatePlan`：每篇文章一个 action（含 `reason`）+ `unmappedChanges` /
+  `missingSources` / `needsFull` / `summary` / `warnings` 等汇总。
+- `buildModuleMap({ articles, graph, plan, now })`（第 442-468 行）：把「文章→源码/组件/模块」关系
+  建成版本化状态文件（full compile 时由真实 plan 重建）。模块归属优先取 plan 里的模块名，否则用
+  source_files 的公共目录。
+- `migrateModuleMap({ articles, now })`（第 472-481 行）：旧 wiki 没有 module-map 时从 frontmatter
+  保守迁移——只记 sources，组件留空、标 `migrated: true`，绝不臆造归属。
+- `sameModuleMap(a, b)`（第 484-492 行）：忽略 `generatedAt` 只比实质内容，避免空转提交写文件。
+
+内部辅助（非导出）：`dirOf(p)`（第 38-41 行）、`commonDir(a, b)`（第 44-53 行，最长公共目录，至少一级才算同模块）。
+
+### `lib/update-record.js`
+
+常量：
+
+- `UPDATE_RECORD_VERSION = 1`（第 17 行）：更新记录版本号，`loadUpdateRecord` 据此拒读旧格式。
+- `UPDATE_RECORD_REL = 'temp/update-record.json'`（第 18 行）：记录文件相对 wiki 根的路径。
+- `TERMINAL = new Set(['done', 'partial', 'failed', 'cancelled'])`（第 24 行）：终态集合。
+
+导出函数：
+
+- `isTerminalStage(stage)`（第 26-28 行）：判断某 stage 是否为终态（含 `partial`，否则服务会一直转圈）。
+- `judgeOutcome({ plan, results, options })`（第 37-128 行）：从逐篇结果与计划算出终态。依次检查：
+  ① 计划内必需文章缺页 / 失败（`missing-article`）；② 逐篇失败（`article-failed`）；
+  ③ 未消化的源码变更（`unmapped-changes`，只算源码，非源码文档是常态）；④ 文章缺 source_files
+  （`missing-sources`）；⑤ 质量闸门（`quality`）；⑥ 索引/入口完整性（`index`）；⑦ 调用方补充硬阻塞
+  （`extra`，如 git base 不可达）。终态规则（第 115-118 行）：无任何成果可交付 ⇒ `failed`；有写成的部分
+  但有 blocker ⇒ `partial`；blocker 全空 ⇒ `done`。`canAdvanceBaseline` 仅当 `done` 且 `blockers` 为空时为
+  `true`。
+- `buildUpdateRecord({ jobId, scope, changeSet, plan, results, outcome, wikiPath, qualityIssues, notes, startedAt, finishedAt })`（第 131-211 行）：组装可序列化记录，`outcome` 缺省时调 `judgeOutcome`
+  现算。job 里只存路径与摘要，**不塞整张符号图**（测试 `test-update-record.mjs:179-185` 明确断言记录里
+  没有 `graph` / `tasks` 字段），但保留 500 个组件 id 清单供复盘。
+- `recordPath(wikiPath)`（第 213-215 行）：拼出记录的绝对路径。
+- `saveUpdateRecord(wikiPath, record, fsImpl = fs)`（第 217-227 行）：IO 助手，建目录后写
+  JSON，失败返回 `{ ok:false, reason }`（不抛）。
+- `loadUpdateRecord(wikiPath, fsImpl = fs)`（第 229-238 行）：IO 助手，读并解析；版本不符或读取失败返回
+  `null`（测试 `test-update-record.mjs:199-204` 验证版本 999 不认）。
+- `describeOutcome(outcome, blockers = [])`（第 241-253 行）：面板/工具文案，done/partial/failed/cancelled
+  三态（+取消）一眼可分，且带首个 blocker 的原因。
+
+### 调用侧（`index.js`）
+
+- `planUpdate` 在 `generateToolDefinition` 内被调用两次：`runStaleUpdate` 分支（第 4216 行，带
+  `options.staleArticles`）与「cw status 报有文件变更却没命中文章」的补判分支（第 4313 行）。其
+  `updatePlan` 经 `slimPlanForJob(updatePlan)` 压缩后存入 job（第 3953 行），提交时随 `svc.submit` 的
+  `updatePlan` 参数传入（第 3953、4256、4334 行）。
+- `judgeOutcome` 在 `tickIndex` 内被调用（第 3641-3649 行），结果存 `job.judged`；`saveRecord`
+  （第 2591-2613 行）再调 `buildUpdateRecord` + `saveUpdateRecord`（第 2605 行）落盘到 `UPDATE_RECORD_REL`。
+- `loadUpdateRecord` / `loadModuleMap` / `buildModuleMap` 在 `generateToolDefinition` 的 stale 分支被调用
+  （第 4214、4312 行）以提供变更归属证据。
+
+## Architecture
+
+```text
+ collectChangeSet                   extractCurrentGraph / loadSnapshot
+        │                                      │
+        ▼                                      ▼
+  changeSet (四路变更)               oldGraph / newGraph (Map<id,node>)
+        │                                      │
+        │  planUpdate(src: lib/update-planner.js:156) ◄───────── moduleMap
+        ▼                                      │        (lib/update-planner.js:442 buildModuleMap)
+ ┌──────────────────────────────────────────────────────┐
+ │ UpdatePlan: 每篇 action(write/keep/delete/review)      │
+ │  + reason + unmappedChanges + needsFull + warnings     │
+ └──────────────────────────────────────────────────────┘
+        │                                         │
+   提交 stale 任务 (svc.submit)           存入 job.updatePlan
+   prebuiltTasks = write 动作                  │ (slimPlanForJob, index.js:3953)
+        │                                         ▼
+        ▼                              tickIndex → judgeOutcome
+   batch/agentic 写作                          (lib/update-record.js:37)
+        │                                         │
+        ▼                                         ▼
+  逐篇 results (job.articles)        ┌─────────────────────────────┐
+        │                             │  done / partial / failed    │
+        └──────────────┬──────────────►│  + blockers + canAdvance?  │
+                       │              └─────────────────────────────┘
+                       │                              │
+                       │                              ▼
+                       │                 saveRecord → buildUpdateRecord
+                       │                   → saveUpdateRecord (落盘)
+                       │                      temp/update-record.json
+                       ▼
+              tickIndex 据 canAdvanceBaseline 决定
+              cw meta update（推进基线）或跳过
+```
+
+`planUpdate` 与 `judgeOutcome`/`buildUpdateRecord` 都是纯函数，框外不动文件系统；只有当
+`needsFull` 为真（源码变更无归属或文章缺 source_files）时，调用方才退回 `scope=full` 全量编译
+（`index.js:4220-4222`、`index.js:4315`），而非静默放行。
+
+## Data Flow
+
+### `planUpdate` 内部流程（`lib/update-planner.js:156-436`）
+
+输入：`changeSet`（`collectChangeSet` 产物，可为 null ⇒ 调用方显式要求 full）、`oldGraph/newGraph`
+（`Map<id,node>`，任一为 null ⇒ 降级文件级判定）、`articles: [{ name, articlePath, sources, content?, type? }]`、
+`moduleMap`、`options: { fileLevel, linkExists, articleExists, staleArticles, requiredNames }`。
+
+1. 归一化变更集（第 171-175 行）：`sourceChanges/deleted/renamed/untracked` 经 `normRel` 归一。
+2. 文件级降级判定（第 179 行）：`fileLevel = options.fileLevel === true || !oldGraph || !newGraph`。
+   非文件级才调 `diffGraphs` + `realChangedIds`（第 185-192 行）算 `real/structural/cosmetic/counts`。
+3. 组件→文件索引（第 195-203 行）：`componentsByFile` / `fileOfComponent`，新图侧也包含新增文件。
+4. 反向依赖闭包（第 209-219 行）：仅对 `structural` 变更算 `impactByFile`（interface/added/deleted/
+   renamed/edge 才连带重写引用方，实现细节变更不连带——测试 `test-update-planner.mjs:75-86`）。
+5. 文章遍历（第 238-347 行）逐篇判 action：
+   - 缺 `sources` ⇒ `review` + `needsFull`（第 253-258 行）。
+   - `sources` 有文件被删 ⇒ `write` 并点名被删文件（第 270-279 行）。
+   - `sources` 有文件被改名 ⇒ `write` 并含 `from→to`（第 280-289 行）。
+   - 无符号可判（配置/模板/无语法扩展名）⇒ 文件级：变了就 `write`、没变就 `keep`（第 290-304 行）。
+   - 自身源文件变更组件（`ownHit`）或反向依赖影响（`depHit`）⇒ `write`（第 305-318 行）。
+   - 未命中 ⇒ 跑 `scanStaleArticle`：引用已删/改名符号 ⇒ `write`；只有死链 ⇒ `review`；都无 ⇒ `keep`
+     （第 319-346 行）。注意 `keep` 的文章**不**计入「必需清单」（`requiredNames` 只取 `write` 动作，
+     见下），否则正常增量会因 keep 被当成缺页而落 partial（踩过的坑，`lib/update-planner.js:399-408`）。
+6. 无归属变更兜底（第 349-392 行）：源码文件变了但无文章认领。先按「目录前缀」保守路由给同模块已有
+   文章（第 359-380 行，转成该篇 `write` + `newFiles`）；真无归属的源码文件进 `unmappedChanges` 并
+   要求 `needsFull`（第 383-392 行）。非源码文件（README/CodeWiki.md）无引用是常态，只进 `warnings`
+   不触发全量（第 122-134 行测试）。
+7. 汇总（第 410-435 行）：`requiredNames` 优先取 `options.requiredNames`，否则取所有 `write` 动作名；
+   `missingRequired` = 必需但既不在 `articleNames` 也不在 `actions` 里；`needsFull` = 有未归属源码变更
+   或任一篇 `needsFull`。
+
+### `judgeOutcome` 内部流程（`lib/update-record.js:37-128`）
+
+输入：`plan`（`planUpdate` 产物，可 null ⇒ full 编译无增量计划）、`results: [{name, ok, error?}]`、
+`options: { expectedNames, qualityIssues, indexOk, cancelled, extraBlockers }`。
+
+1. `cancelled` ⇒ 直接 `outcome: 'cancelled'`、`canAdvanceBaseline: false`（第 46-54 行）。
+2. 必需文章缺页 / 失败分开记 `missing-article`（第 56-75 行）：计划 `actions` 里 `write` 动作未产出、
+   以及 `options.expectedNames`（full 编译的任务清单）里未成功也未失败的，均记 blocker；两者处置不同
+   （缺页 vs 已记录失败）。
+3. 逐篇失败 → `article-failed`（第 78 行）。
+4. 未消化源码变更 → `unmapped-changes`（第 83-91 行，**只算 `unmappedSourceChanges`**，把非源码文档
+   排除在外，否则正常增量永远 partial）。
+5. 文章缺 source_files → `missing-sources`（第 92-97 行）。
+6. 质量闸门 → `quality`（第 100-102 行）；索引/入口不完整 → `index`（第 105 行）；调用方补充 → `extra`
+   （第 108-110 行，如 git base 不可达导致 full 退化）。
+7. 终态（第 115-118 行）：`writtenCount === 0` 且有任何失败/缺页/阻塞 ⇒ `failed`；其余有 blocker ⇒
+   `partial`；blocker 全空 ⇒ `done`。`canAdvanceBaseline` 仅 `done` 时为真。
+
+### `buildUpdateRecord` → 落盘（`lib/update-record.js:131-227` + `index.js:2591-2613`）
+
+`tickIndex` 调 `judgeOutcome` 得 `judged`，再 `saveRecord(job, judged)`（第 2591 行）调
+`buildUpdateRecord` 组装记录（job 只存摘要、不塞整图），最后 `saveUpdateRecord(job.wikiPath, rec)`
+（第 2605 行）写到 `UPDATE_RECORD_REL`（`temp/update-record.json`）。记录内含 `changeSet.counts`、
+`plan.actions`（每 action 带 `reason`）、`results`、`outcome`、`blockers`、`canAdvanceBaseline`、
+`writtenCount`、`failedCount`、`notes`。
+
+## Connections
+
+- [[change-set]]：`planUpdate` 的输入 `changeSet` 由 `collectChangeSet`（`lib/change-set.js`）采集四路变更
+  （committed/staged/unstaged/untracked + deleted + renamed），弥补 `cw status` 只看 committed 的漏检
+  （`index.js:4179-4193` 注释）。
+- [[incremental]]：旧判定 `filterStaleTasks`（`lib/incremental.js:140-193`）只从文章 source_files 收组件、
+  命中就写——本模块 `planUpdate` 是它的问题修复版；符号快照 `loadSnapshot` / `graphFromSnapshot` /
+  `extractCurrentGraph` 也是增量判定的输入（`index.js:4203-4211`）。
+- [[symbols]]：`planUpdate` 依赖 `extractRepoGraph` / `resolveImportEdges`（`lib/symbols.js`）产出的符号图与
+  依赖边，反向依赖影响才能生效（测试 `test-update-planner.mjs:21-28`）。
+- [[graph-diff]]：`diffGraphs` / `changedIds` / `graphDiffCounts`（`lib/graph-diff.js`）提供图差，被
+  `planUpdate` 与 `realChangedIds` 消费。
+- [[incremental-e2e]] / [[orchestration]]：`index.js` 的 `generateToolDefinition`（`runStaleUpdate` 分支，
+  `index.js:4175-4282`）与 `tickIndex`（`index.js:3624-3741`）是 `planUpdate` 与 `judgeOutcome` 的编排入口；
+  编译基线的推进闸门（`cw meta update` 仅在 `canAdvanceBaseline === true` 时执行，`index.js:3677-3693`）
+  直接受本模块终态控制。
+- [[article-contract]]：存量文章体检（`auditExistingArticles`）产出的质量阻塞并入 `job.qualityIssues`，
+  经 `judgeOutcome` 的 `quality` blocker 影响终态（`index.js:3630-3637`）。
+
+## Known Issues
+
+- **反向依赖闭包依赖图里的 `dependsOn` 边**：若符号图没有任何依赖边（如 `extractCurrentGraph` 旧链路
+  不建边），`dependentsOf` 收不到使用方，`planUpdate` 只能按 source_files 自身判定，已在 `lib/update-planner.js:156-158`
+  记一条 warning「符号图没有任何依赖边，反向依赖影响不可用」。
+- **文件级降级仍可见删除/改名/新文件**（`lib/update-planner.js:177-179`、测试 `test-update-planner.mjs:212-224`）：
+  无图或关闭符号增量（`symbolIncremental=false` / 快照缺失 / 符号提取不可用）时退化为文件级，但删除、改名、
+  新文件仍照常处理，不再只认 source_files 命中——这是为兼容旧链路刻意保留的语义。
+- **非源码文件无归属不触发全量**：`notes/scratch.md` 这类 `.md`/`.json` 文档无文章引用是常态，只进
+  `warnings`（`lib/update-planner.js:385-389`），若混进 `unmappedChanges` 会让每次正常增量落 partial
+  （踩过的坑，`lib/update-planner.js:421-423`）。
+- **`keep` 文章不计入必需清单**：`requiredNames` 只取 `write` 动作名（`lib/update-planner.js:399-408`），
+  否则正常增量里两篇 keep 会被当成 missing-article，任务明明完整成功却落 partial。
+- **记录的版本护城河**：`loadUpdateRecord` 遇到版本 ≠ `UPDATE_RECORD_VERSION`（1）的记录直接返回 `null`
+  （`lib/update-record.js:233`），旧格式（如测试里的 999）不会被当新格式读，避免误判。
+- **原生通道不跑旧 planner**：`scope=stale` 且命中原生引擎时，`generateToolDefinition` 不调用 `planUpdate`
+  的 `needsFull/unmapped` 判定，决议权归 `runNativeJob`（`index.js:4145-4164`），否则会把阶段 5 的
+  组件级增量能力废掉。
+
+---
+title: update_planning
+type: module
+source_files:
+  - lib/update-planner.js
+  - lib/update-record.js
   - lib/engine/mapping.js
   - lib/graph-diff.js
   - lib/incremental.js
