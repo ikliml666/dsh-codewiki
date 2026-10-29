@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.16.6 — 2026-10-30
+
+### 修复：仓库清单落点只看目录，测试会把 fixture 路径写进真实宿主清单
+
+**现象**：真机 `%TEMP%/dsh-codewiki-repos.json`（自动更新的已知仓库清单）里出现 `%TEMP%/cw-orch-txSQbO` 这类**目录早已不存在**的 fixture 路径，且每次跑完测试都会多几条。自动扫描每轮都要对它们空跑 `hasCompilableSources` / `isWorktreeCwd` 探测，面板上的「扫描 N 个仓库」也因此虚高。
+
+**根因**：`REPOS_FILE` 原先按**目录**推导——`path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')`。但测试通过 `DSH_CODEWIKI_JOBS_FILE` 换掉的是**文件名**（`dsh-codewiki-jobs-test-<pid>-<token>.json`），目录仍是系统临时目录，于是测试与被测产品推导出**同一个**宿主清单文件：测试里 `rememberRepo()` 登记的 fixture 仓库、`fs.unlinkSync(reposFile)` 的清理，全部作用在真实宿主的清单上。`test-orchestration.mjs` 自己也有两处同样写死 `dirname(JOBS_FILE)` 的推导，属于测试与产品同错共振。
+
+**修改**：
+
+| 位置 | 改动 |
+| --- | --- |
+| `index.js` | 新增 `export function reposFileFor(jobsFile, explicit = null)`：显式环境变量最优先；否则把文件名里的 `-jobs` 换成 `-repos`（无 `-jobs` 时追加 `.repos`）；`REPOS_FILE = reposFileFor(JOBS_FILE, process.env.DSH_CODEWIKI_REPOS_FILE || null)`。默认形态（`dsh-codewiki-jobs.json`）仍推导出原路径，既有登记不丢 |
+| `test-orchestration.mjs` | 三处硬编码推导改为 `reposFileFor(JOBS_FILE)`（`import` 增加该导出） |
+| `test-repos-isolation.mjs` | 新增回归：隔离 JOBS_FILE 后 `REPOS_FILE` 必须换路径、默认形态仍指向宿主清单、显式环境变量最优先，并**实证**跑一遍 `apply()` 后宿主清单逐字节未变 |
+
+**反向验证**：把 `reposFileFor` 改回 `path.join(dir, 'dsh-codewiki-repos.json')` → `✗ 隔离 JOBS_FILE 后 REPOS_FILE 必须换路径`、`✗ 宿主清单必须逐字节未变（测试不得污染真实宿主）`、`FAIL：2 项未通过`；恢复后全绿。回退运行当场就把宿主清单从 2 条冲成 1 条失效 fixture 路径——缺陷可复现，不是纸面推断。
+
+**全量回归**：`ok suites: 28`、`failed suites: test-wiki-anchors.mjs`（wiki 文章滞后于源码，重编译后消失）。
+
 ## 0.16.5 — 2026-10-30
 
 ### 修复：原生通道超时预算低于真机耗时（45 分钟 → 180 分钟），且超时抢救一直失效

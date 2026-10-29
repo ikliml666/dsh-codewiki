@@ -2038,7 +2038,23 @@ const MAX_JOBS_KEPT = 30
 // 已知仓库清单：独立于 job 历史的持久化工作区登记。job 记录会被 MAX_JOBS_KEPT 截断、
 // Temp 沙箱任务会被启动清理移除，仓库总览若只扫 job 历史就会漏掉编译过的工作区
 // ——提交过一次就永久登记（hindsight recentWorkspaces 同思路），与 JOBS_FILE 同目录同生命周期。
-const REPOS_FILE = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+//
+// 落点必须**跟随 JOBS_FILE 的名字**，不能只跟随它的目录：各测试套件都把 JOBS_FILE 指向
+// `dsh-codewiki-jobs-test-<pid>-<token>.json` 做隔离，而 dirname 仍是系统临时目录——只按
+// 目录推导时，测试写出的清单与真实宿主的 `dsh-codewiki-repos.json` 是同一个文件，跑一次
+// 测试就会把 fixture 路径（如 %TEMP%/cw-orch-xxxxxx）塞进宿主的已知仓库清单，自动调度随后
+// 每轮都会去扫那些早已删除的目录（0.16.6 修复，真机见过宿主清单里躺着已删的 cw-orch-*）。
+// 命名规则：把 JOBS_FILE 基名里的 `-jobs` 段换成 `-repos`，默认形态
+// `dsh-codewiki-jobs.json` 仍推导出 `dsh-codewiki-repos.json`（保持旧清单兼容）；
+// 显式 DSH_CODEWIKI_REPOS_FILE 永远最优先。
+export function reposFileFor(jobsFile, explicit = null) {
+  if (explicit) return explicit
+  const dir = path.dirname(jobsFile)
+  const base = path.basename(jobsFile)
+  const renamed = base.includes('-jobs') ? base.replace('-jobs', '-repos') : `${base}.repos`
+  return path.join(dir, renamed)
+}
+export const REPOS_FILE = reposFileFor(JOBS_FILE, process.env.DSH_CODEWIKI_REPOS_FILE || null)
 function loadKnownRepos() {
   try { return JSON.parse(fs.readFileSync(REPOS_FILE, 'utf8'))?.repos ?? [] } catch { return [] }
 }

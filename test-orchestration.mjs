@@ -23,7 +23,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 // 后续提交全部 queued，表现为「偶发 20 项失败」。收尾统一删除，不留残留。
 const TEST_JOB_TOKEN = crypto.randomBytes(4).toString('hex')
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}-${TEST_JOB_TOKEN}.json`)
-const { name, apply, SESSIONS_DIR } = await import('./index.js')
+const { name, apply, SESSIONS_DIR, reposFileFor } = await import('./index.js')
 
 let failures = 0
 function check(cond, msg) {
@@ -1155,7 +1155,8 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
 {
   const krRepo = makeFixtureRepo()
   const mock = makeBatchMock()
-  const reposFile = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  // 与产品同源推导：写死 dirname 会落到真实宿主的清单文件（0.16.6 修复）
+  const reposFile = reposFileFor(JOBS_FILE)
   try {
     const r = await gen.execute({ cwd: krRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '0.4.8 编译提交成功')
@@ -1550,7 +1551,9 @@ console.log('== 自动调度：过期检测触发真实心跳提交，历史外�
   // 截断）。自动扫描必须仍对它执行 scope=auto，而不是把调度器变成只扫任务历史的摆设。
   const scanRepo = makeFixtureRepo()
   const mockScan = makeBatchMock()
-  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  // 落点必须与产品一致（跟随 JOBS_FILE 名字，而非只跟随目录）：写死 dirname 推导会落到
+  // 真实宿主的 dsh-codewiki-repos.json，跑一次测试就把 fixture 路径塞进宿主清单。
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || reposFileFor(JOBS_FILE)
   // 干净现场：前序用例会往同一个 JOBS_FILE 里留 fixture 任务（如「Temp 目录活动任务保留」
   // 的 job-tmp-active 仍是活动态），单项目串行闸门会被它永久占住——本仓库的初始化任务只会
   // 一直 queued，根本没编译出 wiki，后面的 stale 判定自然退化成 missing/full。
@@ -1634,7 +1637,9 @@ console.log('== 自动调度遵守 workspaceOnly：工作区外仓库不被后�
   const outsideRepo = makeFixtureRepo()
   const wsOnlyRepo = makeFixtureRepo()
   const mockWs = makeBatchMock()
-  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  // 落点必须与产品一致（跟随 JOBS_FILE 名字，而非只跟随目录）：写死 dirname 推导会落到
+  // 真实宿主的 dsh-codewiki-repos.json，跑一次测试就把 fixture 路径塞进宿主清单。
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || reposFileFor(JOBS_FILE)
   fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
   fs.writeFileSync(repoFile, JSON.stringify({ repos: [outsideRepo] }), 'utf8')
   // 只把 wsOnlyRepo 登记为已添加工作区；outsideRepo 不在清单里（含子目录判定见 isExcluded）
