@@ -1,189 +1,225 @@
 ---
-title: _patterns
+title: 仓库反复出现的模式
 type: pattern
 source_files:
-  - lib/symbols.js
-  - lib/graph-diff.js
+  - index.js
+  - lib/agentic-host.js
+  - lib/agentic.js
+  - lib/article-contract.js
+  - lib/articles-agentic.js
+  - lib/change-set.js
   - lib/cluster.js
+  - lib/git-paths.js
+  - lib/graph-diff.js
   - lib/incremental.js
+  - lib/symbols.js
   - lib/update-planner.js
   - lib/update-record.js
-  - lib/change-set.js
-  - lib/article-contract.js
-  - lib/agentic.js
-  - lib/agentic-host.js
-  - lib/articles-agentic.js
-  - lib/engine/contract.js
-  - lib/engine/client.js
-  - lib/engine/process-tree.js
-  - lib/engine/manifest.js
-  - lib/engine/mapping.js
-  - lib/engine/output.js
-  - lib/engine/quality-gate.js
   - lib/engine/apply-plan.js
-  - lib/engine/native-run.js
-  - lib/engine/openai-bridge.js
+  - lib/engine/client.js
+  - lib/engine/contract.js
   - lib/engine/llm-bridge.js
-  - index.js
-  - test-symbols.mjs
-  - test-cluster.mjs
-  - test-semantic-plan.mjs
-  - test-change-set.mjs
-  - test-article-contract.mjs
-  - test-agentic.mjs
-  - test-agentic-host.mjs
-  - test-articles-agentic.mjs
-  - test-agentic-fallback.mjs
-  - test-engine-apply-plan.mjs
-  - test-engine-process-tree.mjs
-  - test-engine-bridge.mjs
-  - test-engine-llm-bridge.mjs
-  - test-engine-native-job.mjs
-  - test-engine-output.mjs
-  - test-fixtures/fake-native-engine.mjs
-  - test-worktree.mjs
-  - test-wiki-anchors.mjs
+  - lib/engine/manifest.js
+  - lib/engine/native-run.js
+  - lib/engine/native-state.js
+  - lib/engine/output.js
+  - lib/engine/process-tree.js
+  - lib/engine/quality-gate.js
+  - lib/engine/python/entry.py
+  - lib/engine/python/stage_map.py
   - test-batch.mjs
-  - tools/fsoft-engine/probe-no-llm-graph.py
-tags: [patterns, conventions, error-handling, testing, cross-platform, engine]
+  - test-change-set.mjs
+  - test-cluster.mjs
+  - test-cwd-paths.mjs
+  - test-engine-apply-plan.mjs
+  - test-engine-client.mjs
+  - test-engine-contract.mjs
+  - test-engine-native-incremental.mjs
+  - test-engine-native-job.mjs
+  - test-engine-process-tree.mjs
+  - test-engine-python-entry.mjs
+  - test-engine-quality-gate.mjs
+  - test-graphdiff.mjs
+  - test-incremental.mjs
+  - test-orchestration.mjs
+  - test-prune-orphans.mjs
+  - test-semantic-plan.mjs
+  - test-symbols.mjs
+  - test-update-record.mjs
+  - test-wiki-anchors.mjs
+  - test-wiki-entry.mjs
+  - test-worktree.mjs
+  - test-fixtures/fake-native-engine.mjs
+  - test-fixtures/gen-graphdiff-golden.py
+  - tools/fsoft-engine/setup-env.sh
+tags: [pattern, conventions, testing, error-handling, contract, pipeline]
 ---
 
 ## Overview
 
-本文总结 dsh-codewiki 仓库里**跨模块反复出现**的模式，而非任何单一模块的行为。证据全部取自各模块文章中出现过的真实文件与函数——`lib/` 下的纯逻辑库（`lib/symbols.js`、`lib/cluster.js`、`lib/graph-diff.js`、`lib/incremental.js`、`lib/update-planner.js`、`lib/update-record.js`、`lib/change-set.js`、`lib/article-contract.js`、`lib/agentic*.js`）、`lib/engine/` 下的原生引擎边界（`contract.js`/`client.js`/`apply-plan.js`/`quality-gate.js`/`mapping.js`/`manifest.js`/`llm-bridge.js` 等）、`index.js` 编排层，以及成套的 `test-*.mjs` 独立测试脚本。每条模式一节，均给出「文件：行号」出处，便于对照源码核实。
-
-模式大致覆盖四类：**代码组织**（契约先行、表驱动、纯函数分层）、**错误处理风格**（可机读分类、保守降级、终态诚实、版本号契约）、**平台与安全边界**（路径归一、写集白名单、凭证边界、原子写回滚）、**构建与测试流程**（独立脚本 + `check()` 微型框架、真环境回归护栏），外加**命名与目录约定**（组件 id、slug 策略、`.codewiki/` 布局与瘦身持久化）。
-
-两条主线贯穿几乎所有模式：其一，**外部世界不可信**——git、LLM、文件系统、子进程、模型回复都可能坏，所以降级要显式、错误要分类、终态要诚实；其二，**测试要能离线确定性跑**——副作用一律走注入点，核心判定一律纯函数，容易悄悄出错的地方再用真 git / 真进程钉死。
+dsh-codewiki 是一个零子代理、批量流水线的 CodeWiki 编译插件：Node 侧编排（`index.js` 与 `lib/` 下的纯函数库）负责规划、源码装填、并发执行、文章契约闸门与落盘；可选的 FSoft 原生引擎通道（`lib/engine/`）把编译外包给 Python 子进程，并以严格裁决链收口。本文横向汇总各模块文章中反复出现的工程模式，覆盖四个维度：可测性设计（纯函数 + 依赖注入）、测试基建与流程（零框架 check 脚本、mock LLM、假引擎、SKIP 语义、环境隔离）、错误处理风格（显式降级、机读枚举、严格终态裁决）、目录与命名约定（`.codewiki/` 布局、`_` 前缀跳过、`TYPE_BY_DIR`、组件 id 形态）。每条模式均引用模块文章中出现的文件与函数名作为证据。
 
 ## Patterns
 
-### 1. 契约先行与窄边界：跨边界处先立数据契约，一个模块只做一件事
+### 纯函数 + 依赖注入的可测性设计
 
-凡跨进程、跨语言、跨模块的边界，仓库先用纯数据契约钉死形状，再把每个模块的职责收窄到单一动词。
+核心逻辑一律写成不碰文件系统、不绑死服务的纯函数，IO 与外部服务经参数注入，使每个决策可单测。
 
-- `lib/engine/contract.js` 只做纯数据校验，不碰文件、不碰进程、不碰模型；`lib/engine/client.js` 是引擎子进程的唯一 `spawn` 点（client.js:22、:288）；`lib/engine/process-tree.js` 只做「终止」一件事（`terminateProcessTree`，process-tree.js:61-103）。
-- JSON-lines 协议的六条不变量写在 client.js 头注释（client.js:13-20），由纯逻辑读取器 `createProtocolReader`（client.js:39-186）强制执行：非 JSON 行记 `not-json` 但不丢已收结果、requestId 不匹配记 `unknown-request`、取消后到达的 result 记 `late-result` 等。
-- `mapFsoftOutput` 的四条硬规则（lib/engine/mapping.js:115-125）：不臆造 `source_files`、未映射页进 `unmapped` 不静默丢弃、slug 冲突两页都进 `unmapped` 不覆盖、正文一字不动。
-- Node 记录形状契约由 `lib/symbols.js:785-786` 与 `lib/graph-diff.js:9-10` 共同约定；`extractRepoGraph`（lib/symbols.js:810-830）只提取组件、不建边，依赖边由 `resolveImportEdges`（lib/symbols.js:810-833）显式补建——图的生产与边的生产刻意分离。
+- `collectChangeSet(cwd, baseCommit, opts)` 把 git 执行器作为 `opts.execFile` 注入（lib/change-set.js:108-210），`defaultExecFile` 只是缺省实现（lib/change-set.js:43-50）；`test-change-set.mjs:203-220` 注入假执行器并断言它真的被调用。
+- lib/article-contract.js 全模块纯函数，`inspectArticle` 经 `opts.fsImpl`/`cwd` 注入存在性探测（lib/article-contract.js:213-227），真正的落盘动作留在调用方（index.js 的 `contractCheck`，index.js:590）。
+- lib/cluster.js 的 `clusterComponents` 接受注入的 `llmCall(prompt)=>string`（lib/cluster.js:291-297），缺省时退 `heuristicCluster`（lib/cluster.js:219）。
+- lib/agentic.js 的 `runAgenticArticle` 只消费裸消息与注入的 `streamFn`，不绑死任何 llm 服务（lib/agentic.js:331-345）；宿主适配集中在 lib/agentic-host.js 的 `makeHostStream`（lib/agentic-host.js:83）。
+- lib/engine/apply-plan.js 刻意不 import index.js，`runCw`/`commit`/`normalizeIndexLinks`/`verifyCommit` 全部由 `deps` 注入（lib/engine/apply-plan.js:24-27），默认内置同语义的 `commitWikiArtifacts`（lib/engine/apply-plan.js:260-308）。
+- lib/engine/native-run.js 的 `runNativeJob` 经 `deps` 注入 doctor/runEngine/gate/apply/collectChangeSet/engineFor（lib/engine/native-run.js:129-136）；test-engine-native-job.mjs:544-622 换假 `runEngine` 但保留真 gate/apply。
+- lib/engine/manifest.js 的 `probeEnvironment` 只调注入的 `probe()`，不在模块内 spawn（lib/engine/manifest.js:34-45）。
 
-### 2. 表驱动声明式配置：加条目只加一行
+### 零框架测试脚本约定（check / 计数 / 退出码 / SKIP）
 
-反复出现「一张声明式表 + 一个按表遍历的解释器」，替代逐条硬编码：
+全部测试不依赖测试运行器，直接 `node test-xxx.mjs` 运行（test-batch.mjs 要求 Node ≥20，见 test-batch.mjs:15-17），共享同一套轻量框架。
 
-- `LANG_RULES`（lib/symbols.js:36-271）：16 种语言的容器节点类型/名称字段/参数字段/基类字段全在一张表，`walk`（lib/symbols.js:597-695）按规则遍历，「加语言只加一行」（lib/symbols.js:302）；正则降级路径同样表驱动（`REGEX_RULES`，lib/symbols.js:302-368）。
-- `LINE_COMMENT_MARKS` / `BLOCK_COMMENT_PAIRS` / `TRAILING_COMMENT_MARKS`（lib/graph-diff.js:35-39）：多语言注释剥离标记表，取舍写在表旁注释。
-- `SCAN_SKIP_DIRS` / `SCAN_SKIP_EXT`（index.js:2178-2188）：`scanRepoFiles`（index.js:2192-2215）的黑名单表。
-- 错误词表也是表：`GATE_DEFECT_KINDS`/`GATE_DEGRADATION_KINDS`/`GATE_STALE_KINDS`（lib/engine/quality-gate.js:45-72）、`APPLY_PROBLEM_KINDS`/`APPLY_RESULT_KINDS`（lib/engine/apply-plan.js:52-73），均冻结、只允许追加。
-- 映射表：`TO_CONTRACT_KIND`（lib/engine/quality-gate.js:572-587、lib/engine/apply-plan.js:298-307）把领域问题类别翻成契约词表；`RANK`/`weakest`（lib/engine/native-run.js:41-42）把终态强弱排成表。
+- 顶部自带 `check(cond, msg)` 断言器：test-batch.mjs:17-20、test-orchestration.mjs:27-30、test-wiki-anchors.mjs:172、test-symbols.mjs:17-36（同步/异步双版本）、test-cluster.mjs:13、test-semantic-plan.mjs:11、test-prune-orphans.mjs:14-16（async）、test-engine-contract.mjs:34-37、test-engine-client.mjs:29-32。
+- 统一收口：`passed`/`failures` 计数，结尾按失败数设退出码——`process.exit(failures ? 1 : 0)`（test-batch.mjs:638-642、test-orchestration.mjs:26、test-cluster.mjs:417-420）。
+- 软硬两档断言：test-wiki-anchors.mjs 的 `check`（:172）与 `soft(msg)`（:177），软报告记入 `softReports` 不算失败。
+- fixture 就地构造：`makeFixtureRepo()` 强制 git identity（test-orchestration.mjs:109-126）；test-worktree.mjs:19-27 用真实 git 子进程搭 linked worktree。
+- 环境缺失时 SKIP 而非误报：无 git 整体 SKIP（test-worktree.mjs:32）、web-tree-sitter 不可用 SKIP（test-symbols.mjs:42-45）、找不到引擎 venv 显式 SKIP（test-engine-python-entry.mjs:47-51）、真产物路径不存在整组 SKIP（test-engine-quality-gate.mjs:508-509）。反例：对拍黄金基准缺失必须 `exit(1)` 提示先生成（test-graphdiff.mjs:14-17），不许覆盖率静默空转。
 
-配套约束：表条目必须「登记」，未登记即报错（见模式 6）。
+### mock 宿主 LLM 与假引擎替身体系
 
-### 3. 纯函数核心 + 依赖注入 IO：判定逻辑不碰文件系统，副作用走注入点
+跨边界依赖（宿主 llm 服务、Python 引擎）一律用确定性替身替换，且替身必须复刻真实协议/副作用。
 
-模块把「算」与「做」分开：核心判定是纯函数，IO 集中收口，外部副作用经注入点替换，从而测试零网络、零真实 git 即可确定性跑。
+- test-batch.mjs 的 `makeLlm(reply)`（test-batch.mjs:174-189）按宿主 block 协议 yield `block-start`/`text-delta`/`usage`/`finish`，`reply` 可为函数或 Error（走 `finish{kind:'error', failure:{code:'MOCK_FAIL'}}`）；`makeSlowLlm`（test-batch.mjs:233-243）+ `poolProbe()`（test-batch.mjs:244-259）做分池并发峰值探针。
+- test-orchestration.mjs 的 `makeBatchMock`（test-orchestration.mjs:144-226）按 prompt 首行特征分发应答（`answerFor`，:147-195，识别「你是 CodeWiki 文章作者」「总结仓库反复出现的模式」等区分句）；`llmProxy` 恒转发模块级 `activeLlm`（:133-140），块间用 `restore()` 还原（:225）。
+- test-semantic-plan.mjs 的 `fakeLlm` 按 `llm.stream()` 生成器协议产出 block 事件，分别模拟正常 JSON/坏 JSON/请求抛错（test-semantic-plan.mjs:83、116、132）。
+- test-fixtures/fake-native-engine.mjs 是「真进程、假算法」的引擎替身：`modeOf` 从仓库外模式文件解析行为（test-fixtures/fake-native-engine.mjs:27-40）、`logCall` 写 `.native-calls-<tag>.log` 足迹（:52-57）、`readStateInputs` stat 受管状态证明水合真被消费（:65-88）、`writeDocs` 只写协议产物（:131-201）。
+- test-engine-client.mjs 用真实 Python 子进程当假引擎，`FAKE_MODE` 环境变量切换 ok/garbage/noresult/crash 等协议模式（test-engine-client.mjs:162-241）。
+- 桩必须复刻真行为：test-engine-apply-plan.mjs:105-134 的 `recordingDeps` 忠实模拟真 `cw` 副作用（init/index/meta 各写对应文件），否则回滚测试没有意义；`makeBatchMock.answerFor` 伪造回文必须让 `source_files` 真实存在（test-orchestration.mjs:154-168），否则被文章契约闸门判 partial。
 
-- 纯函数核心：`filterStaleTasks`（lib/incremental.js:140-194）、`planUpdate`（lib/update-planner.js:156）、`scanStaleArticle`（lib/update-planner.js:106-145，不碰磁盘）、`mapFsoftOutput`（lib/engine/mapping.js:115）、`checkWriteTargets`（lib/engine/apply-plan.js:86-131，不碰磁盘）、`createProtocolReader`（lib/engine/client.js:39-186，可逐字节喂）；`lib/engine/manifest.js` 主体是纯函数与只读诊断（唯一落盘是 `writeLock`）。
-- IO 收口：lib/incremental.js 的读写集中在 `loadSnapshot`/`saveSnapshot`（:94-115）。
-- 注入点：`collectChangeSet` 的 `opts.execFile`（lib/change-set.js:102，假执行器见 test-change-set.mjs:177-194）；`probeEnvironment({ probe })`（lib/engine/manifest.js:34）；`applyNativeOutput` 的 `deps`（runCw/commit/normalizeIndexLinks/verifyCommit，apply-plan.js:411、:532-537——落地器刻意不 import index.js，避免「为测一个写盘函数启动整个插件」）；`runNativeJob` 的 `gateImpl`/`applyImpl`（native-run.js:88-89，假 runEngine + 真 gate/apply 见 test-engine-native-job.mjs:526-559）；`runAgenticArticle` 的 `streamFn`/`workspace`（lib/agentic.js:331，脚本化回放见 test-agentic.mjs:62-73）；`clusterComponents` 的 `llmCall`（lib/cluster.js:293，不传则纯本地启发式）；`loadSnapshot`/`saveSnapshot` 的 `fsImpl`（lib/incremental.js:94、:106）与 `saveUpdateRecord`/`loadUpdateRecord` 的 `fsImpl`（lib/update-record.js:217、:229）；`inspectArticle` 可注入 `cwd`/`fsImpl`/`readableSources`/`allowedLinks`/`expectedType`（lib/article-contract.js:213）。
+### 显式降级：state + fallback + 记账，绝不静默
 
-### 4. 保守降级：能力可以缺，数据不能丢
+任何「做不全」的情形都被显式暴露为结构化状态 + 人类可读原因，而不是静默返回空或吞掉。
 
-可选能力缺失时降级运行并留痕，但绝不静默丢数据、绝不假装成功：
+- `collectChangeSet` 对 `missing-base`/`no-git`/`git-error`/`unreachable-base` 各返回带 `state`+`reason` 的非 ok ChangeSet，`fallback:'full'`（lib/change-set.js:79-99、108-210）。
+- lib/symbols.js：AST 任何一环失败（依赖缺失/ABI 不匹配/解析零符号）退正则兜底 `regexExtract`（lib/symbols.js:374-440），记 `stats.regex`（lib/symbols.js:551-594）。
+- lib/cluster.js：LLM 缺失/抛错/坏 JSON 一律 `stats.fallbacks+=1` 并退 `heuristicCluster`（lib/cluster.js:310-324）。
+- index.js 的 `semanticPlan` 失败返回 `{plan:null, fallback:true, reason}`（index.js:1412-1495），`buildPlan` 降回 `localPlan`（index.js:1372）。
+- lib/update-planner.js：无归属源文件进 `unmappedChanges` 并强制 `needsFull`（lib/update-planner.js:392）；非源码文件只 warning 不触发全量。
+- lib/engine/native-state.js 的 `isUpdateEligible`：缺图/缺树/引擎版本不符 → 显式 full 并写 `fallbackReason`（lib/engine/native-state.js:256-303）。
+- lib/incremental.js 的 `loadSnapshot` 版本不符或坏 JSON 返回 null 退化全量（lib/incremental.js:94-104）；老快照缺固化 `codeHash` 时保守保留（test-incremental.mjs:109-118）。
+- 记账而不中断：`parseClusterResponse` 把丢弃的 id 记进 `warnings`（lib/cluster.js:156-195）；`parseToolArgs` 坏 JSON 记 `steps.warning` 回灌让模型自改（lib/agentic.js:476-500）；`fixAnchors` 未找到/歧义只记 `unresolved`（index.js:936）。
 
-- AST 不可用（WASM 缺失/ABI 不匹配/`parse` 抛错/零符号）一律退 `regexExtract`（lib/symbols.js:374-440），产出与 AST 路径**同形状**的记录让下游无感切换（test-symbols.mjs:309-316），并记 `stats.regex`；`vendorImport` 失败返回 null，插件照常启动（lib/symbols.js:484-495）。
-- LLM 聚类失败/漏组件 → `heuristicCluster`（lib/cluster.js:219-244）+ `fillMissing`（lib/cluster.js:247-268）按目录补回、无处归属建 `misc`；「组件数守恒」被多处断言钉住（test-cluster.mjs:141、:185、:198）。
-- 变更采不全 → `collectChangeSet` 返回 `fallback:'full'`，「采不到」绝不当成「没变化」（lib/change-set.js:102-103）。
-- 快照版本不符/坏 JSON → `loadSnapshot` 返回 null 退化全量，「宁可重写也不误判」（lib/incremental.js:94-99）。
-- 无符号可判的文章 → `filterStaleTasks` 保守保留并标 `symbolFallback`（lib/incremental.js:179-184）。
-- 垃圾模型回复 → `parseJsonLoose`（lib/cluster.js:135-153）尽力抢救；工具参数坏 JSON → `parseToolArgs` 三级解析后当工具结果回灌让模型自己改（lib/agentic.js:476-500）。
-- 未登记错误码归 `engine-unknown`、未登记 blocker kind 降级 `engine-error`（lib/engine/contract.js:171-182、:88-94）——协议容错而非崩溃；git 命令失败返回 null 变成可上报状态而非异常（lib/engine/quality-gate.js:90-102；`detectLinkedWorktree` 同理放行，index.js:435-451）。
-- 降级有边界：非源码文件无归属只记 warning、不触发全量（`isSourcePath`，lib/update-planner.js:33-36）；符号图无边时 `planUpdate` 记 warning、反向依赖影响不可用（lib/update-planner.js:156-158）。
+### 机读枚举登记表与未知项保守归类
 
-### 5. 命名与 id 约定：组件 id、三套 slug、frontmatter 契约
+问题类别、错误码、阻塞原因全部落成冻结枚举，消费方按 kind 分派而非 message；未知项兜底归类并保留原始值，绝不静默丢弃。
 
-- 组件 id：`<相对路径>#<符号名>`，方法为 `#<类名>.<方法名>`（lib/symbols.js:10-11、:652）；刻意用 `#` 而非上游的 `::`，避免 Windows 盘符 `C:` 混淆。
-- slug 化有三套并存且语义不同的策略：`normalizeModuleName`（lib/cluster.js:198-206）面向文件名、空格转 `_`、空串回落 `'module'`；`slugify`（index.js:1741）保留 CJK 转 `-`，避免多个中文目录塌缩成单模块；`moduleSlug`（lib/engine/mapping.js:38）kebab-case，与 cw 现有命名一致。三者不可混用，测试分别覆盖（test-cluster.mjs:113-118、test-semantic-plan.mjs:108）。
-- 文章 frontmatter 契约：必填 `title`/`type`/`source_files`/`tags`，`type` 与目录经 `TYPE_BY_DIR` 匹配，必需章节按类型配置 `REQUIRED_SECTIONS`，根目录 `_architecture.md`/`_index.md`/`_patterns.md` 走 `ROOT_TYPES` 推断（lib/article-contract.js:28 起）。
-- 稳定文本形态也是契约：`formatComponents` 每行 `id <TAB> kind <TAB> name(参数)`（lib/cluster.js:28-46），测试的 `fakeLlm` 解析依赖它（test-semantic-plan.mjs:73），改格式需同步改消费方。
+- lib/engine/contract.js：`BLOCKER_KINDS`（lib/engine/contract.js:57-72）、`ENGINE_ERROR_CODES`（:76-86）、`RETRYABLE_CODES`（:90）；未知错误码落 `engine-unknown` 并保留 `rawCode`（`engineError`，:204-215）。
+- lib/engine/output.js：`OUTPUT_PROBLEM_KINDS` 冻结表（lib/engine/output.js:22-34）。
+- lib/engine/quality-gate.js：`GATE_DEFECT_KINDS`/`GATE_DEGRADATION_KINDS`/`GATE_STALE_KINDS`（lib/engine/quality-gate.js:45-72）；未登记 kind 抛错式暴露不许静默吞（:435-436）；`toContractBlockers` 映射不上一律归 `'quality-gate'`（:589-596）。
+- lib/engine/apply-plan.js：`APPLY_PROBLEM_KINDS`/`APPLY_RESULT_KINDS`（lib/engine/apply-plan.js:53-74）；`toApplyBlockers` 的 kind 必须落在 contract 枚举内否则抛错（:322-333）。
+- lib/article-contract.js：`SEVERITY` kind→严重度映射（lib/article-contract.js:56-73），未登记缺省按 error（:234）。
 
-### 6. 错误处理风格：可机读分类 + 冻结枚举 + 未登记即报错
+### 契约与协议版本号，版本不符一律视为无效
 
-错误不是字符串而是带 `kind`/`state`/`code`/`severity` 的结构，词表冻结只可追加，映射未命中要显式暴露：
+每类持久化结构与跨进程协议都带版本常量；回读时版本不符按「无效、走保守路径」处理，而不是抛错。
 
-- `collectChangeSet` 的 `state` 枚举（`missing-base`/`no-git`/`git-error`/`unreachable-base`/`ok`）+ `reason` + `fallback`（lib/change-set.js:73-93）。
-- `TERMINAL_OUTCOMES`/`BLOCKER_KINDS`/`ENGINE_ERROR_CODES` 全 frozen、`ENGINE_STAGES` 为固定顺序的阶段数组（lib/engine/contract.js:24-67）；`GATE_DEFECT_KINDS` 等三类词表同（lib/engine/quality-gate.js:45-72）。
-- 写入侧校验：`gateNativeOutput` 写入未登记 kind 直接抛错（lib/engine/quality-gate.js:406、:410）；`APPLY_RESULT_KINDS` 每个必须在 `pushProblem` 登记，否则启动期抛错（lib/engine/apply-plan.js:428-431）；`OUTPUT_PROBLEM_KINDS` 未登记 kind 被拒（lib/engine/output.js:22-34、:188，test-engine-output.mjs:214-217）。
-- 转换侧兜底：`toContractBlockers` 对一一对应不了的 blocker 统一归 `quality-gate` 并在 `detail` 保留原 kind（lib/engine/quality-gate.js:589-596）。
-- 协议违规同样分类：`not-json`/`unknown-request`/`late-result`/`duplicate-result`/`bad-shape`（lib/engine/client.js 的 `createProtocolReader`）。
-- 文章问题分 error/warning 两级：结构破坏拒写、章节缺失放行降 partial（`SEVERITY`/`hasBlockingIssue`，lib/article-contract.js）。
-- `compareLock` 返回可机读 `status`（absent/match/drift/unhealthy）与 `diffs`，而非布尔或异常（lib/engine/manifest.js:86-111）。
+- 版本常量齐备：`ARTICLE_CONTRACT_VERSION`（lib/article-contract.js:16）、`CHANGE_SET_VERSION`（lib/change-set.js:20）、`SNAPSHOT_VERSION`（lib/incremental.js:19）、`UPDATE_PLAN_VERSION`/`MODULE_MAP_VERSION`（lib/update-planner.js:26、26）、`UPDATE_RECORD_VERSION`（lib/update-record.js:17）、`ENGINE_CONTRACT_VERSION`（lib/engine/contract.js:20）、`ENGINE_PROTOCOL_VERSION`（lib/engine/client.js:27）、`MANIFEST_VERSION`（lib/engine/manifest.js:20）、`NATIVE_STATE_VERSION`（lib/engine/native-state.js:46）、`APPLY_VERSION`（lib/engine/apply-plan.js:44）、`GATE_VERSION`（lib/engine/quality-gate.js:43）。
+- 版本不符视为无效：`loadSnapshot` 返回 null（lib/incremental.js:94-104）、`loadUpdateRecord` 返回 null（lib/update-record.js:229-238，test-update-record.mjs:199-204）、`readState` 记 `code:'version'` 退全量（lib/engine/native-state.js:204-211）。
+- 跨语言枚举双向对账：lib/engine/python/stage_map.py 的 `ENGINE_STAGES` 与 lib/engine/contract.js:24-33 必须一字不差（stage_map.py:20-29；test-engine-python-entry.mjs:344）。
+- 协议版本独立于契约版本：hello 行版本不符记 `protocol-version` 违规（lib/engine/client.js:74-80）。
 
-### 7. 终态诚实：最弱终态合成 + canAdvanceBaseline 闸门
+### 路径归一化与编码鲁棒性（POSIX、git 转义、CRLF、中文）
 
-「1 篇成功 + 19 篇失败也曾被报成 done 并推进基线」是仓库反复引用的教训，由此固定成一组硬不变量：
+反斜杠/盘符/`../` 的路径治理和 git 八进制转义解码被反复实现，中文与非 ASCII 路径是显式验收项。
 
-- `engineResult` 非法输入抛错而非静默归一：`done` 带 blockers、`partial` 无 blockers、`failed` 无 error 都抛（lib/engine/contract.js:97-147）；反序列化边界再过一遍 `validateEngineResult`（:186-220）。
-- 多环裁决取最弱：`weakest(weakest(engine, gate), apply)`，`done` 带 blockers 自动降 `partial`，`partial` 无 blockers 兜底补 `quality-gate`（lib/engine/native-run.js:41-42、:399-418）。
-- 质量门把问题机读地分成 defect/degradation/stale 三类，回答「谁来修、修什么」，只有三类皆空才 `done`（lib/engine/quality-gate.js:15、:45-72、:533-536）。
-- 基线闸门：`judgeOutcome`（lib/update-record.js:37-128）产出 blockers 与 `canAdvanceBaseline`，只有 `done` 才允许推进基线（:124）；未映射源码变更、缺 `source_files`、质量闸门不过都阻止推进。
-- 多条判定路径必须同一口径：`toContractBlockers`（quality-gate.js:589）、`toApplyBlockers`（apply-plan.js:309-320）、`toQualityIssues`（quality-gate.js:610）把各类结论统一翻到契约词表，防「一个严一个松」。
+- lib/git-paths.js：`decodeGitPath` 按字节重拼 Buffer 解八进制转义（lib/git-paths.js:37-72）、`withQuotepathOff`/`GIT_QUOTEPATH_OFF`（:20-27）。
+- lib/change-set.js 的 `normChangePath`：反斜杠→`/`、拒绝绝对路径/盘符/`../`（lib/change-set.js:34-41）。
+- index.js：`normalizeArticlePath`（index.js:289）、`normalizeIndexLinks`（index.js:293）、`normalizeCwd` MSYS 盘符归一（index.js:52-57）；test-wiki-entry.mjs 第 6 组与 test-cwd-paths.mjs:22-45 分别钉住。
+- 同一取向多次实现：`normalizeWritePath`（lib/article-contract.js:357-361）、`normRel`（lib/incremental.js:118-120）、`safeRelPath`（lib/agentic.js:266-273）、`posix`（lib/engine/native-state.js:62）。
+- 非 ASCII 硬约束：`graphFileName` 必须用 `\p{L}\p{N}` 对齐 Python `sanitize_repo_name`（lib/engine/native-state.js:146-150）；lib/engine/python/entry.py 钉 UTF-8 三流并给 `subprocess.Popen` 打补丁（entry.py:62-95）；`verifyCommitScope`/`defaultVerifyCommit` 必须关 quotepath + 解码，否则中文页名被误判越界（lib/engine/apply-plan.js:210-247）。
+- 编码与换行鲁棒性：`yamlScalar` 只在不安全时加双引号（lib/engine/quality-gate.js:268-287）；`parseFrontmatter` 剥 BOM（lib/article-contract.js:77）；`makeArticleEditor` 的 `str_replace` 匹配前归一 CRLF、命中后按原文风格写回（lib/agentic.js:216-229）；`numberLines`/`fixAnchors` 的 CRLF 用例（test-batch.mjs:48-52、523-603）。
 
-### 8. 版本号契约：每个落盘结构都带 version，版本不符当没有
+### 严格终态裁决与基线推进闸门
 
-- 版本常量成套出现：`CHANGE_SET_VERSION`（lib/change-set.js:19）、`SNAPSHOT_VERSION`（lib/incremental.js:19）、`UPDATE_PLAN_VERSION`/`MODULE_MAP_VERSION`（lib/update-planner.js:26、:26）、`UPDATE_RECORD_VERSION`（lib/update-record.js:17）、`ENGINE_CONTRACT_VERSION`（lib/engine/contract.js:20）、`ENGINE_PROTOCOL_VERSION`（lib/engine/client.js:27）、`GATE_VERSION`（lib/engine/quality-gate.js:42）、`APPLY_VERSION`（lib/engine/apply-plan.js:43）、`MANIFEST_VERSION`（lib/engine/manifest.js:19）。
-- 读取端一律「版本不符返回 null、退化全量」：`loadSnapshot`（lib/incremental.js:94-95）、`loadUpdateRecord`（lib/update-record.js:229）。
-- 序列化本身是契约：`ChangeSet` 必须能 JSON 往返（test-change-set.mjs:196-203，因为它要写进 `update-record.json`）；`engine.deps.ok` 只有严格 `=== true` 才算通过（lib/engine/contract.js:134）。
-- 协议版本与结果契约版本分开演进（client.js:27 vs contract.js:20）——「行怎么长」与「结果字段」独立升级。
+终态由最弱一环决定，`done` 受硬不变量约束；基线只在完全成功时推进，失败/降级一律冻结。
 
-### 9. 路径归一化与写集白名单：跨平台收口 + 越界防护
+- lib/engine/contract.js 的 `engineResult` 硬不变量：`done` 不许带 blockers、`partial` 必带、`failed` 必有 `error`（lib/engine/contract.js:116-180）；`validateEngineResult` 在反序列化边界复核（:219-260）。
+- lib/engine/native-run.js：`RANK`/`weakest` 取最弱终态合成（lib/engine/native-run.js:75-76）；done 带 blockers 降级 partial。
+- lib/update-record.js 的 `judgeOutcome`：blockers 累积 + `canAdvanceBaseline`（lib/update-record.js:37-128）；「1 成功 19 失败」必须 partial（test-update-record.mjs:62-76，旧实现误判 done 的回归锚）。
+- lib/article-contract.js 的 `hasBlockingIssue`：error 拒写、warning 放行降 partial（lib/article-contract.js:346-348）。
+- lib/engine/quality-gate.js：`done ⟺ defects/degradations/stale 三类皆空`（lib/engine/quality-gate.js:525-536）。
+- lib/engine/apply-plan.js 的 `done()`：有 blockers 时 done→partial（lib/engine/apply-plan.js:645-655）；「未提交且非 noChanges 绝不允许 done」（:984-989）。
 
-Windows 反斜杠、MSYS 盘符、`./` 前缀、`../` 越界在多个模块反复收口：
+### 写集白名单封闭
 
-- 归一：`normRel`（lib/incremental.js:118-120）、`normChangePath`（lib/change-set.js:33-40，越界路径直接丢弃）、`normalizeArticlePath`（index.js:280）、`normalizeIndexLinks`/`normalizeIndexLinksIn`（index.js:284-292、lib/engine/apply-plan.js:376-390）、`normalizeCwd`（index.js:62-67，MSYS `/e/...`→`E:/...`）。
-- 越界防护：`safeRelPath`（lib/agentic.js:266）拒绝 `../`/绝对路径/盘符；`makeFsWorkspace` 再兜一层「真实绝对路径必须落在 cwd 内」（lib/agentic-host.js:113-118）。
-- 写集白名单：`APPLY_WRITE_ROOTS = ['.codewiki', 'CodeWiki.md']`（lib/engine/apply-plan.js:86），`checkWriteTargets`（:86-131）拒绝绝对路径/盘符/`..` 上跳/白名单外，残缺写集整批拒写；文章侧 `makeWriteSet`/`isWritable`（lib/article-contract.js:352-378）编译 `allowedWritePaths` 校验越界（生产传参见 index.js:2952），agentic 子模块只下传子自己那一条路径（lib/articles-agentic.js:112）。
-- 提交边界：只 add `WIKI_PATHS = ['.codewiki', 'CodeWiki.md']` 两个 pathspec、不用 `-A`（index.js:58、:4933-4934）；`verifyCommitScope` 用 `git show --name-only` 反查提交是否只动了 wiki 产物（lib/engine/apply-plan.js:224-237）。
+所有写盘点共享同一把白名单尺子；越界是整批拒写/显式报错，而不是跳过单条。
 
-### 10. 目录约定与瘦身持久化：`.codewiki/` 布局与「不塞源码」
+- lib/article-contract.js 的 `makeWriteSet`/`isWritable`（lib/article-contract.js:352-378）；agentic 通道越界写 `stopReason:'write-set'`（lib/articles-agentic.js:155-167），子模块只拿自己那条路径的写集（lib/articles-agentic.js:67）。
+- lib/agentic.js 的 `safeRelPath` 拒绝绝对路径/盘符/`../`（lib/agentic.js:266-273）。
+- lib/engine/apply-plan.js：`APPLY_WRITE_ROOTS = ['.codewiki','CodeWiki.md']`（lib/engine/apply-plan.js:126）；`checkWriteTargets` 整批拒写（:87-132）；`checkDeleteTargets` 同尺子且拒目录目标（:442-490）；`collectPruneTargets` 裁剪根必须落白名单（:505-519）。
+- index.js 的 `pruneOrphanModules` 只在 full、只删 `.codewiki/modules/*.md`、失败文章保留（index.js:351-376；test-prune-orphans.mjs）。
+- 链接白名单：index.js 的 `allowedLinkTargets` 构造 `allowedLinks` 喂 `inspectArticle` 判死链（index.js:617-639）。
 
-- wiki 根与入口固定：`WIKI_DIR='.codewiki'`、`WIKI_ENTRY='CodeWiki.md'`，配套 `WIKI_META_REL`/`WIKI_UPDATE_RECORD_REL`/`WIKI_MODULES_REL` 常量（lib/engine/mapping.js:30-34）。
-- 状态文件各有 REL 常量且集中：`SNAPSHOT_REL=temp/symbol-graph.json`（lib/incremental.js:22）、`MODULE_MAP_REL=temp/module-map.json`（lib/update-planner.js:27）、`UPDATE_RECORD_REL=temp/update-record.json`（lib/update-record.js:18）、`ENGINE_LOCK_REL=.codewiki/engine-lock.json`（lib/engine/manifest.js:20）；快照与更新记录落 `temp/` 且随 wiki 入库，避免换机器退化全量（lib/incremental.js:20-21）。插件侧另有 `REPOS_FILE`（index.js:2146）维护已知仓库清单。
-- `.codewiki/` 自身产物不算源码变更：`isWikiProduct`（lib/change-set.js:26-29）把它从 `sourceChanges` 分离进 `ignored`，否则增量永远 dirty。
-- 瘦身持久化：`SLIM_FIELDS`（lib/incremental.js:26）不存 `sourceCode`，`bodyHash`/`codeHash` 固化进快照让 `graph-diff` 走缓存分支（lib/graph-diff.js:109、:124）；`plan.graph` 显式不含 `sourceCode`（index.js:1456，体积 <400KB 防线见 test-semantic-plan.mjs:165-167）；`buildUpdateRecord` 只存摘要、不塞整张符号图（lib/update-record.js:131-132）。
-- 依赖隔离也走目录约定：tree-sitter WASM 语法装在 `vendor/tree-sitter` 独立 npm 根（lib/symbols.js:21-25），不破坏插件 `node_modules`。
+### pre-image 快照与同事务落地/回滚
 
-### 11. 原子写与回滚：写 tmp 再 rename，先拍快照再落盘
+落地器把「写盘 → 索引 → 基线 → 提交」做成一个事务：失败按阶段回滚，状态文件与文章共享同一 pre-image。
 
-- 原子写：`writeLock` 先写 `${file}.${pid}.tmp` 再 `renameSync`（lib/engine/manifest.js:131-133）。
-- 落地器回滚：`capturePre`/`restorePre`（lib/engine/apply-plan.js:138-176）预拍现场；三条硬不变量——写集封闭 / 索引基线失败即回滚 / 提交失败不回滚（lib/engine/apply-plan.js:138-150），由 test-engine-apply-plan.mjs 逐条钉死（索引失败回滚 :305-323、基线失败回滚 :325-338、提交失败不回滚 :357-401）。
-- 回滚本身可能失败：`restorePre` 恢复失败只记账不中断（apply-plan.js:155），极端磁盘故障下需人工介入。
-- 写前比对避免空转：`sameSnapshotContent`（lib/incremental.js:53-66）保证代码没变时不覆盖快照，防 `autoCommit` 为「只改时间戳」生成空转提交；写入顺序敏感处显式注释（如首跑落锁推迟到落地器之后，native-run.js:423-438）。
+- 三条硬不变量写在 lib/engine/apply-plan.js 文件头（:10-22）：写集封闭、索引/基线失败即回滚、提交失败不回滚。
+- `capturePre` 拍 pre-image（lib/engine/apply-plan.js:161-176）、`restorePre` 逆序恢复（:156-177）、`rollback` 恢复并删除本次新建的 `.codewiki/`（:787-793）。
+- 受管状态文件、首次引擎锁（`buildLockBody`）、孤儿页删除与文章共享同一 pre-image/同一回滚/同一提交（lib/engine/native-run.js:606-682）；落锁曾因事后 `writeLock` 留脏文件而改为进写集。
+- `writeAll` 内容逐字节相同跳过重写（lib/engine/apply-plan.js:201-216）。
+- 回滚语义逐分支固化：index 失败回滚（:874-924）、基线失败连文章撤回（:943-952）、提交失败只记 `commit-failed` 不回滚（:979-982）。
 
-### 12. 凭证边界：loopback + 占位 key + 日志脱敏
+### JSON-lines 子进程协议与进程树终止
 
-插件「既不保存也不传递密钥」是硬约束，原生引擎桥为此固定了一套安全边界：
+Node ↔ Python 唯一跨语言边界是「一行请求 JSON + stdout JSON-lines」，协议破坏必须产出可机读失败；取消必须整树打穿。
 
-- 桥不读凭证文件、不接收真实 `api_key`、不转发 `Authorization`：`toLlmRequest` 返回值里永远没有 `apiKey` 字段（lib/engine/openai-bridge.js:27-28，断言见 test-engine-bridge.mjs:348-356）。
-- 三重防护缺一不可（lib/engine/llm-bridge.js:230-233）：绑定 `127.0.0.1`（`server.listen(0, '127.0.0.1')`，:230）、随机端口、每次启动 `randomBytes(32)` 生成的 `dsh-bridge-…` 占位 key（:96），同格式但非本次生成的 key 一律 401。
-- 日志脱敏：`bearerOf` 取完 token 即弃（lib/engine/llm-bridge.js:38-43）；错误体不回显收到的 key（:123-124）；测试断言日志不含 authorization/占位 key（test-engine-llm-bridge.mjs:232-247），`terminateProcessTree` 的 `onLog` 不含凭证字样（test-engine-process-tree.mjs:114-128），持久化 job 里没有桥占位 key（test-engine-native-job.mjs 用例 1）。
+- lib/engine/client.js 的 `createProtocolReader` 纯增量读取器（lib/engine/client.js:39-186）：多字节 UTF-8 跨 chunk 不切坏、单行超限记 `line-too-long`、半行收尾记 `not-json`。
+- 协议不变量：每条消息 requestId 匹配；没有 `result` = 协议破坏（退出码 0 也失败，lib/engine/client.js:403-414）；取消后迟到 result 记 `late-result`；重复先到赢。
+- lib/engine/python/entry.py 侧对称实现：`emit`/`emit_hello`/`emit_progress`/`emit_result`（entry.py:143-192）；`_ProtocolOnly` 在 import codewiki 前接管 stdout 防 FSoft print 污染协议流（entry.py:98-131）；任何路径都必须返回 result（`handle_request`，entry.py:702-735）。
+- 取消打穿进程树：lib/engine/process-tree.js 的 `terminateProcessTree` POSIX `kill(-pid)` SIGTERM→SIGKILL、Windows `taskkill /T /F`（lib/engine/process-tree.js:61-103）；test-engine-process-tree.mjs 用真实孙进程验证不留孤儿。
+- 阶段映射唯一口径：stage_map.py 的 `map_stage`/`percent_of`，引擎内部进度封顶 90%（`FSOFT_PROGRESS_CEILING`，stage_map.py:63）。
 
-### 13. 独立脚本测试：check() 微型框架 + 退出码收尾
+### 内容指纹防无变化提交
 
-全部测试都是 `node test-*.mjs` 直接运行的独立脚本，零第三方断言库（只用 node: 内置模块），共用一套手写 `check(label, fn)` 计数器：
+带时间戳的持久化结构比较时一律剥离易变字段做「实质内容」比较，无变化轮不产生纯记账提交。
 
-- 同款实现遍布：test-cluster.mjs:13、test-semantic-plan.mjs:11、test-change-set.mjs:15-18、test-article-contract.mjs:20-23、test-agentic.mjs:12-21、test-agentic-host.mjs:12、test-agentic-fallback.mjs:20、test-articles-agentic.mjs:18、test-engine-bridge.mjs:31-34、test-engine-llm-bridge.mjs:22-25、test-engine-native-job.mjs:43-47、test-batch.mjs:17。
-- 末尾统一汇总 `N passed, M failed`，失败置 `process.exit(1)` 或 `process.exitCode = 1`（如 test-change-set.mjs:205-209）。
-- 变体：test-wiki-anchors.mjs 分 `check`（硬断言，:172-176）与 `soft`（软报告，:177-180）两档，同步类失败在源文件滞后时可降级。
-- 已知代价：各脚本各维护一份框架、没有复用也没有 `node:test`（test-cluster.mjs:12-13 与 test-semantic-plan.mjs:10-11 各一套），新增断言需手动对齐写法。
+- lib/engine/native-state.js 的 `stateFingerprint` 去掉 `updatedAt`/`notes` 后比较（lib/engine/native-state.js:425-435）。
+- lib/incremental.js 的 `sameSnapshotContent` 忽略 `generatedAt`/`commit` 与顺序（lib/incremental.js:53-66）。
+- lib/update-planner.js 的 `sameModuleMap`（lib/update-planner.js:484-492）。
+- lib/engine/native-run.js 的 `idleRound` 短路：`update + no_change + 变化集空 + 无未消费账` 才不重写状态/不裁剪/不落锁（lib/engine/native-run.js:632-635）；test-engine-native-incremental.mjs 用例 2 钉死「无变化轮无新提交」。
 
-### 14. 真环境测试与回归护栏：桩测逻辑，真环境测边界
+### 对拍基准与同源规则双重实现
 
-容易「悄悄出错却不报错」的地方用真实 git/真进程/真产物验证；已修缺陷一律补回归用例钉死：
+关键判定要么对上游逐位对拍，要么以「同源但独立」的第二次实现做对抗校验；两处规则必须同步维护。
 
-- 临时 git 仓库：`makeRepo()`（test-change-set.mjs:23-42）每场景 `git init` + 基线 commit；`gitRepo()`（test-engine-apply-plan.mjs:601-648）用真 git 验证 `verifyCommitScope`——「它判的就是提交里到底有什么，桩不出真值」。
-- 真实进程树：`startTree()`（test-engine-process-tree.mjs:32-43）起两层真进程，验证孙进程不留孤儿——kill bug 只在真实进程树里出现。
-- 真进程假引擎：test-fixtures/fake-native-engine.mjs 让 client.js 的 spawn/stdin JSON-lines/stdout 解析全走真代码；`realSourceFiles`（:81-98）真扫仓库源码，避免 `source_files` 硬编码触发 `source-missing`。
-- 真 git worktree：test-worktree.mjs:19-28 搭 linked worktree；无 git 环境整体 SKIP 退出 0（:30-36），不误报成功。
-- 端到端样例仓库：test-semantic-plan.mjs:20 用 `fs.mkdtempSync` 造「目录≠职责」的仓库验证语义聚类；极端路径由 tools/fsoft-engine/probe-no-llm-graph.py 默认分析「中文 空格 fixture」（路径含中文与空格）覆盖。
-- 回归护栏：下钻 `maxDepth` 布尔开关缺陷由 test-cluster.mjs:269-343 钉死；`subDepth` 无限递归由 test-articles-agentic.mjs:182/:201「看磁盘层数 + 调用次数有界」守护；CRLF 下 `str_replace` 匹配不上（test-agentic.mjs:542）、`insert` 负数行号（test-agentic.mjs:589）、`generate_sub_module` 谎称已派发（test-agentic.mjs:401）均以对抗用例固定；test-batch.mjs 的 `fixAnchors` 用例是守护已修 bug 的 load-bearing 断言。增量侧「从不建边导致反向依赖判定失效」的缺陷修复也以 `resolveImportEdges` 在 index.js:2238 的显式补边留痕。
+- test-fixtures/gen-graphdiff-golden.py 用 Python 原生 difflib/hashlib 生成黄金基准（种子固定 20261027，gen-graphdiff-golden.py:53），test-graphdiff.mjs:28-42 按 similarity/hash/unified 三类与 lib/graph-diff.js 逐位对拍。
+- test-wiki-anchors.mjs 独立重实现 `judgeAnchor`/`symbolsOnLine`，与 index.js `fixAnchors` 内部的 `symbolsWithPos`（index.js:992）、`changelogSections`（index.js:779）同源，做对抗校验（test-wiki-anchors.mjs:187 注释「两处同源，改一处须同步另一处」）。
+- 「纯注释降级」在 lib/incremental.js 的 `filterStaleTasks`（:140-194）与 lib/update-planner.js 的 `realChangedIds`（:57-81）实现两次，必须共享同一 `codeHash` 判据（lib/graph-diff.js:108-111）保持一致。
+- lib/engine/python/stage_map.py 与 lib/engine/contract.js 的 `ENGINE_STAGES` 双向对账（同上）。
+
+### 大档/默认档分池并发与 customId 记账
+
+批量执行统一走「按 bigTier 分池独立限流的并发池」，结果以 `customId` 为键收进 Map，失败推入 notes 记账。
+
+- index.js 的 `runRealtimeTasks`（index.js:671-730）按 `bigTier` 分池，`bigConcurrency` 缺省跟随 `concurrency`（index.js:101-104）；test-batch.mjs:232-297 用 `poolProbe()` 断言分池峰值。
+- lib/articles-agentic.js 的 `runAgenticArticles`（:231-312）补上同款双池（:245-255）；`markBigAgenticTasks`（:320-333）用源文本量等价物替代「装填超预算」判据。
+- `prepareArticleTasks`（index.js:1245-1330）四条路径：普通档、大档接管、会话通道兜底、多文件观察批拆分。
+- 两条通道返回统一的 `Map(customId→结果)`，失败原因推入 `notes`（test-batch.mjs:343）。
+
+### 命名与目录约定（`_` 前缀、TYPE_BY_DIR、temp/ 状态文件、组件 id）
+
+- `.codewiki/` 布局与 `_` 前缀跳过：`NATIVE_STATE_DIR='.codewiki/_native-state'`（lib/engine/native-state.js:28）首段 `_` 让 `cw index` 跳过（lib/engine/native-state.js:20-28；lib/engine/apply-plan.js:379 的 `seg.startsWith('_')`）；根级特殊文章 `_index.md`/`_architecture.md`/`_patterns.md` 由 `ROOT_TYPES` 登记（lib/article-contract.js:28-32）。
+- 目录→type 映射：`TYPE_BY_DIR`（lib/article-contract.js:19-26），`type` 与目录不符判 `type-mismatch`。
+- 状态文件集中 `.codewiki/temp/`：`SNAPSHOT_REL='temp/symbol-graph.json'`（lib/incremental.js:22）、`MODULE_MAP_REL`（lib/update-planner.js:27）、`UPDATE_RECORD_REL`（lib/update-record.js:18）；引擎锁 `ENGINE_LOCK_REL='.codewiki/engine-lock.json'`（lib/engine/manifest.js:20）。
+- frontmatter 契约：必填 `title/type/source_files`（`REQUIRED_FIELDS`，lib/article-contract.js:46）；tags 必填但允许空列表；source_files 必须是仓库相对文件（`isRepoRelativeFile`，lib/article-contract.js:195-203）。
+- slug 保留 CJK：index.js 的 `slugify`（index.js:1660）、lib/cluster.js 的 `normalizeModuleName`（:198-206）都保留中文字符避免塌缩成 `module`。
+- 组件 id 约定：`<相对路径>#<符号名>`，唯一来源 `componentId`（lib/symbols.js:776-778），方法为 `#<类名>.<方法名>`；graph-diff/cluster/incremental 三方一致（lib/cluster.js:15、lib/graph-diff.js:10）。
+
+### 运行环境隔离与零构建测试流程
+
+测试通过随机化路径、压缩 tick、仓库外 fixture 与凭证隔离做到可重复、零构建、无密钥。
+
+- JOBS_FILE 随机 token：`TEST_JOB_TOKEN = crypto.randomBytes(4).toString('hex')`（test-orchestration.mjs:22-23；同款 test-engine-native-job.mjs:31、test-engine-native-incremental.mjs:29-31），防 pid 复用读到历史 fixture。
+- tick 加速：`DSH_CODEWIKI_TICK_MS='300'`（test-orchestration.mjs:15、test-engine-native-job.mjs:28）；用例选择 `ONLY_CASES=2,5`（test-engine-native-incremental.mjs:172-174）。
+- 测试写入物放仓库外：假引擎模式文件与足迹日志放仓库同级（test-fixtures/fake-native-engine.mjs:284-314），否则会被质量门 `uncommitted-input` 判成产品缺陷；`docsDir` 强制仓库外临时目录（index.js 的 `startNativeRun`，:2778）。
+- 凭证隔离：test-engine-python-entry.mjs 的 `isolatedEnv` 隔离 HOME + `CODEWIKI_NO_KEYRING=1`（:65-67）；引擎模型通道只走 `CODEWIKI_*` 进程环境变量（entry.py:137-140），占位 key 只活在进程环境、不落 JOBS_FILE（lib/engine/llm-bridge.js:90-96；test-engine-native-job.mjs:309）。
+- 零构建与可选依赖：全部测试 `node test-*.mjs` 直跑，无编译步骤；AST 依赖装在独立 npm 根 `vendor/tree-sitter`（lib/symbols.js:21-25）避免污染插件 node_modules；FSoft venv 由 tools/fsoft-engine/setup-env.sh 按冻结快照落盘（setup-env.sh:54-62）。

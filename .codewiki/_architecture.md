@@ -1,322 +1,294 @@
 ---
-title: architecture
+title: 系统总览
 type: architecture
 source_files:
   - index.js
-  - lib/symbols.js
-  - lib/graph-diff.js
-  - lib/cluster.js
-  - lib/incremental.js
-  - lib/update-planner.js
-  - lib/update-record.js
-  - lib/change-set.js
-  - lib/article-contract.js
+  - client.js
+  - package.json
   - lib/agentic.js
   - lib/agentic-host.js
   - lib/articles-agentic.js
-  - lib/engine/contract.js
+  - lib/article-contract.js
+  - lib/change-set.js
+  - lib/cluster.js
+  - lib/git-paths.js
+  - lib/graph-diff.js
+  - lib/incremental.js
+  - lib/symbols.js
+  - lib/update-planner.js
+  - lib/update-record.js
+  - lib/engine/apply-plan.js
   - lib/engine/client.js
-  - lib/engine/process-tree.js
+  - lib/engine/contract.js
+  - lib/engine/git-paths.js
+  - lib/engine/llm-bridge.js
   - lib/engine/manifest.js
   - lib/engine/mapping.js
-  - lib/engine/output.js
-  - lib/engine/quality-gate.js
-  - lib/engine/apply-plan.js
-  - lib/engine/llm-bridge.js
-  - lib/engine/openai-bridge.js
   - lib/engine/native-run.js
+  - lib/engine/native-state.js
+  - lib/engine/openai-bridge.js
+  - lib/engine/output.js
+  - lib/engine/process-tree.js
   - lib/engine/python/entry.py
+  - lib/engine/python/stage_map.py
+  - lib/engine/quality-gate.js
+  - test-agentic.mjs
+  - test-agentic-fallback.mjs
+  - test-agentic-host.mjs
+  - test-article-contract.mjs
+  - test-articles-agentic.mjs
+  - test-batch.mjs
+  - test-change-set.mjs
+  - test-cluster.mjs
+  - test-cwd-paths.mjs
+  - test-engine-apply-plan.mjs
+  - test-engine-bridge.mjs
+  - test-engine-client.mjs
+  - test-engine-contract.mjs
+  - test-engine-llm-bridge.mjs
+  - test-engine-manifest.mjs
+  - test-engine-native-incremental.mjs
+  - test-engine-native-job.mjs
+  - test-engine-output.mjs
+  - test-engine-process-tree.mjs
+  - test-engine-python-entry.mjs
+  - test-engine-quality-gate.mjs
+  - test-graphdiff.mjs
+  - test-incremental.mjs
+  - test-incremental-e2e.mjs
+  - test-orchestration.mjs
+  - test-prune-orphans.mjs
+  - test-semantic-plan.mjs
+  - test-sessions.mjs
+  - test-symbols.mjs
+  - test-update-planner.mjs
+  - test-update-record.mjs
+  - test-wiki-anchors.mjs
+  - test-wiki-entry.mjs
+  - test-worktree.mjs
+  - test-fixtures/fake-native-engine.mjs
+  - test-fixtures/gen-graphdiff-golden.py
+  - test-fixtures/graphdiff-golden.json
+  - tools/fsoft-engine/.gitignore
+  - tools/fsoft-engine/constraints.txt
+  - tools/fsoft-engine/locked-requirements.txt
   - tools/fsoft-engine/setup-env.sh
+  - tools/fsoft-engine/probe-apply-real-cw.mjs
+  - tools/fsoft-engine/probe-generate-with-fake-model.mjs
+  - tools/fsoft-engine/probe-generate.result.json
+  - tools/fsoft-engine/probe-index-missing.mjs
   - tools/fsoft-engine/probe-no-llm-graph.py
+  - tools/fsoft-engine/probe-no-llm-graph.result.json
+  - tools/fsoft-engine/fixtures/.gitignore
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/pyproject.toml"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/scripts/run.py"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/src/core/engine.py"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/src/web/handler.py"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/src/web/task.ts"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/.codewiki/sessions/0ace1c6a91af/summary.json"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/.codewiki/sessions/0ace1c6a91af/component_index.json"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/.codewiki/sessions/0ace1c6a91af/leaf_nodes.json"
+  - "tools/fsoft-engine/fixtures/中文 空格 fixture/.codewiki/sessions/0ace1c6a91af/languages.json"
+  - .probe-inc.mjs
+  - .probe-idxfail.mjs
+  - .probe-nochange.mjs
+  - .probe-nochange-commit.mjs
+  - .probe-posix.mjs
+  - .probe-two-round.mjs
+  - .probe3.mjs
   - docs/fsoft-native-engine.md
-tags: [architecture, overview, pipeline, incremental, native-engine, codewiki]
+tags: [architecture, overview, orchestration, pipeline, incremental, native-engine]
 ---
 
 ## Overview
 
-dsh-codewiki 是 DSH 宿主中的一个插件：把一个 git 代码仓库「编译」成一套 wiki——`.codewiki/modules/*.md` 模块文章、`_index.md` 索引、`_meta.yaml` 元数据（含 `last_compiled_commit` 编译基线）、`.codewiki/temp/` 下的符号快照与更新记录，外加仓库根的 `CodeWiki.md` 入口——并在源码演进后做**符号级增量更新**。文章类型按目录约定：`modules/`（模块）、`concepts/`（概念）、`learnings/`（经验），以及根级 `_architecture.md` / `_index.md` / `_patterns.md`（类型表见 `lib/article-contract.js` 的 `TYPE_BY_DIR` / `ROOT_TYPES`）。
+dsh-codewiki 是一个「仓库 → wiki」编译插件：宿主（agent）调用 `codewiki_generate` / `codewiki_update` 工具提交编译任务，插件把仓库源码规划成模块清单，经**宿主 LLM 服务**（0.10.1 起唯一模型通道，插件零直连）写出 `.codewiki/` 下的文章与 `CodeWiki.md` 入口，再建索引（`cw index`）、推进编译基线（`.codewiki/_meta.yaml:last_compiled_commit`）并自动提交。
 
-给零上下文读者的术语表：
+系统由六块组成：
 
-- **cw**：捆绑的 Rust CLI（`vendor/codewiki`），提供 `cw init / status / index / meta update` 等命令，由 `resolveBinary`（`index.js:163`）解析为 PATH 命中或 `bin/cw(.exe)`。
-- **FSoft**：上游 FSoft-AI4Code/CodeWiki（Python 引擎），本仓库把它迁移成「原生通道」，Node 侧只保留薄适配层（`lib/engine/`）。
-- **agentic**：文章写作的第二种形态——模型在工具调用循环里反复读源码、增量编辑文章（`lib/agentic.js`），与「单轮整包装填」通道（`runRealtimeTasks`，`index.js:662`）并列。
-- **stale**：源码变更后按组件级 diff 判定「哪些文章真的需要重写」的增量编译（`runStaleUpdate`，`index.js:4132`）。
+1. **编排层**（`index.js`）：`apply(ctx, config)`（index.js:4965）注册工具与面板端点，常驻 `JobService`（JOBS_FILE 持久化 + tick）推进 `articles → crosscut → review → index → commit` 阶段机（0.10.7 起无独立规划阶段）。
+2. **规划层**：`scanRepoFiles`（index.js:2074）→ `lib/symbols.js` AST 符号图 → `lib/cluster.js` 三段 LLM 聚类（`semanticPlan`，index.js:1412），失败降级 `localPlan`（index.js:1372，顶层目录分组）。
+3. **写作通道（三选一）**：单轮批量 `runRealtimeTasks`（index.js:671，大档/默认档双池）；agentic 工具循环（`lib/agentic.js` 三层）；FSoft 原生 Python 引擎（`lib/engine/*`，子进程 JSON-lines 协议）；另有会话通道兜底（`classifySessionTask`，index.js:1985）。
+4. **增量层**：`lib/change-set.js` 四路 git 变更 + `lib/graph-diff.js` 符号级 diff → `lib/update-planner.js` 产出每篇文章 `write/keep/delete/review` → `lib/update-record.js` 裁决终态与基线可推进性。
+5. **质量与落盘底座**：`lib/article-contract.js` 契约闸门（error 拒写 / warning 降 partial）+ `fixAnchors`（index.js:936）锚点校正 + 写集闸门；落盘后 `cw index`、`cw meta update`、`autoCommitWiki`。
+6. **浏览器半侧**（`client.js`）：面板只读 7 个回环端点（`/api/codewiki/jobs|repos|control|sessions|sessions/item|models|model-efforts`），零凭证。
 
-系统由**两条编译通道 + 一个共享增量层**组成：
-
-1. **旧 Node 通道**：`index.js` 编排 `semanticPlan`（`index.js:1393`）——AST 符号提取 → 依赖边解析 → LLM 聚类 → 模块任务清单；文章由 agentic 工具循环或单轮通道生成，落盘前后过文章契约闸门。
-2. **原生 FSoft 引擎通道**（仅全量编译）：`runNativeJob`（`lib/engine/native-run.js:68`）起模型桥、spawn Python 引擎、经质量门裁决后由落地器原子落库。
-3. **共享增量层**：四路 git 变更采集（`lib/change-set.js`）+ 符号图 diff（`lib/graph-diff.js`）+ 增量规划（`lib/update-planner.js`）+ 终态判定（`lib/update-record.js`），两条通道共用作基线推进的闸门。
-
-阶段推进顺序由跨语言契约固定（`ENGINE_STAGES`，`lib/engine/contract.js:24-33`）：`env → graph → cluster → articles → validate → index → baseline → commit`。旧 Node 通道的阶段机与之对应：articles → crosscut（`packArticles`，`index.js:1480`，跨模块概念打包）→ review → index → commit（0.10.7 已删独立 plan 阶段，模块规划由 `buildPlan`（`index.js:2986`）在 articles 阶段开头就地完成）。
-
-四条横切不变量贯穿全部模块（未来 agent 改动任何一处都必须维持）：
-
-1. **变化不能丢**：变更采集采不全就 `fallback='full'` 退全量（`lib/change-set.js:99-101`）；无文章认领的源码变更升级为 `unmappedSourceChanges` + `needsFull`（`lib/update-planner.js:391-392`），绝不静默刷新基线。
-2. **终态必须诚实**：`engineResult` 的硬不变量——`done` 不许带 blockers、`partial` 必须带、`failed` 必须带 error（`lib/engine/contract.js:97-147`）；终态合成取最弱一环 `weakest`（`lib/engine/native-run.js:42`），`done` 带 blockers 自动降 `partial`。
-3. **坏文章不入库**：`inspectArticle`（`lib/article-contract.js:213`）拦结构缺陷，`checkWriteTargets`（`lib/engine/apply-plan.js:86`）拦写集越界，质量门把缺陷机读分类（defect / degradation / stale）。
-4. **基线只代表「所有变化已消化」**：`canAdvanceBaseline` 只有终态 `done` 且基线已入库才为真（`lib/judgeOutcome`，`lib/update-record.js:37`；`assessBaseline`，`lib/engine/quality-gate.js:188`），partial/failed 一律不推进。
-
-本文结构：[System Overview](#system-overview) 给总框图与各块职责；[Data Flow](#data-flow) 给一次编译请求的端到端数据流；[Dependency Graph](#dependency-graph) 给模块间依赖方向与契约点；[Module Roles](#module-roles) 逐模块列职责与连接。行号均引自各模块文章（`文件:行号`）。
+本文面向零上下文的未来 agent：先用三张图（总框图 / 数据流 / 依赖方向）建立心智模型，再按 Module Roles 索引跳到对应模块文章（`[[...]]` 为 wiki 反链）。文中行号均引自各模块文章，对应当次成文时的源码版本。
 
 ## System Overview
 
+分五层看：宿主提供 `llm.stream` / `webServer` / `agents` / `tools` 等服务；`index.js` 是唯一编排枢纽（工具注册、JobService、回环端点、落盘收尾）；规划层产出 `plan.modules`；三条写作通道把任务变成文章全文（原生引擎通道走子进程旁路）；所有通道共享契约闸门、增量判定与落盘提交底座；浏览器半侧只消费回环端点。
+
 ```text
-┌────────────────────────────────── dsh-codewiki 系统总览 ─────────────────────────────────┐
-│                                                                                         │
-│  宿主 DSH ──► index.js（JobService · Config · Web 面板 · codewiki_generate/update 工具）  │
-│                     │                                                                   │
-│                     ▼  nativeChannelFor(kind)：原生通道只接 full；stale 走 Node 增量     │
-│        ┌────────────────────┴─────────────────────┐                                     │
-│        ▼                                          ▼                                     │
-│ ┌──────────────────────────────┐   ┌─────────────────────────────────────────────┐     │
-│ │ 旧 Node 通道                  │   │ 原生 FSoft 引擎通道（仅 full）                │     │
-│ │ semanticPlan (index.js:1393) │   │ runNativeJob (native-run.js:68)             │     │
-│ │  ├ scanRepoFiles   (:2192)   │   │  ├ doctor   (manifest.js:141) 环境指纹与锁  │     │
-│ │  ├ extractRepoGraph          │   │  ├ startLlmBridge (llm-bridge.js:90)        │     │
-│ │  │  (lib/symbols.js:785)     │   │  │  127.0.0.1 loopback 桥，凭证不出宿主      │     │
-│ │  ├ resolveImportEdges (:1429)│   │  ├ runEngine (client.js:223)                │     │
-│ │  ├ clusterComponents         │   │  │  └─ spawn lib/engine/python/entry.py     │     │
-│ │  │  (lib/cluster.js:291)     │   │  ├ gateNativeOutput (quality-gate.js:390)   │     │
-│ │  └ job.plan.modules          │   │  └ applyNativeOutput (apply-plan.js:414)    │     │
-│ │ tickArticles (index.js:3135) │   │     写盘 ► cw index ► 基线 ► git 提交        │     │
-│ │  ├ agentic 工具循环写作       │   │  终态 = weakest(engine, gate, apply) (:41)  │     │
-│ │  └ 失败过半退回单轮通道       │   └────────────────────────┬────────────────────┘     │
-│ └───────────────┬──────────────┘                            │                          │
-│                 ▼                                           ▼                          │
-│ ┌───────────────────────────────────────────────────────────────────────────────────┐  │
-│ │ 共享增量层（两通道共用的变更判定与记账）                                              │  │
-│ │  collectChangeSet (change-set.js:102)：committed/staged/unstaged/untracked 四路    │  │
-│ │  旧图 = 快照回读 (incremental.js:94)；新图 = 当前符号图 (lib/symbols.js)             │  │
-│ │  diffGraphs (graph-diff.js:447) ► planUpdate (update-planner.js:156)               │  │
-│ │  judgeOutcome (update-record.js:37) ► canAdvanceBaseline（基线推进闸门）             │  │
-│ └──────────────────────────────────────────┬────────────────────────────────────────┘  │
-│                                            ▼                                           │
-│   .codewiki/（modules/*.md · _index.md · _meta.yaml · temp/符号快照与更新记录）          │
-│   + CodeWiki.md 入口；autoCommitWiki (index.js:4952) 分支合并式提交入库                  │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────── 宿主（cordis ctx） ─────────────────────────────────────┐
+│  agents · tools · llm.stream · webServer · workspaceRegistry · 配置: codewiki                │
+└────────────────────────────────────────┬─────────────────────────────────────────────────────┘
+                                         │ apply(ctx, config)
+                                         ▼
+┌─────────────────────────── index.js（插件主入口，宿主半侧） ─────────────────────────────────┐
+│  工具: cw · codewiki_generate · codewiki_update · codewiki_progress                          │
+│  JobService: submit ─► tick 阶段机 articles►crosscut►review►index►commit                     │
+│  installWebServer: /jobs /repos /control /sessions /models /model-efforts（仅回环）          │
+│  收尾: contractCheck · fixAnchors · pruneOrphanModules · autoCommitWiki · wakeCompileSession │
+└───────┬────────────────────┬───────────────────────┬─────────────────────────────────────────┘
+        │ 规划                │ 写作通道               │ 原生引擎通道
+        ▼                    ▼                       ▼
+┌──────────────────────┐ ┌────────────────────────────┐ ┌──────────────────────────┐
+│ 规划层                │ │ 宿主 LLM 写作通道           │ │ lib/engine/*（Node 适配） │
+│ scanRepoFiles        │ │ 单轮: runRealtimeTasks     │ │ runNativeJob 裁决链       │
+│ symbols.js           │ │ agentic: 工具循环          │ │ env►增量►引擎►门►落地     │
+│ cluster.js           │ │ 会话通道兜底               │ │ └► python entry.py(FSoft)│
+│ semanticPlan/local   │ │                            │ │ llm-bridge 回环模型       │
+└──────────────────────┘ └────────────────────────────┘ └──────────────────────────┘
+           ▼ plan.modules          ▼ 文章全文                 ▼ report/engineResult
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│  契约闸门: inspectArticle · fixAnchors · makeWriteSet/isWritable                               │
+│  增量底座: change-set 四路采集 · graph-diff 组件diff · update-record 终态裁决                   │
+│  落盘提交: cw index · cw meta update · autoCommitWiki · ensureWikiEntry                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+                            │ GET/POST /api/codewiki/*（仅回环）
+                            ▼
+┌──────────────────────────── client.js（浏览器半侧，零凭证） ────────────────────────────────┐
+│   CodewikiPanel 任务面板 · CodewikiCard 设置 · ReposTab · SessionView                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-各块职责与相互连接：
+读图要点：
 
-- **index.js（编排层）**：唯一 import 全部模块的层。JobService 阶段机（`submit`/`tick`）、双通道选择（`nativeChannelFor`，`index.js:223`）、Web 面板端点（`/api/codewiki/jobs`、`/api/codewiki/repos`）、模型目录端点、git 与仓库辅助（见 [Module Roles](#module-roles)）。
-- **旧 Node 通道**：语义规划产出 `job.plan.modules`（组件 → 模块任务），`tickArticles`（`index.js:3135`）按 `agenticArticles` 开关分发到 agentic 通道（`startAgenticRun`，`index.js:2932`）或单轮通道（`runRealtimeTasks`，`index.js:662`）；agentic 批次失败过半时退回单轮重跑（`shouldFallBackFromAgentic`，`index.js:1364`，只退一次）。
-- **原生通道**：环境不闭合/锁漂移直接 `failed` 不跑引擎；引擎 `done` 不能替代质量门；落地器带回滚点；终态由 `weakest(engine, gate, apply)` 合成。落地器刻意不 `import index.js`，全部外部副作用（跑 cw、git 提交）走 `deps` 注入。
-- **共享增量层**：`collectChangeSet` 是增量入口（采不全 → 全量）；符号图 diff 决定「哪些组件真的变了」；`planUpdate` 产出每篇文章的 `write/keep/review` 动作；`judgeOutcome` 决定终态与基线能否前移。
-- **产物**：`.codewiki/` 与 `CodeWiki.md` 是唯一的写集白名单（`APPLY_WRITE_ROOTS`，`lib/engine/apply-plan.js:46`；`WIKI_PATHS`，`index.js:58`），提交只动这两个路径。
+- **提交制**：`gen.execute` 立即返回 `{ submitted, jobId, stage }`，不就地等待；job 落盘 JOBS_FILE，宿主重启后按持久化 prompt 快照重跑（`settleJob`，index.js:2399）。
+- **通道选择**：`nativeEngine` 开且 scope 支持时走原生通道（`nativeChannelFor`，index.js:228）；`agenticArticles` 开走 agentic 通道；否则单轮批量。agentic 失败过半退回单轮（`shouldFallBackFromAgentic`，index.js:1390）。
+- **原生引擎是子进程**：`lib/engine/client.js` spawn Python 入口（`lib/engine/python/entry.py`），模型经 `llm-bridge` 回环 HTTP 注入，凭证只活在进程环境。
+- **client.js 不持任何凭证**，全部数据来自回环端点。
 
 ## Data Flow
 
+一次全量编译的请求生命周期（编号对应图中 ①-⑥）：
+
+1. **提交**：`codewiki_generate.execute({cwd, scope})` → `JobService.submit`（index.js:3722）写 JOBS_FILE 并触发 tick；项目默认串行（后到 `queued`）。
+2. **plan**：`scanRepoFiles` → `extractRepoGraph`（lib/symbols.js:785）+ `resolveImportEdges`（:810）→ `clusterComponents`（lib/cluster.js:291，三段：顶层聚类 ► 下钻 ► 超级分组；无模型/失败降级 `heuristicCluster` 或 `localPlan`）。`plan.graph` 刻意不含 `sourceCode`，防 JOBS_FILE 膨胀。
+3. **articles**：`prepareArticleTasks`（index.js:1245）按 `collectSources` 装填源码（预算 110k；超大模块打 `bigTier` 或拆观察批或转会话通道）→ `runRealtimeTasks`（index.js:671）双池并发，每任务一次 `llm.stream` → `applyTaskResult`（index.js:633）落盘前过 `contractCheck`（index.js:590，error 级拒写）与 `fixAnchors`。agentic 通道在此阶段由 `runAgenticArticles`（lib/articles-agentic.js:231）接管。
+4. **crosscut**：`packArticles`（index.js:1399）把已写文章装填为上下文，产出 `_architecture.md` / `_patterns.md` / concepts；超预算拆 `#obsN` 观察批再合成。
+5. **review**：审校员批量校对，按 `@@@article:` 标记逐篇回填。
+6. **index/commit**：`pruneOrphanModules`（index.js:351，仅 full 且只删 `modules/*.md` 孤儿）、`ensureWikiEntry`（index.js:381）、`judgeOutcome` 定终态，`autoCommitWiki`（index.js:4801）通过安全边界守卫后提交，`wakeCompileSession` 按需 steer 唤醒。
+
 ```text
-  请求来源：面板 / codewiki_generate 工具 / autoScan（60s 心跳调度）
-        │
+ codewiki_generate / codewiki_update（agent 工具调用）
+        │  提交制：立即返回 { submitted, jobId, stage:'articles' }，不就地等待
         ▼
-  ┌─ 编译前闸门（index.js）────────────────────────────────────────────┐
-  │ detectLinkedWorktree(:435) / hasCompilableSources(:478)            │
-  │   linked worktree 或空壳目录 ► 拒绝（auto 调度则静默跳过）            │
-  └────────────────────────────┬──────────────────────────────────────┘
-                               ▼
-  ┌─ 变更采集（stale/auto 更新入口 runStaleUpdate index.js:4132）────────┐
-  │ collectChangeSet (change-set.js:102)：committed/staged/unstaged/    │
-  │ untracked 四路 ► ChangeSet；任一路采不全 ► ok=false + fallback='full'│
-  │       └──────────► 退回全量编译（变化不能丢）                         │
-  └──────────────┬─────────────────────────────────────────────────────┘
-                 │ changeSet.ok
-                 ▼
-  ┌─ 符号图构建 ────────────────────────────────────────────────────────┐
-  │ extractCurrentGraph (index.js:2220) ► newGraph                      │
-  │   = extractRepoGraph (symbols.js:785) + resolveImportEdges (:810)   │
-  │ loadSnapshot (incremental.js:94) ► oldGraph（temp/符号快照，无源码）  │
-  └──────────────┬─────────────────────────────────────────────────────┘
-                 ▼
-  ┌─ 全量：语义规划 ──────────┐   ┌─ 增量：符号级规划 ────────────────────┐
-  │ clusterComponents        │   │ diffGraphs (graph-diff.js:447)       │
-  │ (cluster.js:291)         │   │ realChangedIds (update-planner.js:57)│
-  │ ► job.plan.modules       │   │ planUpdate (update-planner.js:156)   │
-  └────────────┬─────────────┘   │ ► write/keep/review + unmappedSource │
-               │                 │       Changes ► needsFull ◄ 退全量    │
-               ▼                 └────────────┬─────────────────────────┘
-               └──────────────┬────────────────┘
-                              ▼
-  ┌─ 文章生成（按通道）─────────────────────────────────────────────────┐
-  │ 旧通道：runAgenticArticles (articles-agentic.js:231) ► runOneArticle│
-  │   ► runAgenticArticle (agentic.js:331) 工具循环（read_code/         │
-  │   list_files/edit_article），streamFn = makeHostStream (:83)        │
-  │ 原生通道：runEngine (client.js:223) ► entry.py 产 docs/ 树          │
-  └──────────────┬─────────────────────────────────────────────────────┘
-                 ▼
-  ┌─ 质量闸门 ──────────────────────────────────────────────────────────┐
-  │ 旧通道：inspectArticle (article-contract.js:213) + fixAnchors       │
-  │         （error 拒写 / warning 放行降 partial）                      │
-  │ 原生通道：gateNativeOutput (quality-gate.js:390) defect/degradation/│
-  │           stale 三类分流 ► applyNativeOutput (apply-plan.js:414)    │
-  │           写集封闭 ► cw index ► 基线 ► 提交（索引/基线失败即回滚）     │
-  └──────────────┬─────────────────────────────────────────────────────┘
-                 ▼
-  ┌─ 终态与基线（tickIndex index.js:3602）──────────────────────────────┐
-  │ judgeOutcome (update-record.js:37) ► blockers / 终态                │
-  │   done ◄─ 无 blockers；partial/failed ◄─ canAdvanceBaseline=false   │
-  │ buildUpdateRecord+saveUpdateRecord (:131/:217) ► temp/update-record │
-  │ slimGraph+saveSnapshot (incremental.js:37/:106) ► temp/符号快照      │
-  │ autoCommitWiki (index.js:4952) ► 只提交 .codewiki/ 与 CodeWiki.md   │
-  └─────────────────────────────────────────────────────────────────────┘
+┌────────────── JobService（JOBS_FILE 持久化 · tick 驱动 · 项目串行闸门）──────────────┐
+│                                                                                      │
+│  ①plan      scanRepoFiles ──► extractRepoGraph(symbols.js) ──► resolveImportEdges    │
+│                     │                       graph: Map<id,node>                      │
+│                     ▼                                                               │
+│             semanticPlan(cluster.js 三段聚类) ──失败/降级──► localPlan(顶层目录)     │
+│                     │ plan.modules + plan.graph(无 sourceCode)                       │
+│  ②articles  prepareArticleTasks ──► runRealtimeTasks(大档/默认档双池)                │
+│                     │       每任务一次 llm.stream ◄── 宿主 LLM 服务（零直连）         │
+│                     ▼                                                               │
+│             applyTaskResult ──► contractCheck ──► fixAnchors ──► 写盘 .codewiki/    │
+│  ③crosscut  packArticles ──► _architecture / _patterns / concepts(观察批►合成)      │
+│  ④review    审校员批量校对（@@@article: 逐篇回填）                                   │
+│  ⑤index     pruneOrphanModules · ensureWikiEntry · judgeOutcome(canAdvanceBaseline) │
+│  ⑥commit    autoCommitWiki(安全边界守卫) ──► wakeCompileSession / commitHintText    │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+        │
+        ├── scope=stale：collectChangeSet(四路 git 变更) ──► planUpdate(write/keep/delete/review)
+        │            └─ symbolIncremental：快照图 vs 新图 ──► diffGraphs(纯注释降级)
+        ├── nativeEngine=true：tickNative ──► runNativeJob
+        │        env(doctor+lock) ──► 增量决议 ──► runEngine(JSON-lines 子进程)
+        │        ──► gateNativeOutput(质量门) ──► applyNativeOutput(写►index►基线►提交)
+        ▼
+   /api/codewiki/jobs ◄── client.js 面板 2s 轮询；cancel ──► /control ──► 终止进程树
 ```
 
-### 全量编译（旧 Node 通道）
+增量与原生分支的关键语义：
 
-1. **规划**：`buildPlan`（`index.js:2986`）按 `planMode` 选择 `semanticPlan`（`index.js:1393`）或 `localPlan`（`index.js:1371`，纯目录分组兜底）。`semanticPlan` 读正文 → `extractRepoGraph`（`lib/symbols.js:785`）→ `resolveImportEdges`（`index.js:1429` 补边）→ `clusterComponents`（`lib/cluster.js:291`）→ `toPlanModules`（`lib/cluster.js:460`）得 `job.plan.modules`；`plan.graph`/`plan.tree`（不含 `sourceCode`）随 job 持久化供增量。
-2. **写作**：`tickArticles`（`index.js:3135`）组装任务并 `markBigAgenticTasks`（`index.js:3277`）打大档标记；agentic 通道 `runOneArticle`（`lib/articles-agentic.js:33`）落盘前过写集闸门（`isWritable`）与 `fixAnchors`；单轮通道经 `applyTaskResult`/`writeValidated`（`index.js:2601`/`:2601`）闸门。
-3. **横切与收尾**：crosscut 阶段 `packArticles`（`index.js:1480`）打包已有文章产概念/模式页；review 阶段 `localReview` 记账结构问题；`tickIndex` 跑 `cw index` 并写符号快照；`tickCommit` 调 `autoCommitWiki`。
-
-### 全量编译（原生通道）
-
-1. `startNativeRun`（`index.js:2727`）→ `runNativeJob`（`lib/engine/native-run.js:68`）：环境探测与锁（`doctor`/`compareLock`，漂移即 `failed`，`:133-218`）。
-2. `startLlmBridge`（`lib/engine/llm-bridge.js:90`）建 loopback 桥；`nativeEnginePlan`（`index.js:252`）把 `bridge.url`/占位 key/模型名写进子进程环境变量，`entry.py` 的 `_model_config`（`lib/engine/python/entry.py:243`）读取（注意：桥返回对象不含 `model`，必须显式传）。
-3. `runEngine`（`lib/engine/client.js:223`）spawn 引擎，JSON-lines 协议收 result/progress；协议破坏（无 result/未知 requestId/迟到结果）判 `engine-crashed`/`engine-protocol`。
-4. 质量门 `gateNativeOutput`（`:340` 调用）→ 落地器 `applyNativeOutput`（`:366` 调用，固定 `advanceBaseline:null`）→ `weakest` 合成终态（`:399-418`）→ 首跑成功后落锁 `writeLock`（`:423-438`）。
-
-### 增量更新（stale）
-
-1. `runStaleUpdate`（`index.js:4132`）读编译基线 `last_compiled_commit` → `collectChangeSet`（`index.js:4143`）；`ok=false` 直接 `needFull`。
-2. `planUpdate`（`index.js:4173` 调用）：符号级判定用 `diffGraphs`（`lib/graph-diff.js:447`）+ `dependentsOf`（`lib/update-planner.js:85`，反向依赖闭包）+ `scanStaleArticle`（死链/已删符号引用）；`moduleMap` 缺失时 `migrateModuleMap`（`lib/update-planner.js:472`）保守迁移。
-3. `plan.actions` 里 `write` 映射为 `prebuiltTasks` 提交（`index.js:4181-4191`）；`needsFull` 或 `unmappedSourceChanges` 非空则整轮退全量（`index.js:4177-4179`）。
-4. 收尾：`tickIndex` 调 `judgeOutcome`（`index.js:3619`），`saveRecord`（`index.js:2574`）落 `update-record.json`；`canAdvanceBaseline === true` 才 `cw meta update` 前移基线（`index.js:3602-3618`）。
+- **增量**：`collectChangeSet`（lib/change-set.js:108）收 committed/staged/unstaged/untracked 四路；`planUpdate`（lib/update-planner.js:156）按「签名/实现/依赖边/改名」分类（`diffGraphs`，lib/graph-diff.js:447），纯注释变更降级不重写；无归属的源码变更强制 `needsFull`，**变更从不静默丢弃**。终态只有 `done` 才允许 `canAdvanceBaseline`，partial/failed 冻结基线让下轮重见未消费变更（`lib/update-record.js:173` judgeOutcome）。
+- **原生通道**：`runNativeJob`（lib/engine/native-run.js:114）裁决链每一步结论不可被下一步洗白——引擎 `done` 不能替代质量门（`gateNativeOutput`，lib/engine/quality-gate.js:397）；跨轮受管状态存 `.codewiki/_native-state/`（`state.json` + docs 副本），未提交改动经 `mergeUnconsumed` 跨轮携带；终态取引擎/质量门/落地器三者的**最弱**。
+- **取消是终态**：abort 后杀整棵进程树（POSIX `kill(-pid)` / Windows `taskkill /T /F`），迟到 result 记 `late-result` 丢弃。
 
 ## Dependency Graph
 
+约定：`A ──► B` 表示 A 依赖（import / 注入调用）B。全图单向无环：`index.js` 是唯一编排层，`lib/` 不反向 import 它；`lib/engine/` 内部用依赖注入（native-run 注入 doctor/runEngine/gate/apply/bridge），便于测试换桩；唯一的跨进程边界是 Node ↔ Python 子进程协议，不是 import。
+
 ```text
-（A ─► B = A 依赖 B：A import/调用 B；◈ = 仅消费数据契约，无 import。箭头向下指被依赖方）
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 层 4 总编排   index.js ─► 下面全部模块（semanticPlan · runStaleUpdate ·       │
-│               tickArticles · startNativeRun · tickIndex · autoCommitWiki）   │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 层 3 通道编排                                                                 │
-│  lib/engine/native-run.js ─► manifest.js / llm-bridge.js / client.js /       │
-│                              quality-gate.js / apply-plan.js / contract.js   │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 层 2 执行器 / 规划器 / 门与落地                                                │
-│  lib/cluster.js ─◈ lib/symbols.js（组件形状契约，无 import）                   │
-│  lib/articles-agentic.js ─► agentic.js + agentic-host.js +                   │
-│                              article-contract.js                             │
-│  lib/update-planner.js ─► graph-diff.js + incremental.js + symbols.js +      │
-│                            change-set.js（ChangeSet ◈ 数据契约）               │
-│  lib/engine/quality-gate.js ─► output.js + mapping.js +                      │
-│                                  article-contract.js + contract.js           │
-│  lib/engine/apply-plan.js ─► mapping.js + contract.js + article-contract.js  │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 层 1 组合                                                                     │
-│  lib/incremental.js ─► lib/graph-diff.js                                     │
-│  lib/engine/mapping.js ─► lib/engine/contract.js                             │
-│  lib/engine/output.js ─► mapping.js                                          │
-│  lib/engine/client.js ─► contract.js + process-tree.js                       │
-│  lib/engine/llm-bridge.js ─► openai-bridge.js                                │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 层 0 叶子（不 import 任何 lib 内模块）                                         │
-│  lib/symbols.js · lib/graph-diff.js · lib/change-set.js ·                    │
-│  lib/update-record.js · lib/article-contract.js · lib/agentic.js ·           │
-│  lib/agentic-host.js · lib/engine/contract.js · lib/engine/manifest.js ·     │
-│  lib/engine/process-tree.js · lib/engine/openai-bridge.js ·                  │
-│  lib/engine/python/entry.py                                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-横切消费方（多对一共用，箭头指向被依赖方）：
-  lib/article-contract.js ◄─ lib/articles-agentic.js / lib/engine/quality-gate.js
-                            / lib/engine/apply-plan.js / index.js
-  lib/engine/contract.js  ◄─ engine/client / engine/mapping / engine/quality-gate
-                            / engine/apply-plan / engine/native-run
-  lib/symbols.js（SUPPORTED_EXTS）◄─ lib/update-planner.js
+┌──────────────────────── Dependency Graph（A ──► B = A import B）────────────────────────┐
+│                                                                                          │
+│  index.js ──► lib/cluster.js           （llmCall 由宿主注入，库零内部依赖）               │
+│  index.js ──► lib/symbols.js           （vendor/tree-sitter WASM 为可选依赖）             │
+│  index.js ──► lib/articles-agentic.js ──► lib/agentic.js（工具循环）                     │
+│      │                                ──► lib/agentic-host.js（宿主 llm/FS 适配）        │
+│      │                                ──► lib/article-contract.js（写集闸门）            │
+│  index.js ──► lib/change-set.js ──► lib/git-paths.js（quotepath 字节级解码）             │
+│  index.js ──► lib/incremental.js ──► lib/graph-diff.js（diffGraphs/codeHash/bodyHash）   │
+│  index.js ──► lib/update-planner.js ──► lib/graph-diff.js + lib/symbols.js               │
+│      │                               ──► lib/incremental.js（normRel/快照口径）          │
+│  index.js ──► lib/update-record.js     （judgeOutcome / buildUpdateRecord）              │
+│  index.js ──► lib/engine/native-run.js ──► engine/contract · client · process-tree      │
+│      │                                  ──► engine/manifest · native-state               │
+│      │                                  ──► engine/quality-gate ──► output · mapping     │
+│      │                                  ──► engine/apply-plan ──► mapping · git-paths    │
+│      │                                  ──► engine/llm-bridge ──► openai-bridge(纯转换)  │
+│  engine/client.js ──(子进程 JSON-lines 协议)──► python/entry.py ──► python/stage_map.py  │
+│                                                                                          │
+│  复用底座（被多方 import）: article-contract · graph-diff · git-paths · engine/contract   │
+│  唯一跨进程边界: engine/client.js ◄──协议──► python/entry.py（子进程，非 import）         │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-依赖规则与契约点（未来 agent 改动前必读）：
+结构不变量：
 
-- **分层不可倒置**：叶子层不得 import 组合层；`index.js` 是唯一允许 import 全部模块的层。例外是**依赖注入边界**：`lib/engine/apply-plan.js` 刻意不 import `index.js`（避免拉起宿主服务），`runCw`/`commit`/`normalizeIndexLinks`/`verifyCommit` 全部由调用方经 `deps` 注入，未注入时回落内置同语义提交器 `commitWikiArtifacts`（`lib/engine/apply-plan.js:250`）。
-- **Node 记录契约**：`{id, name, kind, relativePath, sourceCode, docstring, parameters, baseClasses, dependsOn}`，由 `lib/symbols.js:13-14` 与 `lib/graph-diff.js:447-448` 共同约定。`lib/symbols.js` 是图的生产者，`diffGraphs`/`clusterComponents`/增量判定都是消费者。
-- **组件 id 约定**：`<相对路径>#<符号名>`，方法为 `#<类名>.<方法名>`（`lib/symbols.js:10-11`）；用 `#` 而非 `::` 以避免与 Windows 盘符混淆。
-- **跨语言契约**：`ENGINE_CONTRACT_VERSION`（`lib/engine/contract.js:20`）与 `ENGINE_PROTOCOL_VERSION`（`lib/engine/client.js:27`）独立演进——前者管结果字段，后者管行协议；`mapping.js` 的 `WIKI_DIR`/`WIKI_ENTRY`/`WIKI_META_REL`（`lib/engine/mapping.js:30-32`）被 `apply-plan.js:46` 复用为写集白名单。
-- **模型通道与进程通道正交**：`client.js` 管进程与 JSON-lines 协议、不连模型；`llm-bridge.js` 管模型通道、不 spawn 引擎；两者由 `native-run.js` 在同一轮编译里编排。引擎与桥之间是 OpenAI-compatible HTTP（loopback + 占位 key），凭证永不出宿主。
-- **数据-only 依赖**：`lib/cluster.js` 与 `lib/symbols.js` 之间、`lib/graph-diff.js` 与 `lib/symbols.js` 之间、`lib/change-set.js` → `lib/update-planner.js` 之间只有数据契约（组件形状/Node 形状/ChangeSet），无 import——改任一侧形状必须同步另一侧。
+- **底座被复用而非重写**：`article-contract.js` 同时服务单轮（`contractCheck`）、agentic（写集 `isWritable`）、原生（quality-gate 经 `inspectArticle` 判目标格式）三个写盘点；`graph-diff.js` 同时被 `incremental.js` 与 `update-planner.js` 消费，两处的「纯注释降级」必须同源（`codeHash`）。
+- **契约是唯一出口形状**：引擎终态一律经 `engineResult`（lib/engine/contract.js:116）归一，硬不变量——`done` 不带 blockers、`partial` 必带 blockers、`failed` 必有 error；落地问题经 `toContractBlockers`/`toApplyBlockers` 落进同一份 `BLOCKER_KINDS`。
+- **测试侧依赖与生产同向**：`test-*.mjs` 只 import 生产模块（或经 `apply` 注入 mock ctx），生产代码不依赖任何测试文件；`test-fixtures/fake-native-engine.mjs` 是「真进程、假算法」的协议替身，模式文件必须放仓库外以免污染变更集。
 
 ## Module Roles
 
-### 编排与宿主集成（index.js）
+**运行时主体（无独立模块文章，由测试文章交叉钉死）**
 
-- **`index.js`** — 插件主入口（约 5000 行单文件）：JobService 阶段机、Config、工具定义（`codewiki_generate`/`codewiki_update`）、Web 面板端点、两条通道的调度与收割。关键入口：`semanticPlan`(:1393)、`localPlan`(:1371)、`buildPlan`(:2986)、`tickArticles`(:3135)、`startAgenticRun`(:2932)、`runRealtimeTasks`(:662)、`prepareArticleTasks`(:1236)、`startNativeRun`(:2727)、`runStaleUpdate`(:4132)、`tickIndex`(:3602)、`saveRecord`(:2574)。
-- **git 辅助（git_helpers）** — `detectLinkedWorktree`(:435)、`isWorktreeCwd`(:459，60s 缓存)、`hasCompilableSources`(:478，10 分钟缓存)、`isDeadCompileTarget`(:504)、`scanRepoFiles`(:2192，黑名单+上限 2000 文件/256KB)、`autoCommitWiki`(:4952，主题分支合并式提交，只 add `.codewiki` 与 `CodeWiki.md`)、`commitHintText`(:5036)、`currentCommit`(:1916)、`normalizeCwd`(:62)。被工具执行、面板、autoScan、落地器注入（`deps.applyDeps.commit`）四方共用。
-- **仓库面板助手（repo_helpers）** — `parseStatus`(:294，cw status 三态解析)、`normalizeArticlePath`(:280)、`normalizeIndexLinks`(:284)、`excludedItem`/`isExcluded`(:410/:420)、`loadKnownRepos`/`rememberRepo`/`forgetRepo`(:2147-2170，`dsh-codewiki-repos.json`)、`countWikiArticles`(:310)、`/api/codewiki/repos` handler(:4707，30s 缓存 + wsSig 失效)。
-- **单轮写作与锚点** — `collectSources`(:1165)、`packArticles`(:1480)、`applyTaskResult`(:624)、`writeValidated`(:2601)、`validateArticleEnvelope`(:1153，旧闸门)、`fixAnchors`(:927)/`fixChangelogAnchors`(:780)（与 `test-wiki-anchors.mjs` 校验器同源对侧）、`slugify`(:1741，保留 CJK，与 `normalizeModuleName` 是两套策略不可混用)。
+- **index.js（宿主半侧编排）** — `apply`（index.js:4965）注册工具（`cw`/`codewiki_generate`/`codewiki_update`/`codewiki_progress`）与 7 个回环端点；JobService tick 推进阶段机；单轮写作（`runRealtimeTasks`:681、`prepareArticleTasks`:1255）、规划入口（`buildPlan`:3043）、落盘收尾（`autoCommitWiki`:5030、`pruneOrphanModules`:361、`ensureWikiEntry`:391）、原生通道接线（`tickNative`:2851）与会话记录（`SESSIONS_DIR`:1994）都在这里。
+- **client.js（浏览器半侧）** — `CodewikiCard`（client.js:570，设置页/模型目录/思考档位）、`CodewikiPanel`（:1455，2s 轮询 jobs/cancel）、`ReposTab`（:1213）、`SessionView`（:1363）；只读回环端点，不持凭证。
 
-### 符号与聚类
+**规划**
 
-- **`lib/symbols.js`** — AST 符号提取：表驱动 17 语言（`LANG_RULES`，:36-271），web-tree-sitter + WASM（装在独立 `vendor/tree-sitter`），不可用时正则兜底 `regexExtract`(:374) 产出同形状记录。`extractRepoGraph`(:785) 只产组件不建边，`resolveImportEdges`(:810) 显式补边。连接：graph-diff（Node 契约）、cluster（组件形状）、update-planner（`SUPPORTED_EXTS`）、index.js 两条链路（:1412/:2238）。
-- **`lib/cluster.js`** — LLM 组件聚类三段式：顶层 `clusterPrompt`(:57) → 超大模块下钻 `subdivide`(:396) → 顶层过多超级分组 `superGroupPrompt`(:106)；主入口 `clusterComponents`(:291) 返回 `{modules, tree, concepts, warnings, stats, byId}`；无 LLM 走 `heuristicCluster`(:219)，`fillMissing`(:247) 保证组件零丢失；`toPlanModules`(:460) 转 `job.plan.modules`。注意 `concepts` 恒为 `[]`，概念抽取由横切阶段负责。
+- [[clustering]] — `lib/cluster.js` 三段 LLM 聚类（`clusterComponents`:291）+ 启发式兜底（`heuristicCluster`:219）+ `fillMissing` 保证组件不丢；容器父节点不单独成文；产出经 `toPlanModules`:460 变成 articles 阶段任务。
+- [[symbol_extraction]] — `lib/symbols.js` 表驱动 16 语言 AST 提取（`extractRepoGraph`:785）+ import 依赖边（`resolveImportEdges`:810）+ 正则兜底（`regexExtract`:374，绝不让整块语言静默消失）；组件 id 约定 `<相对路径>#<符号名>`。
 
-### 增量与变更
+**写作通道**
 
-- **`lib/change-set.js`** — 四路 git 变更采集 `collectChangeSet`(:102)（committed/staged/unstaged/untracked + deleted/renamed，`-M` 改名检测），`parseNameStatus`(:52)，`isWikiProduct`(:26) 排除 `.codewiki/` 自产物，任何采不全都 `fallback='full'`。可 JSON 序列化（要进 update-record）。
-- **`lib/graph-diff.js`** — 符号级 diff 核心算法库（逐位移植 FSoft `graph_diff.py`，golden 对拍）：`diffGraphs`(:447) 归类 added/deleted/interface/body/edge/renamed 并产 records（含截断统一 diff）；`changedIds`(:436)、`graphDiffCounts`(:425)、`pairRenames`(:371，贪心改名配对)、`codeHash`(:108，剥注释)/`bodyHash`(:121) 拉开「纯注释」与「实质变更」粒度差。
-- **`lib/incremental.js`** — 符号快照存取（`SNAPSHOT_REL`:22 = `temp/symbol-graph.json`，`SLIM_FIELDS`:26 不存源码、固化哈希）：`slimGraph`(:37)/`loadSnapshot`(:94，坏 JSON/版本不符安静返 null)/`saveSnapshot`(:106)/`graphFromSnapshot`(:69)；`filterStaleTasks`(:140) 是朴素判定（已被 `planUpdate` 取代为主链路，保留为最小可验证单元）；`normRel`(:118) 被 update-planner 复用。
-- **`lib/update-planner.js`** — 增量规划主入口 `planUpdate`(:156)：`changeSet` + 新旧符号图 + articles + moduleMap → 每篇 `write/keep/review` 动作（含 reasons）；`realChangedIds`(:57) 区分 real/cosmetic/structural；`dependentsOf`(:85) 反向依赖闭包；`buildModuleMap`(:442)/`migrateModuleMap`(:472)；无归属源码变更 → `unmappedSourceChanges` + `needsFull`。已知：`delete` action 从未产出（孤儿文章由 `pruneOrphanModules`，`index.js:342` 清理）。
-- **`lib/update-record.js`** — 终态判定与复盘：`judgeOutcome`(:37) 按 blockers 合成 `done/partial/failed/cancelled` 与 `canAdvanceBaseline`；`buildUpdateRecord`(:131)/`saveUpdateRecord`(:217) 落 `temp/update-record.json`（只存摘要不塞符号图）；`loadUpdateRecord`(:229) 版本不符返 null。
+- [[agentic_writing]] — 三层：`lib/agentic.js` 工具循环（`runAgenticArticle`:331，4 工具 + 坏 JSON 三级抢救）；`lib/agentic-host.js` 宿主适配（`makeHostStream`:83、`makeFsWorkspace`:111）；`lib/articles-agentic.js` 编排（`runOneArticle`:33、双池 `runAgenticArticles`:231、子模块递归 `subDepth` 封顶）。
+- 单轮/会话通道（在 index.js，见 [[test_batch]]）：双池并发 + 大档接管 + 会话通道 `timeout/harvest/wait` 三态兜底。
 
-### 文章生成（旧通道）
+**增量**
 
-- **`lib/agentic.js`** — 纯逻辑工具循环 `runAgenticArticle`(:331)（无工具调用即写完，`stopReason` 五态）；四工具 `read_code`(:115，重复读抑制+行/字符上限)/`list_files`(:179)/`edit_article`(:200，CRLF 归一+负行号报错)/`generate_sub_module`(:285，无递归支持时必须说实话防死链) 由 `buildToolset`(:279) 组装；`parseToolArgs`(:476) 三级 JSON 抢救；`DEFAULT_MAX_STEPS`(:325)=30 是唯一定义点。
-- **`lib/agentic-host.js`** — 宿主适配：`toRequestMessages`(:34，裸消息↔宿主 Message，tool 一拆多、身份稳定)、`makeHostStream`(:83，chunk 收流、error/abort 抛错)、`makeFsWorkspace`(:111，真实 fs 再兜一层 cwd 越界防护)。
-- **`lib/articles-agentic.js`** — 执行器：`runOneArticle`(:33，编辑器+workspace+写集闸门+落盘)、`runAgenticArticles`(:231，bigTier/默认双池并发，返回 `Map(customId→结果)`)、`markBigAgenticTasks`(:320)、`sourceTokensOf`(:185)、`resolveTaskRoute`(:208)；`dispatchSub` 递归派生子模块文章且深度封顶。
-- **`lib/article-contract.js`** — 文章契约闸门：`inspectArticle`(:213) 判 frontmatter 闭合/必填字段/type-目录匹配/重复 frontmatter/重复章节/必需章节空/围栏未闭合/`source_files` 存在性与证据/死链；error 拒写、warning 放行（`hasBlockingIssue`）；`makeWriteSet`/`isWritable` 写集闸门。消费方：旧通道落盘、原生质量门、落地器。
+- [[change_set]] — `lib/change-set.js` 四路 git 变更收成规范化 ChangeSet（`collectChangeSet`:108，采不全显式 `fallback:'full'`）；`lib/git-paths.js` 字节级解码 quotepath 转义（`decodeGitPath`:37）。
+- [[graph_diff]] — `lib/graph-diff.js` 组件级 diff（`diffGraphs`:447），difflib 逐位移植 + Python golden 对拍；`codeHash`/`bodyHash` 支撑纯注释降级与改名配对（`pairRenames`:371）。
+- [[incremental_update]] — 四文件管线：快照存取（`lib/incremental.js`，`.codewiki/temp/symbol-graph.json`）→ `planUpdate`（lib/update-planner.js:156，write/keep/delete/review + 反向依赖传播 + `unmappedChanges` 强制 needsFull）→ `judgeOutcome`/`buildUpdateRecord`（lib/update-record.js:131/:131，终态与 `.codewiki/temp/update-record.json`）。
 
-### 原生 FSoft 引擎通道（lib/engine/）
+**质量契约**
 
-- **`lib/engine/contract.js`**（阶段 0，叶子）— 跨语言数据契约：`ENGINE_STAGES`(:24-33)、`TERMINAL_OUTCOMES`(:35)、`BLOCKER_KINDS`(:42-53)、`ENGINE_ERROR_CODES`(:57-67)、`RETRYABLE_CODES`(:71)；`engineResult`(:97)/`engineProgress`(:150)/`engineError`(:171) 构造器施加终态硬不变量；`validateEngineResult`(:186) 反序列化边界不抛错校验。
-- **`lib/engine/client.js`**（阶段 2）— 唯一 spawn 点：`runEngine`(:223) 按协议不变量收 JSON-lines（requestId 隔离、违规记录、取消后迟到 result 丢弃、退出码 0 无 result 仍判失败）；`createProtocolReader`(:39) 纯逻辑可逐字节喂；失败码映射 engine-missing/timeout/crashed/protocol。
-- **`lib/engine/process-tree.js`** — 取消地基：`terminateProcessTree`(:61)（POSIX `detached` 进程组 SIGTERM→SIGKILL；Windows `taskkill /T /F`），`isAlive`(:41)；不整组打掉孙进程会变孤儿继续烧 token。
-- **`lib/engine/manifest.js`** — 环境指纹锁：`probeEnvironment`(:34)、`fingerprintOf`(:50，只吃影响产物的因素)、`readLock`(:61)/`compareLock`(:86，absent/match/drift/unhealthy)/`writeLock`(:117，原子写 `.codewiki/engine-lock.json`)、`doctor`(:141，只读诊断不修环境)。
-- **`lib/engine/mapping.js`** — 产物格式翻译：`mapFsoftOutput`(:115) 把 FSoft docs 树翻成 wiki 写集，四条硬规则（不臆造 `source_files`/不静默丢弃/不覆盖/不改技术内容）；whole-repository 空树模式页照写但 `attribution:'unattributed'`。
-- **`lib/engine/output.js`**（阶段 2）— 产物自洽校验：`collectOutput`(:91)、`buildWritePlan`(:162)、`validateOutput`(:184，entry-missing/empty-body/unmapped-page/article-missing/source-missing/dead-link 等 11 类问题)。
-- **`lib/engine/quality-gate.js`**（阶段 3 采用门）— `gateNativeOutput`(:390) 复用 `validateOutput` 不重写判定，叠加 `renderArticle`(:316，正文一字不动+安全 YAML frontmatter)/`checkRendered`(:346)/`assessBaseline`(:188，产物 commit 必须是已提交 HEAD)；defect/degradation/stale 三类机读分流，只有三类皆空才 `done`；`toContractBlockers`(:589)/`toQualityIssues`(:610) 是两条下游判定路径口径一致的关键接线。
-- **`lib/engine/apply-plan.js`**（阶段 3 落地器）— `applyNativeOutput`(:414) 四步流水（写盘→`cw index`→基线→提交，`APPLY_STAGES`:49）+ 三条硬不变量：写集封闭（`checkWriteTargets`:86 + `APPLY_WRITE_ROOTS`:46）、索引/基线失败即回滚（`capturePre`/`restorePre`）、提交失败不回滚；`gate-partial` 照写但不洗成 done；`findArticlesMissingFromIndex`(:338) 补 cw index 静默缺页探测。
-- **`lib/engine/llm-bridge.js` + `lib/engine/openai-bridge.js`** — 模型通道桥：`startLlmBridge`(:90) 在 `127.0.0.1` 随机端口起 loopback HTTP（`/healthz`、`/v1/models`、`POST /v1/chat/completions`），占位 key 每次随机、错误体不回显、日志不含凭证；`openai-bridge.js` 纯转换 `toLlmRequest`(:128)/`chunksToCompletion`(:236)/`chunksToSse`(:265，`[DONE]` 必收尾)，流式与非流式共用 `foldChunks` 同源拼接。
-- **`lib/engine/native-run.js`**（阶段 4 编排）— `runNativeJob`(:68)：环境/锁 → 桥(:233-259) → 引擎(:261-323) → 门(:340) → 落地(:366，`advanceBaseline` 固定 null) → `weakest`(:41) 最弱终态合成(:399-418) → 首跑落锁(:423-438，故意推迟到落地之后防「半截库」误判)；`settle`(:97) 统一出口施加契约硬不变量。
-- **`lib/engine/python/entry.py`** — 引擎入口：`_model_config`(:243) 从 `CODEWIKI_BASE_URL/API_KEY/MAIN_MODEL/CLUSTER_MODEL` 环境变量构造 OpenAI-compatible 配置；与桥之间是唯一的跨语言运行时边界。
+- [[article_contract]] — `lib/article-contract.js` 结构契约闸门：`inspectArticle`:213（SEVERITY 分 error 拒写 / warning 放行降 partial）+ 写集闸门（`makeWriteSet`:352 / `isWritable`:365）；是所有写盘点的统一判据基座。
 
-### 工具与验收
+**原生引擎（FSoft Python，子进程通道）**
 
-- **`tools/fsoft-engine/setup-env.sh`** — 独立 venv 构建：`--no-deps` 落盘 `locked-requirements.txt` + `constraints.txt` 防依赖跑偏，editable 装 FSoft 本体，`pip check` + import 冒烟收口。
-- **`tools/fsoft-engine/probe-no-llm-graph.py`** — 无 LLM 依赖图验收探针（R1–R5：session/组件/依赖边/artifact/workspace 落盘），fixture `tools/fsoft-engine/fixtures/中文 空格 fixture/` 刻意用中文+空格路径压测解析器；模型链路验收由 1B/1C 其它探针覆盖。
+- [[engine_core]] — 边界层总装：`contract.js`（八段枚举/终态不变量）、`client.js`（JSON-lines 协议 `runEngine`:223）、`process-tree.js`（整树终止:61）、`manifest.js`（doctor + `.codewiki/engine-lock.json`）、`native-run.js`（`runNativeJob`:111 直线裁决链）。
+- [[engine_state]] — `lib/engine/native-state.js` 跨轮受管状态（`.codewiki/_native-state/`）：`isUpdateEligible`:187 判增量资格、`hydrateDocsDir`/`captureDocsDir` 复制式水合/采集、`mergeUnconsumed`:455 未消费变更跨轮携带、状态文件与文章同 pre-image 同回滚。
+- [[engine_output_quality]] — `output.js` 只读收集校验（11 类 problem）+ `quality-gate.js` 采用门（`gateNativeOutput`:390，defect/degradation/stale 三分类，三类皆空才 done）。
+- [[engine_apply]] — `lib/engine/apply-plan.js` 落地器（`applyNativeOutput`:602）：写集封闭 ► pre-image ► 写盘 ► `cw index` ► 基线 ► 提交；索引/基线失败即回滚、提交失败不回滚；孤儿页探测（`findOrphanPages`:413）。
+- [[engine_python]] — `lib/engine/python/entry.py` 协议薄入口（stdout 守卫 + UTF-8 三流 + 不读凭证库）与 `stage_map.py` 五段►八段映射（与 `contract.js` 双向对账，进度封顶 90%）。
 
-### 测试基础设施
+**测试（零框架，`node test-*.mjs`，failures 计数定退出码）**
 
-全部为独立脚本（`node test-*.mjs` 直接运行），零第三方断言库，共用微型 `check()` 计数器并以 `process.exit(fails ? 1 : 0)` 收尾；优先用「临时目录 + 注入桩」钉不变量，而非重放真实引擎：
+- [[test_batch]] — 批量流水线纯函数自检 + 假流式 llm（`makeLlm`:174），钉装填/装配/分池/会话收割/锚点/信封/模型目录。
+- [[test_orchestration_api]] / [[test_orchestration_setup]] — 服务化编排冒烟：提交制、阶段机、面板端点 JSON、取消/串行/并行/重启重跑/steer 唤醒/自动提交；setup 文章是其 `makeCtx`/`makeBatchMock`/`waitJob`/`fakeReq` 脚手架说明。
+- [[test_wiki]] — 四份产物测试：锚点三基准对抗校验、入口生成、linked worktree 判据、会话记录 TTL。
+- [[test_clustering]] — `test-cluster.mjs`（三段聚类/降级/maxDepth/超级分组）+ `test-semantic-plan.mjs`（临时仓库端到端 semanticPlan→plan.modules）。
+- [[test_graph_symbols]] — graphdiff golden 对拍、symbols AST+正则兜底、cwd 路径归一化（`test-cwd-paths.mjs`）。
+- [[test_incremental_update]] — 快照/`filterStaleTasks`/`planUpdate`/`judgeOutcome` 四份单测 + e2e，钉死「1 成 19 败不再判 done」。
+- [[test_engine_protocol]] / [[test_engine_output]] / [[test_engine_apply]] / [[test_engine_native_job]] / [[test_engine_native_inc]] — 引擎侧测试网：契约与客户端、产物与质量门、落地器与孤儿清理、16 用例生产接线、九用例原生增量生产链（真子进程 + `.native-calls` 足迹证据）。
 
-- 纯逻辑单测：`test-symbols.mjs`、`test-cluster.mjs`、`test-semantic-plan.mjs`（目录≠职责端到端）、`test-graphdiff.mjs`（与 `test-fixtures/gen-graphdiff-golden.py` 逐位对拍）、`test-incremental.mjs`/`test-incremental-e2e.mjs`、`test-change-set.mjs`、`test-article-contract.mjs`、`test-update-planner.mjs`、`test-update-record.mjs`。
-- 引擎侧：`test-engine-contract/client/process-tree/manifest/output/apply-plan/quality-gate/bridge/llm-bridge.mjs`，以及 `test-engine-native-job.mjs`（16 个端到端接线用例）+ `test-fixtures/fake-native-engine.mjs`（**真进程**假引擎，协议与产物真实、算法为桩）。
-- agentic 侧：`test-agentic.mjs`、`test-agentic-host.mjs`、`test-articles-agentic.mjs`、`test-agentic-fallback.mjs`（退回链路）。
-- wiki 集成：`test-wiki-anchors.mjs`（`file:行号` 锚点对照三基准源码视图）、`test-wiki-entry.mjs`、`test-worktree.mjs`（无 git 环境 SKIP）、`test-prune-orphans.mjs`（删文件安全边界）、`test-batch.mjs`、`test-orchestration.mjs`、`test-cwd-paths.mjs`。
+**夹具与探针**
 
-### 关键契约速查
-
-| 契约 | 定义处 | 主要消费方 |
-|---|---|---|
-| Node 记录形状（8 字段 + dependsOn） | `lib/symbols.js:13-14` ↔ `lib/graph-diff.js:9-10` | graph-diff、cluster、incremental、update-planner |
-| 组件 id `<相对路径>#<符号名>` | `lib/symbols.js:10-11` | cluster 提示词、图 diff、module-map |
-| ChangeSet（version/ok/state/四路/`sourceChanges`） | `lib/change-set.js:73-93` | planUpdate、judgeOutcome、job 面板 |
-| UpdatePlan（actions/summary/unmapped/needsFull） | `lib/update-planner.js:154-179` | `job.updatePlan`（index.js:3931）、judgeOutcome |
-| ModuleMap（articles→sources/components/module） | `lib/update-planner.js:442` | planUpdate 增量归属 |
-| 符号快照（SLIM_FIELDS，无源码） | `lib/incremental.js:22`/:26 | `diffGraphs` 的旧图来源 |
-| EngineResult / EngineProgress / EngineError | `lib/engine/contract.js` | client.js 翻译、native-run 终态、面板 |
-| GateReport（defect/degradation/stale 三类分流） | `gateNativeOutput`（`lib/engine/quality-gate.js:390`） | apply-plan、native-run blockers |
-| ApplyResult（applied/outcome/rolledBack/blockers） | `lib/engine/apply-plan.js:414` | native-run `apply` 子对象、面板 |
-| UpdateRecord（outcome/blockers/canAdvanceBaseline） | `lib/update-record.js:131-211` | `temp/update-record.json`、面板复盘 |
-| OpenAI-compatible loopback 协议（占位 key） | `llm-bridge.js:90` 路由 ↔ `entry.py:243` | 引擎模型通道（凭证不出宿主） |
-
-改任何一处契约前，先读对应模块文章的 Known Issues（如：agentic 通道落盘不过二次契约闸门、`filterStaleTasks` 已非生产主链路、桥返回对象不含 `model` 字段、`_meta.yaml` 基线未入库会阻塞推进等），这些是历史上真实踩过的坑。
+- [[fsoft_fixtures]] — `tools/fsoft-engine/` 下中文空格 fixture（跨 Python/TS 的可复现输入）与验收探针（R1–R5 无 LLM 依赖图、假模型 429 协议桥、真 cw 落地）+ 冻结依赖环境 `setup-env.sh`。
+- [[probes_root]] — 仓库根 `.probe-*.mjs` 临时集成探针（跑完即删的排查残留）+ `test-fixtures/fake-native-engine.mjs`（真进程假引擎，模式文件与调用足迹放仓库外）。
