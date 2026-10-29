@@ -14,3 +14,7 @@ bin/*.bak-*
 # Python 字节码缓存（lib/engine/python 是产品代码，pycache 不入库）
 __pycache__/
 *.pyc
+
+# 临时探针脚本（开发/验收用，不入库）
+.probe-*.mjs
+.probe3.mjs
