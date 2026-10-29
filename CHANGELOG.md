@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.16.1 — 2026-10-29
+
+### 修复：允许 partial 推进基线，打破编译死循环
+
+**问题**：引擎超时时（articles 阶段 2700000ms 超时），35 篇文章已写入但 `_meta.yaml` 基线未更新（`last_compiled_commit` 仍指向上次提交）。由于 `canAdvanceBaseline` 仅在 `done` 时为 true，partial 状态永不推进基线，导致每轮编译都全量重跑，形成死循环。
+
+**修改**：
+
+| 文件 | 改动 |
+| --- | --- |
+| `lib/engine/native-run.js:169` | `canAdvanceBaseline` 允许 `partial` + `rawTreeFiles>0` |
+| `lib/engine/quality-gate.js:552` | `canAdvanceBaseline` 允许 `partial` + 有文章写入 + 无 defect/degradation |
+| `lib/engine/apply-plan.js:656` | 删除 `problems.length===0` 条件（质量门已裁决） |
+| `lib/engine/client.js:368` | **关键修复**：超时后检查 `reader.progress`，有 `writtenCount>0` 时返回 `partial` 而非 `failed` |
+
+**验证**：
+
+- `test-engine-native-job.mjs`：99/99 通过
+- `test-engine-native-incremental.mjs`：96/96 通过
+- `test-engine-quality-gate.mjs`：29/29 通过
+- 全量回归：所有功能测试通过（test-wiki-anchors 的 10 败为历史文档引用错误，待下次 codewiki_generate 重编译修复）
+
+**提交**：`dec253e4`
+
+---
+
 ## 0.16.0 — 2026-10-29
 
 ### 阶段 7 受控退役：原生引擎转正为默认通道，删除 Node 侧重写的 FSoft 算法
