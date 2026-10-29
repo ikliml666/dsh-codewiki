@@ -3,6 +3,7 @@ title: root
 type: module
 source_files:
   - client.js
+  - index.js
   - .probe-idxfail.mjs
   - .probe-inc.mjs
   - .probe-nochange-commit.mjs
@@ -310,7 +311,7 @@ tags: [root, client, dsh-codewiki, tests, probes]
 测试矩阵的分层（箭头指向被守护的实现）：
 
 ```text
-┌──────────────────── 测试矩阵（仓库根 test-*.mjs）────────────────────┐
+┌──────────────────────── 测试矩阵（仓库根 test-*.mjs）────────────────────────┐
 │ 编排冒烟         test-orchestration.mjs ──► index.js 服务阶段机      │
 │ 批量执行链       test-batch.mjs ──► index.js 纯函数 + runRealtime    │
 │ 原生引擎(0-5)    contract/output/output-real/bridge/llm-bridge/      │

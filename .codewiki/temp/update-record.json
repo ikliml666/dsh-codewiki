@@ -1,36 +1,36 @@
 {
   "version": 1,
-  "jobId": "job-mvsxcbru-1",
+  "jobId": "job-mvszhi7f-2",
   "scope": "auto",
-  "startedAt": "2026-10-29T02:28:37.914Z",
-  "finishedAt": "2026-10-29T03:52:58.238Z",
+  "startedAt": "2026-10-29T03:28:38.763Z",
+  "finishedAt": "2026-10-29T04:02:08.943Z",
   "baseCommit": null,
   "headCommit": null,
   "changeSet": null,
   "plan": null,
   "results": [
     {
-      "name": "modules/tools.md",
-      "ok": false,
-      "stopReason": "error",
+      "name": "modules/root.md",
+      "ok": true,
+      "stopReason": "stream-error",
       "error": null
     },
     {
       "name": "modules/test-fixtures.md",
       "ok": false,
-      "stopReason": "error",
+      "stopReason": "stream-error",
+      "error": null
+    },
+    {
+      "name": "modules/tools.md",
+      "ok": false,
+      "stopReason": "stream-error",
       "error": null
     },
     {
       "name": "modules/lib.md",
       "ok": true,
-      "stopReason": "completed",
-      "error": null
-    },
-    {
-      "name": "modules/root.md",
-      "ok": true,
-      "stopReason": "completed",
+      "stopReason": "stream-error",
       "error": null
     },
     {
@@ -47,18 +47,6 @@
     }
   ],
   "qualityIssues": [
-    {
-      "name": "modules/article_contract.md",
-      "issue": "存量文章未过契约：source_files 指向不存在的文件：agentic.js"
-    },
-    {
-      "name": "modules/engine_python.md",
-      "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "name": "modules/update_planning.md",
-      "issue": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Architecture、Data Flow、Connections、Known Issues"
-    },
     {
       "name": "concepts/file-watching-mechanism.md",
       "issue": "存量文章未过契约：source_files 指向不存在的文件：modules/observability.md"
@@ -84,13 +72,13 @@
   "blockers": [
     {
       "kind": "article-failed",
-      "name": "modules/tools.md",
-      "detail": "error"
+      "name": "modules/test-fixtures.md",
+      "detail": "stream-error"
     },
     {
       "kind": "article-failed",
-      "name": "modules/test-fixtures.md",
-      "detail": "error"
+      "name": "modules/tools.md",
+      "detail": "stream-error"
     },
     {
       "kind": "article-failed",
@@ -101,21 +89,6 @@
       "kind": "article-failed",
       "name": "_patterns.md",
       "detail": "error"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/article_contract.md",
-      "detail": "存量文章未过契约：source_files 指向不存在的文件：agentic.js"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/engine_python.md",
-      "detail": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Key Components、Architecture、Data Flow、Connections"
-    },
-    {
-      "kind": "quality",
-      "name": "modules/update_planning.md",
-      "detail": "存量文章未过契约：正文里又出现了一份 frontmatter（疑似重复贴头）；重复章节：Overview、Architecture、Data Flow、Connections、Known Issues"
     },
     {
       "kind": "quality",
@@ -147,26 +120,26 @@
   "writtenCount": 2,
   "failedCount": 4,
   "notes": [
-    "文章 modules/lib.md 行号锚点存疑（未改）：lib/engine/native-run.js:19-20 符号未找到未改；lib/engine/native-run.js:679 符号未找到未改；lib/engine/python/entry.py:257-289 符号未找到未改 等",
-    "文章 modules/root.md 自动修正 5 处行号锚点",
-    "文章 modules/root.md 行号锚点存疑（未改）：client.js:7 符号未找到未改；client.js:28-29 符号未找到未改；client.js:127-137 符号歧义未改 等",
+    "规划：4 个模块（AST 符号聚类：691 个组件、3 次模型请求、3 次降级、2s）",
+    "阶段已启动：4 篇 agentic 写作（模型 workbuddy/hy3，并发 6，单篇≤30 步）",
+    "modules/test-fixtures.md agentic 写作未产出正文（stream-error）",
+    "modules/tools.md agentic 写作未产出正文（stream-error）",
     "阶段已启动：2 个请求（模型 workbuddy/hy3，并发 6）",
     "横切批次已提交：_architecture/_patterns + 0 个概念",
-    "_architecture.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 2e0da839-6b0b-42b7-b58f-22089052aab8）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
-    "_patterns.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId baa3f09a-9c0c-4909-8fe4-da1f9e7117a5）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "_architecture.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 84565f45-86fb-4c74-a0f3-5aceca401b98）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "_patterns.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 3875a458-21f1-4873-8a44-4b538b54401f）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
     "1 个请求输入超单请求预算（110k），按大档装填",
     "阶段已启动：2 个请求（模型 workbuddy/hy3 + 大档 volces-ark/glm-5.3-flash（1 个），并发 6 + 大档 2）",
     "校对批次已提交：2 篇合并为 2 个请求",
-    "proof-batch-1 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId 4f44e25f-c69a-482c-bbfd-2d2e1dac9fbd）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "proof-batch-2 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（5 个账号被限流）（code 6004，requestId eab4259b-2ae7-4417-bae4-f8c6b14438ed）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
     "modules/root.md：自动修正 4 处行号锚点",
     "modules/root.md：行号锚点存疑（未改）—— client.js:7 符号未找到未改；client.js:28-29 符号未找到未改；client.js:127-137 符号歧义未改 等",
     "modules/lib.md：批量校对输出缺席，保留原文",
-    "存量文章体检：8 篇未过契约（modules/article_contract.md、modules/engine_python.md、modules/update_planning.md 等）",
-    "完整性未成立（部分完成（12 项未满足：error））—— error；error；error",
-    "清理孤儿模块文章 13 篇（模块划分已变，旧文件无人重写）—— article_contract.md、change_set_git.md、clustering.md、engine_apply.md、engine_llm_bridge.md 等",
+    "存量文章体检：5 篇未过契约（concepts/file-watching-mechanism.md、concepts/test-log-pairing.md、concepts/test-logging-pattern.md 等）",
+    "完整性未成立（部分完成（9 项未满足：stream-error））—— stream-error；stream-error；error",
     "cw index exit 0",
     "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
-    "符号快照已写入（691 个组件），下次增量按组件级判定"
+    "符号快照无变化（691 个组件），跳过写入"
   ],
   "wikiPath": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki"
 }
