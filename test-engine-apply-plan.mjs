@@ -18,6 +18,7 @@ import {
   APPLY_WRITE_ROOTS,
   applyNativeOutput,
   checkWriteTargets,
+  findOrphanPages,
   toApplyBlockers,
   verifyCommitScope,
 } from './lib/engine/apply-plan.js'
@@ -568,6 +569,96 @@ await checkAsync('cw index 退出 0 但文章没进索引 → 同样是 index-fa
   assert.equal(readFile(root, '.codewiki/_meta.yaml'), 'last_compiled_commit: cafe\n')
 })
 
+await checkAsync('孤儿页：source_files 全部失效的存量模块页被识别为孤儿（重命名/删除后必须清）', async () => {
+  // 真实现场（阶段 6.5）：`git rm src/svc/kv_store.py` 之后，引擎回 full_fallback、
+  // pages_removed 为空，`.codewiki/modules/` 里那篇 source_files 指向 kv_store.py 的页
+  // 就永久留在库里，还挂在 _index.md 上 —— gate 只体检**本次产物**，看不见存量页。
+  // 这里钉的是识别语义：source_files 非空且**每一个**在仓库里都不存在 = 孤儿；
+  // 空 source_files（whole-repository 无归属证据）不算孤儿，不能拿它当删除依据。
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(join(mods, 'nested'), { recursive: true })
+  writeFile(repoRoot, 'src/keep.py', 'x = 1\n')
+  const page = (title, sources) => ['---', 'title: ' + title, 'type: module',
+    ...(sources.length ? ['source_files:', ...sources.map((x) => '  - ' + x)] : ['source_files: []']),
+    'tags: []', '---', '', '# ' + title, ''].join('\n')
+  writeFileSync(join(mods, 'alive.md'), page('alive', ['src/keep.py']), 'utf8')
+  writeFileSync(join(mods, 'gone.md'), page('gone', ['src/svc/kv_store.py']), 'utf8')
+  writeFileSync(join(mods, 'half.md'), page('half', ['src/keep.py', 'src/svc/kv_store.py']), 'utf8')
+  writeFileSync(join(mods, 'nested', 'gone2.md'), page('gone2', ['src/svc/other.py']), 'utf8')
+  writeFileSync(join(mods, 'unattributed.md'), page('unattributed', []), 'utf8')
+  writeFileSync(join(mods, 'not-a-page.txt'), 'ignore me\n', 'utf8')
+
+  const orphans = findOrphanPages({ repoRoot })
+  assert.deepEqual(orphans.map((o) => o.rel).sort(), [
+    '.codewiki/modules/gone.md',
+    '.codewiki/modules/nested/gone2.md',
+  ], JSON.stringify(orphans))
+  // 每一篇都要能说出「为什么算孤儿」——删库是不可逆动作，理由必须可审计。
+  for (const o of orphans) {
+    assert.equal(o.missing.length, o.sourceFiles.length)
+    assert.ok(o.missing.every((m) => typeof m === 'string' && m.length))
+  }
+  // 本轮产物里的页即使 source_files 失效也不能被当孤儿删掉（那是本轮要重写的内容来源）
+  const kept = findOrphanPages({ repoRoot, keepPages: ['.codewiki/modules/gone.md'] })
+  assert.deepEqual(kept.map((o) => o.rel), ['.codewiki/modules/nested/gone2.md'])
+})
+
+await checkAsync('孤儿页：删除走写集（进 pre-image，能回滚，可审计）', async () => {
+  // 删除必须是「落地事务的一部分」而不是游离的 rm：索引/基线失败要能把它恢复回来，
+  // 否则一次失败的提交会把页删掉、索引仍指着它，库里留下死链且无法自愈。
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(mods, { recursive: true })
+  const pageText = '---\ntitle: o\nsource_files: []\n---\n\n# o\n'
+  writeFileSync(join(mods, 'orphan.md'), pageText, 'utf8')
+  // .codewiki 存在就必须带 _meta.yaml，否则落地器判 wiki-missing（半截库不自动初始化）
+  writeFile(repoRoot, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(repoRoot, 'src/a.py', 'x = 1\n')
+  const docs = makeDocs()
+  const { deps } = recordingDeps()
+  const okDeps = { ...deps, runCw: async (bin, cwd, args) => {
+    if (args[0] === 'index') writeFileSync(join(cwd, '.codewiki', '_index.md'), '# Wiki Index\n\n- [[modules/core|core]]\n', 'utf8')
+    if (args[0] === 'meta') writeFileSync(join(cwd, '.codewiki', '_meta.yaml'), 'last_compiled_commit: deadbeef\n', 'utf8')
+    return { exitCode: 0, stdout: 'ok', stderr: '' }
+  } }
+  const r = await applyNativeOutput({
+    repoRoot, report: makeReport(), docsDir: docs, deleteFiles: ['.codewiki/modules/orphan.md'], deps: okDeps,
+  })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.deepEqual(r.deleted, ['.codewiki/modules/orphan.md'])
+  assert.equal(existsSync(join(mods, 'orphan.md')), false, '孤儿页必须真的从磁盘消失')
+
+  // 回滚：索引失败时被删的页必须回来
+  const r2 = makeRepo()
+  mkdirSync(join(r2, '.codewiki', 'modules'), { recursive: true })
+  writeFileSync(join(r2, '.codewiki', 'modules', 'orphan.md'), pageText, 'utf8')
+  writeFile(r2, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(r2, 'src/a.py', 'x = 1\n')
+  const d2 = makeDocs()
+  const rb = await applyNativeOutput({
+    repoRoot: r2, report: makeReport(), docsDir: d2,
+    deleteFiles: ['.codewiki/modules/orphan.md'], deps: { ...recordingDeps({ failOn: 'index' }).deps },
+  })
+  assert.equal(rb.outcome, 'failed')
+  assert.equal(rb.rolledBack, true)
+  assert.equal(existsSync(join(r2, '.codewiki', 'modules', 'orphan.md')), true, '回滚必须把删掉的孤儿页恢复')
+})
+
+// 写集封闭：删除也不许越出 `.codewiki/` 与根 CodeWiki.md
+await checkAsync('孤儿页：删除目标同样受写集白名单约束（不许删仓库源码）', async () => {
+  const repoRoot = makeRepo()
+  writeFile(repoRoot, 'src/keep.py', 'x = 1\n')
+  const docs = makeDocs()
+  const r = await applyNativeOutput({
+    repoRoot, report: makeReport(), docsDir: docs,
+    deleteFiles: ['src/keep.py', '../outside.md'], deps: recordingDeps().deps,
+  })
+  assert.equal(r.outcome, 'failed')
+  assert.equal(existsSync(join(repoRoot, 'src', 'keep.py')), true, '白名单外的删除必须整批拒绝')
+  assert.ok(r.problems.some((p) => /out-of-scope|escaping-target/.test(p.detail)), JSON.stringify(r.problems))
+})
+
 await checkAsync('零注入（只给 runCw）也能跑完：内置提交器 + 内置规范化', async () => {
   const root = makeRepo()
   const docs = makeDocs()
@@ -645,6 +736,26 @@ check('verifyCommitScope：allowExtra 里的路径不算越界', () => {
   const { root } = gitRepo()
   const r = verifyCommitScope(root, 'HEAD', { files: ['src/app.js', '.codewiki/_index.md'], allowExtra: ['src'] })
   assert.equal(r.ok, true)
+})
+
+// 非 ASCII 路径（中文模块名/仓库名极常见）是真实仓库的常态：`git show --name-only`
+// 默认 core.quotepath=true，会把非 ASCII 路径输出成 ".codewiki/\344\270\255..."（八进制
+// 转义 + 双引号包裹）。落地器若按字面量判定白名单，合法产物会被误判「混进 wiki 之外的
+// 路径」→ 终态被拉成 partial。这个用例只有在真实 git + 非 ASCII 路径下才会红：
+// 假引擎测试里的产物名全是 ASCII，永远碰不到。
+check('verifyCommitScope：非 ASCII（中文）产物路径不被误判越界', () => {
+  const { root, run } = gitRepo()
+  writeFile(root, '.codewiki/modules/中文模块.md', '# 中文模块\n')
+  writeFile(root, '.codewiki/temp/dependency_graphs/中文_空格_fixture_dependency_graph.json', '{}\n')
+  writeFile(root, 'CodeWiki.md', '# CodeWiki\n')
+  run('add', '--', '.codewiki', 'CodeWiki.md')
+  run('commit', '-q', '-m', 'docs(wiki)：中文产物', '--no-verify')
+  const r = verifyCommitScope(root, 'HEAD')
+  assert.equal(r.ok, true, `中文路径被判越界了：${JSON.stringify(r.unexpected)}`)
+  assert.deepEqual(r.unexpected, [])
+  assert.equal(r.files.length, 3)
+  // 清单必须是**真实路径**，不是 git 的八进制转义写法——下游按它做索引与审计
+  assert.ok(r.files.includes('.codewiki/modules/中文模块.md'), `清单里应是真实中文路径：${JSON.stringify(r.files)}`)
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -174,6 +174,32 @@ await check('路径一律规范化为 POSIX（无反斜杠、无 ./ 前缀）', 
   assert.deepEqual(allPaths(cs), ['src/deep/nested/c.js'])
 })
 
+// git 默认 core.quotepath=true：非 ASCII 路径在 --name-status / --name-only 里会被输出成
+// "a/\344\270\255.md"（八进制转义 + 双引号）。采集器若原样当路径收下，中文名的 wiki
+// 产物就匹配不上 isWikiProduct('.codewiki/') —— 它们会被当成**源码变更**塞进
+// sourceChanges，增量 planner 于是每轮都以为「wiki 产物又是新源码变化」。
+// 真实中文仓库（本插件自己的 fixture 就是）必然踩到，假数据单测永远碰不到。
+await check('非 ASCII（中文）路径：wiki 产物仍判为产物，不污染源码变更', async () => {
+  const { dir, base, write } = makeRepo()
+  write('.codewiki/modules/中文模块.md', '# 中文模块\n')
+  write('src/中文源码.js', 'export const x = 1\n')
+  git(dir, ['add', '-A'])
+  git(dir, ['commit', '-qm', '中文产物与源码'])
+  const cs = collectChangeSet(dir, base)
+  assert.equal(cs.ok, true, cs.reason)
+  // 中文名的 wiki 产物必须落进 ignored，绝不进 sourceChanges
+  assert.ok(cs.ignored.includes('.codewiki/modules/中文模块.md'),
+    `中文 wiki 产物应在 ignored 里：ignored=${JSON.stringify(cs.ignored)} sourceChanges=${JSON.stringify(cs.sourceChanges)}`)
+  assert.ok(cs.sourceChanges.includes('src/中文源码.js'), `中文源码应在 sourceChanges 里：${JSON.stringify(cs.sourceChanges)}`)
+  assert.equal(cs.sourceChanges.some((p) => p.startsWith('.codewiki/')), false,
+    `源码变更里不许混进 wiki 产物：${JSON.stringify(cs.sourceChanges)}`)
+  // 反斜杠/引号形式的转义串一旦漏进 all，下游 planner 会拿它当真实路径
+  for (const p of cs.all) {
+    assert.equal(p.includes('\\'), false, `路径里不该有反斜杠转义：${p}`)
+    assert.equal(p.startsWith('"'), false, `路径不该带 git 的引号包裹：${p}`)
+  }
+})
+
 await check('可注入 execFile（离线单测路径，不依赖真实 git）', async () => {
   const calls = []
   const fake = (cmd, args) => {

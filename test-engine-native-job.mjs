@@ -274,6 +274,22 @@ console.log('== 用例 1：原生通道完整成功（done 只由 gate+apply 共
   check(job?.nativeResult?.apply?.commit?.committed === true, '自动提交成立')
   check(exists(path.join(repo, 'CodeWiki.md')), '仓库根 CodeWiki.md 已生成')
   check(exists(path.join(repo, '.codewiki', 'engine-lock.json')), '引擎锁已落盘（首次成功后写入）')
+  // 锁必须**进提交**，不能留在工作区当未跟踪文件：manifest 的契约是「落锁与产物同事务」。
+  // 分两次写（先提交产物、再补写锁）会让每轮编译之后工作区都多一个脏文件，下一轮
+  // 变化集因此永远不干净——真实仓库实测就是这么长出来的（engine-lock + update-record
+  // 双双 `??`），而无变化轮被要求「零副作用」。
+  {
+    const sha = String(job?.nativeResult?.apply?.commit?.sha ?? '')
+    const committedFiles = gitShowFiles(repo, sha)
+    check(committedFiles.includes('.codewiki/engine-lock.json'),
+      `引擎锁随产物进同一个提交（提交清单 ${committedFiles.length} 项：${committedFiles.slice(0, 6).join('、')}）`)
+    // 提交里出现的必须是真实路径：中文/非 ASCII 页名在 git 默认输出里是八进制转义串，
+    // 拿它去比对路径永远不相等（阶段 6 真实验收就栽在这里）。
+    check(committedFiles.every((f) => !f.startsWith('"') && !f.includes('\\344')),
+      `提交清单是真实路径而非 git 转义写法（${committedFiles.slice(0, 3).join('、')}）`)
+    const dirty = String(execFileSync('git', ['status', '--porcelain', '--', '.codewiki'], { cwd: repo, encoding: 'utf8' })).trim()
+    check(dirty === '', `落地后 .codewiki 工作区干净（没有遗留未跟踪的锁/记录）：${JSON.stringify(dirty)}`)
+  }
   check(job?.nativeStage === 'commit' || job?.nativeStage === 'baseline' || job?.nativeStage === 'index', `引擎阶段挂在真实八段之一（实际 ${job?.nativeStage}）`)
 
   // 引擎确实被调用：doctor 一次 + generate 一次

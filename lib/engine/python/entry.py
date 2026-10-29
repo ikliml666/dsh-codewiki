@@ -47,13 +47,52 @@ from pathlib import Path
 
 _REAL_STDOUT = sys.stdout
 
-# Windows 下 Python 的 stdout 默认按 locale 编码（cp936），而 Node 侧一律按 UTF-8
-# 解码协议行。不先改编码，中文错误信息过管道就是乱码——排障时完全不可读。
+# Windows 下 Python 的 **stdin/stdout** 默认按 locale 编码（cp936），而 Node 侧一律按
+# UTF-8 收发协议行。不先改编码：
+#   · stdout：中文错误信息过管道就是乱码，排障时完全不可读；
+#   · stdin：中文路径的请求行被按 cp936 误解码，repoPath 变成「涓?鏂? 绌烘牸」这种
+#     乱码串，入口随即报「仓库路径不存在」——而这份乱码只出现在非 ASCII 路径上，
+#     ASCII 路径永远复现不出来。
+# 注意 stdin 这一半不能靠外部 PYTHONUTF8/PYTHONIOENCODING 兜底：那种兜底只在
+# nativeEnginePlan 派生的进程里成立，任何直接调入口的调用方（测试、诊断脚本、
+# 别处的集成）都会踩到。入口自己把三条流都钉成 UTF-8，才算边界自洽。
+# 写法上 stdout/stderr 用 replace（宁可读得到、不要因为一个坏字节中断协议行），
+# stdin 用默认的 strict——请求行非法字节应当当场报错，而不是被替换成乱码路径
+# 后继续往下走（静默变乱码正是上面那个 bug 的教训）。
 for _stream in (_REAL_STDOUT, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — 非 TextIOWrapper（被重定向）时忽略即可
         pass
+try:
+    sys.stdin.reconfigure(encoding="utf-8")
+except Exception:  # noqa: BLE001 — 同上
+    pass
+
+# 同一个 locale 陷阱还有第三条流水位：**子进程的 text 模式**。
+# FSoft 内部（如 dependency_analyzer/analysis/repo_analyzer.py:51）用
+# `subprocess.run(..., text=True)` 读 `git rev-parse --show-toplevel`，text=True 在
+# Windows 上按 locale（gbk）解码 stdout；仓库路径含中文时 git 回的是 UTF-8 字节，
+# reader 线程抛 UnicodeDecodeError → `result.stdout` 变成 None → 上游
+# `Path(None.strip())` 直接 AttributeError，整轮编译以「引擎内部错误」失败。
+# 里层的 FSoft 代码我们不改（vendor 锁版本），所以在这里给它的子进程兜底：
+# 用 ``io.text_encoding`` 决定什么编码（frozen 后无法只改局部），改用最外层可控的
+# ``PYTHONUTF8`` 语义——直接设环境变量管不到已启动进程，因此改为给 ``subprocess``
+# 的 Popen 打一个默认编码补丁：调用方没显式给 encoding 的 text 调用一律走 UTF-8。
+_real_popen_init = subprocess.Popen.__init__
+
+
+def _popen_init_utf8(self, *args, **kwargs):
+    # 只补 text 模式（tt/text=True 且未显式指定 encoding/errors）——二进制调用
+    # 保持原样，否则会把 bytes 改成 str，反而破坏别人。
+    text_mode = kwargs.get("text") is True or kwargs.get("universal_newlines") is True
+    if text_mode and not kwargs.get("encoding") and not kwargs.get("errors"):
+        kwargs["encoding"] = "utf-8"
+        kwargs["errors"] = "replace"
+    return _real_popen_init(self, *args, **kwargs)
+
+
+subprocess.Popen.__init__ = _popen_init_utf8
 
 
 class _ProtocolOnly:
@@ -237,6 +276,21 @@ def action_doctor(request_id, payload):
     }
 
 
+# ── 源码分析面 ──────────────────────────────────────────────────────────────
+
+# 本插件自己的 wiki 产物：每轮编译都会改写它们，所以**不能**被当成源码。
+WIKI_PRODUCT_PATTERNS = (".codewiki", "CodeWiki.md")
+
+
+def source_exclude_patterns():
+    """给 FSoft 依赖分析的排除清单：把 wiki 产物挡在源码之外。
+
+    返回新列表而不是共享模块级常量：调用方（RepoAnalyzer）会把 default 与 user
+    两组模式合并进自己的字段，共享同一个 list 会让两处互相污染。
+    """
+    return list(WIKI_PRODUCT_PATTERNS)
+
+
 # ── 模型通道 ────────────────────────────────────────────────────────────────
 
 
@@ -410,6 +464,19 @@ def action_generate(request_id, payload, is_update=False):
     config["agent_retries"] = 3
     config["use_gitignore"] = True
     config["prompt_caching"] = True
+    # 阶段 6.8：把**我们自己的 wiki 产物**排除出源码分析面。
+    #
+    # 为什么必须排：引擎按「旧图 vs 新图」判增量。`.codewiki/` 与 `CodeWiki.md`
+    # 是我们每轮都会改写的产物，不排掉它们就永远有「变化」——实测真实引擎在
+    # 源码零改动的一轮里自报 outcome=incremental，图 diff 恒有 body:1 命中
+    # `.codewiki/_meta.yaml::_meta.yaml`，于是每轮都产出一笔纯记账提交
+    # （「无变化路径不重写/不提交」在真机上不成立），还白花一次 routing 的
+    # 模型调用（约 528 prompt tokens / 3.5s）。
+    #
+    # 排除只作用于**依赖分析的文件树**（RepoAnalyzer 的 user_exclude_patterns），
+    # 不影响：git 变化集采集（我们自己做）、`cw index`/基线（cw 自己按 .codewiki
+    # 路径读写）、以及 docsDir 的输出。所以账本语义不变，只是不再把账本当源码。
+    config["agent_instructions"] = {"exclude_patterns": source_exclude_patterns()}
     # 阶段 5：增量参数由调用方显式给出（不在引擎里猜）。
     #   updateOptions.rung 决定走哪条增量算法（3=组件级方法，0=旧的按文件失效）。
     # 缺省时保持 FSoft 自己的默认行为（rung 3 + metadata.json 的 commit_id）。
@@ -640,7 +707,18 @@ def handle_request(msg):
     if not request_id:
         return "", failure("engine-protocol", "请求缺 requestId")
     action = str(msg.get("action") or "")
-    payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+    # 入参位置：契约（docs/fsoft-native-engine.md「接口面」表）与 client.js 都按
+    # `{requestId, action, ...payload}` **平铺**发送。这里曾经只读 `msg["payload"]`，
+    # 于是真引擎的 repoPath/docsDir/commitId/updateOptions 全部读不到：
+    #   · docsDir 丢失 → 回退写进 repo/.codewiki，增量轮把水合过的状态目录再写回去，
+    #     长出 `_native-state/docs/_native-state/docs/...` 自嵌套，产生重复页与死链；
+    #   · commitId 丢失 → 退化成「用 HEAD」，把调用方的记账语义悄悄换掉。
+    # 假引擎（test-fixtures/fake-native-engine.mjs）按平铺读，所以这处不一致在假引擎
+    # 测试里永远看不出来。两种形状都认：顶层平铺优先，其次才是显式 payload 对象
+    # （保留给仍在用嵌套形状的外部调用方）。
+    nested = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+    flat = {k: v for k, v in msg.items() if k not in ("requestId", "action", "payload")}
+    payload = {**nested, **flat}
 
     if action not in ACTIONS:
         return request_id, failure("engine-protocol", f"未登记的 action：{action!r}（允许 {', '.join(ACTIONS)}）")

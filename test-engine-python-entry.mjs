@@ -122,6 +122,67 @@ await check('协议：非 JSON 请求行回 engine-protocol 失败', async () =>
   assert.equal(result.result.error.code, 'engine-protocol')
 })
 
+await check('协议：入参字段按契约平铺在请求行顶层，入口必须认', async () => {
+  // 契约（docs/fsoft-native-engine.md「接口面」表）与 client.js 都按
+  // `{requestId, action, ...payload}` 平铺发送；入口若只读 `msg.payload`，
+  // 顶层字段全部丢失：真实引擎拿不到 docsDir 就回退写进 repo/.codewiki，
+  // 增量轮再把水合过的状态目录写回去，长出
+  // `_native-state/docs/_native-state/docs/...` 自嵌套与重复页。
+  // 假引擎（test-fixtures/fake-native-engine.mjs）按平铺读，所以这处不一致
+  // 假引擎测试永远碰不到，只有真引擎才暴露。
+  //
+  // 判别用一条 repoPath 指向不存在目录的请求：入口若真读了顶层 repoPath，
+  // 必须回 engine-missing「仓库路径不存在」；若没读，它会拿 cwd（存在的 repo）
+  // 继续走，最后倒在「缺模型通道」上。—— 两种失败码不同，判别是干净的。
+  const ghost = join(sandbox, '不存在的仓库目录')
+  const flat = line({ requestId: 'r-flat', action: 'generate', repoPath: ghost })
+  const raw = spawnSync(PY, [ENTRY], {
+    cwd: repo,
+    env: { ...process.env, ...isolatedEnv },
+    input: flat,
+    encoding: 'utf8',
+    timeout: 120000,
+  })
+  const msgs = String(raw.stdout || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const result = msgs.find((m) => m.type === 'result')
+  assert.ok(result, '必须回 result')
+  assert.equal(result.result.outcome, 'failed')
+  assert.equal(
+    result.result.error.code, 'engine-missing',
+    `入口没把请求顶层的 repoPath 读进来（回的是 ${result.result.error.code}）`
+    + '——它会拿 cwd 顶替真实入参，docsDir/commitId 同理丢失',
+  )
+})
+
+await check('协议：非 ASCII 路径的请求行按 UTF-8 读入，不被 locale 误解码', async () => {
+  // 真机上踩到的：Windows 的 Python stdin 默认按 locale（cp936）解码，Node 按
+  // UTF-8 写请求行，于是中文 repoPath 过管道变成「涓?鏂? 绌烘牸 repo」，入口
+  // 报「仓库路径不存在（engine-missing）」。ASCII 路径永远复现不出来，所以
+  // 这条用「存在的中文路径仓库」做判别：
+  //   · stdin 编码对 → 读得到仓库 → 继续走到「缺模型通道」（engine-model）
+  //   · stdin 编码错 → 路径乱码 → 「仓库路径不存在」（engine-missing）
+  // 不依赖 PYTHONUTF8/PYTHONIOENCODING：入口必须自己把 stdin 钉成 UTF-8，
+  // 否则任何直接调入口的调用方都会踩到（nativeEnginePlan 的 env 只覆盖它自己
+  // 派生的进程）。
+  const requestId = 'r-utf8-path'
+  const raw = spawnSync(PY, [ENTRY], {
+    cwd: repo,
+    env: { ...process.env, ...isolatedEnv },
+    input: line({ requestId, action: 'generate', repoPath: repo, docsDir: join(repo, '.codewiki') }),
+    encoding: 'utf8',
+    timeout: 120000,
+  })
+  const msgs = String(raw.stdout || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const result = msgs.find((m) => m.type === 'result')
+  assert.ok(result, '必须回 result')
+  assert.equal(result.result.outcome, 'failed')
+  assert.equal(
+    result.result.error.code, 'engine-model',
+    `中文仓库路径请求被入口判成「${result.result.error.code}：${result.result.error.message}」`
+    + '——说明 stdin 没按 UTF-8 解码，非 ASCII 路径会变成乱码路径',
+  )
+})
+
 await check('协议：cancel 动作立即回 cancelled 终态', async () => {
   const raw = spawnSync(PY, [ENTRY], {
     cwd: repo,
@@ -231,6 +292,53 @@ print(json.dumps(out))
   assert.equal(out.p0, 0)
   assert.ok(out.p1 > out.p0 && out.p3 > out.p1, `百分数必须单调递增：${out.p0}/${out.p1}/${out.p3}`)
   assert.ok(out.p3 <= 100, `百分数不得超过 100：${out.p3}`)
+})
+
+// ── 源码面 ────────────────────────────────────────────────────────────────
+
+await check('源码面：引擎不把本插件自己的 wiki 产物当成源码（否则每轮都判成有变化）', async () => {
+  // 真实现场（阶段 6.8）：真实引擎在「源码零改动」的一轮里自报 outcome=incremental，
+  // 图 diff 恒有 body:1 命中 `.codewiki/_meta.yaml::_meta.yaml`。根因是它把仓库里的
+  // `.codewiki/` 与 `CodeWiki.md` 当成源码文件分析 —— 而这两处正是**我们自己每轮都会
+  // 改写的产物**，于是「无变化」永远不成立、无变化轮必然产出一笔纯记账提交。
+  // 这里钉的是行为：用入口给出的排除清单建 RepoAnalyzer，wiki 产物不得进文件树，
+  // 而常规源码必须仍在（排除不许过宽）。
+  const wikiRepo = join(sandbox, '排除 wiki 的仓库')
+  mkdirSync(join(wikiRepo, 'src'), { recursive: true })
+  mkdirSync(join(wikiRepo, '.codewiki', 'modules'), { recursive: true })
+  writeFileSync(join(wikiRepo, 'src', 'app.py'), 'def main():' + '\n' + '    return 1' + '\n')
+  writeFileSync(join(wikiRepo, '.codewiki', '_meta.yaml'), 'last_compiled_commit: abc' + '\n')
+  writeFileSync(join(wikiRepo, '.codewiki', 'modules', 'app.md'), '# app' + '\n')
+  writeFileSync(join(wikiRepo, 'CodeWiki.md'), '# CodeWiki' + '\n')
+  spawnSync('git', ['init', '-q'], { cwd: wikiRepo })
+  spawnSync('git', ['add', '-A'], { cwd: wikiRepo })
+
+  const probe = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+from pathlib import Path
+from codewiki.src.be.dependency_analyzer.analysis.repo_analyzer import RepoAnalyzer
+
+patterns = entry.source_exclude_patterns()
+def walk(tree, acc):
+    if tree is None:
+        return acc
+    if tree.get("type") == "file":
+        acc.append(tree["path"].replace("\\\\", "/"))
+    for child in tree.get("children") or []:
+        walk(child, acc)
+    return acc
+structure = RepoAnalyzer(None, patterns, True).analyze_repository_structure(${JSON.stringify(wikiRepo)})
+files = walk(structure["file_tree"], [])
+sys.__stdout__.write(json.dumps({"patterns": patterns, "files": files}))
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 120000 })
+  assert.equal(raw.status, 0, `probe 失败：${raw.stderr}`)
+  const out = JSON.parse(String(raw.stdout).trim())
+  const wikiFiles = out.files.filter((f) => f === 'CodeWiki.md' || f.startsWith('.codewiki/'))
+  assert.deepEqual(wikiFiles, [], `wiki 产物不得进源码分析面，实际命中：${JSON.stringify(wikiFiles)}`)
+  assert.ok(out.files.includes('src/app.py'), `常规源码必须仍在分析面里：${JSON.stringify(out.files)}`)
 })
 
 await check('阶段映射：与契约里的 ENGINE_STAGES 同集合（改一边必须改另一边）', async () => {
