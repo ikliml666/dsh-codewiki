@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "jobId": "job-mvsfyxbr-a",
+  "jobId": "job-mvsfyyou-b",
   "scope": "auto",
-  "startedAt": "2026-10-28T18:22:19.191Z",
-  "finishedAt": "2026-10-28T19:57:27.975Z",
+  "startedAt": "2026-10-28T18:22:20.958Z",
+  "finishedAt": "2026-10-29T01:25:59.715Z",
   "baseCommit": null,
   "headCommit": null,
   "changeSet": null,
@@ -16,14 +16,14 @@
       "error": null
     },
     {
-      "name": "modules/test-fixtures.md",
-      "ok": false,
+      "name": "modules/lib.md",
+      "ok": true,
       "stopReason": "stream-error",
       "error": null
     },
     {
-      "name": "modules/lib.md",
-      "ok": true,
+      "name": "modules/test-fixtures.md",
+      "ok": false,
       "stopReason": "stream-error",
       "error": null
     },
@@ -120,26 +120,26 @@
   "writtenCount": 2,
   "failedCount": 4,
   "notes": [
-    "规划：模块 lib 下钻失败：llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（4 个账号被限流、1 个账号不可用）（code 6004，requestId b2e836bb-5e8d-4e1f-ad6b-60a057b717b5）。您的使用量已",
-    "规划：4 个模块（AST 符号聚类：608 个组件、3 次模型请求、3 次降级、2s）",
+    "规划：模块 lib 下钻失败：llm 通道失败（error，NO_ADAPTER）：no adapter registered for provider \"workbuddy\"",
+    "规划：4 个模块（AST 符号聚类：688 个组件、3 次模型请求、3 次降级、85s）",
     "阶段已启动：4 篇 agentic 写作（模型 workbuddy/hy3，并发 6，单篇≤30 步）",
     "modules/test-fixtures.md agentic 写作未产出正文（stream-error）",
     "modules/tools.md agentic 写作未产出正文（stream-error）",
     "阶段已启动：2 个请求（模型 workbuddy/hy3，并发 6）",
     "横切批次已提交：_architecture/_patterns + 0 个概念",
-    "_architecture.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（4 个账号被限流、1 个账号不可用）（code 6004，requestId f2eb0123-6308-4f04-aeaa-178d5f685d0d）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
-    "_patterns.md 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（4 个账号被限流、1 个账号不可用）（code 6004，requestId 1a35b186-9c18-4677-bf91-c6cf780c6f1f）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "_architecture.md 请求失败 —— llm 通道失败（error，NO_ADAPTER）：no adapter registered for provider \"workbuddy\"",
+    "_patterns.md 请求失败 —— llm 通道失败（error，NO_ADAPTER）：no adapter registered for provider \"workbuddy\"",
     "阶段已启动：2 个请求（模型 workbuddy/hy3，并发 6）",
     "校对批次已提交：2 篇合并为 2 个请求",
-    "proof-batch-1 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（4 个账号被限流、1 个账号不可用）（code 6004，requestId ca59b09d-40de-45f4-886b-9114c248cb79）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
-    "proof-batch-2 请求失败 —— llm 通道失败（error，QUOTA）：429: {\"message\":\"workbuddy 上游失败：被限流（http 429）：池中已无可用账号（4 个账号被限流、1 个账号不可用）（code 6004，requestId 7eb262c6-d56f-4f07-8d35-28b1eb69ca94）。您的使用量已超出频率限制，将在 2026-10-29 12:59:16 UTC+8 重置，您也可以切换其他模型继续使用。建议换一个模型继续，或稍后等待该账号的额度恢复\",\"type\":\"soft_rate\",\"code\":\"quota_exceeded\"}",
+    "proof-batch-1 请求失败 —— llm 通道失败（error，NO_ADAPTER）：no adapter registered for provider \"workbuddy\"",
+    "proof-batch-2 请求失败 —— llm 通道失败（error，NO_ADAPTER）：no adapter registered for provider \"workbuddy\"",
     "modules/root.md：批量校对输出缺席，保留原文",
     "modules/lib.md：批量校对输出缺席，保留原文",
     "存量文章体检：5 篇未过契约（concepts/file-watching-mechanism.md、concepts/test-log-pairing.md、concepts/test-logging-pattern.md 等）",
     "完整性未成立（部分完成（9 项未满足：stream-error））—— stream-error；stream-error；error",
     "cw index exit 0",
     "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
-    "符号快照已写入（608 个组件），下次增量按组件级判定"
+    "符号快照已写入（688 个组件），下次增量按组件级判定"
   ],
   "wikiPath": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki"
 }
