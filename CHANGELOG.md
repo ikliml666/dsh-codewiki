@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.16.4 — 2026-10-30
+
+### 修复：孤立 gitlink 被当成源码，引擎编译超时零产出
+
+**现象**：任务 `job-mvtkkua9-4`（`kind=stale, scope=auto`）跑了整整 45 分钟（`DEFAULT_ENGINE_TIMEOUT_MS = 45 * 60 * 1000`）后被进程树终止，`writtenCount: 0`、`failedCount: 0`，notes 只有一句「任务终态：失败（无可用成果）」。同一时间段里 `/api/codewiki/repos` 里该仓库一直是 `state: stale`，看起来就像「过期了、也真的去编译了、但永远编译不出文章」。
+
+**根因**：`.probe-fsoft/src` 是开发期探针克隆（上游 `FSoft-AI4Code/CodeWiki`，18MB / 186 个文件），它以**孤立 gitlink**（索引里 mode `160000`，但没有 `.gitmodules` 登记）的形式被误提交进了本仓库。这带来两个叠加后果：
+
+1. 它是 **tracked** 的，所以引擎的 `use_gitignore=True` 拦不住它——gitignore 只管未跟踪文件；
+2. 它又不是本仓库源码——`git checkout` 永远恢复不出内容，克隆本仓库的人只拿到一条指针。
+
+于是引擎把那个无关子仓库整个当成源码建图、聚类，`job.nativeLogs` 里成片刷出 `Skipping invalid leaf node '.probe-fsoft/src/codewiki/mcp/server.py::main' - not found in components`（`session.py::SessionStore`、`workspace.py::SessionWorkspace`、`mcp/tools/*.py` 同样中招），编译预算全耗在它身上，最终撞上超时上限被强杀。本仓库真正的源码只有 7 个 `.py`。用真实引擎分析器复现：排除前源码面 239 个文件、其中探针占 186 个；排除后 53 个文件、探针 0 个。
+
+**修改**：
+
+| 位置 | 改动 |
+| --- | --- |
+| `lib/engine/python/entry.py` `dangling_gitlink_patterns(repo_path)` | 新增：`git ls-files --stage -z` 取 mode `160000` 条目，减去 `.gitmodules` 已登记的路径，只留下**孤立** gitlink。读不到索引/git 缺失/超时一律返回空列表——排除是优化，不能成为编译的前置条件 |
+| `lib/engine/python/entry.py` `source_exclude_patterns(repo_path=None)` | 签名扩展：给了仓库路径就并入孤立 gitlink；省略时保持旧语义（只返回 `.codewiki`/`CodeWiki.md`），旧调用方不受影响 |
+| `lib/engine/python/entry.py:555` | `config["agent_instructions"]["exclude_patterns"]` 改为传 `repo_path` |
+| `.gitignore` | `.probe-fsoft/venv/` → `.probe-fsoft/`（整个探针环境不入库，并写明这个教训） |
+| git 索引 | `git rm --cached .probe-fsoft/src`：移除误提交的 gitlink。磁盘上的探针目录**保留**，venv 照常可用于引擎测试 |
+
+**为什么不排除正规 submodule**：`.gitmodules` 里登记过的子模块是项目架构的一部分，改变其既有语义不在本次缺陷范围内；这里只收「没有 `.gitmodules` 就永远 checkout 不出来」的孤立指针。
+
+**验证**（当轮输出）：
+
+- 新增用例「源码面：孤立 gitlink（无 .gitmodules 的嵌套仓库）必须排除出源码分析面」（`test-engine-python-entry.mjs`）：建真实嵌套仓库 + `git add` 形成 gitlink，用真实 `RepoAnalyzer` 走一遍，断言路径进排除清单、其内部文件不进文件树、常规源码仍在、省略 `repo_path` 时语义不变；并追加一段：写了 `.gitmodules` 登记之后该路径**必须**回到源码面。
+- **反向验证**：把 `if repo_path is not None:` 临时短路成 `if False:` → `FAIL  源码面：孤立 gitlink（无 .gitmodules 的嵌套仓库）必须排除出源码分析面`、`12 passed, 1 failed`；恢复后 `PASS  源码面：孤立 gitlink ...`、`13 passed, 0 failed`。
+- 真实引擎复现：`.probe-fsoft/venv/Scripts/python.exe` 跑 `RepoAnalyzer`，修复前 `{"total_files": 239, "probe_files": 186}`，修复后 `{"patterns": [".codewiki", "CodeWiki.md", ".probe-fsoft/src"], "total_files": 53, "probe_files": 0}`，本仓库 7 个 `.py` 全部仍在。
+- 全量：27/28 套件 `ok`；唯一 FAIL 仍是 `test-wiki-anchors.mjs`（wiki 文章引用的 `index.js` 行号越界 / 符号已不存在），属文档滞后于源码，重新编译后消失。
+
+---
+
 ## 0.16.3 — 2026-10-30
 
 ### 修复：自动更新链路的五处缺陷（幂等、缓存、清单清理、口径、工作区语义）

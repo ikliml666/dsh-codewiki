@@ -282,13 +282,89 @@ def action_doctor(request_id, payload):
 WIKI_PRODUCT_PATTERNS = (".codewiki", "CodeWiki.md")
 
 
-def source_exclude_patterns():
-    """给 FSoft 依赖分析的排除清单：把 wiki 产物挡在源码之外。
+def dangling_gitlink_patterns(repo_path):
+    """找出「被提交进索引、但没有 .gitmodules 登记」的嵌套仓库（孤立 gitlink）。
+
+    为什么必须排除：这类条目在索引里是 mode 160000，指向**另一个仓库**的 commit。
+    它不是本仓库的源码——连 `git checkout` 都不会恢复内容，克隆本仓库的人拿到的
+    只是那条指针。但它又**是 tracked**，所以 `use_gitignore=True` 对它无效
+    （gitignore 只管未跟踪文件），引擎会把那个嵌套仓库整个当成源码分析。
+
+    实测代价（0.16.3 现场）：本仓库里 `.probe-fsoft/src` 是一次探针克隆误提交的
+    gitlink，18MB / 186 个文件进了分析面。引擎为它建图、聚类、判定叶子节点，
+    stderr 刷出成片 `Skipping invalid leaf node '.probe-fsoft/src/...' - not found
+    in components`，最终在 45 分钟引擎超时上限上被进程树终止——整轮编译零产出。
+    而本仓库真正的源码只有 7 个 .py。
+
+    正规 submodule（.gitmodules 里有登记）**不排除**：那种内容是项目架构的一部分，
+    改变它的既有语义不在本次缺陷范围内。这里只收「没有 .gitmodules 就永远 checkout
+    不出来」的孤立指针。
+
+    返回相对路径列表（如 ``['.probe-fsoft/src']``）；读不到索引时返回空列表——
+    排除是优化，不是编译的前置条件，绝不能因为它失败而让整轮编译挂掉。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-files", "--stage", "-z"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001 — 非 git 仓库 / git 缺失 / 超时：不影响编译
+        return []
+    if proc.returncode != 0:
+        return []
+
+    gitlinks = []
+    for entry in (proc.stdout or "").split("\0"):
+        if not entry.startswith("160000 "):
+            continue
+        # 格式："160000 <sha> <stage>\t<path>"
+        _, _, path = entry.partition("\t")
+        path = path.strip()
+        if path:
+            gitlinks.append(path.replace("\\", "/"))
+    if not gitlinks:
+        return []
+
+    registered = _gitmodules_paths(repo_path)
+    return [p for p in gitlinks if p not in registered]
+
+
+def _gitmodules_paths(repo_path):
+    """`.gitmodules` 里登记的 submodule 路径集合（没有该文件就是空集）。"""
+    try:
+        text = (Path(repo_path) / ".gitmodules").read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — 没有 .gitmodules / 不可读都算「没有登记」
+        return set()
+    paths = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("path"):
+            continue
+        _, _, value = stripped.partition("=")
+        value = value.strip().replace("\\", "/")
+        if value:
+            paths.add(value)
+    return paths
+
+
+def source_exclude_patterns(repo_path=None):
+    """给 FSoft 依赖分析的排除清单：把非源码的东西挡在源码之外。
 
     返回新列表而不是共享模块级常量：调用方（RepoAnalyzer）会把 default 与 user
     两组模式合并进自己的字段，共享同一个 list 会让两处互相污染。
+
+    ``repo_path`` 省略时只返回 wiki 产物模式（保持调用方兼容）；给了仓库路径就
+    额外排除孤立 gitlink（见 ``dangling_gitlink_patterns``）。
     """
-    return list(WIKI_PRODUCT_PATTERNS)
+    patterns = list(WIKI_PRODUCT_PATTERNS)
+    if repo_path is not None:
+        patterns.extend(dangling_gitlink_patterns(repo_path))
+    return patterns
 
 
 # ── 模型通道 ────────────────────────────────────────────────────────────────
@@ -476,7 +552,11 @@ def action_generate(request_id, payload, is_update=False):
     # 排除只作用于**依赖分析的文件树**（RepoAnalyzer 的 user_exclude_patterns），
     # 不影响：git 变化集采集（我们自己做）、`cw index`/基线（cw 自己按 .codewiki
     # 路径读写）、以及 docsDir 的输出。所以账本语义不变，只是不再把账本当源码。
-    config["agent_instructions"] = {"exclude_patterns": source_exclude_patterns()}
+    # 孤立 gitlink（被提交但 checkout 不出来的嵌套仓库）必须一起排：它是 tracked
+    # 的，use_gitignore 拦不住它，实测会把整轮预算耗在一个 18MB 的无关子仓库上。
+    config["agent_instructions"] = {
+        "exclude_patterns": source_exclude_patterns(repo_path),
+    }
     # 阶段 5：增量参数由调用方显式给出（不在引擎里猜）。
     #   updateOptions.rung 决定走哪条增量算法（3=组件级方法，0=旧的按文件失效）。
     # 缺省时保持 FSoft 自己的默认行为（rung 3 + metadata.json 的 commit_id）。

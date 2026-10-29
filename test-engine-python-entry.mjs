@@ -341,6 +341,74 @@ sys.__stdout__.write(json.dumps({"patterns": patterns, "files": files}))
   assert.ok(out.files.includes('src/app.py'), `常规源码必须仍在分析面里：${JSON.stringify(out.files)}`)
 })
 
+await check('源码面：孤立 gitlink（无 .gitmodules 的嵌套仓库）必须排除出源码分析面', async () => {
+  // 真实现场（0.16.3）：本仓库的 `.probe-fsoft/src` 是一次探针克隆误提交进来的
+  // gitlink（mode 160000），没有 .gitmodules。它是 **tracked** 的，所以
+  // use_gitignore=True 拦不住它（gitignore 只管未跟踪文件），引擎把那个 18MB /
+  // 186 文件的无关子仓库当成源码建图、聚类，stderr 刷出成片
+  // `Skipping invalid leaf node '.probe-fsoft/src/...' - not found in components`，
+  // 最终撞上 45 分钟引擎超时被进程树终止 —— 整轮编译零产出。
+  // 这里钉的是行为：入口给出的排除清单必须含该 gitlink 路径，且 RepoAnalyzer
+  // 真的不再往里走；而正规 submodule（.gitmodules 有登记）**不得**被排除。
+  const linkRepo = join(sandbox, '排除孤立 gitlink 的仓库')
+  mkdirSync(join(linkRepo, 'src'), { recursive: true })
+  mkdirSync(join(linkRepo, '嵌套仓库'), { recursive: true })
+  writeFileSync(join(linkRepo, 'src', 'app.py'), 'def main():' + '\\n' + '    return 1' + '\\n')
+  writeFileSync(join(linkRepo, '嵌套仓库', 'deep.py'), 'X = 1' + '\\n')
+  spawnSync('git', ['init', '-q'], { cwd: linkRepo })
+  // 把子目录做成独立仓库再 add：git 会把它记成 mode 160000 的 gitlink
+  spawnSync('git', ['init', '-q'], { cwd: join(linkRepo, '嵌套仓库') })
+  spawnSync('git', ['add', '-A'], { cwd: join(linkRepo, '嵌套仓库') })
+  spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'sub'], { cwd: join(linkRepo, '嵌套仓库') })
+  spawnSync('git', ['add', '-A'], { cwd: linkRepo })
+
+  const probe = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+from codewiki.src.be.dependency_analyzer.analysis.repo_analyzer import RepoAnalyzer
+
+repo = ${JSON.stringify(linkRepo)}
+pat = entry.source_exclude_patterns(repo)
+def walk(tree, acc):
+    if tree is None:
+        return acc
+    if tree.get("type") == "file":
+        acc.append(tree["path"].replace("\\\\", "/"))
+    for child in tree.get("children") or []:
+        walk(child, acc)
+    return acc
+files = walk(RepoAnalyzer(None, pat, True).analyze_repository_structure(repo)["file_tree"], [])
+sys.__stdout__.write(json.dumps({
+    "patterns": pat,
+    "files": files,
+    "no_arg": entry.source_exclude_patterns(),
+}))
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 120000 })
+  assert.equal(raw.status, 0, `probe 失败：${raw.stderr}`)
+  const out = JSON.parse(String(raw.stdout).trim())
+  assert.ok(out.patterns.includes('嵌套仓库'), `孤立 gitlink 必须在排除清单里：${JSON.stringify(out.patterns)}`)
+  const leaked = out.files.filter((f) => f.startsWith('嵌套仓库/'))
+  assert.deepEqual(leaked, [], `gitlink 内部文件不得进源码分析面，实际命中：${JSON.stringify(leaked)}`)
+  assert.ok(out.files.includes('src/app.py'), `常规源码必须仍在分析面里：${JSON.stringify(out.files)}`)
+  // 兼容面：不给 repo_path 时保持旧语义，只返回 wiki 产物模式
+  assert.deepEqual(out.no_arg, ['.codewiki', 'CodeWiki.md'], `省略 repo_path 时不得引入 git 探测：${JSON.stringify(out.no_arg)}`)
+
+  // 正规 submodule（.gitmodules 有登记）不在排除之列：那种内容是项目架构的一部分
+  writeFileSync(join(linkRepo, '.gitmodules'), '[submodule "嵌套仓库"]\n\tpath = 嵌套仓库\n\turl = https://example.com/x.git\n')
+  const probe2 = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+sys.__stdout__.write(json.dumps(entry.source_exclude_patterns(${JSON.stringify(linkRepo)})))
+`
+  const raw2 = spawnSync(PY, ['-c', probe2], { encoding: 'utf8', timeout: 120000 })
+  assert.equal(raw2.status, 0, `probe2 失败：${raw2.stderr}`)
+  assert.deepEqual(JSON.parse(String(raw2.stdout).trim()), ['.codewiki', 'CodeWiki.md'],
+    '在 .gitmodules 登记过的 submodule 不得被排除')
+})
+
 await check('阶段映射：与契约里的 ENGINE_STAGES 同集合（改一边必须改另一边）', async () => {
   const { ENGINE_STAGES } = await import('./lib/engine/contract.js')
   const probe = `
