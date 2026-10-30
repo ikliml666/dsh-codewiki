@@ -3,7 +3,7 @@
 //   cw                — 薄封装 CodeWiki CLI（init/status/index/meta/path/projects/setup/uninstall）
 //   codewiki_generate — 服务化编译：判态后把编译任务提交给宿主常驻服务（侧边栏 CodeWiki 面板可见），
 //                       服务按 写文章 → 横切 → 审校 → 索引 推进，全部环节在插件内完成
-//                       （默认模型 workbuddy/hy3，192k 上下文，单请求输入预算 110k），零子代理。
+//                       （默认模型 volces-ark/glm-5.3-flash，512k 上下文，单请求输入预算 110k），零子代理。
 //   codewiki_progress — 只读查编译进度：提交后随时查 stage/百分比/篇数/失败原因，立即返回不等待。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -32,11 +32,13 @@ export const name = PLUGIN_NAME
 const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', 'setup', 'uninstall']
 // 编译请求（同步 chat/completions）并发上限
 const CONCURRENCY_HARD_CAP = 8
-// 默认并发：hy3 免费且 192k 上下文，2 路并发足够且不触发上游限流
+// 默认并发：2 路并发足够，且不触发上游限流（glm-5.3-flash 实测无压力）
 const DEFAULT_CONCURRENCY = 2
-// 默认编译模型：workbuddy/hy3（免费、192k 上下文，宿主 llm 服务通道）
-const DEFAULT_BATCH_PROVIDER = 'workbuddy'
-const DEFAULT_BATCH_MODEL = 'hy3'
+// 默认编译模型：volces-ark/glm-5.3-flash（512k 上下文，宿主 llm 服务通道）
+// 0.16.13 起不再默认 workbuddy/hy3：hy3 的 192k 窗口装不下本仓库的模块源码，
+// 且上游空内容/截断频率明显更高（真机 job-mvu2lmd1-a 即因 hy3 返回空内容整轮失败）。
+const DEFAULT_BATCH_PROVIDER = 'volces-ark'
+const DEFAULT_BATCH_MODEL = 'glm-5.3-flash'
 // 大档模型：单批输入超过普通预算 110k 时改用它（512k 上下文的 glm-5.3-flash）。
 // 目的：超过 128k 的内容也不交会话模型，仍在插件内跑完。
 const DEFAULT_BIG_PROVIDER = 'volces-ark'
@@ -71,7 +73,7 @@ export const Config = z.object({
   bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取'),
   bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
   sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
-  maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2（hy3 免费档）'),
+  maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
   bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
@@ -538,7 +540,7 @@ export function isDeadCompileTarget(cwd) {
 // ---------------------------------------------------------------------------
 
 // 粗算 token 数：CJK 字符 ≈ 1 token/字，其余（ASCII 代码为主）≈ 3.5 字符/token。
-// 只为把单请求输入装进模型上下文（hy3 默认 192k，见 BATCH_TOKEN_BUDGET），不需要精确分词器。
+// 只为把单请求输入装进模型上下文（见 BATCH_TOKEN_BUDGET），不需要精确分词器。
 export function estimateTokens(text) {
   const s = String(text ?? '')
   let cjk = 0
@@ -751,13 +753,13 @@ export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurre
 // BATCH_TOKEN_HARD_LIMIT 大档。请求随连接生死，宿主重启按 prompt 快照重跑。
 // ---------------------------------------------------------------------------
 
-// 单个请求的输入 token 预算：默认模型 hy3 上下文 192k、单请求输出上限 64k，
-// 输入侧留 128k；再扣输出与估算误差余量，取 110k。
+// 单个请求的输入 token 预算：默认模型 glm-5.3-flash 上下文 512k，单请求输出上限 64k，
+// 输入侧留 128k 为兼容档（hy3 时代的窗口）；再扣输出与估算误差余量，取 110k。
 const BATCH_TOKEN_BUDGET = 110000
 // 超预算兜底装填上限：单文件/单任务装不进 110k 时按该大档再装一次；
 // 仍装不下才落到会话通道（最后的兜底，见 dispatchSessionTasks）。
-// 上限由 hy3 的真实窗口反推：contextWindow 192k 是输入+输出共享的，单请求输出上限
-// maxTokens 64k，故输入必须 ≤128k（旧值 150k 输入 + 64k 输出 = 214k，已越界）。
+// 上限取 128k：即使回归到 192k 窗口的模型（输入+输出共享），
+// 128k 输入 + 64k 输出仍在界内（旧值 150k 输入 + 64k 输出 = 214k，已越界）。
 const BATCH_TOKEN_HARD_LIMIT = 128000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -1818,7 +1820,7 @@ async function wikiPathFor(cwd, binary, signal) {
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
 //   full   = articles → crosscut →（超预算拆分时 compose）→ review → index（0.10.7 删规划阶段）
 //   stale  = articles（任务在提交时预构建）→ review → index
-// 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 workbuddy/hy3）；单文件超
+// 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 volces-ark/glm-5.3-flash）；单文件超
 // 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。横切/校对结果
 // keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
 // 兜底通道：只有单个源文件大到连 BATCH_TOKEN_HARD_LIMIT 都装不下时才启用——把完整写作
@@ -3908,11 +3910,11 @@ function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 workbuddy/hy3，免费 192k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 volces-ark/glm-5.3-flash，512k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
       '进度：调用即提交后本步就此结束——不要等待、不要轮询、不要为了确认编译好没有而反复调 codewiki_progress；去做你手头其他工作。编译完成的产物由插件自己提交入库（autoCommit：主题分支 codewiki/wiki-<任务id> 提交后合并回原分支，只含 .codewiki/ 与 CodeWiki.md），正常情况下你不需要为 wiki 跑任何 git 命令。需要事件级进度时才用 codewiki_progress（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
       '单项目串行（默认开）：同一时刻只推进一个仓库的编译任务，后提交的项目进 queued 排队，前一个收尾后自动轮到（进度里 stage=queued 即排队）。',
-      '凭证由模型设置里该 provider（默认 workbuddy）的配置解析，插件不保存也不传递任何密钥；provider/model 留空或该模型不可用时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
+      '凭证由模型设置里该 provider（默认 volces-ark）的配置解析，插件不保存也不传递任何密钥；provider/model 留空或该模型不可用时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
     ].join('\n'),
     parameters: {
       type: 'object',

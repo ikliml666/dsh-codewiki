@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.16.13 — 2026-10-30
+
+### 默认编译模型换代：workbuddy/hy3 → volces-ark/glm-5.3-flash
+
+**背景**：用户要求停用 hy3。此前插件内两处「兜底默认值」还指着
+`workbuddy`/`hy3`（192k 上下文），而用户实际配置早已是
+`volces-ark`/`glm-5.3-flash`（512k）。默认值和实际配置分叉会带来两个后果：
+① 配置项留空时插件仍悄悄回落到 192k 窗口，本仓库的模块源码装不下就拆批、
+拆到单模块仍超预算再转会话通道，一路降级而设置页上看不出原因；
+② 文档/包描述写着 hy3，人照着读会以为默认还是那个。
+
+hy3 的 192k 窗口对这类整仓编译本身就不够用——真机 `job-mvu2lmd1-a` 就是
+hy3 返回空内容（`LLM returned empty content for dsh-codewiki overview
+(possible output truncation at max_tokens)`）导致整轮失败。
+
+**改了什么**：
+
+- `index.js` 的 `DEFAULT_BATCH_PROVIDER` / `DEFAULT_BATCH_MODEL`：
+  `'workbuddy'`/`'hy3'` → `'volces-ark'`/`'glm-5.3-flash'`。
+- 一并订正注释与工具描述里残留的「默认 workbuddy/hy3」「hy3 免费档」
+  「hy3 默认 192k」「默认 workbuddy」（`index.js` 文件头、`maxConcurrency`
+  描述、兼容通道说明、`codewiki_generate` 工具描述、`client.js` 的中英双语
+  settings hint）。
+- `package.json` description、`README.md` 工具表 / `batchProvider` 说明 /
+  `maxConcurrency` 说明同步为新默认值。
+
+**刻意没动**：
+
+- `BATCH_TOKEN_BUDGET = 110000` / `BATCH_TOKEN_HARD_LIMIT = 128000` 两个常量
+  的**值**。它们被 20 多处消费，改值会连带改变装填与拆批行为，超出「换默认
+  模型」的范围；只把注释里的「hy3 默认 192k」改成「512k 模型 + 保留 128k 为
+  兼容档」。真要吃到 512k 窗口，应当单独做一次装填策略调整并实测。
+- 用户已配好的 `~/.dsh/profiles/desktop/cordis.patch.yml` **一个字没改**。
+- `README.md`「hy3 硬门禁未通过」与 `docs/fsoft-native-engine.md` 同款段落，
+  那是当时的验收记录，改了就变成篡改历史。
+- `CodeWiki.md` 与 `.codewiki/` 下的文章属于编译产物，不手改，等重编。
+
+**验证**：`node --check index.js` / `node --check client.js` 通过，
+`package.json` 可解析，四个改动文件 U+FFFD 计数均为 0；
+`test-batch.mjs` 148 通过 0 失败、`test-wiki-entry.mjs` 全部断言通过。
+
+**注意**：测试 fixture 里大量显式写 `provider: 'workbuddy'` / `model: 'hy3'`
+是**显式传参**、不走默认值，故保留不动——它们验证的是「任意 provider/model
+都能被路由」，与默认值无关。
+
 ## 0.16.12 — 2026-10-30
 
 ### 阶段 2 也带出子树名：真机复验补上的半块

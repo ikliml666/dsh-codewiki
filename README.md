@@ -15,7 +15,7 @@
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
-| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（默认 `workbuddy`/`hy3`，192k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
+| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
 | `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled` |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
@@ -239,14 +239,14 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 上述设置同样可在 **插件页 → CodeWiki 详情页**（`client.js`，v0.2.0 起）里修改：保存走 `configForms.mutate`（单层 op），与 patch 文件里手改等价、同样热生效。0.9.1 起「编译模型」是 provider/model 两级下拉：目录来自插件自己的 `/api/codewiki/models`（同源宿主 `llm.listProviders` + 各 provider 的 `listModels`，即模型设置页里已注册的提供商），不读插件配置；目录不可用时退化为文本输入，仍可填任意 provider/model。0.10.0 起「思考程度」也改为从模型目录读取——选中 provider/model 后拉 `/api/codewiki/model-efforts`（宿主 `resolveModel().reasoning.efforts`）渲染下拉，不再手填裸字符串。
 
 
-- `batchProvider` / `batchModel`（0.10.0，0.10.1 起为唯一通道）：编译模型（规划/写文章/横切/审校全部环节共用），默认 `workbuddy` / `hy3`（免费、192k 上下文），走宿主 llm 服务。`batchModel` 填该 provider 的模型 id——本地 OpenAI 兼容端点（如本地 9B）只要在模型设置里注册过，就能在这里选到并参与编译。**0.10.1 删除了内置百炼直连通道**：`batchProvider` 必须指向模型设置里已注册的提供商，留空直接提交失败（不再有自带直连兜底，插件也不保存任何 API Key）。
+- `batchProvider` / `batchModel`（0.10.0，0.10.1 起为唯一通道）：编译模型（规划/写文章/横切/审校全部环节共用），默认 `volces-ark` / `glm-5.3-flash`（512k 上下文；0.16.13 起默认值从 `workbuddy`/`hy3` 换过来，hy3 的 192k 窗口装不下本仓库的模块源码），走宿主 llm 服务。`batchModel` 填该 provider 的模型 id——本地 OpenAI 兼容端点（如本地 9B）只要在模型设置里注册过，就能在这里选到并参与编译。**0.10.1 删除了内置百炼直连通道**：`batchProvider` 必须指向模型设置里已注册的提供商，留空直接提交失败（不再有自带直连兜底，插件也不保存任何 API Key）。
 - `batchReasoningEffort`（0.10.0）：该模型的思考程度档位 id。**可选值不手填**，设置页从模型目录实时读取（`GET /api/codewiki/model-efforts?provider=&model=` → 宿主 `resolveModel().reasoning.efforts`）；留空 = 用该模型的默认档。
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`（0.10.4，0.10.8 全面启用）：大档模型——输入超 110k 普通预算的请求（写文章/横切/批量校对）改用该档在插件内一次写完。默认 `volces-ark` / `glm-5.3-flash`（512k 上下文），预算 420k token。`bigProvider` 留空=不启用大档。0.10.8 起大档同时是观察→合成分割的门槛：模块源码总量超 420k 才拆观察批。
 - `sessionTier`（0.9.2）：**仅超大输入兜底**时才用。0.10.8 起装填上限=大档预算（`bigTokenBudget`，默认 420k）：文章源码总量在 110k–420k 区间直接大档单请求写完；超 420k 才拆观察→合成批；只有连大档都装不下的单文件才转会话通道，此时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。
 
 - `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0 引入，**0.16.0 起 `nativeEngine` 默认 `true`**）：原生引擎通道；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道」。**0.16.5 起默认超时从 45 分钟改为 180 分钟**：45 分钟是早期按小 fixture（约 1 分钟）估的，真机全量实测约 174 分钟（`job-mvt1mrvu-6`：articles 66.0min + crosscut 10.0min + review 68.9min），预算低于物理耗时意味着每次都在阶段 3 刚开头被砍、一篇都写不出来，重试多少次都一样。
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`（与 codewiki 源码同步演进），找不到再用插件自带 `bin/cw.exe`。0.2.3 起此顺序（原先捆绑优先，会吃到过期的旧布局二进制）。
-- `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`，如免费 hy3）请求并发上限，默认 2（1–8，硬顶 8）。
+- `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`）请求并发上限，默认 2（1–8，硬顶 8）。
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
 - `articleLanguage`：文章语言，默认中文。**两条通道都生效**：兼容通道写进提示词，原生通道经 `runNativeJob` 的 `language` 字段传进引擎 payload、落在 `agent_instructions.language`（上游 `config.py` 的 `language` property 读它）。0.16.7 之前原生通道整条链路都没接这个字段，引擎静默按英文写。
