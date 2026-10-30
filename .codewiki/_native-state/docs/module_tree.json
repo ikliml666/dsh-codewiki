@@ -1,0 +1,210 @@
+{
+    "client_ui": {
+        "path": "client.js",
+        "components": [
+            "client.js::CodewikiCard",
+            "client.js::CodewikiPanel",
+            "client.js::PanelIcon",
+            "client.js::ReposTab",
+            "client.js::SessionView",
+            "client.js::Spark",
+            "client.js::byUpdated",
+            "client.js::discard",
+            "client.js::en",
+            "client.js::mount",
+            "client.js::save",
+            "client.js::zh"
+        ],
+        "children": {}
+    },
+    "core_entry": {
+        "path": "index.js",
+        "components": [
+            "index.js::allowedLinkTargets",
+            "index.js::apply",
+            "index.js::cancel",
+            "index.js::currentCommit",
+            "index.js::isAgentic",
+            "index.js::jobSummary",
+            "index.js::list",
+            "index.js::makeLinkExists",
+            "index.js::onAbort",
+            "index.js::progressView",
+            "index.js::reposFileFor",
+            "index.js::runPool",
+            "index.js::symbolsOnLine",
+            "index.js::tickArticles",
+            "index.js::tickCommit",
+            "index.js::tickCompose",
+            "index.js::tickCrosscut",
+            "index.js::tickIndex",
+            "index.js::tickReview",
+            "index.js::wakeCompileSession",
+            "index.js::worker"
+        ],
+        "children": {}
+    },
+    "agentic_support": {
+        "path": "lib/",
+        "components": [
+            "lib\\agentic.js::edit",
+            "lib\\article-contract.js::hasBlockingIssue",
+            "lib\\article-contract.js::issueSummary",
+            "lib\\articles-agentic.js::runPool",
+            "lib\\articles-agentic.js::worker",
+            "lib\\update-record.js::isTerminalStage",
+            "lib\\update-record.js::loadUpdateRecord"
+        ],
+        "children": {
+            "agentic_support_tooling": {
+                "components": [
+                    "lib/agentic.js::edit",
+                    "lib/articles-agentic.js::runPool",
+                    "lib/articles-agentic.js::worker"
+                ],
+                "children": {}
+            },
+            "agentic_support_governance": {
+                "components": [
+                    "lib/article-contract.js::hasBlockingIssue",
+                    "lib/article-contract.js::issueSummary",
+                    "lib/update-record.js::isTerminalStage",
+                    "lib/update-record.js::loadUpdateRecord"
+                ],
+                "children": {}
+            }
+        }
+    },
+    "engine_core": {
+        "path": "lib/engine/",
+        "components": [
+            "lib\\engine\\apply-plan.js::applyNativeOutput",
+            "lib\\engine\\apply-plan.js::defaultRunCw",
+            "lib\\engine\\apply-plan.js::findOrphanPages",
+            "lib\\engine\\client.js::runEngine",
+            "lib\\engine\\contract.js::describeEngineResult",
+            "lib\\engine\\contract.js::normalizeBlocker",
+            "lib\\engine\\contract.js::validateEngineResult",
+            "lib\\engine\\llm-bridge.js::startLlmBridge",
+            "lib\\engine\\manifest.js::doctor",
+            "lib\\engine\\manifest.js::writeLock",
+            "lib\\engine\\native-run.js::noop",
+            "lib\\engine\\native-state.js::stateDocFiles",
+            "lib\\engine\\openai-bridge.js::isPlaceholderKey",
+            "lib\\engine\\python\\entry.py::_ProtocolOnly",
+            "lib\\engine\\python\\entry.py::_popen_init_utf8",
+            "lib\\engine\\python\\entry.py::main",
+            "lib\\engine\\quality-gate.js::gateNativeOutput",
+            "lib\\engine\\quality-gate.js::toQualityIssues",
+            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+            "lib\\engine\\workspace-snapshot.js::shortSha",
+            "lib\\engine\\workspace-snapshot.js::snapshotExists"
+        ],
+        "children": {
+            "engine_core_contract": {
+                "components": [
+                    "lib/engine/contract.js::describeEngineResult",
+                    "lib/engine/contract.js::normalizeBlocker",
+                    "lib/engine/contract.js::validateEngineResult",
+                    "lib/engine/python/entry.py::_ProtocolOnly",
+                    "lib/engine/python/entry.py::_popen_init_utf8",
+                    "lib/engine/python/entry.py::main",
+                    "lib/engine/client.js::runEngine",
+                    "lib/engine/openai-bridge.js::isPlaceholderKey",
+                    "lib/engine/llm-bridge.js::startLlmBridge"
+                ],
+                "children": {}
+            },
+            "engine_core_compilation": {
+                "components": [
+                    "lib/engine/native-run.js::noop",
+                    "lib/engine/manifest.js::doctor",
+                    "lib/engine/manifest.js::writeLock",
+                    "lib/engine/native-state.js::stateDocFiles",
+                    "lib/engine/workspace-snapshot.js::createWorkspaceSnapshot",
+                    "lib/engine/workspace-snapshot.js::shortSha",
+                    "lib/engine/workspace-snapshot.js::snapshotExists"
+                ],
+                "children": {}
+            },
+            "engine_core_artifact_gate": {
+                "components": [
+                    "lib/engine/quality-gate.js::gateNativeOutput",
+                    "lib/engine/quality-gate.js::toQualityIssues",
+                    "lib/engine/apply-plan.js::applyNativeOutput",
+                    "lib/engine/apply-plan.js::defaultRunCw",
+                    "lib/engine/apply-plan.js::findOrphanPages"
+                ],
+                "children": {}
+            }
+        }
+    },
+    "Build___Dependency_Configuration_Layer": {
+        "path": "",
+        "components": [
+            "cordis.patch.yml::cordis.patch.yml",
+            "package.json::package.json"
+        ],
+        "children": {
+            "build_config": {
+                "path": "cordis.patch.yml",
+                "components": [
+                    "cordis.patch.yml::cordis.patch.yml"
+                ],
+                "children": {}
+            },
+            "package_manifest": {
+                "path": "package.json",
+                "components": [
+                    "package.json::package.json"
+                ],
+                "children": {}
+            }
+        }
+    },
+    "Ecosystem_Tooling___Validation_Layer": {
+        "path": "",
+        "components": [
+            "test-fixtures\\gen-graphdiff-golden.py::main",
+            "tools/fsoft-engine/setup-env.sh::setup-env.sh",
+            "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\scripts\\run.py::main",
+            "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
+            "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\handler.py::Handler",
+            "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue",
+            "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push",
+            "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
+        ],
+        "children": {
+            "test_fixtures": {
+                "path": "test-fixtures/",
+                "components": [
+                    "test-fixtures\\gen-graphdiff-golden.py::main"
+                ],
+                "children": {}
+            },
+            "fsoft_engine_tools": {
+                "path": "tools/fsoft-engine/",
+                "components": [
+                    "tools/fsoft-engine/setup-env.sh::setup-env.sh",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\scripts\\run.py::main",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\handler.py::Handler",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push",
+                    "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
+                ],
+                "children": {}
+            }
+        }
+    },
+    "codewiki_vendor": {
+        "path": "vendor/codewiki/",
+        "components": [
+            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+            "vendor\\codewiki\\src\\main.rs::Cli",
+            "vendor\\codewiki\\src\\main.rs::capitalize",
+            "vendor\\codewiki\\src\\main.rs::main"
+        ],
+        "children": {}
+    }
+}
