@@ -647,6 +647,135 @@ console.log('== 用例 17：默认引擎超时必须覆盖真机全量实测耗�
   check(ch2?.timeoutMs === 12345, `显式 nativeEngineTimeoutMs 仍优先（实际 ${ch2?.timeoutMs}）`)
 }
 
+// ============================ 用例 18：language 必须透传进引擎 payload ============================
+//
+// P1（Spec 轴）：插件设置 articleLanguage 默认「中文」，但原生通道整条链路都没把它
+// 带到引擎侧——入口 entry.py 的 config["agent_instructions"] 只设了 exclude_patterns，
+// 上游 config.py 的 language property 读的是 agent_instructions.language，于是引擎
+// 静默按英文写，README 承诺的「文章语言，默认中文」在默认通道上完全落空。
+console.log('== 用例 18：articleLanguage 必须一路传到引擎 payload ==')
+{
+  const { repo } = makeRepo('lang', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-lang-'))
+  madeDirs.push(docs)
+  let seen = null
+  const res = await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    language: '中文',
+    deps: {
+      runEngine: async (opts) => {
+        if (opts.action === 'doctor') {
+          return { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        }
+        seen = opts.payload ?? {}
+        return {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 1,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }
+      },
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+    },
+  })
+  check(res != null, '任务有终态')
+  check(seen?.language === '中文', `引擎 payload 必须带 language=中文（实际 ${JSON.stringify(seen?.language)}）`)
+}
+{
+  // 不传 language 时不许凭空写一个值：空值必须整个字段消失，让引擎走它自己的默认。
+  const { repo } = makeRepo('lang2', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-lang2-'))
+  madeDirs.push(docs)
+  let seen = null
+  await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: {
+      runEngine: async (opts) => {
+        if (opts.action === 'doctor') {
+          return { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        }
+        seen = opts.payload ?? {}
+        return {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 1,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }
+      },
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+    },
+  })
+  check(!('language' in (seen ?? {})), `未指定语言时不许写 language 字段（实际 ${JSON.stringify(seen?.language)}）`)
+}
+
+// ============================ 用例 19：三计数必须随终态出去 ============================
+//
+// P5（Spec 轴）：契约把 keptCount/removedCount/unmappedCount 列为 EngineResult 的
+// 必填事实，但 settle() 与最终 settle 都没带，engineResult 按 0 归一，于是
+// 「本轮一页没动」与「本轮评估 30 页但都判 no-op」在终态里长得一模一样。
+console.log('== 用例 19：kept/removed/unmapped 三计数必须透传进终态 ==')
+{
+  const { repo } = makeRepo('counts', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-counts-'))
+  madeDirs.push(docs)
+  // 写一个最小可过门的 docs 树，让编译走到最终 settle 分支。
+  fs.mkdirSync(path.join(docs, 'modules'), { recursive: true })
+  fs.writeFileSync(path.join(docs, 'CodeWiki.md'), '# 入口\n\n见 [[core]]\n', 'utf8')
+  fs.writeFileSync(path.join(docs, 'modules', 'core.md'), '# core\n\n正文\n', 'utf8')
+  const res = await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: {
+      runEngine: async (opts) => (opts.action === 'doctor'
+        ? { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        : {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 1,
+          keptCount: 7,
+          removedCount: 3,
+          unmappedCount: 2,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }),
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+    },
+  })
+  check(res.keptCount === 7, `keptCount 必须是引擎自报的 7（实际 ${res.keptCount}）`)
+  check(res.removedCount === 3, `removedCount 必须是引擎自报的 3（实际 ${res.removedCount}）`)
+  check(res.unmappedCount === 2, `unmappedCount 必须是引擎自报的 2（实际 ${res.unmappedCount}）`)
+}
+
+// ============================ 用例 20：engine-timeout 必须还是 engine-timeout ============================
+//
+// P2（Spec 轴）：client.js 超时判 partial 时把 {kind:'engine-timeout'} 当 blocker，
+// 但它没登记进 BLOCKER_KINDS，normalizeBlocker 会把它静默降级成 engine-error，
+// 超时语义在终态与面板里就消失了。
+console.log('== 用例 20：engine-timeout 作为 blocker 不许被改名 ==')
+{
+  const { BLOCKER_KINDS, engineResult } = await import('./lib/engine/contract.js')
+  check(BLOCKER_KINDS.includes('engine-timeout'), `BLOCKER_KINDS 必须含 engine-timeout（实际 ${JSON.stringify(BLOCKER_KINDS)}）`)
+  const r = engineResult({
+    outcome: 'partial',
+    blockers: [{ kind: 'engine-timeout', detail: '引擎在 10800000ms 内未完成（已写 3 篇，进程树已终止）' }],
+    writtenCount: 3,
+  })
+  check(r.blockers[0].kind === 'engine-timeout', `blocker kind 必须原样保留（实际 ${r.blockers[0].kind}）`)
+  // 未登记的 kind 仍要降级：不能因为加了一条就让归一失效
+  const r2 = engineResult({ outcome: 'partial', blockers: [{ kind: '不认识的种类', detail: 'x' }] })
+  check(r2.blockers[0].kind === 'engine-error', `未登记 kind 仍须降级成 engine-error（实际 ${r2.blockers[0].kind}）`)
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 上被占用的临时目录留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

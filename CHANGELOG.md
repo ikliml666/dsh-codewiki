@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.16.7 — 2026-10-30
+
+### 修复：Spec 评审确认的六条契约缺陷（含两条「设置项静默失效」）
+
+`/code-review` 双轴评审（基准 `main`，142 文件 / +29009-4757）中，Spec 轴报出 6 条与 `docs/fsoft-native-engine.md` 不符的项，逐条回代码核实后全部成立并修复。其中 P1/P2 属于「设置或语义静默失效」——用户改了设置、系统也接受了，但行为完全没变。
+
+| # | 缺陷 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| P1 | `articleLanguage` 在默认（原生）通道完全失效，引擎永远按英文写 | `index.js` 的 `startNativeRun → runNativeJob` 入参没有 `language`；`nativeEnginePlan` 不接；`entry.py` 的 `config["agent_instructions"]` 只设了 `exclude_patterns`。上游 `config.py:179` 的 `language` property 读的正是 `agent_instructions.language` | `index.js:2659` 传 `language: job.language`；`native-run.js` 签名/payload 收 `language`（空值整个字段不写，保持上游默认）；`entry.py` 取 `payload.language` 后写进 `agent_instructions.language` |
+| P2 | `engine-timeout` 被静默改名成 `engine-error`，超时语义在终态与面板里丢失 | `client.js:381/387` 把 `{kind:'engine-timeout'}` 当 blocker，但 `BLOCKER_KINDS` 没登记它，`normalizeBlocker` 走 `else → 'engine-error'` | `lib/engine/contract.js` 的 `BLOCKER_KINDS` 追加 `engine-timeout`（只追加不改名，符合「枚举只许追加」约定） |
+| P3 | `cancel` 动作出参是一整份 `EngineResult`，契约要求 `{cancelled:boolean}` | `entry.py` 的 `handle_request` 直接 `return _cancelled_result(...)` | 改成 `return request_id, {"cancelled": True}`；cancel 是控制面动作，回 EngineResult 会让下游把它当成「这轮编译结束了」 |
+| P4 | `doctor` 出参缺 `checks:[{name,ok,detail}]`，上层拿到 `done` 也不知道过了哪几项检查 | `entry.py` 的 `action_doctor` 只回 EngineResult 形状 | 三个分支（正常/pip 不闭合/引擎缺失）都补 `checks`；`contract.js` 新增 `normalizeChecks()` 做归一（非数组→`[]`、缺 name 丢弃、`ok` 只认布尔 `true`），`engineResult()` 带出 `checks` |
+| P5 | `keptCount`/`removedCount`/`unmappedCount` 恒 0，`settle()` 与最终 `settle` 都不带 | `entry.py` 四处结果构造硬编码 0；`native-run.js:157` 的 `base` 与 `:866` 的最终 `settle` 都没有这三项 | `entry.py` 新增 `_counts_of(adapter)`：`keptCount` = `verdicts` 里 `no-op` 的页数、`removedCount` = `pages_removed` 去重、`unmappedCount` = `repair.orphans` 长度；`_done_result` 接 `counts`；`native-run.js` 两处 `settle` 补三字段 |
+| P6 | 改契约未升 `ENGINE_CONTRACT_VERSION`，也没同步测试 | `contract.js` 版本停在 1；`test-engine-contract.mjs` 断言 `=== 1` | 升到 `2`；`entry.py` 抽出 `CONTRACT_VERSION = 2` 常量替换 5 处字面量（避免「同一进程报两个版本」）；同步测试断言 |
+
+**顺带修掉的自造 bug**：P1 首次落地时 `config["agent_instructions"]` 展开 `language` 的位置**排在** `language = str(payload.get(...))` 赋值之前，会抛 `UnboundLocalError`。已把取值上移到 `config = dict(cfg)` 之前，并在注释里写明踩坑原因。
+
+**同时修正的文档自相矛盾**（Standards 轴 S1/S2/S3）：
+
+- `docs/fsoft-native-engine.md:139` 与 `lib/engine/native-run.js:16` 的不变量 4 都还写着「partial/failed 一律不推进基线」，而实现从 0.16.1 起允许 **有产物的 partial** 推进——这两处注释/文档正是 0.16.1 改代码时漏改的。现统一表述为「`done` 一律推进；`partial` 仅在 `rawTreeFiles > 0` 时推进；`failed`/`cancelled` 不动」，并写明死循环的实际后果。
+- `README.md:27`/`:57` 同款表述一并修正；`:112` 的 `nativeEngineTimeoutMs` 默认值从「`10800000`（180 分钟）」改为「`0`（= 用默认 180 分钟）」——`index.js:92` 的实现值就是 `0`，靠 `native-run.js:83` 兜底，数值等效但写法不是实现。
+- `README.md:252` 补 `articleLanguage` 在两条通道的生效路径。
+
+**新增回归**（4 处，均已反向验证）：
+
+- `test-engine-native-job.mjs` 用例 18：`language` 必须进引擎 payload（`language: '中文'` → payload 带 `中文`；不传 → 字段整个不出现）；用例 19：三计数必须透传（7/3/2 原样到终态）；用例 20：`engine-timeout` 不许被改名、未登记 kind 仍须降级。
+- `test-engine-python-entry.mjs`：cancel 断言改为「出参是 `{cancelled:boolean}` 且不含 `outcome`/`blockers`」；新增 doctor `checks` 两项用例（真实 venv 至少 import/python/pip 三项，且 `ok` 必须是布尔、`detail` 必须有内容；归一函数对非数组/缺 name/字符串 `'true'` 的处理）。
+- `test-engine-contract.mjs`：版本断言升 2。
+
+**反向验证（逐条，全部当场跑出红）**：去掉 payload 的 `language` 展开 → `✗ 引擎 payload 必须带 language=中文（实际 undefined）`、`110/111`；`BLOCKER_KINDS` 移除 `engine-timeout` → `✗ BLOCKER_KINDS 必须含 engine-timeout`、`✗ blocker kind 必须原样保留（实际 engine-error）`、`109/111`；最终 `settle` 去掉三计数 → 三条 `✗`、`108/111`；`cancel` 改回 `_cancelled_result` → `FAIL 协议：cancel 出参是 {cancelled:boolean}`、`16 passed, 1 failed`；doctor 去掉 `checks` → `FAIL doctor：出参必须带 checks`、`16 passed, 1 failed`；版本改回 1 → `FAIL 契约版本是显式数字`、`18 passed, 1 failed`。全部 `cp` 备份恢复后复绿。
+
+**全量回归**：`ok suites: 28`、`failed suites: test-wiki-anchors.mjs`（红项仍是 `.codewiki` 文章锚点滞后于源码，随一次成功编译消失）。
+
 ## 0.16.6 — 2026-10-30
 
 ### 修复：仓库清单落点只看目录，测试会把 fixture 路径写进真实宿主清单

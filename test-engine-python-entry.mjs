@@ -183,7 +183,7 @@ await check('协议：非 ASCII 路径的请求行按 UTF-8 读入，不被 loca
   )
 })
 
-await check('协议：cancel 动作立即回 cancelled 终态', async () => {
+await check('协议：cancel 出参是 {cancelled:boolean}，不是一份 EngineResult', async () => {
   const raw = spawnSync(PY, [ENTRY], {
     cwd: repo,
     env: { ...process.env, ...isolatedEnv },
@@ -194,10 +194,12 @@ await check('协议：cancel 动作立即回 cancelled 终态', async () => {
   const msgs = String(raw.stdout || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   const result = msgs.find((m) => m.type === 'result')
   assert.ok(result, '必须回 result')
-  assert.equal(result.result.outcome, 'cancelled')
-  assert.equal(result.result.error, null, 'cancelled 不是失败，不许带 error')
-  assert.ok(result.result.blockers.length >= 1, 'cancelled 应说明是取消')
-  assert.equal(result.result.blockers[0].kind, 'cancelled')
+  // 契约（docs/fsoft-native-engine.md「接口面」表）：cancel -> {cancelled:boolean}。
+  // cancel 是控制面动作，不是一次编译的结果；回整份 EngineResult 会让下游把它当成
+  // 「这轮编译结束了」，进而把一次取消记成一次带产物的终态。
+  assert.equal(result.result.cancelled, true, `实际出参 ${JSON.stringify(result.result)}`)
+  assert.equal(result.result.outcome, undefined, 'cancel 不允许回 EngineResult.outcome')
+  assert.equal(result.result.blockers, undefined, 'cancel 不允许回 EngineResult.blockers')
 })
 
 // ── 环境面（真 venv、真 pip check）─────────────────────────────────────────
@@ -215,6 +217,47 @@ await check('doctor：真 venv 上报真实版本与闭合依赖', async () => {
   assert.deepEqual(res.protocolViolations, [], `不应有协议违规：${JSON.stringify(res.protocolViolations)}`)
   assert.equal(res.engine.version, '2.0.0', `引擎版本应为 2.0.0，实际 ${JSON.stringify(res.engine.version)}`)
   assert.match(res.engine.python, /^3\.12\./, `python 版本应为 3.12.x，实际 ${res.engine.python}`)
+})
+
+await check('doctor：出参必须带 checks（不看明细就无法判断环境可信性）', async () => {
+  const res = await runEngine({
+    engine: engineOf(),
+    requestId: 'r-doctor-checks',
+    action: 'doctor',
+    payload: {},
+    cwd: repo,
+    timeoutMs: 120000,
+  })
+  // 契约（docs/fsoft-native-engine.md「接口面」表）：doctor 出参含
+  // checks:[{name,ok,detail}]。以前只回 EngineResult 形状，上层拿到 outcome=done
+  // 也不知道「过的是哪几项检查」，环境坏了只能靠猜。
+  assert.equal(res.outcome, 'done', `doctor 应 done：${res.error?.message ?? ''}`)
+  assert.ok(Array.isArray(res.checks), `checks 必须是数组，实际 ${typeof res.checks}`)
+  assert.ok(res.checks.length >= 3, `checks 至少三项（import/python/pip），实际 ${JSON.stringify(res.checks)}`)
+  const names = res.checks.map((c) => c.name)
+  for (const need of ['import', 'python', 'pip']) {
+    assert.ok(names.includes(need), `checks 必须含 ${need}，实际 ${JSON.stringify(names)}`)
+  }
+  for (const c of res.checks) {
+    assert.equal(typeof c.name, 'string', 'checks[].name 必须是字符串')
+    assert.equal(typeof c.ok, 'boolean', `checks[${c.name}].ok 必须是布尔，实际 ${typeof c.ok}`)
+    assert.equal(typeof c.detail, 'string', `checks[${c.name}].detail 必须是字符串`)
+  }
+  const pip = res.checks.find((c) => c.name === 'pip')
+  assert.ok(pip.detail.length > 0, 'pip 检查必须给出证据（不是只说 ok）')
+})
+
+await check('doctor：checks 缺项/类型不对时归一而不是崩（诊断信息不能拖垮 doctor）', async () => {
+  // 直接测归一函数：非数组 → []；缺 name 的项丢弃；ok 只认布尔 true。
+  const { engineResult } = await import('./lib/engine/contract.js')
+  const r = engineResult({ outcome: 'done', checks: 'not-an-array' })
+  assert.deepEqual(r.checks, [], 'checks 非数组必须归一成空数组')
+  const r2 = engineResult({
+    outcome: 'done',
+    checks: [{ name: 'pip', ok: 'true', detail: 'x' }, { ok: true }, null, { name: '' }],
+  })
+  assert.deepEqual(r2.checks, [{ name: 'pip', ok: false, detail: 'x' }],
+    `字符串 'true' 不算通过、无 name 的项必须丢弃，实际 ${JSON.stringify(r2.checks)}`)
 })
 
 await check('doctor：pip check 闭合状态被如实上报（不闭合要能看出来）', async () => {

@@ -131,6 +131,11 @@ class _ProtocolOnly:
 sys.stdout = _ProtocolOnly()
 
 PROTOCOL_VERSION = 1
+# 引擎结果契约版本，必须与 lib/engine/contract.js 的 ENGINE_CONTRACT_VERSION 同步。
+# 为什么单独抽常量：此前 5 处字面量 `1` 散在 emit_progress / failure / doctor /
+# _done_result / _cancelled_result 里，升版本时漏改一处就会出现「同一进程报两个
+# 契约版本」，client.js 的 validateEngineResult 只在测试里跑，真机上没人拦。
+CONTRACT_VERSION = 2
 ACTIONS = ("doctor", "generate", "update", "cancel")
 
 # 进度帧里 writtenCount 的重新清点间隔（秒）。
@@ -164,7 +169,7 @@ def emit_progress(request_id, stage, percent, message="", written=0, failed=0, t
         {
             "type": "progress",
             "requestId": request_id,
-            "contractVersion": 1,
+            "contractVersion": CONTRACT_VERSION,
             "stage": stage,
             "percent": percent,
             "message": message,
@@ -182,7 +187,7 @@ def emit_result(request_id, result):
 def failure(code, message, stage=None, request_id=""):
     """构造一个 failed 终态。message 只放给人看的说明，绝不拼凭证内容。"""
     return {
-        "contractVersion": 1,
+        "contractVersion": CONTRACT_VERSION,
         "outcome": "failed",
         "stage": stage,
         "blockers": [],
@@ -248,11 +253,21 @@ def action_doctor(request_id, payload):
     version = _engine_version()
     py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     if not version:
-        return failure("engine-missing", "无法导入 codewiki：解释器里没有安装 FSoft 引擎", "env", request_id)
+        result = failure("engine-missing", "无法导入 codewiki：解释器里没有安装 FSoft 引擎", "env", request_id)
+        result["checks"] = [
+            {"name": "import", "ok": False, "detail": "解释器里没有安装 FSoft 引擎"},
+            {"name": "python", "ok": True, "detail": py},
+        ]
+        return result
     ok, check_out = _pip_check()
     emit_progress(request_id, "env", 100, "依赖检查完成" if ok else "依赖未闭合")
     if not ok:
         result = failure("engine-deps", check_out, "env", request_id)
+        result["checks"] = [
+            {"name": "import", "ok": True, "detail": f"codewiki {version} 可导入"},
+            {"name": "python", "ok": True, "detail": py},
+            {"name": "pip", "ok": False, "detail": check_out},
+        ]
         result["engine"] = {
             "version": version,
             "commit": "",
@@ -261,10 +276,15 @@ def action_doctor(request_id, payload):
         }
         return result
     return {
-        "contractVersion": 1,
+        "contractVersion": CONTRACT_VERSION,
         "outcome": "done",
         "stage": "env",
         "blockers": [],
+        "checks": [
+            {"name": "import", "ok": True, "detail": f"codewiki {version} 可导入"},
+            {"name": "python", "ok": True, "detail": py},
+            {"name": "pip", "ok": True, "detail": check_out or "No broken requirements found."},
+        ],
         "error": None,
         "writtenCount": 0,
         "failedCount": 0,
@@ -605,6 +625,9 @@ def action_generate(request_id, payload, is_update=False):
 
     emit_progress(request_id, "env", 100, "环境与模型通道就绪")
 
+    # 文章书写语言必须在组装 config **之前**取出来：下面 config["agent_instructions"]
+    # 要把 language 展开进去，先读后写否则就是 UnboundLocalError（真机 P1 修复时踩过）。
+    language = str(payload.get("language") or "").strip()
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     config = dict(cfg)
     config["update"] = bool(is_update)
@@ -632,6 +655,15 @@ def action_generate(request_id, payload, is_update=False):
     # 的，use_gitignore 拦不住它，实测会把整轮预算耗在一个 18MB 的无关子仓库上。
     config["agent_instructions"] = {
         "exclude_patterns": source_exclude_patterns(repo_path),
+        # 文章书写语言：上游从 agent_instructions.language 读（config.py 的
+        # `language` property），再经 normalize_language 归一（"ja" -> "Japanese"、
+        # 未知文本原样透传、English 归 None 即上游默认英文）。
+        #
+        # 为什么必须显式传：插件设置 articleLanguage 默认「中文」，但原生通道此前
+        # 整条链路都没把它带下来——nativeEnginePlan 不接、startNativeRun 不传、
+        # 这里也不设，于是引擎静默按英文写，README 承诺的「文章语言，默认中文」
+        # 在默认通道上完全落空。空值不写入，保持上游默认行为。
+        **({"language": language} if language else {}),
     }
     # 阶段 5：增量参数由调用方显式给出（不在引擎里猜）。
     #   updateOptions.rung 决定走哪条增量算法（3=组件级方法，0=旧的按文件失效）。
@@ -677,7 +709,7 @@ def action_generate(request_id, payload, is_update=False):
             return _done_result(
                 request_id, docs_dir, repo_path, started,
                 written=_count_docs(docs_dir), stage=reached["stage"],
-                update_outcome=_update_outcome_of(adapter),
+                update_outcome=_update_outcome_of(adapter), counts=_counts_of(adapter),
             )
         return failure("engine-crashed", f"引擎以退出码 {code} 结束", reached["stage"], request_id)
     except Exception as exc:  # noqa: BLE001 — 必须把所有异常翻成契约终态
@@ -699,7 +731,7 @@ def action_generate(request_id, payload, is_update=False):
     update_outcome = _update_outcome_of(adapter)
 
     if missing:
-        result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome)
+        result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome, counts=_counts_of(adapter))
         result["outcome"] = "partial"
         result["blockers"] = [
             {"kind": "article-missing", "detail": f"计划内文章缺失：{name}.md", "target": f"{name}.md"}
@@ -708,7 +740,7 @@ def action_generate(request_id, payload, is_update=False):
         result["failedCount"] = len(missing)
         return result
 
-    result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome)
+    result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome, counts=_counts_of(adapter))
     # 用量：FSoft 自己记在 job.statistics 上（doc_generator.py:559-580）
     try:
         stats = getattr(job, "statistics", None)
@@ -739,6 +771,40 @@ def _update_outcome_of(adapter):
         return str(getattr(record, "outcome", "") or "") or None
     except Exception:
         return None
+
+
+def _counts_of(adapter):
+    """本轮增量的真实计数：保留 / 删除 / 未映射（引擎自己记账的）。
+
+    为什么这些数不能恒 0：契约（docs/fsoft-native-engine.md:44）把
+    keptCount / removedCount / unmappedCount 列为 EngineResult 的必填事实，
+    上层与面板据此判断「这轮到底改了什么」。此前三处硬编码 0，等于把
+    「本轮一行没改」和「本轮改了 30 页但都被判 no-op」记成同一件事。
+
+    取值来源（都是引擎 `UpdateRecord` 的原生字段，不自己猜）：
+      · keptCount    —— verdicts 里 verdict == 'no-op' 的页数（本轮评估过、
+                        判定无需改动，页留在盘上）
+      · removedCount —— pages_removed 去重后的页数（本轮判定应删除的页）
+      · unmappedCount—— repair.orphans 的长度（有变化但没有任何叶节点负责
+                        的组件数，对应质量门的 unmapped-change）
+    拿不到 record（全量 generate 路径）时返回全 0：那一轮本来就没有增量记账。
+    """
+    out = {"keptCount": 0, "removedCount": 0, "unmappedCount": 0}
+    try:
+        record = getattr(adapter, "_last_update_record", None)
+        if record is None:
+            return out
+        verdicts = getattr(record, "verdicts", None) or []
+        out["keptCount"] = sum(
+            1 for v in verdicts if str((v or {}).get("verdict", "")) == "no-op"
+        )
+        out["removedCount"] = len(set(getattr(record, "pages_removed", None) or []))
+        repair = getattr(record, "repair", None) or {}
+        if isinstance(repair, dict):
+            out["unmappedCount"] = len(repair.get("orphans") or [])
+    except Exception:
+        return {"keptCount": 0, "removedCount": 0, "unmappedCount": 0}
+    return out
 
 
 def _state_files(docs_dir):
@@ -773,18 +839,25 @@ def _state_files(docs_dir):
     return out
 
 
-def _done_result(request_id, docs_dir, repo_path, started, written=0, stage="articles", update_outcome=None):
+def _done_result(request_id, docs_dir, repo_path, started, written=0, stage="articles", update_outcome=None, counts=None):
+    out = {"keptCount": 0, "removedCount": 0, "unmappedCount": 0}
+    if isinstance(counts, dict):
+        for key in out:
+            try:
+                out[key] = max(0, int(counts.get(key, 0) or 0))
+            except (TypeError, ValueError):
+                out[key] = 0
     return {
-        "contractVersion": 1,
+        "contractVersion": CONTRACT_VERSION,
         "outcome": "done",
         "stage": stage,
         "blockers": [],
         "error": None,
         "writtenCount": written,
         "failedCount": 0,
-        "keptCount": 0,
-        "removedCount": 0,
-        "unmappedCount": 0,
+        "keptCount": out["keptCount"],
+        "removedCount": out["removedCount"],
+        "unmappedCount": out["unmappedCount"],
         "usage": {"inputTokens": 0, "outputTokens": 0, "cachedTokens": 0, "requests": 0},
         "engine": {"version": _engine_version(), "commit": _git_commit(repo_path), "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"},
         "artifacts": {
@@ -839,7 +912,7 @@ def _classify_exception(exc, request_id, docs_dir, repo_path, started, stage="ar
 
 def _cancelled_result(request_id, written=0, stage="articles"):
     return {
-        "contractVersion": 1,
+        "contractVersion": CONTRACT_VERSION,
         "outcome": "cancelled",
         "stage": stage,
         "blockers": [{"kind": "cancelled", "detail": "用户取消了这次编译"}],
@@ -889,8 +962,12 @@ def handle_request(msg):
     if action == "cancel":
         # 取消由 Node 侧直接杀进程树（lib/engine/process-tree.js）。
         # 入口这一侧的 cancel 只用于「请求已受理但还没开始跑」的场景，
-        # 所以立刻回 cancelled 终态，不做任何实际工作。
-        return request_id, _cancelled_result(request_id)
+        # 所以立刻应答，不做任何实际工作。
+        #
+        # 出参按契约（docs/fsoft-native-engine.md「接口面」表）是
+        # `{cancelled: boolean}`，**不是**一份 EngineResult：cancel 是控制面动作，
+        # 不是一次编译的结果，回 EngineResult 会让下游把它当成「这轮编译结束了」。
+        return request_id, {"cancelled": True}
     if action == "update":
         return request_id, action_generate(request_id, payload, is_update=True)
     return request_id, action_generate(request_id, payload, is_update=False)

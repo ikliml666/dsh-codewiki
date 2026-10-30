@@ -24,7 +24,7 @@
 
 - `scope=auto`（默认）：无 wiki / 未编译 → 全量；有变更 → 逐篇更新过期文章；最新 → 直接报告。
 - 全部模型环节（写文章/横切/审校）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型；不再委托发起会话的主模型。
-- 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**，此时不刷新编译基线（`meta update` 不执行，可安全重试）；只有「所有变更都已被解释 + 所有必需文章都成功 + 索引与质量检查全过」才 `done` 并推进基线。
+- 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**。基线推进的判据是「这一轮有没有交付产物」：`done` 推进；`partial` 只在确有产物落盘（`rawTreeFiles > 0`）时推进，否则下一轮从同一批变化重来、永远卡在同一处（0.16.1 之前按「partial 一律不推进」实现，真机上就是这么死循环的）；`failed`/`cancelled` 一律不动基线。
 - 请求并发分两档独立限流：默认档 `maxConcurrency` 默认 2（硬顶 8），大档 `bigConcurrency` 默认跟随默认档（`0`）；两池同时推进，总在飞为两者之和。
 - `serialProjects` 默认开：同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued` 排队，前一个收尾后自动轮到。
 - `scope=full`：跳过 clean 短路，即使 wiki 最新也强制全量重编。
@@ -54,7 +54,7 @@
 
 ### 终态诚实：`partial` 不是 `done`
 
-`done` 现在只表示「完整成功」。以下任一情况终态为 `partial`（附 `blockers` 逐条原因），并且**不执行 `meta update`**，下次编译还会重新处理这些变化：
+`done` 现在只表示「完整成功」。以下任一情况终态为 `partial`（附 `blockers` 逐条原因）。`partial` 不推进基线，**除非**这一轮确实写出了文章（`rawTreeFiles > 0`）——那种情况下已产出的部分会被记进基线，未消化的变化留给下一轮，避免「每次都重跑同一批、每次都撞同一个上限」：
 
 - 计划内必需的文章缺失或写作失败（旧实现只看 `writtenCount === 0`，1 篇成功 + 19 篇失败照样 `done` + 推进基线）；
 - 有变更没被任何文章解释（未映射）；
@@ -109,7 +109,7 @@
 | `nativeEngine` | `true` | 编译通道。`true`（默认，0.16.0 起）= 原生引擎裁决全流程；`false` = 兼容通道（插件内 Node 流水线，仅按顶层目录分组 + 文件级归属判定） |
 | `nativeEnginePython` | 空 | venv 解释器绝对路径；空 → `DSH_CODEWIKI_PYTHON` → `python` |
 | `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本，一般不用改 |
-| `nativeEngineTimeoutMs` | `10800000`（180 分钟） | 单次引擎调用上限；超时杀进程树，**已写出的文章按 partial 抢救**（不会白跑）。默认值按真机全量实测（约 174 分钟）给，不是按小 fixture 估的 |
+| `nativeEngineTimeoutMs` | `0`（= 用默认 180 分钟） | 单次引擎调用上限；超时杀进程树，**已写出的文章按 partial 抢救**（不会白跑）。默认值按真机全量实测（约 174 分钟）给，不是按小 fixture 估的 |
 
 模型侧不新增设置：复用 `batchProvider` / `batchModel`（聚类与写文章都用它），经上面的
 llm bridge 转发。
@@ -249,7 +249,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `maxConcurrency`（0.12.2 起语义收窄为**默认档**）：默认档（`batchModel`，如免费 hy3）请求并发上限，默认 2（1–8，硬顶 8）。
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
-- `articleLanguage`：文章语言，默认中文。
+- `articleLanguage`：文章语言，默认中文。**两条通道都生效**：兼容通道写进提示词，原生通道经 `runNativeJob` 的 `language` 字段传进引擎 payload、落在 `agent_instructions.language`（上游 `config.py` 的 `language` property 读它）。0.16.7 之前原生通道整条链路都没接这个字段，引擎静默按英文写。
 - `planMode`（0.13.0，**0.16.0 起已无实际效果**）：语义聚类的实现在阶段 7 删除，兼容通道一律按顶层目录分组（等价于 `dirs`）。字段保留仅为兼容既有 `settings.json`，改它不会改变行为。
 - `agenticArticles`（0.13.0，默认开）：文章写作走 agentic 工具循环——模型在写作过程中自己 `read_code` 读指定文件的指定行、`list_files` 找文件、`edit_article` 增量改写，不再把整个模块源码内联进单个 prompt。好处：prompt 小（不再触发 110k/420k 装填分级）、可以多轮回看精修、大文件不必拆观察批。0.13.2 起该通道也走双池并发：模块源文本量超 `bigTokenBudget` 的任务打 `bigTier` 标记走大档（`bigProvider`/`bigModel`），其余走默认档。关闭则走单轮整包装填的旧通道。0.13.3 起 `read_code` 带重复读抑制：模型反复读同一段（真实运行里出现过同一文件读 13 次）时不再回吐正文，只提示「你已经在第 N 步读过这段」，去重判定发生在读盘之前；同一探针实测重复读 12 → 5 次、上下文 2144 → 1413KB、步数 45 → 17，`stopReason` 由 `max-steps` 变为 `finished`。0.13.4 起工具层补齐四个翻车点：`str_replace`/`insert` 按行尾归一化匹配（仓库 `core.autocrlf=true`，`.codewiki` 下 28/36 篇是 CRLF，跨行替换原先必然失败且模型会反复重试到步数耗尽）；子模块到嵌套上限时不再谎称「已记录」而是报错并要求写成普通小节（原先会产出指向不存在文件的死链、父任务仍记 `ok:true`）；`read_code` 加 40000 字符上限（原先单行超长文件一次可灌 5.7 万 token）；`list_files` 隐藏 `node_modules`/`.git` 等目录。
 - `agenticMaxSteps`（0.13.0，默认 30，1–100）：单篇文章最多允许几轮「读源码 → 改文章」。到上限会强制收尾（写回当前文章并记 note）。

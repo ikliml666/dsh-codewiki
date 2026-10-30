@@ -32,11 +32,12 @@ graph-diff/incremental/update-planner 五个模块及其 7 套测试**已删除*
 
 ### EngineResult
 
-一次 `generate` / `update` 的完整结果。`contractVersion` 固定为 `1`。
+一次 `generate` / `update` 的完整结果。`contractVersion` 固定为 `2`（0.16.7 起；
+改契约必须同步升 `lib/engine/contract.js` 的 `ENGINE_CONTRACT_VERSION` 与 `test-engine-contract.mjs`）。
 
 ```jsonc
 {
-  "contractVersion": 1,
+  "contractVersion": 2,
   "outcome": "done|partial|failed|cancelled",
   "stage": "env|graph|cluster|articles|validate|index|baseline|commit|null",
   "blockers": [{ "kind": "article-failed", "detail": "...", "target": "modules/a.md" }],
@@ -61,7 +62,11 @@ graph-diff/incremental/update-planner 五个模块及其 7 套测试**已删除*
 `blockers[].kind` 是机读枚举（`BLOCKER_KINDS`），新增只许追加、不许改名：
 `article-failed` / `article-missing` / `unmapped-change` / `unmapped-page` /
 `quality-gate` / `index-failed` / `baseline-failed` / `commit-failed` /
-`engine-error` / `cancelled`。
+`engine-error` / `cancelled` / `incremental-fallback` / `engine-timeout`。
+
+`engine-timeout` 是 0.16.7 补登记的：`client.js` 判「超时但有进度 → partial」时把它当
+blocker 用，但枚举里没有它，`normalizeBlocker` 会静默降级成 `engine-error`，
+于是「跑到一半被超时砍掉」与「引擎自己崩了」在终态和面板里长得一模一样。
 
 `error.code` 决定重试语义（`ENGINE_ERROR_CODES`）：`engine-timeout`、`engine-model`、
 `engine-unknown` 可重试；其余（`engine-missing`、`engine-deps`、`engine-crashed`、
@@ -136,8 +141,13 @@ graph-diff/incremental/update-planner 五个模块及其 7 套测试**已删除*
 只把「算图/聚类/写文/增量判定」交给 FSoft。因此：
 
 - `.codewiki/_index.md` 永远由 `cw index` 生成，插件不手写；
-- `.codewiki/_meta.yaml` 的 `last_compiled_commit` 只在 `EngineResult.outcome === 'done'`
-  时才允许推进（partial/failed/cancelled 一律不动），与 0.14.0 的基线不变量一致；
+- `.codewiki/_meta.yaml` 的 `last_compiled_commit` 只在「这一轮确实交付了产物」时推进：
+  `done` 一律推进；`partial` 只有在 `rawTreeFiles > 0`（引擎确有产物落盘并被留档）时
+  才推进；`failed`/`cancelled` 一律不动。
+  0.16.1 之前写的是「partial 一律不动」，真机上造成死循环：超时被砍但已写 28 篇的那一轮
+  推不动基线，下一轮从同一批变化重来，每次都跑到同一处超时（连续六条任务全挂在这条上）。
+  判据实现见 `lib/engine/native-run.js:181`（`canAdvanceBaseline`）与
+  `lib/engine/apply-plan.js` 的基线推进段，两者必须一致；
 - 自动提交仍只 `git add -- .codewiki CodeWiki.md`，pathspec 边界不变。
 
 ## 阶段门禁
