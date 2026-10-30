@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.16.11 — 2026-10-30
+
+### 进度帧带上模块名：让「已写 0 篇」变成「正在写 lib/engine/client.js」
+
+**背景**：0.16.9 的心跳解决了「阶段 3 一帧不发、面板上与挂死无法区分」，但真机跑起来
+仍然是 `引擎仍在运行（阶段 3，已写 0 篇）`——一个数字，不知道卡在哪。用户明确要求
+把进度粒度做细（选项 B）。
+
+**为什么拿不到模块名**：FSoft 以 `verbose=False` 运行时会把 `codewiki.src.be` 的 logger
+压到 `WARNING`（`.probe-fsoft/src/codewiki/cli/adapters/doc_generator.py:96-125`），
+于是逐模块日志——`documentation_generator.py:293` 的
+`📄 Processing leaf module: {module_key}`、`:302` 的 `📁 Processing parent module: {module_key}`、
+`:315` 的 `📚 Generating repository overview`——全被吞掉。桥接层于是只知道「已写 N 篇」。
+
+**改法（旁路只读，不改 FSoft 源码）**：`lib/engine/python/entry.py` 新增
+
+- `_DETAIL` 状态 + `_DETAIL_PATTERNS`（四条正则，**只吃 ASCII 部分**，不碰 emoji 前缀——
+  cp936 控制台下打印 emoji 会抛 `UnicodeEncodeError`）；
+- `_DetailHandler(logging.Handler)`：从日志文本抽模块名，**任何异常都吞掉**
+  （观测失败绝不能弄崩编译）；
+- `attach_detail_tap()` / `release_detail_tap(tap)`：把 `codewiki.src.be` 临时降到 `INFO`
+  并挂 handler，返回句柄供还原；
+- `detail_suffix()`：拼出 `，正在写 <模块>` 或 `，正在生成仓库总览`；模块名超过 80 字符截断。
+
+**两个必须同时处理的副作用**：
+
+1. **不能让 INFO 灌进 stderr**。FSoft 自己在 `doc_generator.py:115` 挂了
+   `StreamHandler(sys.stderr)`，`verbose=False` 时靠「logger level = WARNING」挡住 INFO。
+   只降 logger level 会让这条 INFO 冲进 stderr，被 `client.js` 当 stderr tail 收走，
+   噪音暴涨。所以 `attach_detail_tap()` 同时把已有 handler 的 level 提到 `WARNING`，
+   让 INFO 只走我们这个只读 handler——`silenced` 句柄负责还原。
+2. **探针存活期严格等于一次编译**。tap 挂在 `generate_with_heartbeat()` 里，
+   `finally: release_detail_tap(tap)` 摘掉并还原 level，不给后续请求留下被降级过的 logger。
+
+**接入点**：`start_stage` / `update_stage` / `complete_stage` 三处都改成
+`with_detail(description)` / `with_detail(message)`，心跳帧也拼 `detail_suffix()`。
+`with_detail` 只在有额外信息时补一段，不改调用方传进来的语义；
+FSoft 的 message 在 `verbose=False` 时常常是空的，此时模块名就是唯一可读的进度信息。
+
+**回归**：`test-engine-python-entry.mjs` 新增
+`细节探针：逐模块日志要变成进度帧里的模块名（否则面板只有「已写 0 篇」）`——
+复刻 FSoft 的 `handlers.clear()` + WARNING 配置，断言挂 tap 前 INFO 被吞、
+挂 tap 后 `lib/engine/client.js` / `lib/engine` 都能抽出来、总览阶段有「总览」字样、
+超长名截断到 ≤90 字符、摘掉后 level 还原成 `30`（WARNING）且状态不再变化。
+`21 passed, 0 failed`。
+
+**反向验证**：在 `attach_detail_tap()` 里插 `return None  # REVERSE-VERIFY` →
+`20 passed, 1 failed`，报
+`AssertionError: 叶子模块名必须解析出来：{"phase":"leaf","module":"","suffix":""}`
+（`+ ''` vs `- 'lib/engine/client.js'`）；恢复后 `21 passed, 0 failed`。
+
 ## 0.16.10 — 2026-10-30
 
 ### 澄清：`update-record` 的基线判据写全，但实测该分支当前不可达

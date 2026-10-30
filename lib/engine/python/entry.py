@@ -36,7 +36,9 @@ loopback 桥注入（lib/engine/llm-bridge.js），密钥只存在于**进程环
 """
 
 import json
+import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -193,6 +195,123 @@ def emit_progress(request_id, stage, percent, message="", written=0, failed=0, t
             "totalCount": total,
         }
     )
+
+
+# ── 引擎细节探针：把「已写 3 篇」补成「正在写 lib/engine/client.js」 ─────────
+#
+# 为什么需要它：FSoft 以 verbose=False 运行时会把 `codewiki.src.be` 的 logger
+# 压到 WARNING（.probe-fsoft/src/codewiki/cli/adapters/doc_generator.py:96-120），
+# 于是逐模块日志（documentation_generator.py:293 的
+# "📄 Processing leaf module: X"、:302 的 "📁 Processing parent module: X"）
+# 全被吞掉。阶段 3 里桥接层于是只知道「已写 N 篇」，不知道「在写哪一篇」——真机
+# 上一次编译能卡在单个模块上几十分钟，这个信息量不足以区分「在推进」与「死了」。
+#
+# 做法刻意保持旁路：不改 FSoft 源码（vendor 锁版本），只在自己进程里把那个
+# logger 临时降到 INFO 并挂一个只读 handler，从日志文本里抽当前模块名。
+# handler 里任何异常都被吞掉——观测失败绝不能弄崩编译。
+_DETAIL = {"module": "", "phase": "", "at": 0.0}
+
+# 逐模块日志的文本形态。emoji 前缀不参与匹配：cp936 控制台下非 ASCII 文本
+# 直接 print 会抛 UnicodeEncodeError，所以正则只吃 ASCII 部分。
+_DETAIL_PATTERNS = (
+    (re.compile(r"Processing leaf module:\s*(\S.*?)\s*$"), "leaf"),
+    (re.compile(r"Processing parent module:\s*(\S.*?)\s*$"), "parent"),
+    (re.compile(r"Generating parent documentation for:\s*(\S.*?)\s*$"), "parent"),
+    (re.compile(r"Generating repository overview"), "overview"),
+)
+
+# 模块名在面板上不能挤爆，超长截断。
+_DETAIL_MAX_LEN = 80
+
+
+class _DetailHandler(logging.Handler):
+    """只读旁路 handler：从日志抽出当前模块名，绝不改变日志本身的行为。"""
+
+    def emit(self, record):
+        try:
+            message = record.getMessage()
+            for pattern, phase in _DETAIL_PATTERNS:
+                match = pattern.search(message)
+                if not match:
+                    continue
+                _DETAIL["phase"] = phase
+                if phase == "overview":
+                    # 「生成仓库总览」这一步没有模块名，但它是阶段 3 最后一个大块，
+                    # 面板上必须能看见，否则这十几分钟又是一片空白。
+                    _DETAIL["module"] = ""
+                else:
+                    _DETAIL["module"] = (match.group(1) if match.groups() else "").strip()
+                _DETAIL["at"] = time.time()
+                return
+        except Exception:  # noqa: BLE001 — 观测失败绝不能弄崩编译
+            return
+
+
+def attach_detail_tap():
+    """临时把 `codewiki.src.be` 降到 INFO 并挂只读 handler。
+
+    返回一个句柄供 `release_detail_tap` 还原；拿不到 logger 时返回 None。
+
+    为什么不直接把 level 一降了事：FSoft 自己在 `doc_generator.py:96-120` 挂了
+    StreamHandler(sys.stderr)，verbose=False 时靠「logger level = WARNING」挡住
+    INFO。一旦我们只降 logger level，这条 INFO 就会灌进 stderr，被
+    `lib/engine/client.js` 当 stderr tail 收走，噪音暴涨。所以这里同时把已有
+    handler 的 level 提到 WARNING，让 INFO 只走我们这个只读 handler。
+    """
+    try:
+        logger_obj = logging.getLogger("codewiki.src.be")
+        handler = _DetailHandler()
+        handler.setLevel(logging.INFO)
+        silenced = []
+        for existing in logger_obj.handlers:
+            # 只压那些会放行 INFO 的 handler；本来就是 WARNING 以上就别动。
+            if existing.level <= logging.INFO:
+                silenced.append((existing, existing.level))
+                existing.setLevel(logging.WARNING)
+        previous = logger_obj.level
+        logger_obj.addHandler(handler)
+        logger_obj.setLevel(logging.INFO)
+        _DETAIL["module"] = ""
+        _DETAIL["phase"] = ""
+        return {
+            "logger": logger_obj,
+            "handler": handler,
+            "level": previous,
+            "silenced": silenced,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def release_detail_tap(tap):
+    """摘掉 handler 并还原所有 level，避免污染后续请求。"""
+    if not tap:
+        return
+    try:
+        tap["logger"].removeHandler(tap["handler"])
+        tap["logger"].setLevel(tap["level"])
+        for existing, level in tap["silenced"]:
+            existing.setLevel(level)
+    except Exception:  # noqa: BLE001
+        return
+    finally:
+        _DETAIL["module"] = ""
+        _DETAIL["phase"] = ""
+
+
+def detail_suffix():
+    """当前正在处理的模块名，拼进进度帧 message；没有就返回空串。"""
+    try:
+        module = _DETAIL["module"]
+        if not module:
+            if _DETAIL["phase"] == "overview":
+                return "，正在生成仓库总览"
+            return ""
+        if len(module) > _DETAIL_MAX_LEN:
+            module = module[: _DETAIL_MAX_LEN - 3] + "..."
+        return f"，正在写 {module}"
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def emit_result(request_id, result):
@@ -518,10 +637,22 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
             request_id, map_stage(stage), percent, message, written=written_now(force)
         )
 
+    def with_detail(message):
+        """把当前处理的模块名拼进 message。
+
+        不改调用方传进来的语义（阶段描述照旧在前），只在有额外信息时补一段。
+        FSoft 自己的 message 常常是空的（verbose=False 时 update_stage 压根不带
+        描述），此时模块名就是唯一可读的进度信息。
+        """
+        extra = detail_suffix()
+        if not extra:
+            return message
+        return f"{message}{extra}" if message else extra.lstrip("，")
+
 
     def start_stage(stage, description=None):
         orig_start(stage, description)
-        emit(stage, percent_of(stage, 0.0), description or "", force=True)
+        emit(stage, percent_of(stage, 0.0), with_detail(description or ""), force=True)
         note(stage)
 
     def update_stage(progress, message=None):
@@ -529,14 +660,19 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
         emit(
             tracker.current_stage,
             percent_of(tracker.current_stage, tracker.stage_progress),
-            message or "",
+            with_detail(message or ""),
         )
         note(tracker.current_stage)
 
     def complete_stage(message=None):
         orig_complete(message)
         # 阶段完成是超时判 partial 的关键帧，必须按当前真实产物重算，不吃节流缓存。
-        emit(tracker.current_stage, percent_of(tracker.current_stage, 1.0), message or "", force=True)
+        emit(
+            tracker.current_stage,
+            percent_of(tracker.current_stage, 1.0),
+            with_detail(message or ""),
+            force=True,
+        )
         note(tracker.current_stage)
 
     tracker.start_stage = start_stage
@@ -581,7 +717,7 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
                 emit(
                     stage,
                     percent_of(stage, tracker.stage_progress),
-                    f"引擎仍在运行（阶段 {stage}，已写 {counted['n']} 篇）",
+                    f"引擎仍在运行（阶段 {stage}，已写 {counted['n']} 篇）{detail_suffix()}",
                     force=True,
                 )
                 note(stage)
@@ -591,11 +727,15 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
     def generate_with_heartbeat():
         thread = threading.Thread(target=_heartbeat, name="codewiki-heartbeat", daemon=True)
         state["on"] = True
+        # 细节探针的存活期严格等于一次编译：挂在 generate 上，finally 里摘掉，
+        # 保证不给后续请求留下被降级过的 logger。
+        tap = attach_detail_tap()
         thread.start()
         try:
             return orig_generate()
         finally:
             state["on"] = False
+            release_detail_tap(tap)
 
     if orig_generate is not None:
         adapter.generate = generate_with_heartbeat

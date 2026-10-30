@@ -737,6 +737,75 @@ pathlib.Path(${JSON.stringify(outFile)}).write_text(
   assert.ok(beats.some((f) => f.written === 1), `心跳必须如实带出已写篇数：${JSON.stringify(beats)}`)
 })
 
+// 细节探针：把「已写 3 篇」补成「正在写 lib/engine/client.js」。
+//
+// FSoft 以 verbose=False 运行时把 `codewiki.src.be` 压到 WARNING，逐模块日志
+// （documentation_generator.py:293 的 "Processing leaf module: X"）全被吞掉，
+// 于是阶段 3 里桥接层只知道「已写 N 篇」，不知道「在写哪一篇」。真机上一轮
+// 编译能卡在单个模块上几十分钟，这个信息量不足以区分「在推进」与「死了」。
+await check('细节探针：逐模块日志要变成进度帧里的模块名（否则面板只有「已写 0 篇」）', async () => {
+  const outFile = join(sandbox, 'probe-detail.json')
+  const probe = `
+import json, sys, pathlib, logging
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+
+# 复刻 FSoft 在 doc_generator.py:96-125 的配置：verbose=False 的形态
+backend = logging.getLogger("codewiki.src.be")
+backend.handlers.clear()
+backend.setLevel(logging.WARNING)
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
+backend.addHandler(stderr_handler)
+backend.propagate = False
+
+child = logging.getLogger("codewiki.src.be.documentation_generator")
+steps = []
+
+# 挂 tap 之前的 INFO 必须被吞掉（否则等于我们凭空改了日志级别）
+child.info("Processing leaf module: should-not-appear")
+steps.append({"phase": "before-tap", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+tap = entry.attach_detail_tap()
+child.info("\\U0001f4c4 Processing leaf module: lib/engine/client.js")
+steps.append({"phase": "leaf", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+child.info("\\U0001f4c1 Processing parent module: lib/engine")
+steps.append({"phase": "parent", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+child.info("\\U0001f4da Generating repository overview")
+steps.append({"phase": "overview", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+# 超长模块名不能在面板上挤爆
+child.info("Processing leaf module: " + "x" * 200)
+long_len = len(entry.detail_suffix())
+
+# 摘掉之后必须还原：level 回到 WARNING，INFO 重新被吞
+entry.release_detail_tap(tap)
+restored_level = logging.getLogger("codewiki.src.be").level
+child.info("Processing leaf module: after-release")
+steps.append({"phase": "after-release", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+pathlib.Path(${JSON.stringify(outFile)}).write_text(
+    json.dumps({"steps": steps, "long_len": long_len, "restored_level": restored_level}, ensure_ascii=False),
+    encoding="utf-8"
+)
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `细节探针失败：${raw.stderr}${raw.stdout}`)
+  const got = JSON.parse(readFileSync(outFile, 'utf8'))
+  const by = (phase) => got.steps.find((s) => s.phase === phase)
+
+  assert.equal(by('before-tap').module, '', `挂 tap 之前的 INFO 必须被吞掉：${JSON.stringify(by('before-tap'))}`)
+  assert.equal(by('leaf').module, 'lib/engine/client.js', `叶子模块名必须解析出来：${JSON.stringify(by('leaf'))}`)
+  assert.ok(by('leaf').suffix.includes('lib/engine/client.js'), `进度帧后缀必须带模块名：${by('leaf').suffix}`)
+  assert.equal(by('parent').module, 'lib/engine', `父模块名必须解析出来：${JSON.stringify(by('parent'))}`)
+  assert.ok(by('overview').suffix.includes('总览'), `总览阶段没有模块名，也必须能看见：${JSON.stringify(by('overview'))}`)
+  assert.ok(got.long_len <= 90, `超长模块名必须截断，实际 ${got.long_len}`)
+  assert.equal(got.restored_level, 30, `摘掉 tap 必须把 level 还原成 WARNING，实际 ${got.restored_level}`)
+  assert.equal(by('after-release').module, '', `摘掉 tap 之后不能再改状态：${JSON.stringify(by('after-release'))}`)
+})
+
 // ── 收尾 ──────────────────────────────────────────────────────────────────
 
 try { rmSync(sandbox, { recursive: true, force: true }) } catch { /* Windows 上占用是常事，临时目录会自动回收 */ }
