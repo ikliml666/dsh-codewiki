@@ -74,6 +74,7 @@ export const Config = z.object({
   bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
   sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
+  moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（与 bigConcurrency 同一约定，真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
   bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
@@ -120,6 +121,12 @@ function liveConfig(config) {
     bigConcurrency: Number.isFinite(bigConcurrency) && bigConcurrency >= 1
       ? Math.min(bigConcurrency, CONCURRENCY_HARD_CAP)
       : 0,
+    // 原生引擎的模块生成并行度：与 maxConcurrency（LLM 请求并发）是两个独立的设置项，
+    // 不能混用同一个值——但 0/未填 时按 bigConcurrency 的既有约定跟随默认档并发。
+    moduleConcurrency: (() => {
+      const raw = Number(val(c.moduleConcurrency))
+      return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), CONCURRENCY_HARD_CAP) : 0
+    })(),
     serialProjects: val(c.serialProjects) !== false,
     parallelLimit: (() => {
       const raw = Number(val(c.parallelProjects))
@@ -2659,9 +2666,9 @@ function createJobService(config, onSettled) {
         // 文章语言：job 提交时已按「入参 > 插件设置」解析好（submit 的 language），
         // 原生通道必须显式带下去，否则引擎按英文写、设置项形同虚设。
         language: job.language,
-        // 同层模块并行度复用编译并发设置：上游原来是严格串行（一篇约 12 分钟，
-        // 16 节点仓库串跑 180 分钟超时只写 18 篇，真机 job-mvuf1c5b-5）。
-        moduleConcurrency: c.maxConcurrency,
+        // 同层模块并行度：独立设置项，0/未填 跟随默认档并发（与 bigConcurrency 同约定），
+        // 填 1 = 上游原本的严格串行。不复用同一个配置键，两者语义不同。
+        moduleConcurrency: c.moduleConcurrency || c.maxConcurrency,
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),

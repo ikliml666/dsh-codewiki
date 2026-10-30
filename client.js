@@ -47,6 +47,8 @@ window.__ModuleLoader__.load({
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
       maxConcurrency: '默认档并发上限',
       maxConcurrencyHint: '1–8；硬顶 8。默认档（batchModel）的请求并发数，默认 2。',
+      moduleConcurrency: '模块生成并行度',
+      moduleConcurrencyHint: '1–8；硬顶 8。同一拓扑层的模块同时写文档，父模块仍等全部子模块。留空或 0 = 跟随默认档并发（与「大档并发上限」同一约定）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。真机实测 2× 时吞吐 2.9×，代价是同批 LLM 请求更密集。',
       bigConcurrency: '大档并发上限',
       bigConcurrencyHint: '1–8；硬顶 8。大档（bigModel）的请求并发数，留空=跟随默认档。两档各自独立限流、同时推进，总在飞为两者之和。',
       serialProjects: '单项目串行',
@@ -235,6 +237,8 @@ window.__ModuleLoader__.load({
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
       maxConcurrency: 'Default-tier concurrency',
       maxConcurrencyHint: '1–8; hard cap 8. In-flight requests for the default tier (batchModel), default 2.',
+      moduleConcurrency: 'Module parallelism',
+      moduleConcurrencyHint: '1–8; hard cap 8. Modules on the same topological layer write their docs concurrently while parent modules still wait for every child. Empty or 0 follows the default-tier concurrency (same convention as Big-tier concurrency); 1 restores the upstream strictly sequential behaviour (~12 min per module). Measured 2.9x throughput at 2 on a real run, at the cost of denser LLM bursts.',
       bigConcurrency: 'Big-tier concurrency',
       bigConcurrencyHint: '1–8; hard cap 8. In-flight requests for the big tier (bigModel); leave empty to follow the default-tier value. The two tiers are limited separately and progress at the same time, so total in-flight is the sum.',
       serialProjects: 'One project at a time',
@@ -811,7 +815,7 @@ window.__ModuleLoader__.load({
             }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'planMode', 'agenticArticles', 'agenticMaxSteps', 'symbolIncremental']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'planMode', 'agenticArticles', 'agenticMaxSteps', 'symbolIncremental']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -886,6 +890,16 @@ window.__ModuleLoader__.load({
                     placeholder: '2',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('maxConcurrencyHint')),
+                ),
+                el('label', null, t('moduleConcurrency')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 0, max: 8, step: 1,
+                    value: String(draft.moduleConcurrency ?? 0),
+                    onChange: (e) => setPath('moduleConcurrency', e.target.value === '' ? 0 : Number(e.target.value)),
+                    placeholder: '0',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('moduleConcurrencyHint')),
                 ),
                 el('label', null, t('bigConcurrency')),
                 el('div', { 'data-dscw-field': '' },

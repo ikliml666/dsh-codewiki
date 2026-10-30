@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.16.15 — 2026-10-30
+
+### /code-review 双轴评审：修三条真回归，并行度拆成独立设置项
+
+**背景**：0.16.14 落地后跑 `/code-review`（Standards + Spec 双轴），
+同时用真机 `job-mvuk7e20-1` 验证提速。评审报了若干条，逐条回代码核实，
+其中三条是真问题，已修并各自做了反向验证。
+
+**1. `else` 分支被并行改造吞掉（严重回归，两个评审各自独立发现）**
+
+`documentation_generator.py` 里「整仓能装进上下文就直接写整个仓库」的
+`else:` 段落，缩进在改造时丢了归属。后果比评审描述的更严重：有模块树的
+仓库会先走 `generate_parent_module_docs`，**再无条件 `run_module_agent`
+跑一遍 whole-repo** —— 双跑，白烧一次全量预算。
+
+修法：恢复 `else:`，并用 AST 复核（`if at line 274` 的 `orelse` 有 6 条语句，
+首条是 `logger.info("Processing whole repo ...")`）。
+补测试「空模块树时必须走 else 分支写整仓总览」：摘掉 `else:` 红
+（`空模块树时 backend 一次都没被调用`），恢复即绿。
+
+**2. 误删逐模块 emoji 日志** — 并行改造顺手删掉了 `📄`/`📁`/`📚` 三处
+`logger.info` 的 emoji，与并行毫无关系。已恢复，`git diff` 现在只剩缩进变化。
+这些日志正是 0.16.11 细节探针的数据源，删了会让进度帧退化成「已写 0 篇」。
+
+**3. 死变量 + 白付深拷贝** — `processed_modules` 只 `add` 不读（原去重守卫
+被删后成了死代码）；`branch_tree = deepcopy(module_tree)` 只用于
+`is_leaf_module` 判断，而两条下游路径都自己从磁盘 load 树，深拷贝纯浪费。
+已删掉死变量，改用 `module_info = module_tree`（主树写入只发生在 gather
+之后的合并阶段，单线程，无需拷贝）。
+
+**4. `moduleConcurrency` 不再复用 `c.maxConcurrency`（Standards 硬违规）**
+
+0.16.14 初版写的是 `moduleConcurrency: c.maxConcurrency`，而 `maxConcurrency`
+是**LLM 请求并发**、默认 2 —— 于是「默认 1 = 上游串行、向后兼容」当场落空，
+所有既有用户升级后立刻变并行 2，行为静默改变。
+
+改为独立设置项 `moduleConcurrency`，沿用 `bigConcurrency` 的既有约定：
+**0 / 未填 = 跟随默认档并发，填 1 = 上游严格串行**。设置面板已加输入框
+（中英双语文案），保存键已纳入。
+补测试钉住语义边界：把回落表达式改回 `c.maxConcurrency` 即红
+（`填 1 = 串行会失效`），恢复即绿。
+
+### 真机提速验证（0.16.14 生效后）
+
+宿主 PID 31460 启动 `16:47:19` 晚于提交 `16:22:57`，确认已加载新代码。
+观测 `job-mvuk7e20-1`（Wxxy-CampusLogin，被新引擎接管重跑）：
+
+| 指标 | 旧（0.16.14 前 `job-mvubwirb-3`） | 新（`job-mvuk7e20-1`） |
+| --- | --- | --- |
+| 产出 | 6 篇 / 14.5 分钟 | 21 篇 / 16.8 分钟 |
+| 吞吐 | 0.41 篇/分钟 | 1.19 篇/分钟 |
+| 单篇 | 2.42 分钟 | 0.84 分钟 |
+
+**吞吐 2.9×**。并发铁证：从磁盘 `dsh-codewiki-jobs.json` 的 nativeLogs 取
+20 条请求做区间扫描，**峰值并发 5、20/20 条都与其他请求时间重叠**
+（串行时区间绝不相交）。典型片段 `09:10:41 ms=99232 end=09:12:20` 与
+`09:10:43 ms=3856`、`09:10:48 ms=4290` 重叠。
+
+### 补丁与文档修正
+
+- `patches/README.md`：上游仓库名 `mraza007/codewiki` → **`FSoft-AI4Code/CodeWiki`**
+  （`git remote -v` 实证）；删掉「基准 commit 与 `UPSTREAM_COMMIT` 对应」这句
+  假陈述（实际不一致，本地浅克隆比锁的 commit 新两个 PR），改成打补丁前先
+  `git -C .probe-fsoft/src log -1` 核对 HEAD。
+- `patches/upstream-module-parallel.patch` 重新导出（190 行），
+  `grep -c "^-        else:"` = 0，确认不再删除原 `else`。
+- 未修（判断题，留作后续）：`test-upstream-parallel.mjs` 未登记进 README 的
+  测试清单；`native-run.js` 只钳下限而 `entry.py` 钳上限 8（不同源）。
+
 ## 0.16.14 — 2026-10-30
 
 ### 上游模块生成并行化：同层并发，父模块仍等子模块

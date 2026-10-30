@@ -11,7 +11,7 @@ index f9e318b..9d77922 100644
                  agent_instructions=self.config.get("agent_instructions"),
                  use_gitignore=self.config.get("use_gitignore", True),
 diff --git a/codewiki/src/be/documentation_generator.py b/codewiki/src/be/documentation_generator.py
-index eb5238f..ad442a0 100644
+index eb5238f..d5329b5 100644
 --- a/codewiki/src/be/documentation_generator.py
 +++ b/codewiki/src/be/documentation_generator.py
 @@ -1,3 +1,4 @@
@@ -19,10 +19,26 @@ index eb5238f..ad442a0 100644
  import json
  import logging
  import os
-@@ -271,52 +272,99 @@ class DocumentationGenerator:
-         processed_modules = set()
+@@ -268,54 +269,101 @@ class DocumentationGenerator:
+     ) -> str:
+         # Process modules in dependency order
+         final_module_tree = module_tree
+-        processed_modules = set()
  
          if len(module_tree) > 0:
+-            for module_path, module_name in processing_order:
+-                try:
+-                    # Reload module tree to get latest hierarchical structure from sub-agent modifications
+-                    module_tree = file_manager.load_json(module_tree_path)
+-
+-                    # Get the module info from the tree
+-                    module_info = module_tree
+-                    for path_part in module_path:
+-                        module_info = module_info[path_part]
+-                        if path_part != module_path[-1]:  # Not the last part
+-                            module_info = module_info.get("children", {})
+-
+-                    # Skip if already processed
 +            # 按拓扑层并行：同一层的模块互不依赖（父模块一定在子模块之后的层），
 +            # 可以并发；层与层之间保持串行，父模块读到的子模块文档才是完整的。
 +            #
@@ -45,18 +61,22 @@ index eb5238f..ad442a0 100644
 +
 +            async def run_one(module_path, module_name):
 +                async with semaphore:
-+                    module_key = "/".join(module_path)
+                     module_key = "/".join(module_path)
+-                    if module_key in processed_modules:
+-                        continue
 +                    try:
-+                        # 每批开始时的主树快照；分支内部只动自己的副本
-+                        branch_tree = deepcopy(module_tree)
-+                        module_info = branch_tree
++                        # 只读主树判断这个模块是叶子还是父模块：两个下游都自己从
++                        # 磁盘 module_tree.json 读树，不接收这里的副本；主树的写入
++                        # 只发生在 gather 之后的合并阶段（单线程），所以这里直接读
++                        # 主树是安全的，不需要整树深拷贝（那是一次白付的全树复制）。
++                        module_info = module_tree
 +                        for path_part in module_path:
 +                            module_info = module_info[path_part]
 +                            if path_part != module_path[-1]:
 +                                module_info = module_info.get("children", {})
 +
 +                        if self.is_leaf_module(module_info):
-+                            logger.info(f"Processing leaf module: {module_key}")
++                            logger.info(f"📄 Processing leaf module: {module_key}")
 +                            result_tree = await self.backend.run_module_agent(
 +                                module_name=module_name,
 +                                components=components,
@@ -65,7 +85,7 @@ index eb5238f..ad442a0 100644
 +                                working_dir=working_dir,
 +                            )
 +                        else:
-+                            logger.info(f"Processing parent module: {module_key}")
++                            logger.info(f"📁 Processing parent module: {module_key}")
 +                            result_tree = await self.generate_parent_module_docs(
 +                                module_path, working_dir
 +                            )
@@ -85,31 +105,9 @@ index eb5238f..ad442a0 100644
 +
 +            # 按路径深度分层：深的（叶子）先跑，浅的（父）后跑
 +            layers = {}
-             for module_path, module_name in processing_order:
--                try:
--                    # Reload module tree to get latest hierarchical structure from sub-agent modifications
--                    module_tree = file_manager.load_json(module_tree_path)
--
--                    # Get the module info from the tree
--                    module_info = module_tree
--                    for path_part in module_path:
--                        module_info = module_info[path_part]
--                        if path_part != module_path[-1]:  # Not the last part
--                            module_info = module_info.get("children", {})
--
--                    # Skip if already processed
++            for module_path, module_name in processing_order:
 +                layers.setdefault(len(module_path), []).append((module_path, module_name))
-+
-+            for depth in sorted(layers.keys(), reverse=True):
-+                batch = layers[depth]
-+                results = await asyncio.gather(*(run_one(p, n) for p, n in batch))
-+                for module_path, result_tree, err in results:
-                     module_key = "/".join(module_path)
--                    if module_key in processed_modules:
-+                    processed_modules.add(module_key)
-+                    if result_tree is None:
-                         continue
--
+ 
 -                    # Process the module
 -                    if self.is_leaf_module(module_info):
 -                        logger.info(f"📄 Processing leaf module: {module_key}")
@@ -120,6 +118,12 @@ index eb5238f..ad442a0 100644
 -                            module_path=module_path,
 -                            working_dir=working_dir,
 -                        )
++            for depth in sorted(layers.keys(), reverse=True):
++                batch = layers[depth]
++                results = await asyncio.gather(*(run_one(p, n) for p, n in batch))
++                for module_path, result_tree, err in results:
++                    if result_tree is None:
++                        continue
 +                    if not module_path:
 +                        module_tree = result_tree
                      else:
@@ -146,16 +150,14 @@ index eb5238f..ad442a0 100644
 +                file_manager.save_json(module_tree, module_tree_path)
  
              # Generate repo overview
--            logger.info("📚 Generating repository overview")
-+            logger.info("Generating repository overview")
+             logger.info("📚 Generating repository overview")
              final_module_tree = await self.generate_parent_module_docs(
                  [], working_dir, components=components
              )
--        else:
 +
+         else:
              logger.info("Processing whole repo because repo can fit in the context window")
              repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
-             final_module_tree = await self.backend.run_module_agent(
 diff --git a/codewiki/src/config.py b/codewiki/src/config.py
 index 338a062..b570c6d 100644
 --- a/codewiki/src/config.py

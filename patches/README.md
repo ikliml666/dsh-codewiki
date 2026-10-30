@@ -1,14 +1,17 @@
 # 上游补丁
 
 `.probe-fsoft/` 被 `.gitignore` 排除（它是上游
-[mraza007/codewiki](https://github.com/mraza007/codewiki) 的 clone + venv），
+[FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki) 的 clone + venv），
 所以对上游源码的改动**不会随插件仓库一起提交**。这个目录保存那些改动的
 diff，让它们可追踪、可复现。
 
 ## upstream-module-parallel.patch
 
 - **基准 commit**：`364b67a166bc113f69a50382cb277c55e3f79cee`
-  （与 `lib/engine/manifest.js` 的 `UPSTREAM_COMMIT` 对应）
+  （本机 `.probe-fsoft/src` 的 HEAD；**注意它与 `lib/engine/manifest.js` 的
+  `UPSTREAM_COMMIT`（`03d0a294…`）并不相同** —— 本地 clone 是浅克隆，比锁的
+  commit 新两个 PR。打补丁前先 `git -C .probe-fsoft/src log -1` 核对 HEAD，
+  不一致就按下面的「升级上游」重新导出，别硬套。）
 - **引入版本**：插件 0.16.14
 - **涉及文件**：
   - `codewiki/src/be/documentation_generator.py` — 模块循环改为按拓扑层并行

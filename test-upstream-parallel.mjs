@@ -159,6 +159,12 @@ async def main():
     _, written = await drive(FLAT, 3, b)
     out['after_failure'] = sorted(written)
 
+    # 空模块树 = 仓库小到能整个塞进上下文，上游必须走 else 分支，
+    # 把整仓当一个模块来写（否则一篇文章都不会产出）。
+    b = FakeBackend(delay=0.05)
+    _, empty_written = await drive({}, 2, b)
+    out['empty_tree'] = {'events': len(b.events), 'written': sorted(empty_written)}
+
     Path(OUT, 'result.json').write_text(
         json.dumps(out, ensure_ascii=False), encoding='utf-8')
 
@@ -202,10 +208,32 @@ await check('并行分支新增的子模块都合并回主树（不互相覆盖�
   assert.equal(got.merged.b_sub, true, 'complex_b 的子模块丢失')
 })
 
+await check('空模块树时必须走 else 分支写整仓总览（不能被并行改造吞掉）', () => {
+  assert.ok(got.empty_tree.events > 0,
+    '空模块树时 backend 一次都没被调用 —— else 分支丢了，这类仓库将一篇文章都写不出来')
+  assert.ok(got.empty_tree.written.includes('overview.md'),
+    `空模块树时必须产出 overview.md，实际只写了 ${JSON.stringify(got.empty_tree.written)}`)
+})
+
 await check('单个模块失败不拖垮同批其它模块', () => {
   assert.ok(got.after_failure.includes('alpha.md'), 'alpha 应正常产出')
   assert.ok(got.after_failure.includes('gamma.md'), 'gamma 应正常产出')
   assert.ok(!got.after_failure.includes('beta.md'), 'beta 失败不该有产物')
+})
+
+// 并行度必须有自己的设置项，默认 1。
+// 0.16.14 初版把它写成 `moduleConcurrency: c.maxConcurrency`，而 maxConcurrency
+// 是 LLM 请求并发、默认 2 —— 于是「默认等于上游串行」的承诺当场落空，
+// 所有既有用户升级后立刻变并行。这条钉住那个语义边界。
+await check('并行度是独立设置项（0=跟随默认档并发，1=上游串行）', () => {
+  const src = readFileSync(join(HERE, 'index.js'), 'utf8')
+  const decl = src.match(/moduleConcurrency:\s*z\.number\(\)\.default\((\d+)\)/)
+  assert.ok(decl, 'index.js 里找不到 moduleConcurrency 的设置项声明')
+  assert.equal(Number(decl[1]), 0,
+    `moduleConcurrency 默认值必须是 0（跟随默认档并发，与 bigConcurrency 同约定），实际 ${decl[1]}`)
+  // 必须是独立配置键：0 时才回落到 maxConcurrency，显式填 1 必须能真的退化成串行。
+  assert.ok(/moduleConcurrency:\s*c\.moduleConcurrency\s*\|\|\s*c\.maxConcurrency/.test(src),
+    'moduleConcurrency 必须读自己的配置键、为 0 时才回落到 maxConcurrency —— 直接写 c.maxConcurrency 会让「填 1 = 串行」失效')
 })
 
 rmSync(sandbox, { recursive: true, force: true })
