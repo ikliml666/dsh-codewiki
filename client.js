@@ -437,6 +437,8 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-stage][data-state="failed"] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-stage][data-state="cancelled"] { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-meta] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
+      // 焦点任务的目录（父目录/目录名，title 里是全路径）
+      '[data-dscw-p-cwd] { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-note] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }',
       '[data-dscw-p-empty] { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); padding: 8px 0; }',
       '[data-dscw-p-group] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); margin-top: 4px; word-break: break-all; }',
@@ -505,6 +507,10 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-sessbody] { font-size: 11px; line-height: 16px; }',
       '[data-dscw-p-sessbody] summary { cursor: pointer; user-select: none; color: var(--dsw-alias-label-tertiary); }',
       '[data-dscw-p-sessbody] pre { max-height: 300px; overflow: auto; margin: 4px 0 0; padding: 8px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }',
+      // 会话视图嵌进 tab 时：不占满高度、不自己滚（否则双层滚动把列表压成一条缝）
+      '[data-dscw-p-sesswrap] { display: flex; flex-direction: column; gap: 8px; min-width: 0; }',
+      '[data-dscw-p-sessbar] { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-sessbar] > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
       '@keyframes dscw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
@@ -1377,7 +1383,10 @@ window.__ModuleLoader__.load({
         // 专门开的会话。列表 5s 轮询（running 请求实时涨 outputChars），点开看 prompt/输出
         // 全文；保留 24h。job 为 null 时走全局聚合接口（不带 jobId），跨任务列出全部请求，
         // 行里带上「哪个任务 + 哪个仓库」；选中后仍按 (jobId, n) 拉单条全文。
-        function SessionView({ job, onClose }) {
+        // embedded=true 表示被塞进面板 tab（外层已经是滚动容器）：此时不能再套一层
+        // [data-dscw-p-page]——那会得到双层 padding + 双层 height:100% + 双层滚动条，
+        // 会话列表被压进一条窄缝里滚，看起来就像「会话标签页不能用」。
+        function SessionView({ job, onClose, embedded = false }) {
           const t = tBound
           const global = !job
           const [list, setList] = React.useState(null)
@@ -1413,12 +1422,22 @@ window.__ModuleLoader__.load({
           }, [sel?.jobId, sel?.n])
           const close = () => { setSel(null); onClose() }
           const jobTag = (id) => String(id ?? '').replace(/^job-/, '')
-          return el('div', { 'data-dscw-p-page': '' },
-            el('div', { 'data-dscw-p-head': '' },
+          return el('div', {
+            // 嵌进 tab 时不套 page 容器（外层已是滚动容器），改用无内边距的 sesswrap
+            ...(embedded ? { 'data-dscw-p-sesswrap': '' } : { 'data-dscw-p-page': '' }),
+          },
+            // 嵌进 tab 时面板已有标题栏，这里只留必要的返回/关闭，不再重复一个大标题
+            embedded ? null : el('div', { 'data-dscw-p-head': '' },
               el('h3', null, global ? t('sessGlobalTitle') : t('sessTitle')),
               sel ? el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')) : null,
               el(Button, { variant: 'ghost', size: 'sm', onClick: close }, '✕'),
             ),
+            embedded
+              ? el('div', { 'data-dscw-p-sessbar': '' },
+                el('span', null, global ? t('sessGlobalTitle') : t('sessTitle')),
+                sel ? el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')) : null,
+              )
+              : null,
             global
               ? el('div', { 'data-dscw-p-meta': '' }, t('sessGlobalHint'))
               : el('div', { 'data-dscw-p-meta': '', title: job.cwd ?? job.id }, `${job.id}`),
@@ -1633,6 +1652,14 @@ window.__ModuleLoader__.load({
             return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: jobTitle },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
+                // 焦点卡（正在进行 / 最近一个）要自报「这是哪个目录的编译」：
+                // 历史任务有分组头标目录，焦点卡被排除在分组之外，此前完全看不出归属。
+                job === focus && job.cwd
+                  ? el('span', {
+                    'data-dscw-p-cwd': '',
+                    title: job.cwd,
+                  }, repoName(job.cwd))
+                  : null,
                 el('span', {
                   'data-dscw-p-stage': '', 'data-state': job.stage,
                   'data-running': active ? 'true' : null,
@@ -1706,8 +1733,9 @@ window.__ModuleLoader__.load({
                   }, label)),
               ),
               tab === 'overview' ? el(ReposTab) : null,
-              // 全局会话（1.2.0）：跨任务列出并发池全部 LLM 请求；job=null 走聚合接口
-              tab === 'sessions' ? el(SessionView, { job: null, onClose: () => setTab('overview') }) : null,
+              // 全局会话（1.2.0）：跨任务列出并发池全部 LLM 请求；job=null 走聚合接口。
+              // embedded=true：面板本身已是滚动容器，会话视图别再套一层 page 布局。
+              tab === 'sessions' ? el(SessionView, { job: null, embedded: true, onClose: () => setTab('overview') }) : null,
               tab === 'settings' ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
               tab === 'tasks'
                 ? (err ? el('div', { 'data-dscw-p-empty': '' }, err)

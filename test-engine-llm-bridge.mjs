@@ -287,6 +287,101 @@ await check('超时 → 上游 signal 被 abort，非流式返回 502', async ()
   })
 })
 
+// ── 会话记录钩子（面板「会话」视图的数据来源）────────────────────────────
+// 原生通道的模型请求只经过桥；钩子不接上，面板会话列表就永远是空的。
+await check('会话钩子：每个请求开始记一次，prompt 保留 role 前缀与正文', async () => {
+  const llm = fakeLlm(async function* () { yield { type: 'text-delta', index: 0, text: 'hi' } })
+  const started = []
+  await withBridge({
+    llm, provider: 'workbuddy', model: 'hy3',
+    onRequestStart: (task) => { started.push(task); return null },
+  }, async (bridge) => {
+    await post(bridge, { ...simpleBody, model: 'hy3' })
+    await post(bridge, simpleBody)
+  })
+  assert.equal(started.length, 2)
+  assert.equal(started[0].model, 'hy3')
+  assert.equal(started[0].provider, 'workbuddy')
+  assert.match(started[0].name, /hy3/)
+  assert.ok(started[0].batchPrompt.includes('[user]'), 'prompt 里应保留 role 前缀')
+  assert.ok(started[0].batchPrompt.includes('写一段话'), 'prompt 里应含原始正文')
+})
+
+await check('会话钩子：流式收尾把完整正文与输出 token 交给 onDone', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'text-delta', index: 0, text: '你好' }
+    yield { type: 'text-delta', index: 0, text: '，世界' }
+    yield { type: 'usage', usage: { inputTokens: 5, outputTokens: 7 } }
+    yield { type: 'finish', reason: 'stop' }
+  })
+  const seen = []
+  await withBridge({
+    llm, provider: 'p', model: 'm',
+    onRequestStart: () => ({ onDelta: () => {}, onDone: (text, tok) => seen.push({ text, tok }), onError: () => {} }),
+  }, async (bridge) => {
+    const res = await post(bridge, { ...simpleBody, stream: true })
+    await res.text()
+  })
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].text, '你好，世界')
+  assert.equal(seen[0].tok, 7)
+})
+
+await check('会话钩子：上游失败时 onError 收到错误，不影响 502 语义', async () => {
+  const llm = fakeLlm(async function* () { throw new Error('上游 429') })
+  let errText = null
+  await withBridge({
+    llm, provider: 'p', model: 'm',
+    onRequestStart: () => ({ onDelta: () => {}, onDone: () => {}, onError: (e) => { errText = String(e?.message ?? e) } }),
+  }, async (bridge) => {
+    const res = await post(bridge, simpleBody)
+    assert.equal(res.status, 502)
+  })
+  assert.match(errText, /429/)
+})
+
+await check('会话钩子：记录里不含 Authorization / 占位 key', async () => {
+  const llm = fakeLlm(async function* () { yield { type: 'text-delta', index: 0, text: 'x' } })
+  const tasks = []
+  await withBridge({
+    llm, provider: 'p', model: 'm',
+    onRequestStart: (task) => { tasks.push(task); return null },
+  }, async (bridge) => {
+    await post(bridge, simpleBody)
+    const flat = JSON.stringify(tasks)
+    assert.ok(!/authorization/i.test(flat), '记录里出现 authorization')
+    assert.ok(!flat.includes('dsh-bridge-'), '记录里出现占位 key')
+    assert.ok(!flat.includes(bridge.placeholderKey), '记录里出现本次占位 key')
+  })
+})
+
+await check('会话钩子：超长 prompt 被截断且标注原长（不静默截断）', async () => {
+  const llm = fakeLlm(async function* () { yield { type: 'text-delta', index: 0, text: 'x' } })
+  const big = 'a'.repeat(250 * 1000)
+  let task = null
+  await withBridge({
+    llm, provider: 'p', model: 'm',
+    onRequestStart: (t) => { task = t; return null },
+  }, async (bridge) => {
+    await post(bridge, { messages: [{ role: 'user', content: big }] })
+  })
+  assert.ok(task.batchPrompt.length < big.length, '未截断')
+  assert.ok(task.batchPrompt.includes('已截断'), '截断必须显式标注')
+})
+
+await check('会话钩子：钩子抛错不拖垮请求（面板记账不能影响编译）', async () => {
+  const llm = fakeLlm(async function* () { yield { type: 'text-delta', index: 0, text: 'ok' } })
+  await withBridge({
+    llm, provider: 'p', model: 'm',
+    onRequestStart: () => { throw new Error('记账炸了') },
+  }, async (bridge) => {
+    const res = await post(bridge, simpleBody)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.choices[0].message.content, 'ok')
+  })
+})
+
 await check('启动参数缺失 → 抛错（不让桥以半配置状态监听端口）', async () => {
   assert.throws(() => startLlmBridge({}), /llm/)
   assert.throws(() => startLlmBridge({ llm: { stream() {} } }), /provider/)

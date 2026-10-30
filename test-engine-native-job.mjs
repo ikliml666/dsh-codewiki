@@ -776,6 +776,52 @@ console.log('== 用例 20：engine-timeout 作为 blocker 不许被改名 ==')
   check(r2.blockers[0].kind === 'engine-error', `未登记 kind 仍须降级成 engine-error（实际 ${r2.blockers[0].kind}）`)
 }
 
+// ============================ 用例 21：会话记录钩子必须透传到模型桥 ============================
+//
+// 面板「会话」标签页恒空的根因就是这条线断着：原生通道的模型请求全部经 llm-bridge
+// 打进来，而 runNativeJob 之前只给桥传 llm/provider/model/onLog，没有会话记录钩子。
+// 这里替换桥实现来捕获实际收到的参数，锁住「钩子一路透传到底」。
+console.log('== 用例 21：deps.onRequestStart 透传到模型桥（会话面板依赖这条线）==')
+{
+  const { repo } = makeRepo('bridgedelegate', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-bh-'))
+  madeDirs.push(docs)
+  let seenOpts = null
+  const hook = () => null
+  await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: {
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+      onRequestStart: hook,
+      bridge: async (opts) => {
+        seenOpts = opts
+        return {
+          url: 'http://127.0.0.1:1/v1',
+          placeholderKey: 'dsh-bridge-unused',
+          port: 1,
+          stats: () => ({}),
+          close: async () => {},
+        }
+      },
+      runEngine: async ({ action }) => (action === 'doctor'
+        ? { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        : {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 1,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }),
+    },
+  })
+  check(seenOpts != null, '桥被启动了（不是 null）')
+  check(seenOpts?.onRequestStart === hook, `桥收到的会话钩子必须与 deps 里同一个函数（实际 ${typeof seenOpts?.onRequestStart}）`)
+  check(seenOpts?.provider === 'workbuddy' && seenOpts?.model === 'hy3', 'provider/model 仍照旧传给桥（钩子不影响其它参数）')
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 上被占用的临时目录留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

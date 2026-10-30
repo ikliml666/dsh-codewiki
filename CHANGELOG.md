@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.16.16 — 2026-10-30
+
+### 面板两处修正：会话记录接到原生通道；焦点任务卡自报目录
+
+**1. 「会话」标签页恒空 —— 根因是原生通道没接会话记录钩子**
+
+会话记录的写入点此前只有两处：`startBatchChatRun`（index.js:2841）与
+`startAgenticRun`（index.js:2896），都在并发池里挂 `onRequestStart`。
+但 0.12.x 起 `nativeEngine` 就成了默认通道（提交 29bcde44），原生通道的模型请求
+由 Python 引擎经 **loopback 桥**（`lib/engine/llm-bridge.js` 的 `startLlmBridge`）
+打回宿主 `llm.stream`，桥里只有 `onLog`，没有任何会话记录钩子 ——
+于是走默认通道的编译永远不产生记录，面板会话列表实测恒为 `{"sessions":[]}`。
+
+修法（三条链路各改一处，钩子只传不落盘）：
+- `lib/engine/llm-bridge.js`：`startLlmBridge` 新增 `onRequestStart` 参数；
+  每个 `POST /v1/chat/completions` 开始时调一次，拿到 `{onDelta,onDone,onError}` 句柄，
+  分别挂在 chunk 循环、正常收尾、异常分支上。新增 `messagesToPrompt(body)` 把
+  OpenAI `messages` 拼成可读文本（`[role]\n正文`，content 支持 string 与 parts 数组），
+  超 `MAX_SESSION_PROMPT_CHARS`（200k 字符）截断并**显式标注原长**——
+  原生通道单请求输入可达 110k–420k token，全文落盘是几百 KB/请求，但静默截断会让
+  看的人以为原文就这么短。`callSession()` 沙箱包裹回调：面板记账失败绝不影响模型请求。
+- `lib/engine/native-run.js:467`：桥实例化处透传 `deps.onRequestStart`。
+- `index.js:2675`（`startNativeRun`）：`onRequestStart: (task) => beginSessionRecord(job, task)`。
+  `beginSessionRecord` 同时改为导出（与 `estimateTokens`/`classifySessionTask` 同一理由：
+  并发池与桥两条路径都要喂它同一套字段，只有能直连测才锁得住字段一致性）。
+
+凭证红线不变：记录只含 messages 文本与模型输出，不含 Authorization、不含占位 key；
+新增用例专门断言记录里 `authorization` 与 `dsh-bridge-` 都不出现。
+
+**2. 「会话」标签页套了两层滚动容器**
+
+`tab === 'sessions'` 把 `SessionView` 渲染进已经带 `[data-dscw-p-page]` 的面板里，
+而 `SessionView` 自己也套一层 —— 双层 padding + 双层 `height:100%` + 双层滚动条，
+会话列表被压进一条窄缝里滚。`SessionView` 加 `embedded` 参数：嵌入时改用
+`[data-dscw-p-sesswrap]`（无内边距、不自滚），标题收成一行 `[data-dscw-p-sessbar]`
+（面板头部已有大标题，不再重复）。
+
+**3. 进行中任务卡不显示所属目录**
+
+`jobCard` 只在「历史任务」分组头标了 `repoName(cwd)`，焦点任务被排除在分组之外，
+于是正在进行的任务完全看不出是哪个仓库的编译。现在 `job === focus` 时在行内
+（Tag 之后）显示 `repoName(cwd)`（父目录/目录名两段，`title` 是全路径）。
+
+**验证**：`node test-engine-llm-bridge.mjs` → 23 passed（新增 6 条钩子用例：
+开始记一次、流式收尾的正文与 output token、失败走 onError 不影响 502、记录不含
+Authorization/占位 key、超长截断标注、钩子抛错不拖垮请求）；`node test-engine-native-job.mjs`
+→ 114/114（新增用例 21 锁「钩子透传到桥」）；`node test-sessions.mjs` → PASS（新增
+`beginSessionRecord` 句柄用例 9 条）；其余 24 个测试文件全绿。另用真实桥 + 真实
+`beginSessionRecord` 跑了一次端到端（临时脚本已删）：SSE 200 收尾、全局列表 1 条、
+prompt 保留 `[system]` 段、output 是完整正文、记录文件里无凭证 —— 全绿。
+
 ## 0.16.15 — 2026-10-30
 
 ### /code-review 双轴评审：修三条真回归，并行度拆成独立设置项

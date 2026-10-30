@@ -62,6 +62,41 @@ fs.utimesSync(path.join(dir2, '001.meta.json'), old, old)
 pruneSessionRecords(Date.now())
 check(!fs.existsSync(dir2), 'job 目录全空后移除')
 
+// ── beginSessionRecord：桥与并发池共用的记录句柄（0.16.16）──────────────
+// 原生通道的会话由 llm-bridge 钩子喂进来，task 形状为 {name, model, provider, batchPrompt}；
+// 并发池喂的是 {name, model, provider, batchPrompt}。两条路径必须落成同一套字段。
+const { beginSessionRecord } = await import('./index.js')
+{
+  const job = { id: 'job_hook' }
+  const h = beginSessionRecord(job, { name: '原生请求 · hy3', model: 'hy3', provider: 'workbuddy', batchPrompt: '[user]\n写一段话' })
+  check(job.sessionSeq === 1, `sessionSeq 自增到 1（实际 ${job.sessionSeq}）`)
+  const m1 = listSessionRecords('job_hook')
+  check(m1.length === 1 && m1[0].status === 'running' && m1[0].n === 1, '开始时立刻落 meta（status=running）')
+  check(m1[0].name === '原生请求 · hy3' && m1[0].model === 'hy3' && m1[0].provider === 'workbuddy', '任务名/模型/provider 原样入库')
+  check(m1[0].inputTokens > 0, '输入 token 有估算值（面板要显示 in Nk tok）')
+  check(readSessionRecord('job_hook', 1).prompt === '[user]\n写一段话', 'prompt 全文可读（会话详情靠它）')
+
+  // 流式增量：text-delta chunk 的形状与宿主 chunk 一致
+  h.onDelta({ type: 'text-delta', text: '你好' })
+  h.onDelta({ type: 'text-delta', text: '，世界' })
+  h.onDelta({ type: 'usage', usage: { outputTokens: 99 } }) // 非文本 chunk 不该污染正文
+  h.onDone('你好，世界', 7)
+  const done = listSessionRecords('job_hook')[0]
+  check(done.status === 'done' && done.outputChars === 5 && done.outputTokens === 7, `收尾写 done（chars=${done.outputChars} tok=${done.outputTokens}）`)
+  check(readSessionRecord('job_hook', 1).output === '你好，世界', '输出全文落盘')
+  check(Boolean(done.finishedAt), '收尾写 finishedAt')
+
+  // 失败路径：错误信息截断 300 字，且 status=error
+  const job2 = { id: 'job_hook_err' }
+  const h2 = beginSessionRecord(job2, { name: 'x', model: 'm', provider: 'p', batchPrompt: 'p' })
+  h2.onError(new Error('上游 429 '.repeat(80)))
+  const e = listSessionRecords('job_hook_err')[0]
+  check(e.status === 'error' && e.error.length === 300, `失败记 error 且截断 300 字（实际 ${e.error.length}）`)
+
+  fs.rmSync(path.join(SESSIONS_DIR, 'job_hook'), { recursive: true, force: true })
+  fs.rmSync(path.join(SESSIONS_DIR, 'job_hook_err'), { recursive: true, force: true })
+}
+
 fs.rmSync(path.join(SESSIONS_DIR, 'job_manual'), { recursive: true, force: true })
 fs.rmSync(process.env.DSH_CODEWIKI_JOBS_FILE, { force: true })
 console.log(failures ? `FAIL：${failures} 项失败` : 'PASS：会话记录存储冒烟全部通过')

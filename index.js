@@ -1955,8 +1955,10 @@ function textDeltaOf(chunk) {
   if (typeof chunk.content === 'string') return chunk.content
   return ''
 }
-// 开始记录一个请求：写 meta（status:running）+ full（prompt 全文），返回句柄给并发池回调
-function beginSessionRecord(job, task) {
+// 开始记录一个请求：写 meta（status:running）+ full（prompt 全文），返回句柄给并发池回调。
+// 导出供测试直接驱动（与 estimateTokens / classifySessionTask 同一理由：并发池与桥两条
+// 调用路径都要喂它同一套字段，只有能直连测，才能锁住「桥传的 task 与这里读的字段一致」）。
+export function beginSessionRecord(job, task) {
   const n = (job.sessionSeq ?? 0) + 1
   job.sessionSeq = n
   const startedAt = new Date().toISOString()
@@ -2678,6 +2680,9 @@ function createJobService(config, onSettled) {
             engineRoot: '',
           },
           llm: llmRef,
+          // 会话记录钩子：原生通道的模型请求全部经 llm-bridge 打进来，不在这里接线
+          // 面板「会话」视图就永远是空列表（batch/agentic 通道早已各自接好）。
+          onRequestStart: (task) => beginSessionRecord(job, task),
           engineFor: ({ bridge }) => nativeEnginePlan(channel, {
             requestId: job.id,
             bridge,
