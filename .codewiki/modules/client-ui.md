@@ -14,7 +14,7 @@ fsoft_page: client_ui.md
 `client_ui` 是插件 `@local/dsh-codewiki`（见 [package_manifest](Build___Dependency_Configuration_Layer/package_manifest.md)）的**浏览器端模块**，全部实现集中在单个文件 `client.js`（v0.4.1）。它在 DeepSeek Harness（dsh）宿主的 web 界面上挂载两个入口：
 
 1. **插件设置页** —— 注入宿主 `plugins.item` 槽位（`id = codewiki`，与 profile patch 条目一致），提供完整的编译运行设置表单；
-2. **侧边栏面板** —— 注入 `main` 槽位（key = `codewiki`）渲染任务面板，同时在 `sidebar.panellist` 注册面板入口（`PanelIcon`），用于实时观察编译任务进度、取消任务、查看仓库 wiki 总览、打开 LLM 请求会话视图。
+2. **侧边栏面板** —— 注入 `main` 槽位（key = `codewiki`）渲染任务面板，同时在 `sidebar.panellist` 注册面板入口（`PanelIcon`），用于实时观察编译任务进度（焦点任务行标注所属仓库目录）、取消任务、查看仓库 wiki 总览、打开 LLM 请求会话视图（全局视图以嵌入形态留在标签页内）。
 
 所有数据交换走宿主后端（core_entry 半侧）暴露的一组 JSON 端点：设置读写经宿主 `configForms` 服务的 `codewiki` 命名空间热生效，任务/仓库/会话数据经 `GET/POST /api/codewiki/*` 轮询获取。
 
@@ -25,7 +25,7 @@ flowchart LR
         Panel["CodewikiPanel<br/>侧边栏面板"]
         Icon["PanelIcon<br/>侧边栏入口"]
         Repos["ReposTab<br/>仓库总览"]
-        Sess["SessionView<br/>LLM 请求记录"]
+        Sess["SessionView<br/>LLM 请求记录<br/>(单任务整页 / 标签内嵌两种形态)"]
     end
     subgraph 宿主["dsh 宿主 web 界面"]
         SlotItem["plugins.item 槽"]
@@ -62,10 +62,10 @@ flowchart LR
 | `mount` | 挂载编排：注册词典、插件页 `plugins.item`、侧边栏 `main` + `sidebar.panellist` 三处槽位 |
 | `zh` / `en` | 中文 / 英文 UI 词典工厂（`locale.register(NS, {...})`），所有文案集中维护 |
 | `CodewikiCard` | 设置页卡片：配置快照订阅、草稿编辑、模型目录联动（provider → model → reasoning effort 三段下拉）、校验与保存（`save` / `discard`） |
-| `CodewikiPanel` | 侧边栏主面板：任务列表、四标签页导航（总览/任务/会话/设置）、轮询差分采样（tps spark 窗口、批量速率 EWMA）、焦点任务与历史折叠 |
+| `CodewikiPanel` | 侧边栏主面板：任务列表、四标签页导航（总览/任务/会话/设置）、轮询差分采样（tps spark 窗口、批量速率 EWMA）、焦点任务与历史折叠（焦点卡自报所属仓库目录） |
 | `PanelIcon` | 侧边栏入口的摊开书本 SVG 图标 |
 | `ReposTab` | 「总览」标签页：所有工作区 wiki 状态、自动更新调度信息、排除/取消排除、手动触发编译 |
-| `SessionView` | 「会话」视图：并发池每次 LLM 请求的列表与 prompt/输出全文（单任务或全局两种模式） |
+| `SessionView` | 「会话」视图：并发池每次 LLM 请求的列表与 prompt/输出全文（单任务或全局两种模式；`embedded=true` 时以无内边距 `sesswrap` 容器嵌入「会话」标签页，只留精简返回条，不重复大标题） |
 | `Spark` | 纯 SVG polyline 的 tps 微趋势线 |
 | `byUpdated` | 任务按 `updatedAt` 倒序排序器（焦点任务选取） |
 | `save` / `discard` | 设置草稿的提交（`form.mutate(ops, revision)` 乐观并发）与回滚 |
@@ -79,10 +79,10 @@ flowchart TD
     Apply --> M3["slots.inject sidebar.panellist<br/>(PanelIcon)"]
     Panel --> Tabs{"tab 状态"}
     Tabs -->|overview| ReposTab
-    Tabs -->|tasks| JobList["jobCard 列表<br/>焦点 + 历史折叠"]
-    Tabs -->|sessions| SessionViewG["SessionView(job=null 全局)"]
+    Tabs -->|tasks| JobList["jobCard 列表<br/>焦点卡带仓库目录 + 历史折叠"]
+    Tabs -->|sessions| SessionViewG["SessionView(job=null 全局, embedded=true)"]
     Tabs -->|settings| Card2["内嵌 CodewikiCard"]
-    JobList -- "单任务会话按钮" --> SessionViewJ["SessionView(job=该任务)"]
+    JobList -- "单任务会话按钮" --> SessionViewJ["SessionView(job=该任务, 非嵌整页)"]
 ```
 
 ## 数据流
@@ -142,7 +142,7 @@ sequenceDiagram
         end
         Panel->>Panel: setJobs(arr)
     end
-    Panel-->>Panel: 焦点任务 = 活动优先（byUpdated），其余入「历史任务」
+    Panel-->>Panel: 焦点任务 = 活动优先（byUpdated），其余入「历史任务」。焦点卡自报所属仓库目录（data-dscw-p-cwd，悬停看完整 cwd）
     Panel->>API: POST control {action:'cancel', jobId}
 ```
 
@@ -153,8 +153,10 @@ sequenceDiagram
 1. **常量即契约**：`NS='codewiki'`（配置命名空间 / profile patch id）、`KEY='codewiki'`（面板 key，须与 `sidebar.panellist` 的 id 一致）、`PANEL_ORDER=52`（排在 dsh-hindsight-on-demand 的 50 之后）、`ACTIVE_STAGES=['queued','articles','crosscut','compose','review','index','commit']`（六段粗粒度步骤条 + 排队）。
 2. **阶段双通道**：原生引擎（见 [engine_core](engine_core.md)）自报八段契约阶段（env/graph/cluster/validate/baseline 等），经 `NATIVE_STAGE_KEYS` 映射后**另起一行**展示，不改写粗粒度七步步骤条——两者粒度不同，混用会让步骤条错位。
 3. **模型目录三段联动**：选 provider → 拉 `/api/codewiki/models` → 联动清空旧 model 与旧 effort → 按 (provider, model) 二次拉 `/api/codewiki/model-efforts`。目录不可用时整体退回「手填」形态（`Input` 直填 id），不阻断保存；目录未声明档位时用 `GENERIC_EFFORTS` 通用档位，模型不支持由 llmChat 兜底剥档。
-4. **样式隔离**：所有 CSS 写在一条 `[data-plugin='@local/dsh-codewiki']` 样式表里（属性前缀 `data-dscw-*`），HMR/重复加载时先查存在性再注入，避免样式堆叠；主题色全部引用宿主 CSS 变量（`--dsw-alias-*`）。
+4. **样式隔离**：所有 CSS 写在一条 `[data-plugin='@local/dsh-codewiki']` 样式表里（属性前缀 `data-dscw-*`，新增 `data-dscw-p-cwd` / `data-dscw-p-sesswrap` / `data-dscw-p-sessbar`），HMR/重复加载时先查存在性再注入，避免样式堆叠；主题色全部引用宿主 CSS 变量（`--dsw-alias-*`）。
 5. **卸载安全**：轮询回包、剪贴板写入等异步回调均经 `alive` / `mountedRef` 守卫，组件卸载后不再 `setState`。
+6. **焦点卡自报归属**：焦点任务（正在进行 / 最近一个）被排除在「历史任务」的仓库分组之外，没有分组头可读，因此 `jobCard` 在焦点卡行内附 `data-dscw-p-cwd` 徽标（`repoName(cwd)` 短名，悬停显示完整 `cwd`），其余任务不重复标注。
+7. **会话视图的两种宿主形态**：单任务「会话」按钮让 `SessionView` 占满整页（`data-dscw-p-page` 容器 + 完整标题栏与 ✕ 关闭）；「会话」标签页内的全局视图传 `embedded=true`，改用无内边距的 `data-dscw-p-sesswrap` 容器并只留 `data-dscw-p-sessbar` 精简返回条——外层面板本身已是滚动容器，避免套两层 page 布局。
 
 ## 与其他模块的关系
 

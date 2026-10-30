@@ -2,7 +2,7 @@
 
 ## 简介
 
-`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.16.15）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
+`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.16.16）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
 
 1. **薄封装 CodeWiki CLI（`cw`）**：提供 `cw` 工具，执行 `init` / `status` / `index` / `meta` / `path` / `projects` / `setup` / `uninstall` 等子命令，对仓库根 `.codewiki/` 目录进行初始化、判态与索引维护。
 2. **服务化编译编排**：提供 `codewiki_generate` / `codewiki_update` / `codewiki_progress` 三个工具，把编译任务提交给宿主常驻后台服务（job service），由该服务以 **10s tick** 节拍驱动阶段状态机推进（写文章 → 横切 → 校对 → 索引 → 自动提交），全程零子代理。
@@ -150,7 +150,7 @@ flowchart TB
 | `classifySessionTask(task)` | 三态判定：`harvest` / `wait` / `timeout` |
 | `progressSessionTasks(job)` | 收割会话通道产出，过 `writeValidated` 闸门落盘 |
 | `buildSessionSteerText({job, snapshots, tier, resend})` | steer 文本组装（`sessionTier` 非空时钉死档位） |
-| `beginSessionRecord(job, task)` | 每个 LLM 请求的 prompt/流式输出落盘（面板「会话」视图数据底座） |
+| `beginSessionRecord(job, task)` | 每个 LLM 请求的 prompt/流式输出落盘（面板「会话」视图数据底座）；batch / agentic / 原生三条通道分别经执行器的 `onRequestStart` 钩子各自接线 |
 | `wakeCompileSession(job, outcome, agents)` | 终态唤醒发起会话：失败或「产物待提交」才打扰，否则静默 |
 
 ### 7. 面板后端与工具注册
@@ -243,6 +243,8 @@ flowchart LR
 ```
 
 > 原生通道的裁决链（环境检测 → 图提取 → 聚类 → 文章 → 质量门 → 落地 → 基线 → 提交）全部固定在 [engine_core](engine_core.md) 的 `native-run.js` / `apply-plan.js` 内，`index.js` 只负责「起进程 / 收进度 / 按结果判终态」，绝不在 tick 里重写裁决。
+>
+> 起进程时经 `runNativeJob` 的 `deps.onRequestStart` 把原生通道的每个模型请求（全部经 llm-bridge 打进来）接入 `beginSessionRecord`：此前不在这里接线，面板「会话」视图对原生任务永远是空列表（batch / agentic 通道早已各自接好）。桥侧回调契约与 batch 通道一致（`onDelta` / `onError` / `onDone`），且只记 messages 文本与模型输出，绝不落 Authorization 请求头或占位 key。
 
 ---
 

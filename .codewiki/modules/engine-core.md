@@ -112,11 +112,13 @@ flowchart LR
 | `contract.js` | `EngineResult` / `EngineProgress` / `EngineError` 的版本化契约、四态语义硬不变量、`validateEngineResult` / `normalizeBlocker` / `describeEngineResult` |
 | `python/entry.py` | Python 侧薄入口：stdout 协议守卫（`_ProtocolOnly`）、UTF-8 补丁（`_popen_init_utf8`）、`main` 主循环，把 FSoft 调用翻成 JSON-lines 结果 |
 | `client.js::runEngine` | Node 侧进程适配：spawn 子进程、JSON-lines 读取、超时/静默/取消/协议破坏的机读失败 |
-| `llm-bridge.js::startLlmBridge` + `openai-bridge.js` | OpenAI-compatible loopback 桥：占位 key 校验、`isPlaceholderKey`、请求/响应双向纯转换 |
+| `llm-bridge.js::startLlmBridge` + `openai-bridge.js` | OpenAI-compatible loopback 桥：占位 key 校验、`isPlaceholderKey`、请求/响应双向纯转换；可选 `onRequestStart` 会话记录钩子——原生通道的每个模型请求都只经过这里，回调契约与 batch 通道一致（`onDelta` / `onError` / `onDone`） |
 
 关键设计：凭证边界——桥**不读**任何凭证文件，引擎侧只拿到
 `http://127.0.0.1:<随机端口>/v1` 和一个随机占位 key（`dsh-bridge-...`），
-真实凭证只存在于宿主 provider 内部。
+真实凭证只存在于宿主 provider 内部。会话记录同样遵守这条边界：`onRequestStart`
+只记 messages 文本（超长截断）与模型输出，绝不把 Authorization 请求头或占位 key
+写进面板「会话」视图的记录。
 
 ### 2. [编译编排与受管状态层](engine_core/engine_core_compilation.md)
 

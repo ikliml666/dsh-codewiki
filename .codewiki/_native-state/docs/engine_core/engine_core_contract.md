@@ -17,7 +17,7 @@
 | `lib/engine/python/entry.py` | Python 侧薄入口：一行请求 JSON → 一次 FSoft 调用，进度/结果翻译成协议行 | `main`、`_ProtocolOnly`、`_popen_init_utf8`、`action_doctor`、`action_generate`、`handle_request` |
 | `lib/engine/client.js` | Node 侧进程 + 协议适配层（`ENGINE_PROTOCOL_VERSION = 1`） | `runEngine`、`createProtocolReader` |
 | `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**层（无 I/O、无密钥） | `isPlaceholderKey`、`toLlmRequest`、`chunksToCompletion`、`chunksToSse` |
-| `lib/engine/llm-bridge.js` | 跑在 127.0.0.1 上的进程内 HTTP 桥，把引擎请求接到宿主 `llm.stream` | `startLlmBridge` |
+| `lib/engine/llm-bridge.js` | 跑在 127.0.0.1 上的进程内 HTTP 桥，把引擎请求接到宿主 `llm.stream`；可选 `onRequestStart` 会话记录钩子 | `startLlmBridge` |
 
 ## 总体架构
 
@@ -154,6 +154,13 @@ sequenceDiagram
     Pure-->>Bridge: OpenAI SSE 帧 / JSON
     Bridge-->>Engine: 响应流（usage 含缓存分列）
 ```
+
+`onRequestStart` 是可选的会话记录钩子（面板「会话」视图靠它看「引擎把什么塞给了模型」）：原生通道的每个模型请求只经过这座桥，
+不接这个钩子面板「会话」视图就永远是空列表。回调契约与 batch 通道一致
+（`onDelta` / `onError` / `onDone`），由桥内部的 `callSession` 包装——回调自身抛错
+只丢记录、绝不影响请求本身。记录内容同样受凭证边界约束：`onRequestStart`
+只收到 `name`（`原生请求 · <model>`）、`model`、`provider` 与 `batchPrompt`
+（messages 文本逐 role 拼接、超长截断），绝不携带 Authorization 请求头或占位 key。
 
 安全上三层缺一不可：**loopback 绑定**阻断外网、**随机端口**让同机其它进程猜不到、**占位 key 校验**（`PLACEHOLDER_KEY_PATTERN = /^dsh-bridge-[a-z0-9-]+$/`）挡住误连与端口扫描。每次启动随机生成新 key，不复用、不落盘、不进日志；401 错误体也不回显收到的 key。
 
