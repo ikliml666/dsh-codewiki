@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.16.10 — 2026-10-30
+
+### 澄清：`update-record` 的基线判据写全，但实测该分支当前不可达
+
+**背景**：Standards 轴评审指出 `canAdvanceBaseline` 在仓库里散布五处、语义不一致，
+其中 `lib/update-record.js` 用的是 `outcome === 'done' && blockers.length === 0`，
+看起来是 0.16.1「允许 partial 推进基线」时漏改的一处。
+
+**核查结论（实测，不是推断）**：写了个探针把 `judgeOutcome` 的 6 类降级来源
+（逐篇失败 / 缺页 / 未归属变更 / 质量闸门 / extraBlockers / 索引未过）逐个单独触发，
+结果 **`partial` 恒带至少一条 blocker**——每个降级来源自己就 push blocker。
+于是 `partial && blockers.length === 0` 这个组合在本函数里根本构造不出来，
+旧写法与新写法**行为完全一致**，这处不是 bug。
+
+**改了什么**：把判据从 `outcome === 'done'` 写成显式的
+`outcome === 'done' || (outcome === 'partial' && writtenCount > 0 && blockers.length === 0)`，
+并在注释里写清三件事——
+
+1. 本函数服务兼容通道（`tickIndex`），它的 blocker 含「未归属变更」「缺页」这类
+   「没消化完」语义；一旦放宽，未消化的变化会被记成已消化，下一轮这些变化不再触发
+   文章更新，wiki 就会静默落后于代码。所以这里**刻意**保持比
+   `native-run.js` / `quality-gate.js` 更严，不是漏改。
+2. `partial` 分支当前不可达的事实与实测依据。
+3. 将来若放宽 blocker 规则，partial 分支会自动按「有成果且无缺陷才推进」生效，
+   而不是靠 `done` 这个别名悄悄失效。
+
+**为什么不直接删掉多余分支**：两处通道的严格度不同是有意的（原生通道有原始树可回放，
+兼容通道没有），删掉会抹掉这个区别；而把判据写全，读者才看得出「严」在哪里。
+
+**验证**：`test-update-record.mjs` → `18 passed, 0 failed`（含「1 成功 19 失败 → partial，
+不得推进基线」「未映射变更 → partial，基线不前移」等用例）。
+
+
 ## 0.16.9 — 2026-10-30
 
 ### 修复：编译挂死没人收尸——加引擎心跳与静默检测
