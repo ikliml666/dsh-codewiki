@@ -213,11 +213,28 @@ _DETAIL = {"module": "", "phase": "", "at": 0.0}
 
 # 逐模块日志的文本形态。emoji 前缀不参与匹配：cp936 控制台下非 ASCII 文本
 # 直接 print 会抛 UnicodeEncodeError，所以正则只吃 ASCII 部分。
+#
+# 分两族：
+# - 阶段 3（documentation_generator.py）：每个模块一条，直接给模块名。
+# - 阶段 2（cluster_modules.py）：不逐模块打印，而是围绕当前处理的子树发
+#   "Module clustering input for <label>: ..." 这类消息，label 就是子树名
+#   （顶层时是 "repository"，见 cluster_modules.py:290）。
+#   阶段 2 在真机上能跑十几分钟，只报「阶段 2，已写 0 篇」等于没有信息。
 _DETAIL_PATTERNS = (
     (re.compile(r"Processing leaf module:\s*(\S.*?)\s*$"), "leaf"),
     (re.compile(r"Processing parent module:\s*(\S.*?)\s*$"), "parent"),
     (re.compile(r"Generating parent documentation for:\s*(\S.*?)\s*$"), "parent"),
     (re.compile(r"Generating repository overview"), "overview"),
+    # 阶段 2：把正在聚类/跳过的子树当成「当前模块」。顺序要紧——越接近
+    # 「现在正在做什么」的越靠前。
+    (re.compile(r"Requesting LLM module clustering for (.+?) because"), "cluster"),
+    (re.compile(r"Module clustering input for (.+?):"), "cluster"),
+    (re.compile(r"Partitioned \d+ leaf nodes for (.+?) into"), "cluster"),
+    (re.compile(r"LLM module clustering for (.+?) produced"), "cluster"),
+    (re.compile(r"Skipping LLM module clustering for (.+?) because"), "cluster"),
+    (re.compile(r"Skipping LLM clustering result for (.+?) because"), "cluster"),
+    (re.compile(r"Requesting super-grouping of \d+ top-level modules"), "super-group"),
+    (re.compile(r"Super-grouping consolidated \d+ top-level modules"), "super-group"),
 )
 
 # 模块名在面板上不能挤爆，超长截断。
@@ -300,15 +317,26 @@ def release_detail_tap(tap):
 
 
 def detail_suffix():
-    """当前正在处理的模块名，拼进进度帧 message；没有就返回空串。"""
+    """当前正在处理的模块名，拼进进度帧 message；没有就返回空串。
+
+    措辞按阶段分开：阶段 3 是真在写文章（「正在写 X」），阶段 2 是在聚类
+    （「正在聚类 X」）。混用会让人以为阶段 2 已经在产出文章，反而更误导。
+    """
     try:
         module = _DETAIL["module"]
+        phase = _DETAIL["phase"]
         if not module:
-            if _DETAIL["phase"] == "overview":
+            if phase == "overview":
                 return "，正在生成仓库总览"
+            if phase == "super-group":
+                return "，正在做子系统归并"
             return ""
         if len(module) > _DETAIL_MAX_LEN:
             module = module[: _DETAIL_MAX_LEN - 3] + "..."
+        if phase == "cluster":
+            return f"，正在聚类 {module}"
+        if phase == "super-group":
+            return f"，正在归并 {module}"
         return f"，正在写 {module}"
     except Exception:  # noqa: BLE001
         return ""

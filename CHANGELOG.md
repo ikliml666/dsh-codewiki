@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.16.12 — 2026-10-30
+
+### 阶段 2 也带出子树名：真机复验补上的半块
+
+**背景**：0.16.11 上线后在真机复验（宿主 12:36:34 重启，晚于 12:35:22 的提交，
+确认加载的是新代码；引擎进程 12:41:02 创建）。心跳帧确实在按 60 秒跳动
+（`04:46:06` → `04:47:06`），但 `nativeMessage` 是
+`引擎仍在运行（阶段 2，已写 0 篇）`——**阶段 2 完全没有被覆盖**。
+
+**为什么**：0.16.11 的四条正则只覆盖阶段 3（`documentation_generator.py` 的
+`Processing leaf module: X` 一族）。阶段 2 的 `cluster_modules.py` 不逐模块打印，
+而是围绕当前子树发消息，形如
+`Requesting LLM module clustering for %s because %d tokens exceed...`
+（`cluster_modules.py:326`）、
+`Module clustering input for %s: %d leaf nodes...`（`:292`），
+`label` 在 `:290 module_label = current_module_name or "repository"` 赋值。
+阶段 2 在真机上能跑十几分钟，只报「阶段 2」等于没有信息。
+
+**改了什么**（`lib/engine/python/entry.py`）：
+
+- `_DETAIL_PATTERNS` 补 8 条阶段 2 正则，按「越接近现在正在做什么越靠前」排序：
+  `Requesting LLM module clustering for (.+?) because`、
+  `Module clustering input for (.+?):`、
+  `Partitioned \d+ leaf nodes for (.+?) into`、
+  `LLM module clustering for (.+?) produced`、
+  `Skipping LLM module clustering for (.+?) because`、
+  `Skipping LLM clustering result for (.+?) because`，
+  以及两条无模块名的 `super-group` 阶段。
+- `detail_suffix()` 按阶段分措辞：阶段 3 是「，正在写 X」，阶段 2 是「，正在聚类 X」，
+  归并阶段是「，正在归并 X」/「，正在做子系统归并」。
+  **不能混用**——阶段 2 用「正在写」会让人以为已经在产出文章，反而更误导。
+
+**回归**：`细节探针` 用例补三条断言——阶段 2 子树名抽得出来、措辞必须是「聚类」
+而不是「写」、归并阶段能看见。`21 passed, 0 failed`。
+
+**反向验证**：删掉
+`Requesting LLM module clustering for (.+?) because` 这一条 →
+`20 passed, 1 failed`，报
+`AssertionError: 阶段 2 的子树名必须抽出来：{"phase":"cluster","module":"xxx...","suffix":"，正在写 xxx..."}`
+（模块名滞留在上一条超长 `xxx`、措辞也错成「正在写」，正好证明两条断言都在真拦）；
+恢复后 `21 passed, 0 failed`，`REVERSE-VERIFY` 计数 0。
+
+**真实模块验证**（不是构造 logger 名）：用 venv 真 import
+`codewiki.src.be.documentation_generator` 与 `codewiki.src.be.cluster_modules`，
+确认二者 `logger.name` 分别是 `codewiki.src.be.documentation_generator` /
+`codewiki.src.be.cluster_modules`，都是 tap 挂载点 `codewiki.src.be` 的子 logger，
+且用真实 logger 打一条日志就能抽出 `lib/engine/client.js`。
+
 ## 0.16.11 — 2026-10-30
 
 ### 进度帧带上模块名：让「已写 0 篇」变成「正在写 lib/engine/client.js」

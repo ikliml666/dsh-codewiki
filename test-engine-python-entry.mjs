@@ -780,6 +780,14 @@ steps.append({"phase": "overview", "module": entry._DETAIL["module"], "suffix": 
 child.info("Processing leaf module: " + "x" * 200)
 long_len = len(entry.detail_suffix())
 
+# 阶段 2（cluster_modules.py）不逐模块打印，而是围绕当前子树发消息，
+# label 就是子树名。真机阶段 2 能跑十几分钟，只报「阶段 2」等于没信息。
+child.info("Requesting LLM module clustering for lib/engine because 12000 tokens exceed the 8000-token threshold.")
+steps.append({"phase": "cluster", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
+child.info("Requesting super-grouping of 7 top-level modules into architectural subsystems.")
+steps.append({"phase": "super-group", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+
 # 摘掉之后必须还原：level 回到 WARNING，INFO 重新被吞
 entry.release_detail_tap(tap)
 restored_level = logging.getLogger("codewiki.src.be").level
@@ -802,6 +810,9 @@ pathlib.Path(${JSON.stringify(outFile)}).write_text(
   assert.equal(by('parent').module, 'lib/engine', `父模块名必须解析出来：${JSON.stringify(by('parent'))}`)
   assert.ok(by('overview').suffix.includes('总览'), `总览阶段没有模块名，也必须能看见：${JSON.stringify(by('overview'))}`)
   assert.ok(got.long_len <= 90, `超长模块名必须截断，实际 ${got.long_len}`)
+  assert.equal(by('cluster').module, 'lib/engine', `阶段 2 的子树名必须抽出来：${JSON.stringify(by('cluster'))}`)
+  assert.ok(by('cluster').suffix.includes('聚类'), `阶段 2 措辞必须是「正在聚类」（不是「正在写」）：${by('cluster').suffix}`)
+  assert.ok(by('super-group').suffix.includes('归并'), `子系统归并阶段必须能看见：${JSON.stringify(by('super-group'))}`)
   assert.equal(got.restored_level, 30, `摘掉 tap 必须把 level 还原成 WARNING，实际 ${got.restored_level}`)
   assert.equal(by('after-release').module, '', `摘掉 tap 之后不能再改状态：${JSON.stringify(by('after-release'))}`)
 })
