@@ -10,3 +10,16 @@ bin/*.bak-*
 
 # DSH 运行期产物（面板会话流、工具调用记录），不入库
 .dsh-ops/
+
+# Python 字节码缓存（lib/engine/python 是产品代码，pycache 不入库）
+__pycache__/
+*.pyc
+
+# 临时探针脚本（开发/验收用，不入库）
+.probe-*.mjs
+.probe3.mjs
+# 探针环境整体不入库：venv 是 714MB 的解释器，src 是上游 CodeWiki 的源码克隆。
+# 曾经的教训：只忽略 venv/，那个克隆被当成孤立 gitlink（mode 160000）提交进索引，
+# 引擎把 186 个上游文件当成本仓库源码分析，编译预算耗尽后整轮超时零产出。
+.probe-fsoft/
+err.txt

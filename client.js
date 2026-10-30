@@ -45,8 +45,10 @@ window.__ModuleLoader__.load({
       autoCommitHint: '开启后编译完成由插件自己提交产物：先在主题分支 codewiki/wiki-<任务id> 上提交 .codewiki/ 与 CodeWiki.md 这两个路径（建议 docs(wiki) 前缀，不跑仓库钩子，不动你其它改动），再合并回原分支并删除主题分支；无法走分支时（detached HEAD 等）降级为直接提交。会话模型因此无需等待编译完成、也无需代跑 git，编译成功时也不会再唤醒会话。关闭或提交失败（非 git 仓库、路径被忽略、合并中、未配 user.name 等）时降级为「产物待提交」提醒；合并冲突时产物保留在主题分支，等手动合并；产物本来就没有改动（重编译无变化）时既不提交也不提醒。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示属于已添加 dsh 工作区（侧边栏工作区列表）的任务，Temp 沙箱等任意路径任务不显示。宿主未注册工作区时不过滤。',
-      maxConcurrency: '编译并发上限',
-      maxConcurrencyHint: '1–8；硬顶 8。插件内并发池的请求数（默认 2，适合免费 hy3 档）。',
+      maxConcurrency: '默认档并发上限',
+      maxConcurrencyHint: '1–8；硬顶 8。默认档（batchModel，如免费 hy3）的请求并发数，默认 2。',
+      bigConcurrency: '大档并发上限',
+      bigConcurrencyHint: '1–8；硬顶 8。大档（bigModel）的请求并发数，留空=跟随默认档。两档各自独立限流、同时推进，总在飞为两者之和。',
       serialProjects: '单项目串行',
       serialProjectsHint: '开启后同一时刻只推进一个仓库的编译任务，后提交的项目排队（queued），前一个收尾后自动轮到我——避免多项目同时编译抢占同一个免费额度与并发。关闭后按「并行项目上限」同时推进多个仓库。',
       parallelProjects: '并行项目上限',
@@ -85,6 +87,18 @@ window.__ModuleLoader__.load({
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
       secBig: '大档模型（超长输入）',
       secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。留空提供商 = 关闭大档，退回会话通道兜底。',
+      secPipeline: '编译流程（吸收自 FSoft CodeWiki）',
+      secPipelineHint: '三档能力来自 FSoft-AI4Code/CodeWiki（MIT，ACL 2026）：符号级 AST 分析、语义聚类分层、agentic 写作。全部在本插件内用 Node + tree-sitter WASM 实现，不需要 Python 运行时；任一项失败都自动降级回旧的目录分组 / 单轮整包装填 / 文件级增量，不会让编译中断。',
+      planMode: '模块划分方式',
+      planModeAuto: '语义聚类（已退役）',
+      planModeDirs: '顶层目录分组',
+      planModeHint: '仅对兼容通道（nativeEngine=false）生效。0.16.0 阶段 7 起语义聚类已退役并删除实现，两条取值都按顶层目录分组；模块划分现由原生引擎在 Python 侧完成。',
+      agenticArticles: 'agentic 写作',
+      agenticArticlesHint: '开启后模型在写文章过程中自己调 read_code / list_files 读源码、用 edit_article 增量改写，不再把源码整包内联进 prompt（省 prompt、允许多轮精修、大文件不必再拆观察批）。关闭则走单轮整包装填的旧通道。',
+      agenticMaxSteps: 'agentic 单篇步数上限',
+      agenticMaxStepsHint: '1–100，默认 30。写一篇文章最多允许几轮「读源码 → 改文章」；越大越细致也越慢。',
+      symbolIncremental: '符号级增量',
+      symbolIncrementalHint: '仅对兼容通道（nativeEngine=false）生效。0.16.0 阶段 7 起符号级增量已退役并删除实现，兼容通道统一按 source_files 归属做文件级判定；符号级增量现由原生引擎在 Python 侧完成。',
       bigProvider: '大档提供商',
       bigProviderOff: '（未启用大档）',
       bigProviderHint: '来自模型设置里已注册的提供商。默认火山方舟（volces-ark）。留空则关闭大档通道。',
@@ -106,6 +120,8 @@ window.__ModuleLoader__.load({
       loadingLabel: '加载中…',
       conflict: '保存冲突：设置已被他处修改，请重试。',
       invalidConcurrency: '并发上限须为 1–8 的整数。',
+      invalidAgenticSteps: 'agentic 单篇步数上限须为 1–100 的整数。',
+      invalidPlanMode: '模块划分方式只能是「语义聚类」或「顶层目录分组」。',
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stageQueued: '排队中',
@@ -116,8 +132,20 @@ window.__ModuleLoader__.load({
       stageIndex: '建索引中',
       stageCommit: '提交产物中',
       stageDone: '已完成',
+      stagePartial: '部分完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
+      // 原生引擎（阶段 4）八段契约的真实阶段名：面板阶段条仍是粗粒度七步，
+      // 引擎自报的阶段另显示一行——两者不是一回事，混着显示会让人以为步骤条错了。
+      nativeStageLabel: '引擎阶段',
+      channelNative: '原生引擎',
+      nativeEnv: '探测环境',
+      nativeGraph: '解析代码图',
+      nativeCluster: '聚类模块',
+      nativeValidate: '产物校验',
+      nativeBaseline: '推进基线',
+      gateLabel: '质量门',
+      applyLabel: '落地',
       stepQueued: '排队',
       kindFull: '全量',
       kindStale: '增量',
@@ -185,6 +213,7 @@ window.__ModuleLoader__.load({
       nextScan: '下次扫描',
       scannedLabel: '扫描',
       submittedLabel: '提交',
+      skippedLabel: '工作区外跳过',
       totalTimeLabel: '总耗时',
       copyPath: '复制路径',
       copiedLabel: '已复制',
@@ -204,8 +233,10 @@ window.__ModuleLoader__.load({
       autoCommitHint: 'When on, the plugin commits the artifacts itself once compilation finishes: it commits .codewiki/ and CodeWiki.md on a topic branch codewiki/wiki-<jobId> (docs(wiki) prefix suggested, no repo hooks, your other changes untouched), then merges it back into the original branch and deletes it; when a branch workflow is impossible (detached HEAD, …) it falls back to a direct commit. The session model then never has to wait for compilation or run git, and a successful compile never wakes the session. When off, or when the commit is refused (not a git repo, paths ignored, merge in progress, missing user.name, …) it degrades to a one-shot "artifacts pending" reminder; on merge conflicts the artifacts stay on the topic branch for manual merging; when the artifacts have no changes at all (recompile without diffs) it neither commits nor reminds.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces (the sidebar workspace list); Temp-sandbox and arbitrary-path tasks are hidden. No filtering when the host has no registered workspaces.',
-      maxConcurrency: 'Compile concurrency',
-      maxConcurrencyHint: '1–8; hard cap 8. Requests in the in-plugin pool (default 2, suited to the free hy3 tier).',
+      maxConcurrency: 'Default-tier concurrency',
+      maxConcurrencyHint: '1–8; hard cap 8. In-flight requests for the default tier (batchModel, e.g. the free hy3), default 2.',
+      bigConcurrency: 'Big-tier concurrency',
+      bigConcurrencyHint: '1–8; hard cap 8. In-flight requests for the big tier (bigModel); leave empty to follow the default-tier value. The two tiers are limited separately and progress at the same time, so total in-flight is the sum.',
       serialProjects: 'One project at a time',
       serialProjectsHint: 'When on, only one repository compiles at a time; later submissions queue (queued) and start automatically once the current one finishes — so free quota and concurrency are never shared across projects. Turn off to compile several repos in parallel up to the parallel limit.',
       parallelProjects: 'Parallel repo limit',
@@ -244,6 +275,18 @@ window.__ModuleLoader__.load({
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
       secBig: 'Large-input model',
       secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Empty provider = the large tier is off and oversized input falls back to the session channel.',
+      secPipeline: 'Compile pipeline (absorbed from FSoft CodeWiki)',
+      secPipelineHint: 'Three capabilities ported from FSoft-AI4Code/CodeWiki (MIT, ACL 2026): symbol-level AST analysis, semantic clustering, and agentic writing. All implemented inside this plugin with Node + tree-sitter WASM — no Python runtime required. Any of them failing degrades gracefully to the old directory grouping / single-pass packing / file-level increment, so compilation never breaks.',
+      planMode: 'Module partitioning',
+      planModeAuto: 'Semantic clustering (retired)',
+      planModeDirs: 'Top-level directory grouping',
+      planModeHint: 'Only applies to the compatibility channel (nativeEngine=false). Since 0.16.0 phase 7 semantic clustering is retired and its implementation removed — both values now group by top-level directory; module partitioning is done by the native engine on the Python side.',
+      agenticArticles: 'Agentic writing',
+      agenticArticlesHint: 'When on, the model reads sources itself via read_code / list_files and edits articles incrementally with edit_article instead of receiving the whole source in one prompt (smaller prompts, multi-round refinement, no observation-batch splitting for big files). Off = the legacy single-pass packing channel.',
+      agenticMaxSteps: 'Agentic steps per article',
+      agenticMaxStepsHint: '1–100, default 30. How many "read source → edit article" rounds one article may take; higher is more thorough but slower.',
+      symbolIncremental: 'Symbol-level increment',
+      symbolIncrementalHint: 'Only applies to the compatibility channel (nativeEngine=false). Since 0.16.0 phase 7 symbol-level increment is retired and its implementation removed — the compatibility channel uses file-level source_files attribution; symbol-level increment now happens inside the native engine on the Python side.',
       bigProvider: 'Large-tier provider',
       bigProviderOff: '(large tier off)',
       bigProviderHint: 'A provider registered in model settings. Default Volcengine Ark (volces-ark). Empty disables the large tier.',
@@ -265,6 +308,8 @@ window.__ModuleLoader__.load({
       loadingLabel: 'Loading…',
       conflict: 'Save conflict: settings changed elsewhere, please retry.',
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
+      invalidAgenticSteps: 'Agentic steps per article must be an integer between 1 and 100.',
+      invalidPlanMode: 'Module partitioning must be either semantic clustering or top-level directory grouping.',
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stageQueued: 'Queued',
@@ -276,8 +321,18 @@ window.__ModuleLoader__.load({
       stageCommit: 'Committing',
       stepQueued: 'Queue',
       stageDone: 'Done',
+      stagePartial: 'Partial',
       stageFailed: 'Failed',
       stageCancelled: 'Cancelled',
+      nativeStageLabel: 'Engine stage',
+      channelNative: 'Native engine',
+      nativeEnv: 'Probing environment',
+      nativeGraph: 'Parsing code graph',
+      nativeCluster: 'Clustering modules',
+      nativeValidate: 'Validating output',
+      nativeBaseline: 'Advancing baseline',
+      gateLabel: 'Quality gate',
+      applyLabel: 'Apply',
       kindFull: 'Full',
       kindStale: 'Stale',
       kindResume: 'Resume',
@@ -344,6 +399,7 @@ window.__ModuleLoader__.load({
       nextScan: 'Next scan',
       scannedLabel: 'scanned',
       submittedLabel: 'submitted',
+      skippedLabel: 'skipped (outside workspace)',
       totalTimeLabel: 'total',
       copyPath: 'Copy path',
       copiedLabel: 'Copied',
@@ -736,9 +792,26 @@ window.__ModuleLoader__.load({
               setError(t('invalidConcurrency'))
               return
             }
+            // 大档并发：0 = 跟随默认档；负值/小数/超硬顶一律拦下（0 留给「跟随」语义，不报错）
+            const bigConc = Number(draft?.bigConcurrency)
+            if (Number.isFinite(bigConc) && bigConc !== 0 && (bigConc < 1 || bigConc > 8 || !Number.isInteger(bigConc))) {
+              setError(t('invalidConcurrency'))
+              return
+            }
+            // agentic 步数上限：1–100 整数（开关关闭时值仍要合法，避免下次开启拿到脏值）
+            const steps = Number(draft?.agenticMaxSteps)
+            if (Number.isFinite(steps) && (steps < 1 || steps > 100 || !Number.isInteger(steps))) {
+              setError(t('invalidAgenticSteps'))
+              return
+            }
+            // planMode 只接受白名单，防止手填脏值永久存在配置里
+            if (!['auto', 'dirs'].includes(String(draft?.planMode ?? 'auto'))) {
+              setError(t('invalidPlanMode'))
+              return
+            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'planMode', 'agenticArticles', 'agenticMaxSteps', 'symbolIncremental']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -814,6 +887,16 @@ window.__ModuleLoader__.load({
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('maxConcurrencyHint')),
                 ),
+                el('label', null, t('bigConcurrency')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 0, max: 8, step: 1,
+                    value: String(draft.bigConcurrency ?? 0),
+                    onChange: (e) => setPath('bigConcurrency', e.target.value === '' ? 0 : Number(e.target.value)),
+                    placeholder: '0',
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('bigConcurrencyHint')),
+                ),
                 el('label', null, t('serialProjects')),
                 el('div', { 'data-dscw-field': '' },
                   el(Switch, {
@@ -884,6 +967,53 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
+            // 编译流程（吸收自 FSoft CodeWiki 的三档能力：语义聚类 / agentic 写作 / 符号级增量）
+            el('section', { 'data-dscw-field': '' },
+              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secPipeline'))),
+              el('div', { 'data-dscw-hint': '' }, t('secPipelineHint')),
+              el('div', { 'data-dscw-grid': '' },
+                el('label', null, t('planMode')),
+                el('div', { 'data-dscw-field': '' },
+                  el('select', {
+                    'data-dscw-select': '',
+                    value: String(draft.planMode ?? 'auto'),
+                    onChange: (e) => setPath('planMode', e.target.value),
+                  },
+                    el('option', { key: 'auto', value: 'auto' }, t('planModeAuto')),
+                    el('option', { key: 'dirs', value: 'dirs' }, t('planModeDirs')),
+                  ),
+                  el('div', { 'data-dscw-hint': '' }, t('planModeHint')),
+                ),
+                el('label', null, t('agenticArticles')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.agenticArticles !== false,
+                    onChange: (v) => setPath('agenticArticles', v),
+                    label: t('agenticArticles'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('agenticArticlesHint')),
+                ),
+                el('label', null, t('agenticMaxSteps')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 1, max: 100, step: 1,
+                    disabled: draft.agenticArticles === false,
+                    value: String(draft.agenticMaxSteps ?? 30),
+                    onChange: (e) => setPath('agenticMaxSteps', Math.max(1, Math.min(100, Number(e.target.value) || 30))),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('agenticMaxStepsHint')),
+                ),
+                el('label', null, t('symbolIncremental')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Switch, {
+                    checked: draft.symbolIncremental !== false,
+                    onChange: (v) => setPath('symbolIncremental', v),
+                    label: t('symbolIncremental'),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('symbolIncrementalHint')),
+                ),
+              ),
+            ),
                         // 调度与排除
             el('section', { 'data-dscw-field': '' },
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secSchedule'))),
@@ -934,6 +1064,15 @@ window.__ModuleLoader__.load({
         // -------------------------------------------------------------------
 
         const stageLabel = (stage) => tBound(`stage${String(stage).charAt(0).toUpperCase()}${String(stage).slice(1)}`)
+        // 原生引擎阶段名（八段契约）。与面板七步阶段同名的那几个（articles/index/commit）
+        // 直接映射回步骤条标签，避免同一阶段出现两种说法。
+        const NATIVE_STAGE_KEYS = {
+          env: 'nativeEnv', graph: 'nativeGraph', cluster: 'nativeCluster',
+          articles: 'stageArticles', validate: 'nativeValidate',
+          index: 'stageIndex', baseline: 'nativeBaseline', commit: 'stageCommit',
+        }
+        const nativeStageName = (stage) => (stage && NATIVE_STAGE_KEYS[stage] ? tBound(NATIVE_STAGE_KEYS[stage]) : null)
+
         const stateLabel = (st) => tBound(`state${String(st).charAt(0).toUpperCase()}${String(st).slice(1)}`)
         const kindLabelOf = (t, kind) => t(`kind${String(kind).charAt(0).toUpperCase()}${String(kind).slice(1)}`)
         const progressBar = (done, total) => (total > 0
@@ -994,10 +1133,13 @@ window.__ModuleLoader__.load({
         const stageBar = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           const terminal = idx < 0
-          const failIdx = terminal && job.stage !== 'done' ? ACTIVE_STAGES.indexOf(lastTimedStage(job)) : -1
+          // partial（部分完成）与 done 一样「所有阶段都跑过了」，区别只在终态标签与
+          // 未消化变化的提示——所以步骤条不该停在某个阶段标红，只有 failed/cancelled 才这样。
+          const cleanEnd = job.stage === 'done' || job.stage === 'partial'
+          const failIdx = terminal && !cleanEnd ? ACTIVE_STAGES.indexOf(lastTimedStage(job)) : -1
           return el('div', { 'data-dscw-p-steps': '' },
             ACTIVE_STAGES.map((s, i) => {
-              const done = terminal ? ((failIdx < 0 && job.stage === 'done') || i < failIdx) : i < idx
+              const done = terminal ? ((failIdx < 0 && cleanEnd) || i < failIdx) : i < idx
               const running = !terminal && i === idx
               const failedStep = terminal && failIdx >= 0 && i === failIdx
               const dur = job.stageTimings?.[s]
@@ -1018,7 +1160,9 @@ window.__ModuleLoader__.load({
         const STAGE_WEIGHTS = { queued: 0, articles: 0.63, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05, commit: 0.02 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
-          if (idx < 0) return job.stage === 'done' ? 100 : null
+          // partial 是所有阶段都跑完但完整性没成立：进度按 100 显示（活干完了），
+          // 由终态标签「部分完成」+ 阻塞原因说明为什么没算完整成功。
+          if (idx < 0) return (job.stage === 'done' || job.stage === 'partial') ? 100 : null
           let pct = 0
           for (let i = 0; i < idx; i++) pct += STAGE_WEIGHTS[ACTIVE_STAGES[i]] ?? 0
           const tl = Array.isArray(job.taskList) ? job.taskList : []
@@ -1151,6 +1295,7 @@ window.__ModuleLoader__.load({
                     const remain = next - Date.now()
                     const stats = sched.lastScanRepos != null
                       ? ` · ${t('scannedLabel')} ${sched.lastScanRepos} · ${t('submittedLabel')} ${sched.lastScanSubmitted ?? 0}`
+                        + (sched.lastScanSkipped ? ` · ${t('skippedLabel')} ${sched.lastScanSkipped}` : '')
                       : ''
                     return el('div', { 'data-dscw-p-meta': '' },
                       `${t('nextScan')}: ${sched.scanning
@@ -1185,7 +1330,8 @@ window.__ModuleLoader__.load({
                     ),
                     (() => {
                       const lj = r.lastJob
-                      const ljActive = lj && !['done', 'failed', 'cancelled'].includes(lj.stage)
+                      // partial 也是终态（不再推进），否则会把已结束的任务当成「在跑」继续显示进度条
+                      const ljActive = lj && !['done', 'partial', 'failed', 'cancelled'].includes(lj.stage)
                       const tl = ljActive && Array.isArray(lj.taskList) ? lj.taskList : []
                       const tlDone = tl.filter((x) => x.state === 'done').length
                       const barDone = ljActive && lj.batchProgress ? lj.batchProgress.completed : tlDone
@@ -1417,6 +1563,21 @@ window.__ModuleLoader__.load({
             if (total) meta.push(`${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`)
             else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
             if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
+            // 原生通道（阶段 4）：步骤条是粗粒度七步，引擎自报的是八段契约——粒度不同，
+            // 所以真实引擎阶段另起一项显示，不能拿它去改步骤条的序号（那会让旧任务错位）。
+            if (job.channel === 'native') {
+              const ns = nativeStageName(job.nativeStage)
+              if (active && ns) meta.push(`${t('nativeStageLabel')} ${ns}${Number.isFinite(job.nativePercent) ? ` ${job.nativePercent}%` : ''}`)
+              const nr = job.nativeResult
+              if (!active && nr?.gate?.outcome) meta.push(`${t('gateLabel')} ${nr.gate.outcome}`)
+              if (!active && nr?.apply?.outcome) meta.push(`${t('applyLabel')} ${nr.apply.outcome}`)
+            }
+            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
+            // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
+            const blockers = Array.isArray(job.blockers) ? job.blockers : []
+            if (!active && job.stage === 'partial' && blockers.length) {
+              meta.push(`未消化 ${blockers.length} 项`)
+            }
             if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
             // 已用时拆「排队 / 执行」：排队时长来自 stageTimings.queued（正在排队时实时算），
             // 执行 = 总时长 − 排队。不再让 2 小时排队被看成「编译跑了 2 小时」。
@@ -1446,7 +1607,16 @@ window.__ModuleLoader__.load({
                 if (ac.reason) acTitle = `${t('autoCommitPending')}：${ac.reason}`
               }
             }
-            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: acTitle ?? undefined },
+            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
+            // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
+            // 阻塞原因是几十字的中文句子，塞进 meta 会撑爆一行，所以放 title 悬停看。
+            let blockTitle = null
+            if (!active && job.stage === 'partial' && blockers.length) {
+              meta.push(`未消化 ${blockers.length} 项`)
+              blockTitle = blockers.slice(0, 3).map((b) => String(b.detail ?? b.kind)).join('；')
+            }
+            const jobTitle = [acTitle, blockTitle].filter(Boolean).join('\n') || undefined
+            return el('div', { key: job.id, 'data-dscw-p-job': '', 'data-active': active ? 'true' : null, title: jobTitle },
               el('div', { 'data-dscw-p-row': '' },
                 el(Tag, null, kindLabel(job.kind)),
                 el('span', {

@@ -1,0 +1,432 @@
+{
+  "version": 1,
+  "jobId": "job-mvt1mrvu-6",
+  "scope": "auto",
+  "startedAt": "2026-10-29T04:28:43.818Z",
+  "finishedAt": "2026-10-29T07:22:58.879Z",
+  "baseCommit": null,
+  "headCommit": null,
+  "changeSet": null,
+  "plan": null,
+  "results": [
+    {
+      "name": "modules/test_agentic.md",
+      "ok": false,
+      "stopReason": "stream-error",
+      "error": null
+    },
+    {
+      "name": "modules/test_batch.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/agentic_writing.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/article_contract.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_orchestration_api.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_orchestration_setup.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_wiki.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/change_set.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/symbol_extraction.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/incremental_update.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/clustering.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/graph_diff.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/test_clustering.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_graph_symbols.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_incremental_update.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_core.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_state.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_output_quality.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_bridges.md",
+      "ok": false,
+      "stopReason": "stream-error",
+      "error": null
+    },
+    {
+      "name": "modules/engine_apply.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/engine_python.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_output.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_protocol.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_apply.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_native_inc.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/test_engine_native_job.md",
+      "ok": true,
+      "stopReason": "max-steps",
+      "error": null
+    },
+    {
+      "name": "modules/fsoft_fixtures.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "modules/probes_root.md",
+      "ok": true,
+      "stopReason": "finished",
+      "error": null
+    },
+    {
+      "name": "_patterns.md",
+      "ok": true,
+      "stopReason": "completed",
+      "error": null
+    },
+    {
+      "name": "_architecture.md",
+      "ok": true,
+      "stopReason": "completed",
+      "error": null
+    }
+  ],
+  "qualityIssues": [
+    {
+      "name": "_architecture.md",
+      "issue": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile；source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "name": "_patterns.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "name": "modules/change_set.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/update-planner.js"
+    },
+    {
+      "name": "modules/clustering.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、test-cluster.mjs、lib/update-planner.js；重复章节：Data Flow、Connections"
+    },
+    {
+      "name": "modules/engine_apply.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/engine/git-paths.js、lib/index.js"
+    },
+    {
+      "name": "modules/fsoft_fixtures.md",
+      "issue": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile"
+    },
+    {
+      "name": "modules/graph_diff.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/graph-diff.js、test-graphdiff.mjs、lib/incremental.js、lib/update-planner.js、lib/symbols.js；重复章节：Architecture"
+    },
+    {
+      "name": "modules/incremental_update.md",
+      "issue": "存量文章未过契约：frontmatter 缺必填字段 tags（没有标签也要写成 tags: []）；source_files 指向不存在的文件：lib/incremental.js、lib/update-planner.js、lib/graph-diff.js、test-incremental.mjs、test-update-planner.mjs"
+    },
+    {
+      "name": "modules/lib.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "name": "modules/probes_root.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：.probe-posix.mjs"
+    },
+    {
+      "name": "modules/root.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：test-cluster.mjs、test-graphdiff.mjs、test-incremental-e2e.mjs、test-incremental.mjs、test-semantic-plan.mjs"
+    },
+    {
+      "name": "modules/symbol_extraction.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/symbols.js、test-symbols.mjs、lib/graph-diff.js、lib/cluster.js、lib/update-planner.js"
+    },
+    {
+      "name": "modules/test_clustering.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：test-cluster.mjs、test-semantic-plan.mjs、lib/cluster.js"
+    },
+    {
+      "name": "modules/test_graph_symbols.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：test-graphdiff.mjs、test-symbols.mjs、lib/graph-diff.js、lib/symbols.js"
+    },
+    {
+      "name": "modules/test_incremental_update.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：test-incremental.mjs、test-incremental-e2e.mjs、test-update-planner.mjs、lib/incremental.js、lib/update-planner.js"
+    },
+    {
+      "name": "concepts/file-watching-mechanism.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：modules/observability.md"
+    },
+    {
+      "name": "concepts/test-log-pairing.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-orchestration.log"
+    },
+    {
+      "name": "concepts/test-logging-pattern.md",
+      "issue": "存量文章未过契约：frontmatter 缺必填字段 source_files"
+    },
+    {
+      "name": "concepts/test-logging.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log、.tmp-test-wiki-entry.log"
+    },
+    {
+      "name": "concepts/wiki-generation-flow.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/incremental.js、lib/symbols.js、lib/graph-diff.js"
+    },
+    {
+      "name": "concepts/wiki-generation.md",
+      "issue": "存量文章未过契约：source_files 指向不存在的文件：lib/symbols.js、lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/update-planner.js"
+    },
+    {
+      "name": "learnings/update-reminder-entry-gap.md",
+      "issue": "存量文章未过契约：frontmatter 未闭合（缺结束 ---）"
+    }
+  ],
+  "outcome": "partial",
+  "blockers": [
+    {
+      "kind": "article-failed",
+      "name": "modules/test_agentic.md",
+      "detail": "stream-error"
+    },
+    {
+      "kind": "article-failed",
+      "name": "modules/engine_bridges.md",
+      "detail": "stream-error"
+    },
+    {
+      "kind": "quality",
+      "name": "_architecture.md",
+      "detail": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile；source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "_patterns.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/change_set.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/clustering.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、test-cluster.mjs、lib/update-planner.js；重复章节：Data Flow、Connections"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/engine_apply.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/engine/git-paths.js、lib/index.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/fsoft_fixtures.md",
+      "detail": "存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/graph_diff.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/graph-diff.js、test-graphdiff.mjs、lib/incremental.js、lib/update-planner.js、lib/symbols.js；重复章节：Architecture"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/incremental_update.md",
+      "detail": "存量文章未过契约：frontmatter 缺必填字段 tags（没有标签也要写成 tags: []）；source_files 指向不存在的文件：lib/incremental.js、lib/update-planner.js、lib/graph-diff.js、test-incremental.mjs、test-update-planner.mjs"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/lib.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/probes_root.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：.probe-posix.mjs"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/root.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：test-cluster.mjs、test-graphdiff.mjs、test-incremental-e2e.mjs、test-incremental.mjs、test-semantic-plan.mjs"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/symbol_extraction.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/symbols.js、test-symbols.mjs、lib/graph-diff.js、lib/cluster.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/test_clustering.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：test-cluster.mjs、test-semantic-plan.mjs、lib/cluster.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/test_graph_symbols.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：test-graphdiff.mjs、test-symbols.mjs、lib/graph-diff.js、lib/symbols.js"
+    },
+    {
+      "kind": "quality",
+      "name": "modules/test_incremental_update.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：test-incremental.mjs、test-incremental-e2e.mjs、test-update-planner.mjs、lib/incremental.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/file-watching-mechanism.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：modules/observability.md"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/test-log-pairing.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-orchestration.log"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/test-logging-pattern.md",
+      "detail": "存量文章未过契约：frontmatter 缺必填字段 source_files"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/test-logging.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：.tmp-test-batch.log、.tmp-test-cwd-paths.log、.tmp-test-orchestration.log、.tmp-test-wiki-anchors.log、.tmp-test-wiki-entry.log"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/wiki-generation-flow.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/cluster.js、lib/incremental.js、lib/symbols.js、lib/graph-diff.js"
+    },
+    {
+      "kind": "quality",
+      "name": "concepts/wiki-generation.md",
+      "detail": "存量文章未过契约：source_files 指向不存在的文件：lib/symbols.js、lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/update-planner.js"
+    },
+    {
+      "kind": "quality",
+      "name": "learnings/update-reminder-entry-gap.md",
+      "detail": "存量文章未过契约：frontmatter 未闭合（缺结束 ---）"
+    }
+  ],
+  "canAdvanceBaseline": false,
+  "writtenCount": 28,
+  "failedCount": 2,
+  "notes": [
+    "modules/engine_apply.md：行号锚点存疑（未改）—— lib/engine/apply-plan.js:1-34 符号未找到未改；lib/engine/apply-plan.js:12-15 符号歧义未改；lib/engine/apply-plan.js:117-124 符号未找到未改 等",
+    "modules/engine_python.md：自动修正 11 处行号锚点",
+    "modules/engine_python.md：行号锚点存疑（未改）—— lib/engine/python/entry.py:133 符号歧义未改；lib/engine/python/entry.py:134 符号歧义未改；lib/engine/python/entry.py:723 符号歧义未改 等",
+    "modules/test_engine_apply.md：自动修正 1 处行号锚点",
+    "modules/test_engine_apply.md：行号锚点存疑（未改）—— vendor/codewiki/src/main.rs:236-256 符号未找到未改；index.js:303 符号未找到未改",
+    "modules/test_engine_output.md：自动修正 14 处行号锚点",
+    "modules/test_engine_output.md：行号锚点存疑（未改）—— lib/engine/python/entry.py:62 符号歧义未改；test-engine-python-entry.mjs:79 符号歧义未改；test-engine-quality-gate.mjs:36 符号歧义未改 等",
+    "modules/test_engine_native_job.md：自动修正 7 处行号锚点",
+    "modules/fsoft_fixtures.md：自动修正 2 处行号锚点",
+    "modules/fsoft_fixtures.md：行号锚点存疑（未改）—— tools/fsoft-engine/probe-generate-with-fake-model.mjs:1 符号歧义未改；tools/fsoft-engine/setup-env.sh:1 符号歧义未改；tools/fsoft-engine/probe-no-llm-graph.py:165 符号歧义未改 等",
+    "modules/probes_root.md：自动修正 13 处行号锚点",
+    "modules/probes_root.md：行号锚点存疑（未改）—— .probe-idxfail.mjs:1 符号歧义未改；.probe-inc.mjs:1 符号歧义未改；.probe-nochange.mjs:1 符号歧义未改 等",
+    "modules/incremental_update.md：批量校对输出缺席，保留原文",
+    "modules/clustering.md：批量校对输出缺席，保留原文",
+    "存量文章体检：22 篇未过契约（_architecture.md、_patterns.md、modules/change_set.md 等）",
+    "完整性未成立（部分完成（24 项未满足：stream-error））—— stream-error；stream-error；存量文章未过契约：source_files 不是仓库相对文件路径：tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile；source_files 指向不存在的文件：lib/cluster.js、lib/graph-diff.js、lib/incremental.js、lib/symbols.js、lib/update-planner.js",
+    "清理孤儿模块文章 2 篇（模块划分已变，旧文件无人重写）—— lib.md、root.md",
+    "cw index exit 0",
+    "编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）",
+    "符号快照已写入（566 个组件），下次增量按组件级判定"
+  ],
+  "wikiPath": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki"
+}

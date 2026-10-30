@@ -9,6 +9,7 @@ import {
   buildSessionSteerText,
   prepareArticleTasks, runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
+  validateArticleEnvelope,
 } from './index.js'
 
 let passed = 0
@@ -193,7 +194,7 @@ const kmTasks = [
 ]
 const batchNotes = []
 const batchRes = await runRealtimeTasks(kmTasks, {
-  provider: 'workbuddy', llm: makeLlm('---\ntitle: B\n---\n批量结果'),
+  provider: 'workbuddy', llm: makeLlm('---\ntitle: B\ntype: module\ntags: []\nsource_files:\n  - src.ts\n---\n\n## Overview\n\n批量结果'),
   model: 'hy3', reasoningEffort: 'high', concurrency: 2, notes: batchNotes,
 })
 check(llmCalls.length === 2, '每任务一次流式调用（2 任务 2 次）')
@@ -225,6 +226,75 @@ check(normalCall?.reasoningEffort === 'high', '普通任务沿用参数里的思
 check(bigCall?.provider === 'volces-ark' && bigCall?.model === 'glm-5.3-flash', '大档任务覆盖 provider/model')
 check(bigCall?.reasoningEffort === 'max', '大档任务带自己的思考档位')
 check(bigCall2?.reasoningEffort === undefined, '大档任务未指定档位时不回落普通档（用模型默认）')
+
+// 分池限流（0.12.2）：大档任务与默认档任务各自独立计数、同时推进。
+// 用带延迟的 mock llm 统计「同时在飞」的峰值——只有真正分开限流才能观测到两池各自打满。
+section('runRealtimeTasks：大档与默认档并发分池')
+function makeSlowLlm(reply, delayMs = 30) {
+  return {
+    async *stream(opts) {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      await new Promise((r) => setTimeout(r, delayMs))
+      yield { type: 'text-delta', index: 0, text: reply }
+      yield { type: 'usage', usage: { outputTokens: 8 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  }
+}
+function poolProbe() {
+  const st = { normal: 0, big: 0, peakNormal: 0, peakBig: 0, total: 0, peakTotal: 0 }
+  return {
+    st,
+    onTaskStart(t) {
+      if (t.bigTier) { st.big += 1; st.peakBig = Math.max(st.peakBig, st.big) }
+      else { st.normal += 1; st.peakNormal = Math.max(st.peakNormal, st.normal) }
+      st.total += 1
+      st.peakTotal = Math.max(st.peakTotal, st.normal + st.big)
+    },
+    onTaskEnd(t) {
+      if (t.bigTier) st.big -= 1
+      else st.normal -= 1
+    },
+  }
+}
+const mk = (id, big) => ({
+  customId: id, name: `_${id}`, keepInMemory: true, batchPrompt: `任务${id}`,
+  ...(big ? { provider: 'volces-ark', model: 'glm-5.3-flash', bigTier: true } : {}),
+})
+{
+  // concurrency=2 / bigConcurrency=1：默认档被打满 2，大档单独限 1，两池并行 → 总峰值 3
+  const probe = poolProbe()
+  const timedTasks = [
+    mk('n0'), mk('n1'), mk('n2'), mk('n3'),
+    mk('g0', true), mk('g1', true), mk('g2', true),
+  ]
+  const res = await runRealtimeTasks(timedTasks, {
+    provider: 'workbuddy', llm: makeSlowLlm('---\ntitle: P\n---\n结果'),
+    model: 'hy3', concurrency: 2, bigConcurrency: 1, notes: [],
+    onRequestStart: (t) => {
+      probe.onTaskStart(t)
+      return { onDone: () => probe.onTaskEnd(t), onError: () => probe.onTaskEnd(t) }
+    },
+  })
+  check(res.size === 7 && [...res.values()].every((r) => r.ok), '分池后 7 个任务全部完成')
+  check(probe.st.peakNormal === 2, `默认档并发打满 2（实测 ${probe.st.peakNormal}）`)
+  check(probe.st.peakBig === 1, `大档并发独立限到 1（实测 ${probe.st.peakBig}）`)
+  check(probe.st.peakTotal >= 2, `两池同时推进（总峰值 ${probe.st.peakTotal} ≥ 2）`)
+}
+{
+  // bigConcurrency 不传/为 0 → 跟随默认档（等价 0.12.1 的单一池行为）
+  const probe = poolProbe()
+  const followTasks = [mk('g0', true), mk('g1', true), mk('g2', true), mk('g3', true)]
+  await runRealtimeTasks(followTasks, {
+    provider: 'workbuddy', llm: makeSlowLlm('---\ntitle: F\n---\n结果'),
+    model: 'hy3', concurrency: 2, notes: [],
+    onRequestStart: (t) => {
+      probe.onTaskStart(t)
+      return { onDone: () => probe.onTaskEnd(t), onError: () => probe.onTaskEnd(t) }
+    },
+  })
+  check(probe.st.peakBig === 2, `bigConcurrency 缺省=跟随默认档 2（实测 ${probe.st.peakBig}）`)
+}
 
 section('runRealtimeTasks：tps 采样与取消信号')
 {
@@ -264,7 +334,7 @@ section('runRealtimeTasks：并发池 + 失败记账')
     provider: 'workbuddy',
     llm: makeLlm((opts) => promptOf(opts).includes('boom')
       ? new Error('simulated network error')
-      : (promptOf(opts).includes('km') ? '内存结果' : '---\ntitle: R\n---\n实时结果')),
+      : (promptOf(opts).includes('km') ? '内存结果' : '---\ntitle: R\ntype: module\ntags: []\nsource_files:\n  - src.ts\n---\n\n## Overview\n\n实时结果')),
     model: 'hy3', concurrency: 2, notes: rtNotes,
   })
   check(rt.size === 3, '返回 3 条结果（Map）')
@@ -478,6 +548,13 @@ const fa = (body) => faFm + body
   check(rg.fixed === 1 && rg.text.includes('`a.js:5-5`'), '区间锚点 → 起点对齐符号、尾部钳到文件尾（delta 在文件末行）')
   const clamp = fixAnchors(fa('`gamma`（`a.js:1-99`）钳制。'), faRoot)
   check(clamp.fixed === 1 && clamp.text.includes('`a.js:3-5`'), '区间修正尾越界 → 钳到文件尾')
+  // 倒序区间：原文 `a.js:9-7`（起点大于终点）。旧实现按 end2-start 平移尾行会算出
+  // R + (7-9) = R-2，产出 `5-3` 这种起点大于终点的区间，校验永远报「区间起止有序」失败。
+  // 实测 .codewiki/concepts/test-log-pairing.md 里就有一条 `index.js:902-901` 卡了很多轮编译。
+  const rev = fixAnchors(fa('`delta`（`a.js:9-7`）倒序。'), faRoot)
+  check(rev.fixed === 1 && /`a\.js:5-5`/.test(rev.text), '倒序区间 → 尾行按跨度翻正，起点不大于终点')
+  const rev2 = fixAnchors(fa('`gamma`（`a.js:8-2`）倒序且跨多行。'), faRoot)
+  check(rev2.fixed === 1 && /`a\.js:3-5`/.test(rev2.text), '倒序多行区间 → 跨度取绝对值后不越界（a.js 仅 5 行，尾钳到 5）')
   const bb = fixAnchors(fa('见 `omega` (`b.js:1`)。'), faRoot)
   check(bb.fixed === 0, 'basename 多段路径匹配（src/b.js 唯一）→ 不动因已正确')
   const bbFix = fixAnchors(fa('见 `omega` (`b.js:9`)。'), faRoot)
@@ -491,7 +568,71 @@ const fa = (body) => faFm + body
   fs.writeFileSync(path.join(faRoot, 'sub', 'dup.js'), 'y')
   const amb2 = fixAnchors('---\nsource_files: [dup.js, sub/dup.js]\n---\n\n见 `y` (`dup.js:1`)。', faRoot)
   check(amb2.fixed === 0, 'basename 歧义（根与子目录同名）→ 不碰')
+  // 一行并列多个「符号 + 锚点」：每个锚点必须各自绑定离它最近的符号，绝不能把整行拉平成
+  // 同一个行号。旧实现从 syms[0] 起找第一个能解析的符号，命中后整行锚点全用它，于是
+  // `alpha (a.js:1)、delta (a.js:99)` 会被改写成两处 `a.js:1`——锚点看起来都指向非空代码行，
+  // 能骗过校验器，却是比原文更坏的数据（本仓 _patterns.md 曾出现同行 15 处 index.js:49）。
+  const multi = fixAnchors(fa('`alpha` (`a.js:99`)、`delta` (`a.js:98`)。'), faRoot)
+  check(multi.text.includes('`alpha` (`a.js:1`)') && multi.text.includes('`delta` (`a.js:5`)'),
+    '一行两个锚点 → 各自绑定离自己最近的符号，不拉平成同一个行号')
+  const multiOk = fixAnchors(fa('`alpha` (`a.js:1`)、`delta` (`a.js:5`)。'), faRoot)
+  check(multiOk.fixed === 0 && /`alpha` \(`a\.js:1`\)、`delta` \(`a\.js:5`\)/.test(multiOk.text),
+    '一行两个已正确的锚点 → 互不干扰原样保留')
+
+  // 多锚点行的「已正确」判定必须用**已被占用**的符号来挡：同一行两个锚点不能认领同一个
+  // 符号，否则第二个锚点会被改到第一个符号的行上。
+  //
+  // 注意这里**不能**要求「起始行含该符号就必须改成它的声明行」——单锚点行一直采用宽松
+  // 判定（起始行提到该符号即认可，见上一条用例），多锚点行若改用严格判定，就会出现
+  // 同一份文档单锚点行保留、多锚点行被改的不一致。真正的护栏是 used 占用 + 就近排序：
+  // 第 3 行 `const gamma = beta()` 同时含两个符号，`beta` 认领第 3 行后，`gamma` 仍能
+  // 各自改到它自己的位置——两个符号不会被同一个锚点抢走。
+  const swap = fixAnchors(fa('`beta` (`a.js:3`)、`gamma` (`a.js:99`)。'), faRoot)
+  check(swap.fixed === 1 && swap.text.includes('`gamma` (`a.js:3`)'),
+    '多锚点行：认领过 beta 的第 3 行仍能被 gamma 用，gamma 锚点照常修正')
+  const oneWrong = fixAnchors(fa('`alpha` (`a.js:1`)、`delta` (`a.js:99`)。'), faRoot)
+  check(oneWrong.fixed === 1 && oneWrong.text.includes('`alpha` (`a.js:1`)') && oneWrong.text.includes('`delta` (`a.js:5`)'),
+    '一对其一错 → 只改错的那个，不因第一个已正确就放过第二个')
+  const reversed = fixAnchors(fa('`delta` (`a.js:99`)、`alpha` (`a.js:1`)。'), faRoot)
+  check(reversed.fixed === 1 && reversed.text.includes('`delta` (`a.js:5`)') && reversed.text.includes('`alpha` (`a.js:1`)'),
+    '锚点顺序颠倒 → 仍各按自己的符号修正')
+  // 单锚点行保持宽松判定（起始行提到该符号即认可），这条钉住「不为了严格而改写全仓既有锚点」
+  check(fixAnchors(fa('见 `beta` (`a.js:3`)。'), faRoot).fixed === 0,
+    '单锚点行保持宽松：起始行是该符号的调用处也视为已正确')
   fs.rmSync(faRoot, { recursive: true, force: true })
+}
+
+// ---- validateArticleEnvelope：frontmatter 信封校验 ----
+// 这条闸门挡的是「半截 frontmatter 文章能落盘、但整篇锚点永远不会被校正」这类静默失效，
+// 光看编译成功发现不了，必须逐种坏输出各钉一条。
+console.log('\n== validateArticleEnvelope ==')
+{
+  const C = (s) => s.join('\n')
+  check(validateArticleEnvelope(C(['---', 'title: t', '---', '', '正文'])) === null,
+    '正常闭合 → 合格')
+  check(validateArticleEnvelope(C(['', '  ', '---', 'title: t', '---', '', '正文'])) === null,
+    '前置空行/空白缩进 → 仍合格（trimStart 后判断）')
+  check(validateArticleEnvelope(C(['---', 'title: t', '---'])) === null,
+    '只有 frontmatter 没有正文 → 合格（信封完整即可）')
+  check(validateArticleEnvelope(C(['---\r', 'title: t\r', '---\r', '', '正文'])) === null,
+    'CRLF 行尾 → 合格')
+  check(/缺 frontmatter/.test(validateArticleEnvelope('正文直接开始，没有 frontmatter')),
+    '缺开头 --- → 判为缺 frontmatter')
+  check(/缺 frontmatter/.test(validateArticleEnvelope('')),
+    '空串 → 判为缺 frontmatter')
+  check(/缺 frontmatter/.test(validateArticleEnvelope(null)),
+    'null → 判为缺 frontmatter（不能抛错）')
+  check(/缺 frontmatter/.test(validateArticleEnvelope(42)),
+    '非字符串 → 判为缺 frontmatter（不能抛错）')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', 'title: t', '', '正文']))),
+    '缺结束 --- → 判为未闭合')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', 'title: t']))),
+    'frontmatter 只有开头 → 判为未闭合')
+  check(/未闭合/.test(validateArticleEnvelope(C(['---', '', '正文', '--- 出现在正文里']))),
+    '结束 --- 后没有换行收尾且非独占行 → 判为未闭合')
+  // 正文里的 --- 不能被误当成 frontmatter 结尾：只有紧随首个 --- 段落后那一个才算
+  check(validateArticleEnvelope(C(['---', 'title: t', '---', '', '正文', '', '---', '', '分隔线'])) === null,
+    '正文里的 --- 分隔线不影响信封判定')
 }
 
 console.log(`\n${failures.length ? 'FAIL' : 'ALL PASS'}：${passed} 通过，${failures.length} 失败`)

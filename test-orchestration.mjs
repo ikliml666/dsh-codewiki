@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url'
 
 // 测试加速：tick 间隔压到下限（生产默认 10s）
 process.env.DSH_CODEWIKI_TICK_MS = '300'
+// 自动调度测试不真等一分钟：心跳压缩到 100ms，仍走 apply 里的真实 autoScan。
+process.env.DSH_CODEWIKI_AUTO_SCAN_MS = '100'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 // 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写。
@@ -21,7 +23,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 // 后续提交全部 queued，表现为「偶发 20 项失败」。收尾统一删除，不留残留。
 const TEST_JOB_TOKEN = crypto.randomBytes(4).toString('hex')
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `dsh-codewiki-jobs-test-${process.pid}-${TEST_JOB_TOKEN}.json`)
-const { name, apply, SESSIONS_DIR } = await import('./index.js')
+const { name, apply, SESSIONS_DIR, reposFileFor } = await import('./index.js')
 
 let failures = 0
 function check(cond, msg) {
@@ -35,7 +37,13 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 
 // 测试配置基线：0.10.1 起编译模型必须显式指向模型设置里的 provider/model
 // （插件已无自带直连通道与任何密钥，provider 留空即提交失败）。
-const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...extra })
+// 本套测试全部断言的是**兼容通道**（nativeEngine=false，插件内 Node 流水线）的请求次数、
+// 装填方式与落盘时序（llm.stream 调用次数、单轮全文、core.md 直接落盘）。0.16.0 阶段 7
+// 起 nativeEngine 默认 true，不在这里钉住 false 的话整条链路会走原生引擎（需要真 Python
+// 环境），断言会因「通道换了」而不是「功能坏了」失败。原生通道的验证见
+// test-engine-native-job.mjs 与 test-engine-native-incremental.mjs。
+const LEGACY_CHANNEL = { nativeEngine: false, planMode: 'dirs', agenticArticles: false, symbolIncremental: false }
+const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...LEGACY_CHANNEL, ...extra })
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/tools/agents/llm 全部可捕获。
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
@@ -143,6 +151,24 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       return '观察：模块职责与关键实现（来自分批观察）。\n\n文件清单：见上文。\n'
     }
     if (prompt.includes('你是 CodeWiki 文章作者')) {
+      // stale 逐篇更新：目标文章名写在任务 mission 里。文章契约闸门（0.14.0）会校验
+      // type 与所在目录一致，所以 fixture 必须按目标位置给对类型——根目录 _architecture.md
+      // 是 architecture、concepts/ 是 concept，其余按 module。
+      const staleName = (prompt.match(/更新过期文章\s+(\S+?)：/) ?? [])[1]
+      if (staleName) {
+        const type = staleName === '_architecture.md' ? 'architecture'
+          : staleName === '_patterns.md' ? 'pattern'
+            : staleName.startsWith('concepts/') ? 'concept'
+              : staleName.startsWith('learnings/') ? 'learning' : 'module'
+        // 根级文章：_architecture.md 基于 core/core.py（随 core.py 变更过期），
+        // _patterns.md 基于 util/util.py（不被 core.py 变更波及，用来验证「未变更文章不动」）。
+        // 其余按 modules/<名>.md → <名>/<名>.py。契约闸门会校验 source_files 真实存在，
+        // 所以这里必须造出 fixture 里确实有的路径，不能凭空拼。
+        const src = staleName === '_architecture.md' ? 'core/core.py'
+          : staleName === '_patterns.md' ? 'util/util.py'
+            : staleName.replace(/^modules\//, '').replace(/\.md$/, '/') + `${staleName.replace(/^modules\//, '').replace(/\.md$/, '')}.py`
+        return articleMd(staleName, src, articleMarker, type)
+      }
       const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? modules[0]
       return articleMd(mn, `${mn}/${mn}.py`, articleMarker)
     }
@@ -1129,7 +1155,8 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
 {
   const krRepo = makeFixtureRepo()
   const mock = makeBatchMock()
-  const reposFile = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-repos.json')
+  // 与产品同源推导：写死 dirname 会落到真实宿主的清单文件（0.16.6 修复）
+  const reposFile = reposFileFor(JOBS_FILE)
   try {
     const r = await gen.execute({ cwd: krRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '0.4.8 编译提交成功')
@@ -1373,6 +1400,10 @@ console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
     try {
       fs.mkdirSync(path.join(wtMain, 'core'), { recursive: true })
       fs.writeFileSync(path.join(wtMain, 'core', 'core.py'), 'def run():\n    return 1\n')
+      // mock 生成的 _patterns.md 声明 util/util.py 为 source_files；契约闸门会校验它真实存在，
+      // 缺了这个文件整轮会因「存量文章 source_files 指向不存在的文件」降为 partial。
+      fs.mkdirSync(path.join(wtMain, 'util'), { recursive: true })
+      fs.writeFileSync(path.join(wtMain, 'util', 'util.py'), 'def fmt():\n    return "util"\n')
       execFileSync('git', ['init', '-q', wtMain])
       g('config', 'user.name', 'test')
       g('config', 'user.email', 'test@test')
@@ -1511,6 +1542,127 @@ console.log('== 服务启动清理：Temp 目录终态任务自动移除，活�
   check(!ids.includes('job-tmp-done'), 'Temp 目录终态任务已被启动清理移除')
   check(ids.includes('job-tmp-active'), 'Temp 目录活动任务保留')
   check(ids.includes('job-ws-done'), '工作区终态任务保留')
+}
+
+// ============================ 自动调度：历史任务截断后仍扫描已知仓库 ============================
+console.log('== 自动调度：过期检测触发真实心跳提交，历史外已知仓库不丢 ==')
+{
+  // 回归现场：REPOS_FILE 已有编译过的工作区，但 JOBS_FILE 为空（历史被 MAX_JOBS_KEPT
+  // 截断）。自动扫描必须仍对它执行 scope=auto，而不是把调度器变成只扫任务历史的摆设。
+  const scanRepo = makeFixtureRepo()
+  const mockScan = makeBatchMock()
+  // 落点必须与产品一致（跟随 JOBS_FILE 名字，而非只跟随目录）：写死 dirname 推导会落到
+  // 真实宿主的 dsh-codewiki-repos.json，跑一次测试就把 fixture 路径塞进宿主清单。
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || reposFileFor(JOBS_FILE)
+  // 干净现场：前序用例会往同一个 JOBS_FILE 里留 fixture 任务（如「Temp 目录活动任务保留」
+  // 的 job-tmp-active 仍是活动态），单项目串行闸门会被它永久占住——本仓库的初始化任务只会
+  // 一直 queued，根本没编译出 wiki，后面的 stale 判定自然退化成 missing/full。
+  // 因此必须在 apply 之前就把历史清空，而不是等初始化跑完再清。
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  fs.writeFileSync(repoFile, JSON.stringify({ repos: [] }), 'utf8')
+  const initCtx = makeCtx()
+  apply(initCtx.ctx, batchCfg({ autoUpdate: false }))
+  const initGen = initCtx.registered.get('codewiki_generate')
+  const submit = await initGen.execute({ cwd: scanRepo, scope: 'auto' }, {})
+  check(submit.submitted === true, '自动调度前置：新仓库可提交全量初始化')
+  const initJob = await waitJob(scanRepo)
+  check(initJob?.stage === 'done', `自动调度前置：初始化编译至终态 done（实际 ${initJob?.stage}）`)
+  check(JSON.parse(fs.readFileSync(repoFile, 'utf8')).repos.includes(scanRepo), '已编译仓库进入独立持久清单')
+  for (const dispose of initCtx.disposers) dispose()
+  // 先停掉持有旧任务内存的服务，再清空磁盘历史；否则 mergeFromDisk 只增不删，
+  // 会把内存里的终态任务带回来，根本没测到「只剩 knownRepos」这个现场。
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  const scanCtx = makeCtx()
+  apply(scanCtx.ctx, batchCfg({ autoUpdate: true, autoUpdateMin: 5 }))
+  // 让判态从 missing 变成 stale；真实 cw CLI 给出过期清单，不经 mock generate。
+  fs.writeFileSync(path.join(scanRepo, 'core', 'core.py'), 'def run():\n    return "changed"\n')
+  const scanCw = scanCtx.registered.get('cw')
+  // 判定必须真的走到 stale：cw status 看到 core/core.py 变更，自动调度才会走增量而非全量。
+  const preStatus = await scanCw.execute({ cwd: scanRepo, args: ['status'] }, {})
+  check(/Changed since last compile|Stale articles/.test(String(preStatus?.stdout ?? '')), `自动调度前置：心跳前判态已是过期（实际 ${String(preStatus?.stdout ?? '').split('\n')[0]}）`)
+  let autoJob = null
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 150))
+    const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+    autoJob = (data.jobs ?? []).find((j) => j.cwd === scanRepo && j.auto === true && j.kind === 'stale') ?? null
+    if (autoJob) break
+  }
+  check(autoJob !== null, `历史清空后，真实心跳仍扫描已知仓库并自动提交过期编译（现场 ${JSON.stringify((JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).filter((j) => j.cwd === scanRepo).map((j) => ({ scope: j.scope, kind: j.kind, stage: j.stage, notes: j.notes }))) }）`)
+  if (autoJob) check(autoJob.scope === 'auto' && autoJob.kind === 'stale', `自动提交保留 scope=auto 与增量 kind（实际 ${autoJob.scope}/${autoJob.kind}）`)
+  for (const dispose of scanCtx.disposers) dispose()
+  mockScan.restore()
+  fs.rmSync(scanRepo, { recursive: true, force: true })
+}
+
+// ============================ 幂等：同一仓库的不同路径写法 ============================
+console.log('== 幂等：同一仓库以不同路径写法提交只允许一条活动任务 ==')
+{
+  // 已知仓库清单与工具入参走的是两套路径形态：REPOS_FILE 用归一化 key 去重，
+  // 而 submit/findActive 曾用严格字符串相等，尾分隔符或盘符大小写一变就认不出同一仓库，
+  // 于是同仓库并发两条任务，直接破坏单项目串行与自动调度幂等的前提。
+  const idemRepo = makeFixtureRepo()
+  const mockIdem = makeBatchMock()
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  const idemCtx = makeCtx()
+  apply(idemCtx.ctx, batchCfg({ autoUpdate: false }))
+  try {
+    const idemGen = idemCtx.registered.get('codewiki_generate')
+    const r1 = await idemGen.execute({ cwd: idemRepo, scope: 'auto' }, {})
+    check(r1.submitted === true, `幂等前置：首次提交成功（submitted=${r1.submitted}）`)
+    const variants = [
+      ['尾分隔符', idemRepo + path.sep],
+      ['盘符大小写不同', idemRepo.toLowerCase()],
+    ]
+    for (const [label, variant] of variants) {
+      const r = await idemGen.execute({ cwd: variant, scope: 'auto' }, {})
+      check(
+        r.submitted === false && r.jobId === r1.jobId,
+        `幂等命中：cwd ${label} 仍返回同一任务（实际 submitted=${r.submitted} jobId=${r.jobId}，期望 ${r1.jobId}）`,
+      )
+    }
+  } finally {
+    for (const dispose of idemCtx.disposers) dispose()
+    mockIdem.restore()
+    fs.rmSync(idemRepo, { recursive: true, force: true })
+  }
+}
+
+// ============================ 自动调度遵守 workspaceOnly ============================
+console.log('== 自动调度遵守 workspaceOnly：工作区外仓库不被后台编译 ==')
+{
+  // 现场：knownRepos 里有一个「已移出 dsh 工作区」的仓库，且 autoUpdate 开着。
+  // 若只有面板过滤遵守 workspaceOnly，这个仓库会被后台定时编译、产物悄悄写进它的
+  // .codewiki/，而面板上根本看不到这条任务——用户既不知道它在编译，也取消不了。
+  const outsideRepo = makeFixtureRepo()
+  const wsOnlyRepo = makeFixtureRepo()
+  const mockWs = makeBatchMock()
+  // 落点必须与产品一致（跟随 JOBS_FILE 名字，而非只跟随目录）：写死 dirname 推导会落到
+  // 真实宿主的 dsh-codewiki-repos.json，跑一次测试就把 fixture 路径塞进宿主清单。
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || reposFileFor(JOBS_FILE)
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  fs.writeFileSync(repoFile, JSON.stringify({ repos: [outsideRepo] }), 'utf8')
+  // 只把 wsOnlyRepo 登记为已添加工作区；outsideRepo 不在清单里（含子目录判定见 isExcluded）
+  const wsCtx = makeCtx({ workspaces: [wsOnlyRepo] })
+  apply(wsCtx.ctx, batchCfg({ autoUpdate: true, autoUpdateMin: 5 }))
+  try {
+    // 心跳压到 100ms（见文件顶部），但 autoUpdateMin 闸门只看首轮：lastScan=0 立即放行
+    await new Promise((r) => setTimeout(r, 1200))
+    const jobs = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []
+    const outsideJobs = jobs.filter((j) => j.cwd === outsideRepo)
+    check(outsideJobs.length === 0, `工作区外仓库未被自动提交（实际 ${outsideJobs.length} 条：${JSON.stringify(outsideJobs.map((j) => ({ kind: j.kind, stage: j.stage })))}）`)
+    const reposEp = wsCtx.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    const res = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+    const sched = JSON.parse(res.out)?.scheduler
+    // 面板必须能解释「清单里有 N 个仓库、扫到 M 个」的缺口，否则用户以为调度器丢了仓库
+    check(sched?.lastScanSkipped >= 1, `面板可见工作区外跳过计数（实际 ${sched?.lastScanSkipped}）`)
+  } finally {
+    for (const dispose of wsCtx.disposers) dispose()
+    mockWs.restore()
+    fs.rmSync(outsideRepo, { recursive: true, force: true })
+    fs.rmSync(wsOnlyRepo, { recursive: true, force: true })
+  }
 }
 
 // 清理主 fixture（wiki 在仓库内 .codewiki/，随目录一起删）

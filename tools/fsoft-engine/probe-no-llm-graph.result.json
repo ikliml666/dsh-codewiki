@@ -1,0 +1,105 @@
+{
+  "checks": {
+    "R1_analyze_returned": true,
+    "R2_nodes_and_languages": true,
+    "R4_workspace_files": true,
+    "R3_dependency_edge": true,
+    "R5_artifact_node": true
+  },
+  "ok": true,
+  "fsoft_src": "<FSOFT_SRC>",
+  "fixture": "tools/fsoft-engine/fixtures/中文 空格 fixture",
+  "payload_keys": [
+    "changes",
+    "files",
+    "hint",
+    "output_dir",
+    "repo_name",
+    "session_id",
+    "stats",
+    "workspace_dir"
+  ],
+  "raw_len": 1480,
+  "stats": {
+    "total_components": 15,
+    "total_leaf_nodes": 6,
+    "languages": {
+      "python": 9,
+      "typescript": 4,
+      "null": 2
+    }
+  },
+  "workspace_files": {
+    "component_index": {
+      "path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\.codewiki\\sessions\\9531307e94c9\\component_index.json",
+      "exists": true,
+      "items": 15
+    },
+    "leaf_nodes": {
+      "path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\.codewiki\\sessions\\9531307e94c9\\leaf_nodes.json",
+      "exists": true,
+      "items": 6
+    },
+    "summary": {
+      "path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\.codewiki\\sessions\\9531307e94c9\\summary.json",
+      "exists": true,
+      "items": 8
+    }
+  },
+  "edge_sample": [
+    {
+      "id": "scripts\\run.py::main",
+      "dependsOn": [
+        "src\\web\\handler.py::Handler",
+        "src\\web\\handler.py::Handler.handle"
+      ]
+    },
+    {
+      "id": "src\\core\\engine.py::build_engine",
+      "dependsOn": [
+        "src\\core\\engine.py::Engine"
+      ]
+    },
+    {
+      "id": "src\\web\\handler.py::Handler.__init__",
+      "dependsOn": [
+        "src\\core\\engine.py::build_engine"
+      ]
+    },
+    {
+      "id": "src\\web\\handler.py::Handler.handle",
+      "dependsOn": [
+        "src\\core\\engine.py::Engine.run"
+      ]
+    },
+    {
+      "id": "src\\web\\task.ts::normalize",
+      "dependsOn": [
+        "src\\web\\task.ts::TaskInput"
+      ]
+    },
+    {
+      "id": "src\\web\\task.ts::TaskQueue",
+      "dependsOn": [
+        "src\\web\\task.ts::TaskInput"
+      ]
+    },
+    {
+      "id": "src\\web\\task.ts::TaskQueue.push",
+      "dependsOn": [
+        "src\\web\\task.ts::TaskInput",
+        "src\\web\\task.ts::normalize"
+      ]
+    },
+    {
+      "id": "Dockerfile::Dockerfile",
+      "dependsOn": [
+        "scripts\\run.py::main"
+      ]
+    }
+  ],
+  "edge_count": 8,
+  "artifact_ids": [
+    "scripts\\run.py::main"
+  ]
+}

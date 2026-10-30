@@ -1,0 +1,7 @@
+# 1C fixture 的运行时产物不入库：FSoft 的 session 缓存与生成的 wiki 都是可重算的。
+# 入库的只有源码与配置（Dockerfile / pyproject.toml / scripts / src），
+# 这样 fixture 是「可复现的输入」，而不是某一次跑出来的结果快照。
+.codewiki/
+docs/
+docs2/
+
