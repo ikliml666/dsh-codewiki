@@ -39,6 +39,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -46,6 +47,8 @@ from pathlib import Path
 # ── 协议流守卫：必须在 import codewiki 之前装好 ──────────────────────────────
 
 _REAL_STDOUT = sys.stdout
+# 心跳线程与主线程并发写协议行，必须整行串行（见 emit 的说明）。
+_EMIT_LOCK = threading.Lock()
 
 # Windows 下 Python 的 **stdin/stdout** 默认按 locale 编码（cp936），而 Node 侧一律按
 # UTF-8 收发协议行。不先改编码：
@@ -146,6 +149,11 @@ ACTIONS = ("doctor", "generate", "update", "cancel")
 # partial 的关键帧），普通 update 按这个间隔算。
 _WRITTEN_RECOUNT_SEC = 2.0
 
+# 心跳间隔：长时间无进度帧的阶段（FSoft 阶段 3 就是典型）由桥接层定时补帧，
+# 让 Node 侧能区分「慢」与「僵死」。取值必须显著小于 Node 侧的僵死判定阈值
+# （lib/engine/client.js 的 silenceMs 默认 10 分钟），否则心跳自己会被判成卡死。
+_HEARTBEAT_SEC = 60.0
+
 # 模型通道的环境变量名。Node 侧桥注入，密钥只活在进程环境里。
 ENV_BASE_URL = "CODEWIKI_BASE_URL"
 ENV_API_KEY = "CODEWIKI_API_KEY"
@@ -154,10 +162,17 @@ ENV_CLUSTER_MODEL = "CODEWIKI_CLUSTER_MODEL"
 
 
 def emit(obj):
-    """写一行协议 JSON 到真 stdout。所有协议消息都必须经这里。"""
+    """写一行协议 JSON 到真 stdout。所有协议消息都必须经这里。
+
+    心跳线程与主线程会并发写同一个流：协议行必须整行落盘，不能被另一次
+    ``write`` 切进中间（半行 JSON 会让 Node 侧解析器丢帧，进度就此断掉）。
+    GIL 只保证单次 ``write`` 调用本身不交错，而 stdin/stdout 是文本缓冲流，
+    一次 write 可能被拆成多次底层写入，所以这里显式串行化。
+    """
     line = json.dumps(obj, ensure_ascii=False)
-    _REAL_STDOUT.write(line + "\n")
-    _REAL_STDOUT.flush()
+    with _EMIT_LOCK:
+        _REAL_STDOUT.write(line + "\n")
+        _REAL_STDOUT.flush()
 
 
 def emit_hello():
@@ -527,6 +542,63 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
     tracker.start_stage = start_stage
     tracker.update_stage = update_stage
     tracker.complete_stage = complete_stage
+
+    # ── 心跳：让「引擎还在跑」与「引擎卡死了」不再无法区分 ────────────────
+    #
+    # 为什么必须有（0.16.9 真机事故）：FSoft 阶段 3（Documentation Generation）
+    # 里所有 update_stage 都写在 `if self.verbose:` 里面，而我们传的是
+    # verbose=False——于是从 start_stage(3) 到 complete_stage() 之间**一帧进度都
+    # 不发**。真机上这一整段可持续 40 分钟以上，Node 侧看不到任何 stdout，
+    # 进度停在 `percent_of(3, 0.0)`=(0.40+0.20)*90=54%，job.updatedAt 冻结：
+    # 面板上它跟「进程已经挂了」长得一模一样，而调度闸门（parallelLimit 默认 1）
+    # 又被它占着，后续仓库永远轮不到——这就是「看不到过期自动编译」的真凶。
+    #
+    # 心跳只做两件事：按固定间隔重发**当前**阶段与**当前**真实篇数。它不推进
+    # percent（不谎报进展），也不改任何 FSoft 行为；Node 侧据此可以区分
+    # 「慢」（心跳在、篇数偶尔涨）与「僵死」（心跳在、篇数长期不涨）。
+    #
+    # 线程挂在 adapter.generate 上而不是调用方：generate 是唯一的同步入口，
+    # 包起来之后 stop 一定在 try/finally 里执行，调用方一行都不用改，也不会
+    # 出现「任务已结束、心跳还在污染 stdout」的泄漏。
+    state = {"on": True}
+    # 进度桥的既定契约只要求 adapter 有 progress_tracker（旁路观察，不改引擎行为）。
+    # 心跳必须挂在 generate 上才能保证「任务结束即停表」，但没有 generate 的调用方
+    # （只验阶段映射的探针、上游若换掉入口形态）不该因此报错——拿不到就只装桥，
+    # 不装心跳：少一层观测，不能少一层功能。
+    orig_generate = getattr(adapter, "generate", None)
+
+    def _heartbeat():
+        while state["on"]:
+            time.sleep(_HEARTBEAT_SEC)
+            if not state["on"]:
+                return
+            try:
+                stage = tracker.current_stage
+                # stage=0 表示 FSoft 还没进第一个阶段，此时没有可报告的阶段，
+                # 硬发一帧只会让 map_stage 抛错（它按 1..5 映射）。
+                if not stage:
+                    continue
+                emit(
+                    stage,
+                    percent_of(stage, tracker.stage_progress),
+                    f"引擎仍在运行（阶段 {stage}，已写 {counted['n']} 篇）",
+                    force=True,
+                )
+                note(stage)
+            except Exception:  # noqa: BLE001 — 观测失败绝不能弄崩编译
+                return
+
+    def generate_with_heartbeat():
+        thread = threading.Thread(target=_heartbeat, name="codewiki-heartbeat", daemon=True)
+        state["on"] = True
+        thread.start()
+        try:
+            return orig_generate()
+        finally:
+            state["on"] = False
+
+    if orig_generate is not None:
+        adapter.generate = generate_with_heartbeat
 
 
 def _doc_fingerprints(docs_dir):

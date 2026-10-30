@@ -666,6 +666,77 @@ await check('异常分类：一篇没写出来时仍是 failed，不许用空产
   rmSync(docs, { recursive: true, force: true })
 })
 
+// 心跳：长阶段必须持续发帧，否则「慢」与「僵死」在面板上无法区分。
+//
+// 真机事故（0.16.9）：FSoft 阶段 3 内所有 update_stage 都在 `if self.verbose:`
+// 里，而 entry.py 传的是 verbose=False —— 于是从 start_stage(3) 到
+// complete_stage() 之间**一帧进度都不发**。真机上这一段能跑 40 分钟以上，
+// Node 侧看不到任何 stdout，进度永远停在 percent_of(3, 0.0) = 54%，
+// job.updatedAt 冻结，跟「进程已经挂了」长得一模一样；而调度闸门
+// （parallelLimit 默认 1）又被它占着，后续仓库永远轮不到。
+await check('心跳：长阶段无进度事件时也要持续发帧（否则「慢」与「僵死」无法区分）', async () => {
+  const docs = join(sandbox, 'probe-heartbeat')
+  mkdirSync(join(docs, 'modules'), { recursive: true })
+  writeFileSync(join(docs, 'modules', 'a.md'), '# a\n')
+  const outFile = join(sandbox, 'probe-heartbeat.json')
+  const probe = `
+import json, sys, pathlib, time
+sys.path.insert(0, ${JSON.stringify(dirname(ENTRY))})
+import entry
+
+# 把心跳间隔压到 0.08s，测试才不用真等 60 秒。心跳读模块级常量，改属性对线程可见。
+entry._HEARTBEAT_SEC = 0.08
+
+docs = pathlib.Path(${JSON.stringify(docs)})
+
+class Tracker:
+    current_stage = 0        # 还没进第一个阶段：此时不该发帧（map_stage 只认 1..5）
+    stage_progress = 0.0
+    def start_stage(self, stage, description=None):
+        self.current_stage = stage
+        self.stage_progress = 0.0
+    def update_stage(self, progress, message=None):
+        self.stage_progress = progress
+    def complete_stage(self, message=None):
+        self.stage_progress = 1.0
+
+class Adapter:
+    def __init__(self):
+        self.progress_tracker = Tracker()
+    def generate(self):
+        # 模拟阶段 3：进入之后长时间什么都不上报（verbose=False 的真实形态）。
+        # 中途真实写出一篇文章——心跳必须如实把这个进展带出去，否则上层看到的
+        # 是「引擎活着但一篇没写」，无法判断它是不是在推进。
+        self.progress_tracker.start_stage(3, "Documentation Generation")
+        time.sleep(0.25)
+        (docs / "modules" / "written-during-hang.md").write_text("# 心跳期间写出", encoding="utf-8")
+        time.sleep(0.25)
+        return "job"
+
+frames = []
+def spy(request_id, stage, percent, message="", written=0, failed=0, total=0):
+    frames.append({"stage": stage, "percent": percent, "written": written, "message": message})
+entry.emit_progress = spy
+
+ad = Adapter()
+entry.bridge_progress(ad, "req-hb", docs_dir=str(docs))
+result = ad.generate()
+
+pathlib.Path(${JSON.stringify(outFile)}).write_text(
+    json.dumps({"frames": frames, "result": result}, ensure_ascii=False), encoding="utf-8"
+)
+`
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `心跳探针失败：${raw.stderr}${raw.stdout}`)
+  const got = JSON.parse(readFileSync(outFile, 'utf8'))
+  assert.equal(got.result, 'job', '包了心跳之后 generate 的返回值必须原样透出')
+  const beats = got.frames.filter((f) => String(f.message).includes('引擎仍在运行'))
+  assert.ok(beats.length >= 2, `0.5s 内按 0.08s 心跳必须有帧：${JSON.stringify(got.frames)}`)
+  assert.ok(beats.every((f) => f.stage === 'articles'), `心跳必须报当前阶段（3 → articles）：${JSON.stringify(beats)}`)
+  // 心跳期间真实写了一篇：帧里的篇数必须跟着变，不能恒 0（恒 0 等于「什么都没写」）
+  assert.ok(beats.some((f) => f.written === 1), `心跳必须如实带出已写篇数：${JSON.stringify(beats)}`)
+})
+
 // ── 收尾 ──────────────────────────────────────────────────────────────────
 
 try { rmSync(sandbox, { recursive: true, force: true }) } catch { /* Windows 上占用是常事，临时目录会自动回收 */ }

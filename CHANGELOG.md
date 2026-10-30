@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.16.9 — 2026-10-30
+
+### 修复：编译挂死没人收尸——加引擎心跳与静默检测
+
+**现象**：真机 `job-mvubmj6v-1`（本仓库增量）进入阶段 3 后彻底静止：
+
+| 观测项 | 数值 | 说明 |
+| --- | --- | --- |
+| `job.updatedAt` | `2026-10-30T02:03:32.338Z` 起冻结 | 52 分钟零更新 |
+| `nativePercent` | 恒 54 | 恰为 `percent_of(3, 0.0)` = (0.40+0.20)×90 |
+| 引擎 PID 30284 CPU | 275.5s → 289.56s | 52 分钟只涨 14 秒，不是慢是死 |
+| `py-spy` 主线程 | `_poll (asyncio\windows_events.py:774)` | 事件循环空转，无待办任务 |
+| 产物 docsDir 的 md | 三次采样恒 3 篇 | 无任何新写入 |
+
+更严重的后果不在这一轮本身：调度闸门 `parallelLimit` 默认 1，被这个僵死任务一直占着，
+另外 3 个仓库（`dsh-git-worktree` / `Wxxy-CampusLogin` / `memory/dsh-hindsight-on-demand`）
+的自动编译全部排队饿死——**这就是「看不到过期自动编译」的真凶**。
+
+**两条独立成因**
+
+1. **阶段 3 零进度帧**（引擎侧）。FSoft 阶段 3 内所有 `update_stage` 都在
+   `if self.verbose:` 里（`.probe-fsoft/src/codewiki/cli/adapters/doc_generator.py:377/381/389`），
+   而 `lib/engine/python/entry.py` 传的是 `verbose=False`。于是从
+   `start_stage(3, "Documentation Generation")` 到 `complete_stage()` 之间一帧都不发，
+   真机上这段能跑 40 分钟以上。
+2. **同实例僵死无人接管**（Node 侧）。`index.js:2800` 的 `tickNative` 只判
+   `if (nativeRuns.has(job.id)) return true`，而孤儿接管（`index.js:3659-3670`）
+   只在 `job.owner !== instanceId` 时生效。同实例内的僵死任务没有任何人发现，
+   唯一兜底是 `runEngine` 的 180 分钟总超时；且即使等到超时，最后一条进度帧的
+   `writtenCount` 仍是 0 → 仍判 failed，partial 自救（0.16.5）拿不到任何东西。
+
+**修法**
+
+- `lib/engine/python/entry.py`：
+  - 新增 `_EMIT_LOCK = threading.Lock()`，`emit(obj)` 用锁包住协议行写入——心跳线程
+    与主线程并发写时，半行 JSON 会让 Node 侧解析丢帧。
+  - 新增 `_HEARTBEAT_SEC = 60.0`（必须显著小于 Node 侧静默窗口默认 10 分钟）。
+  - `bridge_progress` 末尾把 `adapter.generate` 包成 `generate_with_heartbeat`：
+    起一个 daemon 线程按 `_HEARTBEAT_SEC` 重发**当前**阶段与**当前**真实篇数
+    （`引擎仍在运行（阶段 N，已写 M 篇）`），`try/finally` 保证任务结束即停表。
+  - 心跳**不推进 percent**——只证明「还活着」，不谎报进展。
+  - `tracker.current_stage == 0` 时跳过（FSoft 还没进第一个阶段，`map_stage` 只认 1..5）。
+  - `orig_generate = getattr(adapter, "generate", None)`：进度桥的既定契约只要求
+    adapter 有 `progress_tracker`，拿不到 `generate` 就只装桥不装心跳
+    （少一层观测，不能少一层功能）。
+- `lib/engine/client.js`：
+  - 新增 `DEFAULT_SILENCE_MS = Math.max(30_000, DSH_CODEWIKI_ENGINE_SILENCE_MS || 10 * 60 * 1000)`。
+  - `stdout.on('data')` 第一行 `markFrame()` 记录最后一次收到协议帧的时刻。
+  - 新增 `silence` promise 参与 `Promise.race`：超过 `silenceMs` 没有任何帧就判卡死
+    （`silenceMs` 可按次传入，测试用）。
+  - 卡死分支：先 `killTree('silence')` 终止进程树，再按最后一条进度帧的 `writtenCount`
+    分流——有产物走 `partial`（带 `engine-timeout` + `engine-timeout` blocker），
+    零产物走 `failed`。口径与 timeout 分支完全一致，不新增第二套语义。
+
+**反向验证（红 → 绿）**
+
+- 摘掉 `silence` 的 `Promise.race` → `test-engine-client.mjs` 报
+  `必须在静默窗口后立刻返回，不该等满 timeoutMs：20299ms`，`27 passed, 1 failed`；
+  恢复即 `28 passed, 0 failed`。这个 `20299ms` 恰好复现真机病态：等满 `timeoutMs` 才返回。
+- 把 `adapter.generate = generate_with_heartbeat` 短路 → `test-engine-python-entry.mjs` 报
+  `0.5s 内按 0.08s 心跳必须有帧：[{"stage":"articles","percent":54,...,"message":"Documentation Generation"}]`，
+  `19 passed, 1 failed`；恢复即 `20 passed, 0 failed`。失败输出里只剩 `start_stage` 那一帧、
+  percent 冻结在 54——正是真机现场。
+
+**新增测试**
+
+- `test-engine-client.mjs`：`silent-hang` / `silent-hang-with-progress` 两个假引擎 mode，
+  外加两条用例（「静默卡死 → partial 交付已写文章，不等 180 分钟超时」与
+  「静默卡死且零进展 → 仍判 failed」），用 `silenceMs: 1200 / timeoutMs: 20000`
+  证明是静默检测先触发、而不是超时先到。
+- `test-engine-python-entry.mjs`：`心跳：长阶段无进度事件时也要持续发帧`。探针把
+  `_HEARTBEAT_SEC` 压到 0.08s，`Tracker.current_stage` 从 0 起步，`generate` 期间真写一篇
+  `written-during-hang.md`，断言心跳帧存在、`stage === 'articles'`、且 `written` 会跟着涨
+  （用 `some` 而非 `every`：前几帧文章还没写出来，那时恒 0 是对的）。
+
+**回归**：全量 `for f in test-*.mjs` → `ok=28 red=1`，唯一红的是
+`test-wiki-anchors.mjs`（已知：`.codewiki` 文章锚点滞后于源码，随一次成功编译消失）。
+
+
 ## 0.16.8 — 2026-10-30
 
 ### 修复：编译中途崩溃时把已写文章交出来，别再整轮作废

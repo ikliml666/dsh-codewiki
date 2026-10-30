@@ -219,6 +219,20 @@ elif mode == "slow-zero-written":
     emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 54, "writtenCount": 0})
     time.sleep(30)
     sys.exit(0)
+elif mode == "silent-hang":
+    # 0.16.9 真机事故形态：引擎进程还活着，但**一帧都不发**，也不退出。
+    # 真机 PID 30284 就是这个状态：CPU 52 分钟只涨 14 秒、py-spy 主线程在
+    # _poll(windows_events.py) 空转、产物 md 三次采样恒为 3 篇，而 job 老老实实
+    # 显示「写文章中 54%」。只靠 timeoutMs（180 分钟）兜底等于把闸门锁死三小时。
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 54, "writtenCount": 0})
+    time.sleep(30)
+    sys.exit(0)
+elif mode == "silent-hang-with-progress":
+    # 同上，但卡住之前已经写出过文章：必须 partial 交付，不能把成果丢掉。
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 54, "writtenCount": 0})
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 60, "writtenCount": 21})
+    time.sleep(30)
+    sys.exit(0)
 elif mode == "late":
     emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 50})
     time.sleep(0.6)
@@ -406,7 +420,45 @@ await check('进程：cwd 含中文与空格时也能跑通（Windows 路径）'
   assert.equal(res.outcome, 'done')
 })
 
-rmSync(tmp, { recursive: true, force: true })
+await check('进程：静默卡死（一帧不发）→ 按 partial 交付已写文章，不等 180 分钟超时', async () => {
+  // 0.16.9 真机事故的回归：引擎 PID 30284 卡死 52 分钟，一帧进度都不发，
+  // 但已经写出 21 篇。旧逻辑只认 timeoutMs，得等满 180 分钟才收尸，期间
+  // 调度闸门（parallelLimit 默认 1）被锁死，其它仓库一条都推不动——这正是
+  // 用户看到的「过期了却自动编译不了」。这里把 silenceMs 设为 1200ms、
+  // timeoutMs 设为 20000ms，就是为了证明**是静默检测先动手**，不是超时。
+  const t0 = Date.now()
+  const seen = []
+  const res = await runEngine({
+    engine: pyEngine('silent-hang-with-progress'),
+    requestId: 'p-sil',
+    action: 'generate',
+    silenceMs: 1200,
+    timeoutMs: 20000,
+    onProgress: (p) => seen.push(p),
+  })
+  const ms = Date.now() - t0
+  assert.ok(ms < 15000, `必须在静默窗口后立刻返回，不该等满 timeoutMs：${ms}ms`)
+  assert.equal(res.outcome, 'partial', `静默卡死但有产物必须 partial，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 21, `必须带出已写篇数，实际 ${res.writtenCount}`)
+  assert.equal(res.stage, 'articles')
+  assert.equal(res.error.code, 'engine-timeout')
+  assert.ok(String(res.error.message).includes('协议帧'), `要说明是被判卡死：${res.error.message}`)
+  assert.equal(res.terminated, true, '卡死的进程树必须被终止，否则会一直挂着')
+  assert.ok(seen.some((p) => Number(p.writtenCount) === 21), '进度帧必须原样透传给 onProgress')
+})
 
+await check('进程：静默卡死且零进展 → 仍判 failed（不能把空轮伪装成 partial）', async () => {
+  const res = await runEngine({
+    engine: pyEngine('silent-hang'),
+    requestId: 'p-sil0',
+    action: 'generate',
+    silenceMs: 1200,
+    timeoutMs: 20000,
+  })
+  assert.equal(res.outcome, 'failed', `零进展的静默卡死必须判 failed，实际 ${res.outcome}`)
+  assert.equal(res.error.code, 'engine-timeout')
+})
+
+rmSync(tmp, { recursive: true, force: true })
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) process.exitCode = 1
