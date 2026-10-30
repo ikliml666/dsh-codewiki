@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.16.14 — 2026-10-30
+
+### 上游模块生成并行化：同层并发，父模块仍等子模块
+
+**背景**：`job-mvuf1c5b-5` 在阶段 3 跑满 180 分钟预算，只写出 18 篇被判失败。
+慢不是模型问题，是上游 `_generate_modules_in_order` 的**严格串行**：
+
+```
+for module_path, module_name in processing_order:
+    final_module_tree = await self.backend.run_module_agent(...)
+```
+
+单篇文档是一个 agentic 工具循环（读文件 → 写稿 → 自查 → 修订），
+实测约 15–20 次 LLM 请求，其中 3–4 次是 3–5 分钟长思考，**单篇约 12 分钟**。
+本仓库模块树 16 个节点，加上复杂模块递归派子模块，串跑就是 3 小时起步。
+180 分钟的超时上限对 16+ 节点的仓库根本不够。
+
+**改法**：按拓扑层分批并行（`documentation_generator.py`）。
+
+- `processing_order` 本来就是自底向上的拓扑序，按路径深度分层后，
+  **同一层的模块互不依赖**，用 `asyncio.gather` 并发；层与层之间仍串行，
+  父模块读到的子模块文档才是完整的。
+- 并发度由 `asyncio.Semaphore` 限制，新增配置项 `module_concurrency`
+  （`Config` 字段 + CLI 适配层透传 + `entry.py` 从 payload 读，默认 **1 = 串行**）。
+  链路：`index.js` 把 `c.maxConcurrency` → `runNativeJob({moduleConcurrency})`
+  → payload `moduleConcurrency` → `config["module_concurrency"]`。
+- 失败语义不变：单模块异常只记日志并跳过，不拖垮同批其它模块。
+
+**共享状态的处理**（并行的真正难点，不是把 for 换成 gather）：
+
+| 状态 | 是否并行安全 | 处理 |
+| --- | --- | --- |
+| `module_tree` 内存对象 | 否：子模块递归直接 mutate | 每分支 `deepcopy`，结束只把**本路径子树**并回主树 |
+| `module_tree.json` 磁盘 | 否：`save_json` 非原子、非加锁 | 每层结束用合并后的主树重写一次，下一层读到完整态 |
+| `UsageContext` | 是：`ContextVar`，每 task 独立 | 不动 |
+| `UsageLedger.add` | 是：自带 `threading.Lock` | 不动 |
+| `os.chdir` | 不在本路径 | 只有 caw 后端 chdir；本插件走 `openai-compatible` → `PydanticAIBackend`，不 chdir |
+
+**验证**：新增 `test-upstream-parallel.mjs`（6 条，真 venv 驱动真实上游类，
+只把 backend 换成记录事件的可控实现）。
+
+- 同层并行：3 个 0.3s 模块并发 3，实测 0.66s、峰值并发 3（串行需 ≥0.9s）
+- `module_concurrency=1`：峰值并发 1、耗时 ≥0.6s，确认向后兼容
+- 拓扑序：父模块开始时刻 ≥ 最后一个子模块结束时刻
+- 树合并：两个并行分支各自新增的 `complex_*_sub` 都保留，没互相覆盖
+- 失败隔离：`beta` 抛错时 `alpha`/`gamma` 照常产出
+- **反向验证**：把 `max_concurrency` 强写成 1 → `5 passed, 1 failed`
+  （`峰值并发必须 >=2，实际 1`）；恢复后 `6 passed, 0 failed`
+
+**补丁留档**：`.probe-fsoft/` 被 gitignore，上游改动不进 git，故导出为
+`patches/upstream-module-parallel.patch`（基准 `364b67a1`），应用方式见
+`patches/README.md`。未打补丁的上游只是少了并行能力，不会报错。
+
+引擎回归串行全绿：`test-engine-python-entry.mjs` 21/0、
+`test-engine-client.mjs` 28/0、`test-engine-native-job.mjs`、
+`test-engine-native-incremental.mjs`、`test-engine-contract.mjs` 19/0。
+
 ## 0.16.13 — 2026-10-30
 
 ### 默认编译模型换代：workbuddy/hy3 → volces-ark/glm-5.3-flash

@@ -1,0 +1,188 @@
+diff --git a/codewiki/cli/adapters/doc_generator.py b/codewiki/cli/adapters/doc_generator.py
+index f9e318b..9d77922 100644
+--- a/codewiki/cli/adapters/doc_generator.py
++++ b/codewiki/cli/adapters/doc_generator.py
+@@ -159,6 +159,7 @@ class CLIDocumentationGenerator:
+                 max_leaf_nodes_per_cluster=self.config.get("max_leaf_nodes_per_cluster", 600),
+                 max_depth=self.config.get("max_depth", 2),
+                 request_limit=self.config.get("request_limit", 100),
++                module_concurrency=self.config.get("module_concurrency", 1),
+                 agent_retries=self.config.get("agent_retries", 3),
+                 agent_instructions=self.config.get("agent_instructions"),
+                 use_gitignore=self.config.get("use_gitignore", True),
+diff --git a/codewiki/src/be/documentation_generator.py b/codewiki/src/be/documentation_generator.py
+index eb5238f..ad442a0 100644
+--- a/codewiki/src/be/documentation_generator.py
++++ b/codewiki/src/be/documentation_generator.py
+@@ -1,3 +1,4 @@
++import asyncio
+ import json
+ import logging
+ import os
+@@ -271,52 +272,99 @@ class DocumentationGenerator:
+         processed_modules = set()
+ 
+         if len(module_tree) > 0:
++            # 按拓扑层并行：同一层的模块互不依赖（父模块一定在子模块之后的层），
++            # 可以并发；层与层之间保持串行，父模块读到的子模块文档才是完整的。
++            #
++            # 为什么必须并行（0.16.14 真机事故 job-mvuf1c5b-5）：上游原本是
++            # `for module_path, module_name in processing_order: await ...`
++            # 的严格串行循环。本仓库 16 个节点，单篇 agentic 循环约 12 分钟
++            # （一篇 ≈ 15–20 次 LLM 请求，其中 3–4 次是 3–5 分钟长思考），
++            # 串跑 180 分钟预算耗尽只写出 18 篇，被超时砍掉。
++            #
++            # 共享状态只有 module_tree（内存 + module_tree.json 磁盘）：
++            #   · 每个分支拿**独立深拷贝**，子模块递归只改自己的副本；
++            #   · 分支结束把「自己那条路径下的子树」合并回主树；
++            #   · 磁盘上的 module_tree.json 在并行期间可能被分支覆写，但每批
++            #     结束都会用合并后的主树重写一次 —— 下一层（父模块）读到的
++            #     永远是完整合并态，最终一致即可。
++            # 其余状态都是并行安全的：UsageContext 是 ContextVar（每个 task
++            # 独立），UsageLedger.add 自带锁，pydantic 后端不 chdir。
++            max_concurrency = max(1, int(getattr(self.config, "module_concurrency", 1) or 1))
++            semaphore = asyncio.Semaphore(max_concurrency)
++
++            async def run_one(module_path, module_name):
++                async with semaphore:
++                    module_key = "/".join(module_path)
++                    try:
++                        # 每批开始时的主树快照；分支内部只动自己的副本
++                        branch_tree = deepcopy(module_tree)
++                        module_info = branch_tree
++                        for path_part in module_path:
++                            module_info = module_info[path_part]
++                            if path_part != module_path[-1]:
++                                module_info = module_info.get("children", {})
++
++                        if self.is_leaf_module(module_info):
++                            logger.info(f"Processing leaf module: {module_key}")
++                            result_tree = await self.backend.run_module_agent(
++                                module_name=module_name,
++                                components=components,
++                                core_component_ids=module_info["components"],
++                                module_path=module_path,
++                                working_dir=working_dir,
++                            )
++                        else:
++                            logger.info(f"Processing parent module: {module_key}")
++                            result_tree = await self.generate_parent_module_docs(
++                                module_path, working_dir
++                            )
++                        return (module_path, result_tree, None)
++                    except Exception as e:  # noqa: BLE001 — one failed module must not abort the run
++                        logger.error(f"Failed to process module {module_key}: {e!s}")
++                        logger.error(f"Traceback: {traceback.format_exc()}")
++                        return (module_path, None, e)
++
++            def branch_subtree(tree, module_path):
++                node = tree
++                for part in module_path:
++                    node = node[part]
++                    if part != module_path[-1]:
++                        node = node.get("children", {})
++                return node
++
++            # 按路径深度分层：深的（叶子）先跑，浅的（父）后跑
++            layers = {}
+             for module_path, module_name in processing_order:
+-                try:
+-                    # Reload module tree to get latest hierarchical structure from sub-agent modifications
+-                    module_tree = file_manager.load_json(module_tree_path)
+-
+-                    # Get the module info from the tree
+-                    module_info = module_tree
+-                    for path_part in module_path:
+-                        module_info = module_info[path_part]
+-                        if path_part != module_path[-1]:  # Not the last part
+-                            module_info = module_info.get("children", {})
+-
+-                    # Skip if already processed
++                layers.setdefault(len(module_path), []).append((module_path, module_name))
++
++            for depth in sorted(layers.keys(), reverse=True):
++                batch = layers[depth]
++                results = await asyncio.gather(*(run_one(p, n) for p, n in batch))
++                for module_path, result_tree, err in results:
+                     module_key = "/".join(module_path)
+-                    if module_key in processed_modules:
++                    processed_modules.add(module_key)
++                    if result_tree is None:
+                         continue
+-
+-                    # Process the module
+-                    if self.is_leaf_module(module_info):
+-                        logger.info(f"📄 Processing leaf module: {module_key}")
+-                        final_module_tree = await self.backend.run_module_agent(
+-                            module_name=module_name,
+-                            components=components,
+-                            core_component_ids=module_info["components"],
+-                            module_path=module_path,
+-                            working_dir=working_dir,
+-                        )
++                    if not module_path:
++                        module_tree = result_tree
+                     else:
+-                        logger.info(f"📁 Processing parent module: {module_key}")
+-                        final_module_tree = await self.generate_parent_module_docs(
+-                            module_path, working_dir
+-                        )
+-
+-                    processed_modules.add(module_key)
+-
+-                except Exception as e:  # noqa: BLE001 — one failed module must not abort the run
+-                    logger.error(f"Failed to process module {module_key}: {e!s}")
+-                    logger.error(f"Traceback: {traceback.format_exc()}")
+-                    continue
++                        # 只取分支里属于这条路径的子树并回主树，
++                        # 避免用分支的旧快照覆盖掉其他分支的改动
++                        subtree = branch_subtree(result_tree, module_path)
++                        node = module_tree
++                        for part in module_path[:-1]:
++                            node = node.setdefault(part, {}).setdefault("children", {})
++                        node[module_path[-1]] = subtree
++                final_module_tree = module_tree
++                # 每层结束把合并后的主树落盘，父模块这层读到的是完整态
++                file_manager.save_json(module_tree, module_tree_path)
+ 
+             # Generate repo overview
+-            logger.info("📚 Generating repository overview")
++            logger.info("Generating repository overview")
+             final_module_tree = await self.generate_parent_module_docs(
+                 [], working_dir, components=components
+             )
+-        else:
++
+             logger.info("Processing whole repo because repo can fit in the context window")
+             repo_name = os.path.basename(os.path.normpath(self.config.repo_path))
+             final_module_tree = await self.backend.run_module_agent(
+diff --git a/codewiki/src/config.py b/codewiki/src/config.py
+index 338a062..b570c6d 100644
+--- a/codewiki/src/config.py
++++ b/codewiki/src/config.py
+@@ -109,6 +109,9 @@ class Config:
+     max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
+     min_modules_for_super_grouping: int = DEFAULT_MIN_MODULES_FOR_SUPER_GROUPING
+     max_leaf_nodes_per_cluster: int = DEFAULT_MAX_LEAF_NODES_PER_CLUSTER
++    # 同层模块并行度：1 = 上游原始的严格串行。
++    # 0.16.14 起由插件按 maxConcurrency 下发；父模块仍等子模块完成后才跑。
++    module_concurrency: int = 1
+     # Agent run limits (model requests per run, retries per failing tool call)
+     request_limit: int = DEFAULT_REQUEST_LIMIT
+     agent_retries: int = DEFAULT_AGENT_RETRIES
+@@ -256,6 +259,7 @@ class Config:
+         max_leaf_nodes_per_cluster: int = DEFAULT_MAX_LEAF_NODES_PER_CLUSTER,
+         max_depth: int = MAX_DEPTH,
+         request_limit: int = DEFAULT_REQUEST_LIMIT,
++        module_concurrency: int = 1,
+         agent_retries: int = DEFAULT_AGENT_RETRIES,
+         agent_instructions: dict[str, Any] | None = None,
+         use_gitignore: bool = True,
+@@ -336,6 +340,7 @@ class Config:
+             max_leaf_nodes_per_cluster=max_leaf_nodes_per_cluster,
+             request_limit=request_limit,
+             agent_retries=agent_retries,
++            module_concurrency=module_concurrency,
+             agent_instructions=agent_instructions,
+             use_gitignore=use_gitignore,
+             prompt_caching=prompt_caching,

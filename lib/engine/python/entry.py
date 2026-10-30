@@ -877,6 +877,18 @@ def action_generate(request_id, payload, is_update=False):
     config["max_depth"] = 2
     config["request_limit"] = 100
     config["agent_retries"] = 3
+    # 同层模块并行度（0.16.14）。默认 1 = 上游原始的严格串行。
+    #
+    # 为什么需要并行：上游 `_generate_modules_in_order` 是
+    # `for module_path, module_name in processing_order: await ...` 的串行循环，
+    # 一篇文档约 12 分钟（15–20 次 LLM 请求，含 3–4 次 3–5 分钟长思考），
+    # 本仓库 16 节点串跑 180 分钟预算耗尽只写出 18 篇（真机 job-mvuf1c5b-5）。
+    # 并行按拓扑层分批：同层模块互不依赖可并发，父模块仍等子模块写完。
+    try:
+        module_concurrency = int(payload.get("moduleConcurrency") or 1)
+    except (TypeError, ValueError):
+        module_concurrency = 1
+    config["module_concurrency"] = max(1, min(module_concurrency, 8))
     config["use_gitignore"] = True
     config["prompt_caching"] = True
     # 阶段 6.8：把**我们自己的 wiki 产物**排除出源码分析面。

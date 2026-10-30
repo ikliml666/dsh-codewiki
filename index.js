@@ -2659,6 +2659,9 @@ function createJobService(config, onSettled) {
         // 文章语言：job 提交时已按「入参 > 插件设置」解析好（submit 的 language），
         // 原生通道必须显式带下去，否则引擎按英文写、设置项形同虚设。
         language: job.language,
+        // 同层模块并行度复用编译并发设置：上游原来是严格串行（一篇约 12 分钟，
+        // 16 节点仓库串跑 180 分钟超时只写 18 篇，真机 job-mvuf1c5b-5）。
+        moduleConcurrency: c.maxConcurrency,
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),
