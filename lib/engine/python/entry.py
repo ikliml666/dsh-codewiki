@@ -902,12 +902,54 @@ def _classify_exception(exc, request_id, docs_dir, repo_path, started, stage="ar
 
     # 模型/上游失败：APIError 及其子类
     if name.endswith("APIError") or name in ("APIError", "ConfigurationError"):
-        return failure("engine-model", text, stage, request_id)
+        return _salvage(request_id, docs_dir, repo_path, started, stage, "engine-model", text)
     if name in ("RepositoryError",):
+        # 连仓库都没读出来，docsDir 里不可能有本轮成果，直接判失败。
         return failure("engine-missing", text, "graph", request_id)
     if name in ("KeyboardInterrupt",):
         return _cancelled_result(request_id, _count_docs(docs_dir), stage=stage)
-    return failure("engine-crashed", f"{name}: {text}\n{traceback.format_exc()[-1200:]}", stage, request_id)
+    return _salvage(
+        request_id, docs_dir, repo_path, started, stage, "engine-crashed",
+        f"{name}: {text}\n{traceback.format_exc()[-1200:]}",
+    )
+
+
+def _salvage(request_id, docs_dir, repo_path, started, stage, code, message):
+    """崩溃/模型失败时，若已经写出文章，就降 partial 交付，而不是整轮判 failed。
+
+    **为什么必须这么做**：原生引擎的一条任务动辄跑几十上百分钟（真机全量实测约
+    174 分钟），失败点通常在阶段 3「逐模块写文章」的中途。整轮判 failed 的代价
+    不只是「这次白跑」——native-run.js 对 failed 是直接 settle 短路，不做原始树
+    留档、不采集受管状态，于是下一轮增量因为没有持久化状态又退回全量，再跑一遍
+    同样的时间、再撞同样的墙。把已写的部分降成 partial 交付，才可能打破这个循环。
+
+    **为什么不是无条件 partial**：一篇都没写出来时仍然是 failed——用空产物冒充
+    「部分完成」会让基线与面板失真（见 _done_result 与 canAdvanceBaseline 的注记）。
+    """
+    written = _count_docs(docs_dir)
+    if written <= 0:
+        return failure(code, message, stage, request_id)
+    result = _done_result(
+        request_id, docs_dir, repo_path, started,
+        written=written, stage=stage, update_outcome=_update_outcome_of_safe(),
+    )
+    result["outcome"] = "partial"
+    result["error"] = {"code": code, "message": str(message)[:4000], "stage": stage}
+    result["blockers"] = [
+        {"kind": "article-failed", "detail": f"编译在 {stage} 阶段中断（已写 {written} 篇）：{str(message)[:300]}"}
+    ]
+    result["failedCount"] = 1
+    return result
+
+
+def _update_outcome_of_safe():
+    """_salvage 里没有 adapter 句柄，取不到本轮增量结局就交 None。
+
+    为什么不猜：updateOutcome 是「基线能不能推进」的唯一证据（见 _done_result
+    的注记），猜错会让 full_fallback 被当成普通 done，基线悄悄前移。
+    None 表示「引擎没报」，上层按未知处理。
+    """
+    return None
 
 
 def _cancelled_result(request_id, written=0, stage="articles"):

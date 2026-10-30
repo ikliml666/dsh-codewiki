@@ -609,6 +609,63 @@ pathlib.Path(${JSON.stringify(outFile)}).write_text(
   assert.ok(got.traversals < got.frames, `紧凑 update 必须节流掉遍历：${got.traversals} 次遍历 / ${got.frames} 帧`)
 })
 
+// 崩溃抢救：中途失败时已写出的文章必须交付，不能整轮判 failed。
+//
+// 真机现场（job-mvu2lmd1-a）：引擎跑到阶段 3 的中途遇到
+// `LLM returned empty content for dsh-codewiki overview (possible output
+// truncation at max_tokens)`，那一轮 docsDir 里已经有成果，但旧的
+// _classify_exception 一律走 failure()，writtenCount=0、artifacts 全空；
+// native-run.js 对 failed 又是直接 settle 短路，不做原始树留档、不采集受管
+// 状态 —— 于是下一轮增量因为没有持久化状态又退回全量，再跑一遍 174 分钟、
+// 再撞同样的墙。这条用例钉的就是「别再扔了」。
+await check('异常分类：中途崩溃时已写文章降 partial 交付，产物目录要带出去', async () => {
+  const docs = mkdtempSync(join(tmpdir(), 'cw-salvage-'))
+  const outFile = join(docs, 'salvage.json')
+  const modules = join(docs, 'modules')
+  mkdirSync(modules, { recursive: true })
+  writeFileSync(join(modules, 'a.md'), '# A', 'utf8')
+  writeFileSync(join(modules, 'b.md'), '# B', 'utf8')
+  mkdirSync(join(docs, 'temp'), { recursive: true })
+  writeFileSync(join(docs, 'temp', 'update-record.json'), '{}', 'utf8')
+
+  const probe = [
+    'import json, pathlib, sys',
+    `sys.path.insert(0, ${JSON.stringify(join(HERE, 'lib', 'engine', 'python'))})`,
+    'import entry',
+    'exc = RuntimeError("LLM returned empty content for dsh-codewiki overview (possible output truncation at max_tokens)")',
+    `res = entry._classify_exception(exc, "req-salvage", ${JSON.stringify(docs)}, ${JSON.stringify(docs)}, "2026-10-30T00:00:00Z", stage="articles")`,
+    `pathlib.Path(${JSON.stringify(outFile)}).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")`,
+  ].join('\n')
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `抢救探针失败：${raw.stderr}${raw.stdout}`)
+  const res = JSON.parse(readFileSync(outFile, 'utf8'))
+  assert.equal(res.outcome, 'partial', `已写出文章时必须是 partial，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 2, `已写篇数必须如实上报（temp/ 下记账文件不算文章），实际 ${res.writtenCount}`)
+  assert.ok(res.artifacts?.docsDir, '产物目录必须带出去，否则上层无处留档、也无法采集受管状态')
+  assert.equal(res.error?.code, 'engine-crashed', `错误码仍要保留原始结局，实际 ${res.error?.code}`)
+  assert.ok((res.blockers ?? []).length > 0, 'partial 必须带 blockers（契约不变量）')
+  assert.equal(res.blockers[0].kind, 'article-failed', `blocker 要说明是文章阶段中断，实际 ${res.blockers[0].kind}`)
+  rmSync(docs, { recursive: true, force: true })
+})
+
+await check('异常分类：一篇没写出来时仍是 failed，不许用空产物冒充 partial', async () => {
+  const docs = mkdtempSync(join(tmpdir(), 'cw-salvage-empty-'))
+  const outFile = join(docs, 'salvage-empty.json')
+  const probe = [
+    'import json, pathlib, sys',
+    `sys.path.insert(0, ${JSON.stringify(join(HERE, 'lib', 'engine', 'python'))})`,
+    'import entry',
+    `res = entry._classify_exception(RuntimeError("boom"), "req-empty", ${JSON.stringify(docs)}, ${JSON.stringify(docs)}, "2026-10-30T00:00:00Z", stage="articles")`,
+    `pathlib.Path(${JSON.stringify(outFile)}).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")`,
+  ].join('\n')
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `空产物探针失败：${raw.stderr}${raw.stdout}`)
+  const res = JSON.parse(readFileSync(outFile, 'utf8'))
+  assert.equal(res.outcome, 'failed', `零成果必须是 failed，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 0, `零成果不许报出篇数，实际 ${res.writtenCount}`)
+  rmSync(docs, { recursive: true, force: true })
+})
+
 // ── 收尾 ──────────────────────────────────────────────────────────────────
 
 try { rmSync(sandbox, { recursive: true, force: true }) } catch { /* Windows 上占用是常事，临时目录会自动回收 */ }

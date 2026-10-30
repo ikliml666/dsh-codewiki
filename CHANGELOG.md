@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.16.8 — 2026-10-30
+
+### 修复：编译中途崩溃时把已写文章交出来，别再整轮作废
+
+**现象**：真机 `job-mvu2lmd1-a`（本仓库增量）在阶段 3「Documentation Generation」跑到一半，上游抛
+
+```
+Documentation generation failed: LLM returned empty content for dsh-codewiki overview (possible output truncation at max_tokens)
+```
+
+终态是 `stage=failed, writtenCount=0, failedCount=0`，`artifacts` 四个字段全是空字符串，`canAdvanceBaseline` 连值都没有，notes 末尾「任务终态：失败（无可用成果）」。而那一轮 docsDir 里**并不是没有东西**——它已经写了十几分钟。
+
+**根因是两段叠加的死循环**：
+
+1. `lib/engine/python/entry.py` 的 `_classify_exception()` 对 `APIError`/`ConfigurationError` 和兜底的「未知异常」一律走 `failure()`，`writtenCount` 恒 0、`artifacts` 全空，**完全不看 docsDir 里已经写了多少**。
+2. `lib/engine/native-run.js` 对 `engineOutcome === 'failed'` 是**直接 settle 短路**——不做原始树留档（`rawArchive`）、也不采集受管状态（`.codewiki/_native-state`）。
+
+两段一叠加就是一个闭环：失败轮不产出 `_native-state` → 下一轮增量读到「还没有持久化状态（首次增量）」→ 退回全量 → 全量本身要 174 分钟、更容易撞上同样的中途崩溃 → 又失败。**只要崩一次，就再也增量不起来。**
+
+**修法**：`_classify_exception()` 的这两条分支改走新增的 `_salvage()`：
+
+| 场景 | 结果 |
+| --- | --- |
+| `_count_docs(docs_dir) > 0`（确有文章落盘） | `outcome = 'partial'`，`writtenCount` 如实上报，`artifacts` 带出 docsDir/rawTreeDir/updateRecord，`error` 保留原始错误码与信息，`blockers` 加一条 `article-failed`（说明「编译在 X 阶段中断（已写 N 篇）」） |
+| `written <= 0`（一篇没写出来） | 仍走 `failure()` 判 `failed`——不许用空产物冒充 partial |
+| `RepositoryError` | 仍直接 `failure('engine-missing')`：连仓库都没读出来，docsDir 里不可能有成果 |
+| `KeyboardInterrupt` | 仍走 `_cancelled_result`（取消不是失败） |
+
+`_salvage()` 里 `updateOutcome` 显式交 `None`（`_update_outcome_of_safe()`）：它没有 adapter 句柄，而 `updateOutcome` 是「基线能不能推进」的唯一证据——猜错会让 `full_fallback` 被当成普通 `done`，基线悄悄前移，那次没消化的变化就永久失明。
+
+**为什么这比「多写点重试」重要**：原生全量实测约 174 分钟（`job-mvt1mrvu-6`：queued 29.2 + articles 66.0 + crosscut 10.0 + review 68.9 分钟）。在任何一小时级别的长任务里，「崩了就全丢」等于「重试平均打水漂一半」，而且失败轮永远不产生增量状态，第二次一定还是全量。
+
+### 新增回归
+
+`test-engine-python-entry.mjs` 两条（用真 venv 直接调 `_classify_exception`）：
+
+- 「异常分类：中途崩溃时已写文章降 partial 交付，产物目录要带出去」——docsDir 里放 2 篇 .md + `temp/update-record.json`，断言 `outcome==='partial'`、`writtenCount===2`（`temp/` 下记账文件不算文章）、`artifacts.docsDir` 非空、`error.code==='engine-crashed'`、`blockers[0].kind==='article-failed'`。
+- 「异常分类：一篇没写出来时仍是 failed，不许用空产物冒充 partial」。
+
+**探针踩坑（写进测试注释）**：`entry.py:99-131` 在**导入时**就把 `sys.stdout` 换成了只放行协议行的 `_ProtocolOnly()` 替身，所以探针里 `print(json.dumps(res))` 会被改道到 **stderr**，Node 侧 `raw.stdout` 永远是空串。取结果必须显式 `pathlib.Path(outFile).write_text(...)` 再读文件。
+
+**反向验证**（逐条红）：把两条分支还原成 `failure(...)` → `FAIL 异常分类：中途崩溃时已写文章降 partial 交付，产物目录要带出去`（`1 !== 0`）、`18 passed, 1 failed`；恢复后 `19 passed, 0 failed`。
+
 ## 0.16.7 — 2026-10-30
 
 ### 修复：Spec 评审确认的六条契约缺陷（含两条「设置项静默失效」）
