@@ -227,6 +227,10 @@ await checkAsync('正常路径：写盘 + index + baseline + commit → done', a
   assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
   assert.equal(r.applied, true)
   assert.equal(r.canAdvanceBaseline, true)
+  // baselineAdvanced 是「cw meta update 真的成功」这一**事实**，与许可（baselineEligible）
+  // 和交付完成（deliveryComplete）分开记：三者混成一个字段就无法区分
+  // 「门说可以推进」与「基线真的推进了」。
+  assert.equal(r.baselineAdvanced, true)
   assert.ok(exists(root, '.codewiki/modules/core.md'), '文章应写盘')
   assert.ok(exists(root, 'CodeWiki.md'), '入口应写盘')
   assert.ok(exists(root, '.codewiki/_index.md'), '索引应存在')
@@ -461,6 +465,7 @@ await checkAsync('裁决 partial 且 writable=true → 照写，但终态保持 
   assert.equal(r.outcome, 'partial')
   assert.equal(r.ok, false)
   assert.equal(r.canAdvanceBaseline, false)
+  assert.equal(r.baselineAdvanced, false, 'partial 轮基线一律不推进')
   assert.ok(r.blockers.every((b) => typeof b.kind === 'string'))
   assert.ok(r.blockers.some((b) => b.detail.includes('[gate-partial]')), '要把「裁决没消化完」记成机读问题')
   assert.ok(r.notes.some((n) => n.includes('基线未推进')), '基线必须明说不推进')

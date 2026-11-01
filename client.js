@@ -1605,12 +1605,7 @@ window.__ModuleLoader__.load({
               if (!active && nr?.gate?.outcome) meta.push(`${t('gateLabel')} ${nr.gate.outcome}`)
               if (!active && nr?.apply?.outcome) meta.push(`${t('applyLabel')} ${nr.apply.outcome}`)
             }
-            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
-            // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
             const blockers = Array.isArray(job.blockers) ? job.blockers : []
-            if (!active && job.stage === 'partial' && blockers.length) {
-              meta.push(`未消化 ${blockers.length} 项`)
-            }
             if (active && job.batchProgress) meta.push(`${t('batchLabel')} ${job.batchProgress.completed}/${job.batchProgress.total}`)
             // 已用时拆「排队 / 执行」：排队时长来自 stageTimings.queued（正在排队时实时算），
             // 执行 = 总时长 − 排队。不再让 2 小时排队被看成「编译跑了 2 小时」。

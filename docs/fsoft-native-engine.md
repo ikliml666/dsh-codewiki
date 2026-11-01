@@ -141,13 +141,17 @@ blocker 用，但枚举里没有它，`normalizeBlocker` 会静默降级成 `eng
 只把「算图/聚类/写文/增量判定」交给 FSoft。因此：
 
 - `.codewiki/_index.md` 永远由 `cw index` 生成，插件不手写；
-- `.codewiki/_meta.yaml` 的 `last_compiled_commit` 只在「这一轮确实交付了产物」时推进：
-  `done` 一律推进；`partial` 只有在 `rawTreeFiles > 0`（引擎确有产物落盘并被留档）时
-  才推进；`failed`/`cancelled` 一律不动。
-  0.16.1 之前写的是「partial 一律不动」，真机上造成死循环：超时被砍但已写 28 篇的那一轮
-  推不动基线，下一轮从同一批变化重来，每次都跑到同一处超时（连续六条任务全挂在这条上）。
-  判据实现见 `lib/engine/native-run.js:181`（`canAdvanceBaseline`）与
-  `lib/engine/apply-plan.js` 的基线推进段，两者必须一致；
+- `.codewiki/_meta.yaml` 的 `last_compiled_commit` 只在「这一轮把变化全部消化完」时推进：
+  `done` 才推进；`partial`/`failed`/`cancelled` 一律不动（写成的文章照常入库，
+  「变化已消化」这个事实不成立）。
+  0.16.1 曾改为「`partial` 且 `rawTreeFiles > 0` 也推进」，目的是打破「超时被砍但已写 28 篇 →
+  基线不动 → 下一轮从同一批变化重来 → 又超时」的死循环；但那条路径把「没消化完」记成
+  已消化，与落地器的「`partial` 不推基线」自相矛盾（门说可推、落地器照写、终态报 partial）。
+  0.17.0 改回单一判据，死循环的真正解法落在质量门的 `isEmptyBaseline()`：本轮刚
+  `cw init` 出来的空骨架（无编译提交、来源是 `worktree-only` 或 `git-head`）判
+  `baseline-absent` 直接放行，首次编译因此能走成 `done` 并正常推进基线。
+  判据实现见 `lib/engine/quality-gate.js` 的 `baselineEligible` 与本文件「落地器」一节，
+  两者必须一致；
 - 自动提交仍只 `git add -- .codewiki CodeWiki.md`，pathspec 边界不变。
 
 ## 阶段门禁

@@ -251,6 +251,33 @@ await check('readCommittedBaseline：HEAD 里有基线、工作区改了它 → 
   assert.equal(b.dirty, true)
 })
 
+await check('assessBaseline：工作区 _meta.yaml 的 last_compiled_commit 为空（本轮刚 cw init）→ baseline-absent，不算未入库基线', async () => {
+  const { dir, head } = makeRepo('meta-fresh-init-repo')
+  mkdirSync(join(dir, '.codewiki'), { recursive: true })
+  // `cw init` 的真实产物：last_compiled_commit: null。它没有任何历史进度可吞，
+  // 若照 worktree-only 判 baseline-uncommitted，首次编译就永远推进不了基线。
+  writeFileSync(join(dir, '.codewiki', '_meta.yaml'), 'project: p\nlast_compiled_commit: null\n')
+  const r = assessBaseline({ repoRoot: dir, artifactCommit: head })
+  assert.equal(r.stale.length, 1, JSON.stringify(r.stale))
+  assert.equal(r.stale[0].kind, 'baseline-absent', '空基线属于首次编译，不是「未提交的历史基线」')
+  assert.equal(r.ok, true, '没有历史进度可吞，不许阻塞')
+})
+
+await check('gate：历史基线只存在于工作区（未提交）→ baselineEligible=false，兼容字段 canAdvanceBaseline 同步 false', async () => {
+  const { dir, g } = makeRepo('gate-baseline-uncommitted-repo')
+  const head = g(['rev-parse', 'HEAD']).trim()
+  mkdirSync(join(dir, '.codewiki'), { recursive: true })
+  // 工作区里有一份**已有进度**的基线却没入库：推进它等于把未提交状态记成已消化。
+  writeFileSync(join(dir, '.codewiki', '_meta.yaml'), `last_compiled_commit: ${head}\n`)
+  const docs = makeDocs('gate-baseline-uncommitted', {
+    'metadata.json': JSON.stringify({ generation_info: { commit_id: head, layout: 'hierarchical' } }),
+  })
+  const r = gateNativeOutput({ docsDir: docs, repoRoot: dir, componentFiles })
+  assert.ok(r.stale.some((s) => s.kind === 'baseline-uncommitted'), JSON.stringify(r.stale))
+  assert.equal(r.baselineEligible, false, '基线未入库时门不许许可推进')
+  assert.equal(r.canAdvanceBaseline, false, '兼容字段不能与 baselineEligible 打架')
+})
+
 await check('assessBaseline：产物 commit ≠ HEAD → defect commit-mismatch（产物对不上当前代码）', async () => {
   const { dir } = makeRepo('commit-mismatch-repo')
   const r = assessBaseline({ repoRoot: dir, artifactCommit: SHA })

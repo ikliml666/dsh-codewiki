@@ -25,6 +25,10 @@ import { inspectArticle, hasBlockingIssue, issueSummary } from './lib/article-co
 // 阶段 4：原生引擎（FSoft Python）通道。整条裁决链在 native-run.js 里固定，
 // 这里只负责「起进程 / 收进度 / 按结果判终态」——绝不在 tick 里重写裁决。
 import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from './lib/engine/native-run.js'
+import {
+  createJobsStore, mergeJobLists, findActiveJob, reassignSession,
+  snapshotNativeRun, planNativeReplay, heartbeat, adoptOrphan, lastSeenAt,
+} from './lib/job-store.js'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -2141,36 +2145,16 @@ export function scanRepoFiles(cwd) {
 // 0.16.0 阶段 7 受控退役：lib/symbols.js 已删，本函数随之删除。符号级增量能力
 // 由原生引擎（默认通道）在 Python 侧完成，兼容通道退回文件级判定。
 
-function loadJobs() {
-  const j = readJsonFile(JOBS_FILE)
-  return Array.isArray(j?.jobs) ? j.jobs : []
-}
+const jobsStore = createJobsStore({ file: JOBS_FILE, maxKept: MAX_JOBS_KEPT, instanceTag: 'global' })
 
-const JOBS_LOCK_FILE = `${JOBS_FILE}.lock`
-// 跨进程推进锁：两个宿主窗口各跑一个服务实例，同时推进同一 job 会双提交批量。
-// 崩溃残留锁 60s 过期强删——tick 间隔 10s，60s 足够宽限。
-function acquireTickLock() {
-  try {
-    fs.writeFileSync(JOBS_LOCK_FILE, String(process.pid), { flag: 'wx' })
-    return true
-  } catch {
-    try {
-      if (Date.now() - fs.statSync(JOBS_LOCK_FILE).mtimeMs > 60000) {
-        fs.unlinkSync(JOBS_LOCK_FILE)
-        fs.writeFileSync(JOBS_LOCK_FILE, String(process.pid), { flag: 'wx' })
-        return true
-      }
-    } catch { /* 锁刚被别的实例释放：本轮让路 */ }
-    return false
-  }
+function loadJobs() {
+  const snap = jobsStore.load()
+  if (snap.state === 'ok' || snap.state === 'missing') return snap.jobs
+  throw new Error(`CodeWiki 任务现场不可读：${snap.error ?? snap.state}；为避免重复编译，已拒绝把损坏现场当作空任务`)
 }
-function releaseTickLock() { try { fs.unlinkSync(JOBS_LOCK_FILE) } catch { /* 已被清理 */ } }
 
 function saveJobs(jobs) {
-  // 只留最近 30 个；cancelRequested 必须落盘（取消标记靠它跨 tick 存活）。
-  // 0.10.1 起插件不存任何密钥，job 里也不再出现 apiKey 字段。
-  const kept = jobs.slice(-MAX_JOBS_KEPT)
-  try { fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: kept }, null, 2), 'utf8') } catch { /* tmp 不可写则放弃持久化 */ }
+  jobsStore.save(jobs)
 }
 
 function jobSummary(job) {
@@ -2207,6 +2191,9 @@ function jobSummary(job) {
     outcome: job.outcome ?? null,
     blockers: (job.blockers ?? []).slice(0, 20),
     canAdvanceBaseline: job.canAdvanceBaseline === true,
+    baselineEligible: job.baselineEligible === true,
+    baselineAdvanced: job.baselineAdvanced === true,
+    deliveryComplete: job.deliveryComplete === true,
     updateRecord: job.updateRecord ?? null,
     updatePlan: job.updatePlan ?? null,
     // 插件自动提交结果（0.10.9）：面板与 codewiki_progress 共用同一份 jobSummary，
@@ -2275,10 +2262,13 @@ function createJobService(config, onSettled) {
   for (const j of jobs) rememberRepo(j.cwd) // 一次性种子：旧历史进已知仓库清单
   let timer = null
   let ticking = false
+  let stopped = false
   let seq = 0
   // 实例身份：tick 只推进本实例创建的 job（owner 缺失=0.4.2 残留，任何实例可接管续查）。
   // 否则另一实例的 tick 会用 loadJobs 旧快照重复推进同一 job——双提交批量。
   const instanceId = `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const store = createJobsStore({ file: JOBS_FILE, maxKept: MAX_JOBS_KEPT, instanceTag: instanceId })
+  let tickLockToken = null
   // 脏标记：只有任务状态变更过才整写 JOBS_FILE。多实例并存时（插件重载/测试重复 apply），
   // 无事可做的旧实例不会用自己的过期快照覆盖新实例的活动 job。
   let dirty = false
@@ -2336,30 +2326,30 @@ function createJobService(config, onSettled) {
   // 磁盘吸收：另一实例新增的 job、或同 id 但磁盘更新且本实例没动过的 job，并回内存——
   // 防止 flush 用本实例的过期快照覆盖掉对方的活动 job。
   function mergeFromDisk() {
-    const disk = loadJobs()
-    if (!disk.length) return
-    const mine = new Map(jobs.map((j) => [j.id, j]))
-    let changed = false
-    for (const theirs of disk) {
-      const m = mine.get(theirs.id)
-      if (m) {
-        if (!dirtyIds.has(theirs.id) && (theirs.updatedAt ?? '') > (m.updatedAt ?? '')) {
-          mine.set(theirs.id, theirs)
-          changed = true
-        }
-        continue
-      }
-      mine.set(theirs.id, theirs)
-      changed = true
-    }
-    if (!changed) return
-    const merged = [...mine.values()].sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+    const snap = store.loadForIdempotency()
+    if (!snap.safe) throw new Error(`CodeWiki 任务现场不可读：${snap.error ?? snap.state}；已停止推进，避免重复执行`)
+    const merged = mergeJobLists({ mine: jobs, disk: snap.jobs, dirtyIds })
+    // 幽灵任务回收：owner 不是我、本实例也没动过的任务，磁盘上已不存在，说明它被
+    // 拥有者删除（Temp 沙箱清理、MAX_JOBS_KEPT 截断）。只增不删会让这些任务永远留在
+    // 本实例内存里占住项目闸门（提交被判 queued，直到没人能等的超时），面板也一直显示。
+    const diskIds = new Set(snap.jobs.map((j) => j.id))
+    const kept = merged.jobs.filter((j) => diskIds.has(j.id) || !j.owner || j.owner === instanceId || dirtyIds.has(j.id))
+    const dropped = merged.jobs.length - kept.length
+    if (!merged.changed && !dropped) return
     jobs.length = 0
-    jobs.push(...merged)
+    jobs.push(...kept)
   }
   const flush = () => {
+    if (stopped) return
     if (!dirty) return
-    mergeFromDisk(); dirty = false; dirtyIds.clear(); saveJobs(jobs)
+    const dirtyJobs = new Map(jobs.filter((j) => dirtyIds.has(j.id)).map((j) => [j.id, j]))
+    mergeFromDisk()
+    for (const [id, local] of dirtyJobs) {
+      const at = jobs.findIndex((j) => j.id === id)
+      if (at >= 0) jobs[at] = local
+      else jobs.push(local)
+    }
+    dirty = false; dirtyIds.clear(); store.save(jobs)
   }
   const note = (job, msg) => {
     ;(job.notes ??= []).push(msg) // 磁盘残留/手工构造的 job 可能缺 notes，防御性补齐
@@ -2398,7 +2388,7 @@ function createJobService(config, onSettled) {
   // 跨实例取消：另一实例 cancel 的 job 不在本实例内存现场（dirtyIds 之外才允许被磁盘覆盖，
   // 但本实例若正在推进它，内存对象永远不被磁盘覆盖）——每轮 tick 开头从磁盘拾取取消标记。
   function syncCancelFlags() {
-    const disk = loadJobs()
+    const disk = store.load().jobs
     if (!disk.length) return
     for (const j of jobs) {
       if (JOB_TERMINAL.has(j.stage) || j.cancelRequested) continue
@@ -2434,7 +2424,8 @@ function createJobService(config, onSettled) {
     job.outcome = stage
     job.blockers = blockers
     // 基线只代表「所有变化都已被消化」：任何 blocker 都意味着没消化完。
-    job.canAdvanceBaseline = stage === 'done' && blockers.length === 0
+    job.deliveryComplete = stage === 'done' && blockers.length === 0
+    job.canAdvanceBaseline = job.baselineAdvanced === true
     if (stage === 'failed' && blockers.length) {
       job.error = String(blockers[0]?.detail ?? blockers[0]?.kind ?? job.error ?? '失败').slice(0, 500)
     }
@@ -2742,18 +2733,16 @@ function createJobService(config, onSettled) {
     if (nativeResults.has(job.id)) {
       const res = nativeResults.get(job.id)
       nativeResults.delete(job.id)
+      job.nativeExecutionFinished = true
       if (!res) return true // 执行器已 fail（null = 整体失败），终态已写，不再动
-      // 取消优先：取消是终态，不许被「刚好跑完的 done」覆盖
-      if (job.cancelRequested && res.outcome !== 'cancelled') {
-        setStage(job, 'cancelled')
-        job.finishedAt = new Date().toISOString()
-        note(job, '已取消：原生引擎结果作废（未落盘部分保持原样）')
-        touch(job)
-        return true
-      }
+      // 到这里说明原生结果已包含 gate/apply/commit 的真实结果；迟到的取消不能把
+      // 已落盘的产物改写成 cancelled。真正的执行中取消由 tick 先 abort，结果才是 cancelled。
       job.writtenCount = Number(res.writtenCount ?? 0) || 0
       job.failedCount = Number(res.failedCount ?? 0) || 0
       job.blockers = res.blockers ?? []
+      job.autoCommit = res.apply?.commit ?? null
+      job.baselineEligible = res.gate?.baselineEligible === true
+      job.baselineAdvanced = res.apply?.baseline?.advanced === true
       // 引擎/裁决给出的错误原文必须落到 job.error：finishJob 只在 blockers 非空时
       // 拿 blockers[0].detail 兜底，而「引擎 crashed」「协议破坏」这类失败的真实原因
       // 在 res.error 里（如「引擎正常退出但没有 result 消息（协议破坏）」），
@@ -2793,7 +2782,6 @@ function createJobService(config, onSettled) {
         canAdvanceBaseline: res.canAdvanceBaseline === true,
       }
       job.judged = judged
-      job.canAdvanceBaseline = judged.canAdvanceBaseline
       // 原生通道的记录写到仓库外（见 saveRecord 的 outDir 说明）：提交已经在落地器里
       // 完成，此刻再往 .codewiki/temp/ 写就是「提交之后产生未跟踪文件」。
       saveRecord(job, judged, { outDir: nativeRecordDir() })
@@ -2816,14 +2804,26 @@ function createJobService(config, onSettled) {
     }
     if (nativeRuns.has(job.id)) return true // 在跑，等下轮
     if (job.nativeStarted === true) {
-      // 已经跑过一轮却还在非终态：说明执行器丢了（宿主重启）。原生通道没有可重放的
-      // prompt 快照，重跑一次全量既贵又可能污染半成品——如实失败，让人重新提交。
       if (job.cancelRequested) return false
-      fail(job, '原生引擎执行器丢失（宿主重启），无法续跑；请重新提交编译')
-      return true
+      const replay = planNativeReplay(job)
+      if (!replay.replayable) {
+        fail(job, replay.reason)
+        return true
+      }
+      if (replay.staleDocsDir) fs.rmSync(replay.staleDocsDir, { recursive: true, force: true })
+      job.nativeSnapshot = { ...job.nativeSnapshot, attempt: replay.attempt }
+      note(job, replay.reason)
     }
     job.nativeStarted = true
-    note(job, `原生通道启动（引擎 ${path.basename(channel.entry)}，解释器 ${channel.python}）`)
+    job.nativeSnapshot = snapshotNativeRun(job, {
+      channel,
+      attempt: job.nativeSnapshot?.attempt ?? 1,
+      docsDir: path.join(os.tmpdir(), `dsh-codewiki-native-${job.id}`),
+      moduleConcurrency: liveConfig(config).moduleConcurrency || liveConfig(config).maxConcurrency,
+      rawTreeRoot: nativeRawTreeDir(),
+    })
+    touch(job)
+    note(job, `原生通道启动（引擎 ${path.basename(channel.entry)}，解释器 ${channel.python}，第 ${job.nativeSnapshot.attempt} 次执行）`)
     startNativeRun(job, channel)
     return true
   }
@@ -3580,8 +3580,30 @@ function createJobService(config, onSettled) {
       // 基线推进闸门：只有「完整性成立」才允许 cw meta update。
       // partial/failed 时索引照建（面板/链接要能看），但基线**绝不前移**——
       // 前移就等于宣布「这些变化已被消化」，而未消化的部分下次编译将永久失明。
-      const advance = job.judged?.canAdvanceBaseline === true
+      let advance = job.judged?.canAdvanceBaseline === true
       try {
+        // wiki 骨架必须先存在：`cw meta update` 要读 .codewiki/_meta.yaml，缺文件即 exit 1。
+        // 提交路径（codewiki_generate）在 state=missing 时会先 cw init，但接管/重放的旧任务
+        // 可能落在一个还没有库骨架的仓库上，此时走到这里必然整批 partial 且基线永远推不动。
+        // 与原生落地器（lib/engine/apply-plan.js 的 3b）保持同一判据：目录不在就 cw init，
+        // 目录在却缺 _meta.yaml（人工删改过的半截状态）不猜、不手写，直接记阻塞。
+        const metaAbs = path.join(job.wikiPath ?? path.join(job.cwd, '.codewiki'), '_meta.yaml')
+        if (!fs.existsSync(metaAbs)) {
+          if (fs.existsSync(job.wikiPath ?? path.join(job.cwd, '.codewiki'))) {
+            job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'wiki-missing', detail: 'wiki 目录存在但缺 _meta.yaml，拒绝自动初始化' }]
+            note(job, 'wiki 目录存在但缺 _meta.yaml（人工删改过？），跳过基线推进；请跑 cw init 或删除该目录后重试')
+            advance = false
+          } else {
+            const initRes = await runCw(binary, job.cwd, ['init'], 120000)
+            if (initRes.exitCode === 0) {
+              note(job, '仓库还没有 wiki，已先 cw init 建出库骨架（之后再 index/基线）')
+            } else {
+              job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'wiki-missing', detail: `cw init exit ${initRes.exitCode}` }]
+              note(job, `cw init exit ${initRes.exitCode} —— ${String(initRes.stderr || initRes.stdout || '').trim().slice(0, 200)}`)
+              advance = false
+            }
+          }
+        }
         const idx = await runCw(binary, job.cwd, ['index'], 120000)
         note(job, `cw index exit ${idx.exitCode}`)
         if (idx.exitCode === 0 && normalizeIndexLinks(job.cwd)) note(job, '_index.md 链接路径已规范化（\\ → /）')
@@ -3590,8 +3612,10 @@ function createJobService(config, onSettled) {
         }
         if (advance) {
           const meta = await runCw(binary, job.cwd, ['meta', 'update'], 120000)
-          note(job, `cw meta update exit ${meta.exitCode}（基线已推进）`)
-          if (meta.exitCode !== 0) {
+          if (meta.exitCode === 0) {
+            note(job, 'cw meta update exit 0（基线已推进）')
+          } else {
+            note(job, `cw meta update exit ${meta.exitCode}（基线未推进）—— ${String(meta.stderr || meta.stdout || '').trim().slice(0, 200)}`)
             job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'meta', detail: `cw meta update exit ${meta.exitCode}` }]
           }
         } else {
@@ -3601,6 +3625,20 @@ function createJobService(config, onSettled) {
         note(job, `cw index/meta 执行异常 —— ${String(err?.message ?? err)}`)
         job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'index', detail: String(err?.message ?? err).slice(0, 200) }]
       }
+      // index/meta 是终态裁决的一部分，不能先冻结 judged 再追加 blocker。
+      const finalJudged = judgeOutcome({
+        plan: job.updatePlan ?? null,
+        results: job.articles ?? [],
+        options: {
+          expectedNames: job.expectedNames ?? [],
+          qualityIssues: job.qualityIssues ?? [],
+          extraBlockers: job.hardBlockers ?? [],
+        },
+      })
+      job.judged = { outcome: finalJudged.outcome, blockers: finalJudged.blockers, canAdvanceBaseline: finalJudged.canAdvanceBaseline }
+      job.baselineEligible = finalJudged.canAdvanceBaseline
+      job.baselineAdvanced = advance && !(job.hardBlockers ?? []).some((b) => b.kind === 'meta')
+      Object.assign(judged, { outcome: finalJudged.outcome, blockers: finalJudged.blockers, canAdvanceBaseline: finalJudged.canAdvanceBaseline })
       // 符号快照：0.16.0 阶段 7 受控退役，随 lib/symbols.js + lib/incremental.js 一并删除。
       // 原生引擎（默认通道）在 Python 侧自己维护受管状态与符号级增量，不需要 Node 侧快照。
       try {
@@ -3649,9 +3687,24 @@ function createJobService(config, onSettled) {
     commit: tickCommit,
   }
 
+  // 项目闸门占位判定：非终态 ≠ 有实例在推进。宿主重启/实例退出后，磁盘上会留下
+  // owner 已消失、lastSeenAt 不再前进的任务；把它们算作占位会让后续提交一直排队，
+  // 直到 ORPHAN_TAKEOVER_MS（默认 5 分钟）超时才被接管——表现为「重启后新任务卡在 queued」。
+  // 停更超过接管阈值的任务不占位；真正的接管仍由 tick 的孤儿分支完成。
+  function occupancyHeld(job) {
+    if (!job.owner || job.owner === instanceId) return true
+    const idleMs = Date.now() - lastSeenAt(job)
+    return !(Number.isFinite(idleMs) && idleMs > ORPHAN_TAKEOVER_MS)
+  }
+
   async function tick() {
+    if (stopped) return
     if (ticking) return
-    if (!acquireTickLock()) return // 另一实例正在推进，本轮让路
+    try { tickLockToken = store.acquireTickLock() } catch (err) {
+      console.error(`[codewiki] ${String(err?.message ?? err)}`)
+      return
+    }
+    if (!tickLockToken) return // 另一实例正在推进，本轮让路
     ticking = true
     try {
       // 会话记录过期清理（保留一天）：每 10 分钟一轮足够，不用每 tick 扫目录
@@ -3659,7 +3712,11 @@ function createJobService(config, onSettled) {
         tick.lastPruneAt = Date.now()
         pruneSessionRecords()
       }
+      mergeFromDisk()
       syncCancelFlags()
+      for (const job of jobs) {
+        if (!JOB_TERMINAL.has(job.stage) && heartbeat(job, { instanceId })) touch(job)
+      }
       // 项目闸门（serialProjects 默认串行=上限1；关闭后按 parallelLimit 并行推进多仓库）。
       // 已经在推进的项目优先（不打断），活跃数不满上限时按提交顺序唤醒最早排队的；
       // 其余排队项目本轮不推进，等前面的到终态后自然轮到。取消仍不受闸门限制。
@@ -3667,7 +3724,7 @@ function createJobService(config, onSettled) {
       const activeIds = new Set()
       for (const j of jobs) {
         if (JOB_TERMINAL.has(j.stage)) continue
-        if (j.stage !== 'queued' && j.stage !== 'submitting') activeIds.add(j.id)
+        if (j.stage !== 'queued' && j.stage !== 'submitting' && occupancyHeld(j)) activeIds.add(j.id)
       }
       for (const j of jobs) {
         if (activeIds.size >= parallelLimit) break
@@ -3676,17 +3733,30 @@ function createJobService(config, onSettled) {
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
         if (job.owner && job.owner !== instanceId) {
+          if (job.stage === 'queued' || job.stage === 'submitting') continue
           // 另一实例的 job：它活着会随批次轮询 touch（updatedAt 每 tick 前进）；
           // 停更超时视为孤儿（宿主重启后 instanceId 变了，旧任务无人推进），接管。
-          const idleMs = Date.now() - Date.parse(job.updatedAt || job.createdAt || new Date().toISOString())
+          const idleMs = Date.now() - lastSeenAt(job)
           if (Number.isFinite(idleMs) && idleMs <= ORPHAN_TAKEOVER_MS) continue
           note(job, `原实例 ${job.owner} 停更 ${Math.round(idleMs / 60000)} 分钟，本实例接管推进`)
-          job.owner = instanceId
+          adoptOrphan(job, { instanceId })
           touch(job)
           if (job.sessionTasks?.length) resendSessionSteer(job) // 在途会话通道任务：旧进程的 steer 可能已丢
         }
         if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {
+          if (job.channel === 'native' && nativeResults.has(job.id)) {
+            note(job, '取消到达时原生结果已落地，按真实结果收尾而不丢弃产物')
+            await tickNative(job, job.nativeChannel)
+            persist()
+            continue
+          }
+          if (job.channel === 'native' && job.nativeExecutionFinished === true) {
+            note(job, '取消到达前原生执行器已结束，交由结果收割核对落盘事实')
+            await tickNative(job, job.nativeChannel)
+            persist()
+            continue
+          }
           setStage(job, 'cancelled')
           job.finishedAt = new Date().toISOString()
           // 取消是终态，但不是「成功」：基线绝不能因为一个半成品任务前移。
@@ -3704,7 +3774,7 @@ function createJobService(config, onSettled) {
           if (nac) nac.abort()
           nativeResults.delete(job.id)
           if (job.batchRef) note(job, '已取消：在途请求已中断（未完成请求不计费）')
-          if (job.channel === 'native') note(job, '已取消：原生引擎进程树已终止，产物未落地')
+          if (job.channel === 'native') note(job, '已取消：原生引擎进程树已终止，未进入落地阶段')
           touch(job)
           continue
         }
@@ -3725,6 +3795,7 @@ function createJobService(config, onSettled) {
         // 0.10.7 前的旧任务卡在 plan 阶段：勘探员代码已删，旧任务快照不可重跑——
         // 清掉规划批次引用与旧任务清单，按 articles 正常组装（full 由 localPlan 本地重建清单）
         if (job.stage === 'plan') {
+          job.channel = 'legacy'
           job.batchRef = null
           job.tasks = []
           job.plan = null
@@ -3773,7 +3844,8 @@ function createJobService(config, onSettled) {
       }
       flush()
     } finally {
-      releaseTickLock()
+      store.releaseTickLock(tickLockToken)
+      tickLockToken = null
       ticking = false
     }
   }
@@ -3807,8 +3879,16 @@ function createJobService(config, onSettled) {
     // 盘符大小写不同；knownRepos 里存的是首次登记时的原样）。严格字符串相等会让同一仓库
     // 各开一条任务，单项目串行闸门与自动调度幂等的前提当场失效。
     const cwdKey = normPathKey(cwd)
-    const existing = jobs.find((j) => normPathKey(j.cwd) === cwdKey && !JOB_TERMINAL.has(j.stage))
-    if (existing) return { job: existing, existed: true }
+    mergeFromDisk()
+    const existing = findActiveJob(jobs, cwd)
+    if (existing) {
+      if (reassignSession(existing, sessionId)) {
+        existing.owner = instanceId
+        touch(existing)
+        flush()
+      }
+      return { job: existing, existed: true }
+    }
     // 占位先行：先落一条 submitting 占位，期间的并发提交靠非终态 stage 挡重复
     const job = {
       id: `job-${Date.now().toString(36)}-${(seq++).toString(36)}`,
@@ -3868,7 +3948,7 @@ function createJobService(config, onSettled) {
     // 轮到时再落地（排队期间不占机器）。
     const c1 = liveConfig(config)
     const limit = Math.max(1, c1.parallelLimit ?? 1)
-    const busyOthers = jobs.filter((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting')
+    const busyOthers = jobs.filter((j) => j.id !== job.id && !JOB_TERMINAL.has(j.stage) && j.stage !== 'queued' && j.stage !== 'submitting' && occupancyHeld(j))
     const busyOther = busyOthers.length >= limit ? busyOthers[limit - 1] : null
     if (busyOther) {
       job.pendingStage = 'articles'
@@ -3899,16 +3979,22 @@ function createJobService(config, onSettled) {
 
   const list = () => { mergeFromDisk(); return jobs.map(jobSummary) }
   const findActive = (cwd) => {
+    mergeFromDisk()
     const key = normPathKey(cwd)
     return jobs.find((j) => normPathKey(j.cwd) === key && !JOB_TERMINAL.has(j.stage)) ?? null
   }
 
   function start() {
     if (timer) return
+    stopped = false
     timer = setInterval(() => { void tick() }, TICK_MS)
     timer.unref?.()
   }
+  // 停止后仍可能有飞行中的 tick（它正在 await 引擎/模型，clearInterval 拦不住）。这些 tick
+  // 手里是本实例的旧内存现场，一旦让它 flush，就会把别的实例已经推进到终态的任务按旧阶段
+  // 写回磁盘——任务被"复活"，还占着单项目串行闸门。所以停止即失效：tick 入口与 flush 都让路。
   function stop() {
+    stopped = true
     if (timer) clearInterval(timer)
     timer = null
   }
@@ -3925,9 +4011,9 @@ function generateToolDefinition(cfg, svc) {
   return {
     name: 'codewiki_generate',
     description: [
-      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（模块文章→横切→校对→索引），全部模型环节在插件内完成（默认 volces-ark/glm-5.3-flash，512k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
+      '编译/刷新指定仓库的 CodeWiki（服务化全批量流水线，零子代理）。调用即提交：cw status 判态 → 提交后台编译任务（job）立即返回；宿主服务以 10s 节拍推进阶段机（原生引擎按依赖图→模块树→文章→校验推进），全部模型环节在插件内完成（默认 volces-ark/glm-5.3-flash，512k 上下文，单请求输入按 110k 预算分块装填），不委托发起会话的主模型。',
       'scope=auto（默认）：无 wiki 或未编译走全量；有变更走逐篇更新；最新则直接报告。scope=full：强制全量重编。scope=stale：只刷新过期文章。',
-      '进度：调用即提交后本步就此结束——不要等待、不要轮询、不要为了确认编译好没有而反复调 codewiki_progress；去做你手头其他工作。编译完成的产物由插件自己提交入库（autoCommit：主题分支 codewiki/wiki-<任务id> 提交后合并回原分支，只含 .codewiki/ 与 CodeWiki.md），正常情况下你不需要为 wiki 跑任何 git 命令。需要事件级进度时才用 codewiki_progress（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启后活动任务自动恢复推进（进行中的请求按 prompt 快照自动重跑当前阶段）。',
+      '进度：调用即提交后本步就此结束——不要等待、不要轮询、不要为了确认编译好没有而反复调 codewiki_progress；去做你手头其他工作。编译完成的产物由插件自己提交入库（autoCommit：主题分支 codewiki/wiki-<任务id> 提交后合并回原分支，只含 .codewiki/ 与 CodeWiki.md），正常情况下你不需要为 wiki 跑任何 git 命令。需要事件级进度时才用 codewiki_progress（只读、立即返回），或在侧边栏 CodeWiki 面板 / GET /api/codewiki/jobs（回环地址）查看；POST /api/codewiki/control {action:"cancel",jobId} 取消。宿主重启或旧实例退出后，活动任务由新实例接管；原生引擎按持久化的非敏感执行快照重新运行，已落盘结果按事实收割。',
       '单项目串行（默认开）：同一时刻只推进一个仓库的编译任务，后提交的项目进 queued 排队，前一个收尾后自动轮到（进度里 stage=queued 即排队）。',
       '凭证由模型设置里该 provider（默认 volces-ark）的配置解析，插件不保存也不传递任何密钥；provider/model 留空或该模型不可用时报错而不是降级子代理。全量编译小仓库也要几分钟（多请求排队+生成），适合后台调用。',
     ].join('\n'),
@@ -4968,7 +5054,7 @@ export function commitHintText(cwd, jobs = loadJobs()) {
   let text = ''
   try {
     const latest = jobs
-      .filter((j) => j.stage === 'done' && (j.writtenCount ?? 0) > 0 && j.finishedAt && samePath(j.cwd, cwd))
+      .filter((j) => ['done', 'partial'].includes(j.stage) && (j.writtenCount ?? 0) > 0 && j.finishedAt && samePath(j.cwd, cwd))
       .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0]
     // 自动提交已成功或产物本就无改动 → 不必再查 git：该任务不需要任何提交动作。
     // （与 wakeCompileSession 共用 autoCommitState，两条通道对同一次编译给出同一结论。）
@@ -4983,7 +5069,7 @@ export function commitHintText(cwd, jobs = loadJobs()) {
           ? `插件自动提交未执行（${latest.autoCommit.reason}）`
           : '编译产物尚未提交 git'
         text = [
-          `【CodeWiki 产物待提交·一次性】本仓库 wiki 编译已完成（任务 ${latest.id}，写入 ${latest.writtenCount} 篇文章），${why}：`,
+          `【CodeWiki 产物待提交·一次性】本仓库 wiki 编译${latest.stage === 'partial' ? '部分完成' : '已完成'}（任务 ${latest.id}，写入 ${latest.writtenCount} 篇文章），${why}：`,
           '- 若确需入库，只 add .codewiki/ 与 CodeWiki.md 后提交（建议 docs(wiki) 前缀；不要 git add -A），随手一次即可；',
           '- 不需要提交就忽略本提醒——不要为了本提醒中断当前任务、不要轮询编译进度。',
         ].join('\n')

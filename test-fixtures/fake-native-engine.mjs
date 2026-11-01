@@ -14,6 +14,8 @@
 //   stall       不返回，等被取消（验证取消会终止进程树）
 //   bad-yaml    文章 title 写成裸值 `核心: 引擎`（serde_yaml 会把 index 收录静默跳过）
 //   empty-docs  不写任何产物就回 done（验证「引擎 done 不能替代质量门」）
+//   drop-graph  产物写完后再删掉依赖图：模拟「这一轮引擎没有产出下一轮的增量凭据」。
+//               缺图意味着受管状态不完整，调用方必须既不裁旧状态、也不推进基线。
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -287,6 +289,11 @@ function run(req) {
   progress(requestId, 'cluster', 30, '聚类')
   progress(requestId, 'articles', 60, '写文章')
   writeDocs(docsDir, repoPath, { action, commitId: String(req?.commitId ?? '') })
+  if (MODE === 'drop-graph') {
+    // 只删依赖图，其余产物照旧：质量门自身不看图，所以能过门——
+    // 这样才能证明拦住本轮的是调用方的受管状态完整性判据，而不是门。
+    fs.rmSync(path.join(docsDir, 'temp', 'dependency_graphs'), { recursive: true, force: true })
+  }
   progress(requestId, 'articles', 90, '产物已写出')
   // updateOutcome：真实引擎从 update_record.json 的 outcome 读出来（entry.py
   // `_update_outcome_of`），夹具照同一条路径自报，让「引擎说回退/无变化」这条

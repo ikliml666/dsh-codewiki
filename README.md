@@ -8,6 +8,8 @@
 
 **0.14.0 起补上「增量不丢、结果诚实、坏文章不入库」三层质量保证**（对应上游的 updater/ownership/完整性终态/write-set 与文章质量门）：变更采集覆盖工作区（未提交/已暂存/未跟踪/删除/改名），增量规划带反向依赖闭包与新文件 ownership，终态新增 `partial` 且只有完整成功才推进基线，所有写盘点统一走文章契约闸门。详见下文「增量与质量保证（0.14.0）」。
 
+**0.17.0 起编译基线只有一个判据：`done`**（`baselineEligible`）。0.16.1 曾让「有产物的 `partial`」也推进基线来打破死循环，但那等于把「没消化完」记成已消化，与落地器的「`partial` 不推基线」直接冲突；真正的死循环来源是**首次编译**把本轮刚 `cw init` 出来的空骨架判成「未入库基线」，于是正常首编也只能 `partial`。现在空骨架（`worktree-only`/`git-head` 且无编译提交）判 `baseline-absent` 直接放行，首编能走成 `done`；`partial` 一律不推基线。同一版还补齐了**原生任务跨重启接管**、JobService 的原子持久化与跨实例幂等（详见「任务生命周期（0.17.0）」）。
+
 **0.15.0 引入、0.16.0 转正的原生引擎通道**（`nativeEngine`，**0.16.0 起默认开启**）：装法见「原生引擎通道」。`nativeEngine:false` 仍然可用，是一条**兼容通道**（插件内 Node 流水线），只服务「本机装不了 Python 依赖」这一种场景，**不再接收新能力**；两条通道互不回退。
 
 ## 提供
@@ -17,14 +19,14 @@
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
 | `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；只有单模块源码连 420k 大档都装不下时才走观察→合成或会话通道兜底 |
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
-| `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled` |
+| `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled`。0.17.0 起另带 `baselineEligible`（质量门是否许可推进基线）与 `baselineAdvanced`（本轮基线**事实上**是否已前移）——提交失败时会看到 `baselineAdvanced:true` 而 `deliveryComplete:false`，两者口径不同 |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
 
 `codewiki_generate` 关键行为：
 
 - `scope=auto`（默认）：无 wiki / 未编译 → 全量；有变更 → 逐篇更新过期文章；最新 → 直接报告。
 - 全部模型环节（写文章/横切/审校）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型；不再委托发起会话的主模型。
-- 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**。基线推进的判据是「这一轮有没有交付产物」：`done` 推进；`partial` 只在确有产物落盘（`rawTreeFiles > 0`）时推进，否则下一轮从同一批变化重来、永远卡在同一处（0.16.1 之前按「partial 一律不推进」实现，真机上就是这么死循环的）；`failed`/`cancelled` 一律不动基线。
+- 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**。基线推进的判据是**完整性**：`done` 才推进；`partial`/`failed`/`cancelled` 一律不动基线，未消化的变化下一轮还会被看见（0.16.1–0.16.16 曾按「`partial` 且有原始树留档就推进」实现，那是拿「有产物」冒充「消化完」；0.17.0 已改回单一判据，并用「空骨架不算未入库基线」解决首次编译原先必然 `partial` 的死循环）。
 - 请求并发分两档独立限流：默认档 `maxConcurrency` 默认 2（硬顶 8），大档 `bigConcurrency` 默认跟随默认档（`0`）；两池同时推进，总在飞为两者之和。
 - `serialProjects` 默认开：同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued` 排队，前一个收尾后自动轮到。
 - `scope=full`：跳过 clean 短路，即使 wiki 最新也强制全量重编。
@@ -54,7 +56,7 @@
 
 ### 终态诚实：`partial` 不是 `done`
 
-`done` 现在只表示「完整成功」。以下任一情况终态为 `partial`（附 `blockers` 逐条原因）。`partial` 不推进基线，**除非**这一轮确实写出了文章（`rawTreeFiles > 0`）——那种情况下已产出的部分会被记进基线，未消化的变化留给下一轮，避免「每次都重跑同一批、每次都撞同一个上限」：
+`done` 现在只表示「完整成功」。以下任一情况终态为 `partial`（附 `blockers` 逐条原因）。`partial` 一律不推进基线：写成的文章照常入库（下次不必重写），但「这一批变化已消化」这个事实不成立，下一轮从同一批变化继续 —— 这才是完整性终态的意义：
 
 - 计划内必需的文章缺失或写作失败（旧实现只看 `writtenCount === 0`，1 篇成功 + 19 篇失败照样 `done` + 推进基线）；
 - 有变更没被任何文章解释（未映射）；
@@ -76,7 +78,7 @@
 `error` 级问题一律不落盘（记 note 并计入终态阻塞）；`warning` 级（缺非必需章节）放行但记账。agentic 通道另有 **write-set 闸门**：父任务只能写自己那一篇、子模块只能写调度器分配的那条路径，越界返回 `stopReason='write-set'` 且不落盘。
 
 
-## 原生引擎通道（0.15.0，可选，默认关闭）
+## 原生引擎通道（0.15.0 引入，0.16.0 起默认开启）
 
 上面那一整套是 Node 重写版。0.15.0 另加一条**直接驱动上游 Python 引擎**的通道：把
 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki) 装进一个独立 venv，
@@ -125,7 +127,7 @@ llm bridge 转发。
 |------|------|
 | 全量编译（8 场景中的 6.1） | **done**，241s，written 13，提交范围校验 `ok:true`，工作区干净 |
 | 已提交改动的 stale 增量 | **done**，10.7s（约为全量的 4%），written 9 |
-| 工作区有未提交改动 | **partial**（正确）：把四路改动合成临时 commit 交给引擎（`workspaceSnapshot`，不挂 ref），产物与内容对齐；`uncommitted-input` 记账、基线不推进、文章照写 |
+| 工作区有未提交改动 | **partial**（正确）：把四路改动合成临时 commit 交给引擎（`workspaceSnapshot`，不挂 ref），产物与内容对齐；`uncommitted-input` 记账、基线不推进、文章照写（快照不挂 ref，把它记成已提交基线是不可逆的） |
 | 重命名文件（`git mv` + 类改名） | **done**，增量识别 3 条变化，新增/重写模块页 |
 | 删除模块 | **done**，孤儿页在同一提交里被清理（见下） |
 | 取消（面板 `/api/codewiki/control`） | **cancelled**，基线不推进，HEAD 不变 |
@@ -300,6 +302,9 @@ test-engine-python-entry.mjs / test-engine-output.mjs / test-engine-output-real.
 test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.mjs
 test-engine-llm-bridge.mjs / test-engine-native-job.mjs
 test-engine-native-incremental.mjs / test-engine-process-tree.mjs
+
+# 任务生命周期（0.17.0）
+test-job-reliability.mjs
 ```
 
 测试用假引擎（`test-fixtures/fake-native-engine.mjs`）走真实子进程协议，所以能覆盖协议

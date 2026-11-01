@@ -524,6 +524,34 @@ if (want(9)) { console.log('== 用例 9：nativeEngine=false 时旧通道照常�
     for (const d of m.disposers) { try { d() } catch { /* ignore */ } }
   }
 }
+// ============================ 用例 10：本轮没有产出增量凭据 ============================
+if (want(10)) { console.log('== 用例 10：本轮缺依赖图（受管状态不完整）→ 不裁旧状态、不推进基线、不 done ==')
+  const { base, repo } = makeRepo('dropgraph', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `首轮 done（实际 ${first.job?.stage}）`)
+  const graphDir = path.join(repo, STATE_DIR, 'docs', 'temp', 'dependency_graphs')
+  const graphsBefore = fs.readdirSync(graphDir).filter((f) => f.endsWith('.json'))
+  check(graphsBefore.length > 0, '首轮持久化了依赖图（下一轮增量就靠它）')
+
+  fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "v6"\n')
+  execFileSync('git', ['add', '.'], { cwd: repo, stdio: 'pipe' })
+  execFileSync('git', ['commit', '-m', 'v6'], { cwd: repo, stdio: 'pipe' })
+  setMode(base, 'dropgraph', 'drop-graph')
+
+  const r = await runNativeJob({ repoRoot: repo, scope: 'stale', docsDir: freshDocs('dropgraph'), deps: baseDeps() })
+  // 缺图 = 这一轮的产状态不完整。它不影响文章本身（门照过、文章照写），
+  // 但**下一轮唯一的增量凭据**没了：此时裁掉旧状态就是把凭据删掉，
+  // 推进基线就是把「没消化完的变化」记成已消化。两件都不能做。
+  check(r.outcome === 'partial', `缺图轮不得完整 done（实际 ${r.outcome}）`)
+  check(r.blockers.some((b) => b.kind === 'quality-gate' && String(b.detail).includes('[native-state]')),
+    `状态不完整必须成为机读 blocker（${JSON.stringify(r.blockers.map((b) => b.kind))}）`)
+  check(r.apply?.baseline?.advanced === false, '状态不完整时基线不推进')
+  check(r.apply?.applied === true, '文章照写（不完整的是状态，不是产物）')
+  check((r.incremental?.stateMissing ?? []).length > 0, `现场证据里能看出缺了什么（${JSON.stringify(r.incremental?.stateMissing)}）`)
+  const graphsAfter = exists(graphDir) ? fs.readdirSync(graphDir).filter((f) => f.endsWith('.json')) : []
+  check(graphsAfter.length === graphsBefore.length, `旧依赖图没被裁掉（${graphsBefore.length} → ${graphsAfter.length}）`)
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 占用留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

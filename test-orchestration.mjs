@@ -17,6 +17,14 @@ process.env.DSH_CODEWIKI_TICK_MS = '300'
 process.env.DSH_CODEWIKI_AUTO_SCAN_MS = '100'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+// 主工作区根：测试常在本仓库的 linked worktree 里跑，而 worktree 目录被编译对象闸门
+// 有意排除（1.2.1），拿 here 当「正常仓库」会得到假失败。
+const mainRepoRoot = (() => {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: here, encoding: 'utf8' }).trim()
+    return path.dirname(common)
+  } catch { return here }
+})()
 // 独立 JOBS_FILE：与真实宿主服务实例（同机共享默认路径）隔离，避免互相洗写。
 // 0.10.10：文件名追加随机串——只用 pid 时，历史运行留在 tmp 里的同名文件会在 pid 复用时
 // 被原样读入（旧文件里有 job-tmp-active 等 fixture 任务），让「单项目串行」误判为已有项目在编译、
@@ -49,6 +57,59 @@ const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3
 // inject 同时支持 cordis 两种风格：带回调（apply 注册）与 promise（await ctx.inject([...])）
 // 0.10.1：插件不再解析任何凭证（无自带直连通道），llm 服务是唯一模型通道——
 // 默认注入转发到 activeLlm 的 llmProxy，块内 makeBatchMock() 换掉 activeLlm 即可。
+// 块间隔离：每个 makeCtx 都建出一个带 setInterval(tick) 的 JobService，共享同一个
+// JOBS_FILE。块结束时 fixture 目录被删、实例却还在 tick，残留的未终态任务会占住单项目
+// 串行闸门（serialProjects 默认 true → parallelLimit=1），让后续块的新任务永远 queued。
+// 因此每个顶层块开始前把上一块建出的实例全部停掉（disposer 即 service.stop()，重复调用无害）。
+// 主链路实例标记为 persistent，不参与清理。
+const liveCtxs = []
+let persistentCtx = null
+async function cleanupServices() {
+  // 先取消、再停实例：顺序反了就没救。取消只是写一个标记，得由**拥有该任务的、还活着的
+  // 实例**在自己的 tick 里收尾；实例一旦停掉，它的任务就再没人推进，只能等
+  // ORPHAN_TAKEOVER_MS（默认 5 分钟）被别的实例接管，这期间一直占着单项目串行闸门。
+  const ctl = persistentCtx?.endpoints?.find((e) => e.path === '/api/codewiki/control')
+  if (ctl) {
+    const readJobs = async () => {
+      let data = null
+      for (let i = 0; i < 20 && !data; i += 1) {
+        try { data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')) } catch { /* 写入中途：稍后重试 */ }
+        if (!data) await new Promise((r) => setTimeout(r, 25))
+      }
+      return data?.jobs ?? []
+    }
+    const isLive = (j) => !['done', 'partial', 'failed', 'cancelled'].includes(j.stage)
+    let left = (await readJobs()).filter(isLive)
+    if (left.length) {
+      for (const job of left) {
+        if (job.cancelRequested) continue
+        await ctl.handler(fakeReq({ action: 'cancel', jobId: job.id }), fakeRes())
+      }
+      for (let i = 0; i < 60; i += 1) {
+        await new Promise((r) => setTimeout(r, 100))
+        left = (await readJobs()).filter(isLive)
+        if (!left.length) break
+      }
+      // 仍然非终态 = 没有活着的实例会推进它（块内手写的外来任务 fixture、或实例已被停掉）。
+      // 从作业文件里摘掉即可：主实例的 mergeFromDisk 会把这些磁盘上已不存在的他人任务当幽灵回收，
+      // 闸门随之释放。真正「该跑完却卡住」的用例会先在 waitJob 里失败，不靠这里兜。
+      if (left.length) {
+        const drop = new Set(left.map((j) => j.id))
+        const disk = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
+        disk.jobs = (disk.jobs ?? []).filter((j) => !drop.has(j.id))
+        fs.writeFileSync(JOBS_FILE, JSON.stringify(disk), 'utf8')
+      }
+    }
+  }
+  const keep = []
+  for (const made of liveCtxs) {
+    if (made === persistentCtx) { keep.push(made); continue }
+    for (const dispose of made.disposers.splice(0)) dispose()
+  }
+  liveCtxs.length = 0
+  liveCtxs.push(...keep)
+}
+
 function makeCtx({ agents = [], workspaces = null, brokenRegistry = false, agentGet = null, llm = null } = {}) {
   const registered = new Map()
   const endpoints = []
@@ -88,7 +149,9 @@ function makeCtx({ agents = [], workspaces = null, brokenRegistry = false, agent
       return d
     },
   }
-  return { ctx, registered, endpoints, listeners, disposers }
+  const made = { ctx, registered, endpoints, listeners, disposers }
+  liveCtxs.push(made)
+  return made
 }
 
 // 真实 cordis 语义 mock：agent.ctx 用于 systemPrompt section 注册
@@ -237,7 +300,7 @@ async function waitJob(cwd, { timeout = 30000 } = {}) {
       const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
       job = (data.jobs ?? []).filter((x) => norm(x.cwd) === norm(cwd)).pop() ?? null
     } catch { /* 文件尚未落盘 */ }
-    if (job && ['done', 'failed', 'cancelled'].includes(job.stage)) return job
+    if (job && ['done', 'partial', 'failed', 'cancelled'].includes(job.stage)) return job
     if (Date.now() - start > timeout) return job
     await new Promise((r) => setTimeout(r, 150))
   }
@@ -258,6 +321,7 @@ function fakeRes() {
 }
 
 // ============================ 系统提示提醒 ============================
+await cleanupServices()
 console.log('== 系统提示 wiki 维护提醒 ==')
 {
   const repoWith = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-remind-'))
@@ -289,10 +353,12 @@ console.log('== 系统提示 wiki 维护提醒 ==')
 }
 
 // ============================ 注册与 cw 工具 ============================
+await cleanupServices()
 console.log('== 注册 ==')
 const mainRepo = makeFixtureRepo()
 const e2eSteers = [] // 编译终态 steer 唤醒捕获（sess-e2e 专属）
 const main = makeCtx({ agentGet: (id) => (id === 'sess-e2e' ? { steer: (m) => e2eSteers.push({ id, m }) } : undefined) })
+persistentCtx = main
 const mainConfig = batchCfg()
 apply(main.ctx, mainConfig)
 check(name === 'dsh-codewiki', `插件名 ${name}`)
@@ -302,6 +368,7 @@ const cwTool = main.registered.get('cw')
 const prog = main.registered.get('codewiki_progress')
 check(!!prog, 'codewiki_progress 工具已注册')
 
+await cleanupServices()
 console.log('== cw 工具 ==')
 {
   const st = await cwTool.execute({ cwd: mainRepo, args: ['status'] })
@@ -309,6 +376,7 @@ console.log('== cw 工具 ==')
 }
 
 // ============================ codewiki_update 工具 + 提交提醒 ============================
+await cleanupServices()
 console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHintText ==')
 {
   // wrapper 单测：mock generateDef（临时替换注册的 gen.execute，测完还原），验证 scope 强制、note 追加、错误前缀改写
@@ -429,6 +497,7 @@ console.log('== codewiki_update：固定 scope=auto 的更新请求 + commitHint
 }
 
 // ============================ autoCommitWiki：插件自己提交编译产物（0.10.11 分支合并式） ============================
+await cleanupServices()
 console.log('== autoCommitWiki：安全边界（主题分支提交→合并回原分支；可疑状态一律拒绝） ==')
 {
   const { autoCommitWiki } = await import('./index.js')
@@ -532,6 +601,7 @@ console.log('== autoCommitWiki：安全边界（主题分支提交→合并回�
 }
 
 // ============================ autoCommitState：三态判定的唯一来源 ============================
+await cleanupServices()
 console.log('== autoCommitState：committed / no-changes / pending 三态（唤醒与提醒两条通道共用） ==')
 {
   const { autoCommitState } = await import('./index.js')
@@ -544,6 +614,7 @@ console.log('== autoCommitState：committed / no-changes / pending 三态（唤�
 }
 
 // ============================ wakeCompileSession：编译终态 steer 唤醒 ============================
+await cleanupServices()
 console.log('== wakeCompileSession：终态实时唤醒（插件已自动提交时完全不打扰会话） ==')
 {
   const { wakeCompileSession } = await import('./index.js')
@@ -582,6 +653,7 @@ console.log('== wakeCompileSession：终态实时唤醒（插件已自动提交�
 }
 
 // ============================ 本地规划（0.10.7：规划阶段已删，articles 开头就地 localPlan） ============================
+await cleanupServices()
 console.log('== 本地规划：零规划请求，模块清单由 localPlan 顶层目录分组生成 ==')
 {
   // 0.10.1：唯一通道是宿主 llm 服务。此块的意图不再是「不碰 ctx.llm」，
@@ -641,6 +713,7 @@ console.log('== 本地规划：零规划请求，模块清单由 localPlan 顶�
 }
 
 // ============================ 全量编译（服务阶段机） ============================
+await cleanupServices()
 console.log('== codewiki_generate 全量编译：提交即返回，服务推进阶段机 ==')
 {
   const mock = makeBatchMock()
@@ -684,6 +757,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
 }
 
 // ============================ 大 wiki：横切精准拆分 ============================
+await cleanupServices()
 console.log('== 横切精准拆分：模块文章总量超预算 → 观察任务 map + 合成批 reduce ==')
 {
   const bigRepo = makeFixtureRepo()
@@ -714,6 +788,7 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
 }
 
 // ============================ 大模块：文章观察→合成分割 ============================
+await cleanupServices()
 console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
 {
   const splitRepo = makeFixtureRepo()
@@ -750,6 +825,7 @@ console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + �
 }
 
 // ============================ 单项目串行（0.10.0） ============================
+await cleanupServices()
 console.log('== 单项目串行：已有项目在跑时新提交进 queued，前一个收尾后自动轮到 ==')
 {
   const repoA = makeFixtureRepo()
@@ -808,6 +884,7 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
 }
 
 // ============================ 并行项目上限（1.1.0） ============================
+await cleanupServices()
 console.log('== 并行项目上限：关闭单项目串行后多仓库同时推进，不再互相排队 ==')
 {
   const repoA = makeFixtureRepo()
@@ -839,6 +916,7 @@ console.log('== 并行项目上限：关闭单项目串行后多仓库同时推�
 }
 
 // ============================ 唯一通道：宿主 llm 服务 ============================
+await cleanupServices()
 console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 provider/model，插件零直连 ==')
 {
   const smallRepo = makeFixtureRepo()
@@ -873,6 +951,7 @@ console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 prov
 }
 
 // ============================ stale 逐篇更新 ============================
+await cleanupServices()
 console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 articles 阶段） ==')
 {
   fs.writeFileSync(path.join(mainRepo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
@@ -896,6 +975,7 @@ console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 art
 }
 
 // ============================ codewiki_progress 只读查进度 ============================
+await cleanupServices()
 console.log('== codewiki_progress：注册、cwd/jobId 过滤、百分比与明细 ==')
 {
   // 终态 job：taskList 全 done，progress=100
@@ -932,10 +1012,14 @@ console.log('== codewiki_progress：注册、cwd/jobId 过滤、百分比与明�
     fs.rmSync(midRepo, { recursive: true, force: true })
   }
 }
+await cleanupServices()
 console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==')
 {
   // 场景 A：阶段任务（stage-*）停在 articles，执行器随进程丢失
   const repoA = makeFixtureRepo()
+  // 真实重启的任务都来自一次 submit：codewiki_generate 在 state=missing 时已 cw init，
+  // 库骨架（_meta.yaml）因此一定存在。手写快照要还原同样的现场，否则基线一步必然失败。
+  execFileSync('cw', ['init'], { cwd: repoA, stdio: 'ignore' })
   const mock = makeBatchMock({ articleMarker: 'Restarted-batch' })
   const staleAt = new Date(Date.now() - 6 * 60000).toISOString()
   const articlePath = path.join(repoA, '.codewiki', 'modules', 'core.md')
@@ -965,6 +1049,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
   // 场景 B：0.10.6 及更早的 plan 阶段任务（勘探员快照）——宿主升级后迁移到 articles，
   // 旧勘探员任务作废，按 localPlan 本地重建清单继续编译
   const repoB = makeFixtureRepo()
+  execFileSync('cw', ['init'], { cwd: repoB, stdio: 'ignore' })
   const mockB = makeBatchMock()
   const staleAtB = new Date(Date.now() - 6 * 60000).toISOString()
   fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [{
@@ -992,6 +1077,7 @@ console.log('== 0.6.0：宿主重启后任务按持久化 prompt 快照重跑 ==
 }
 
 // ============================ 并发提交占位 + 多实例合并 ============================
+await cleanupServices()
 console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并 ==')
 {
   // 预置「另一实例」的 job：flush 合并后不得丢失
@@ -1042,6 +1128,7 @@ console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并
 }
 
 // ============================ 面板端点与取消 ============================
+await cleanupServices()
 console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/control（loopback 守卫 + 取消） ==')
 {
   const cancelRepo = makeFixtureRepo()
@@ -1096,6 +1183,7 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
 }
 
 // ============================ 排除清单 / repos 总览 / compile 动作（0.4.7） ============================
+await cleanupServices()
 console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
 {
   const exRepo = makeFixtureRepo()
@@ -1151,6 +1239,7 @@ console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
 }
 
 // ============================ 已知仓库登记 / refresh（0.4.8） ============================
+await cleanupServices()
 console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 ==')
 {
   const krRepo = makeFixtureRepo()
@@ -1192,6 +1281,7 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
 }
 
 // ============================ 工作区任务过滤（0.4.9） ============================
+await cleanupServices()
 console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） ==')
 {
   const wsRepo = makeFixtureRepo()
@@ -1255,6 +1345,7 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
 }
 
 // ============================ registry 异常防御（0.4.10） ============================
+await cleanupServices()
 console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不过滤 ==')
 {
   const outsideRepo = makeFixtureRepo()
@@ -1285,6 +1376,7 @@ console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不
 }
 
 // ============================ 工具输出 schema 形态（0.4.10b） ============================
+await cleanupServices()
 console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null 占位回归） ==')
 {
   // 与宿主校验器同构：属性存在时类型必须匹配（null/undefined 都不是 string，不算缺失）
@@ -1325,6 +1417,7 @@ console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null
 }
 
 // ============================ 孤儿任务接管（0.4.11.2） ============================
+await cleanupServices()
 console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时接管 ==')
 {
   const staleAt = new Date(Date.now() - 6 * 60000).toISOString()
@@ -1359,6 +1452,7 @@ console.log('== 0.4.11.2：宿主重启后 foreign 孤儿任务按停更超时�
 }
 
 // ============================ 会话全局 Tab + worktree 闸门（1.2.0） ============================
+await cleanupServices()
 console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
 {
   // a) 全局会话接口：不带 jobId → 跨任务聚合（带 jobId/cwd）；带 jobId → 单任务列表
@@ -1436,6 +1530,7 @@ console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
 }
 
 // ==================== 空壳目录闸门 + 面板过滤（0.12.1） ====================
+await cleanupServices()
 console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列表/仓库总览不显示 ==')
 {
   // 造一个「只剩 .codewiki 骨架」的空壳目录：真实的残留形态——worktree 被删掉后留下的目录
@@ -1458,7 +1553,7 @@ console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列�
     const iso = new Date().toISOString()
     const mkJob = (id, cwd) => ({ id, cwd, kind: 'full', scope: 'auto', stage: 'failed', notes: [], articles: [], tasks: [], createdAt: iso, updatedAt: iso })
     const prev = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'))
-    prev.jobs = [...(prev.jobs ?? []), mkJob('job-shell-dead', shell), mkJob('job-ws-live', here)]
+    prev.jobs = [...(prev.jobs ?? []), mkJob('job-shell-dead', shell), mkJob('job-ws-live', mainRepoRoot)]
     fs.writeFileSync(JOBS_FILE, JSON.stringify(prev), 'utf8')
 
     const cc2 = makeCtx()
@@ -1487,6 +1582,7 @@ console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列�
 }
 
 // ============================ 编译模型缺失诚实报错（0.10.1） ============================
+await cleanupServices()
 console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理、不静默跑空 ==')
 {
   const noCfgRepo = makeFixtureRepo()
@@ -1502,6 +1598,7 @@ console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理
 }
 
 // ============================ 严格 cordis 语义 ============================
+await cleanupServices()
 console.log('== 严格 cordis 语义：未 inject 的服务属性访问即抛 ==')
 {
   const strictRegistered = new Map()
@@ -1526,6 +1623,7 @@ console.log('== 严格 cordis 语义：未 inject 的服务属性访问即抛 ==
 }
 
 // ============================ Temp 残留清理（0.4.6） ============================
+await cleanupServices()
 console.log('== 服务启动清理：Temp 目录终态任务自动移除，活动任务与工作区任务保留 ==')
 {
   const iso = new Date().toISOString()
@@ -1545,6 +1643,7 @@ console.log('== 服务启动清理：Temp 目录终态任务自动移除，活�
 }
 
 // ============================ 自动调度：历史任务截断后仍扫描已知仓库 ============================
+await cleanupServices()
 console.log('== 自动调度：过期检测触发真实心跳提交，历史外已知仓库不丢 ==')
 {
   // 回归现场：REPOS_FILE 已有编译过的工作区，但 JOBS_FILE 为空（历史被 MAX_JOBS_KEPT
@@ -1596,6 +1695,7 @@ console.log('== 自动调度：过期检测触发真实心跳提交，历史外�
 }
 
 // ============================ 幂等：同一仓库的不同路径写法 ============================
+await cleanupServices()
 console.log('== 幂等：同一仓库以不同路径写法提交只允许一条活动任务 ==')
 {
   // 已知仓库清单与工具入参走的是两套路径形态：REPOS_FILE 用归一化 key 去重，
@@ -1629,6 +1729,7 @@ console.log('== 幂等：同一仓库以不同路径写法提交只允许一条�
 }
 
 // ============================ 自动调度遵守 workspaceOnly ============================
+await cleanupServices()
 console.log('== 自动调度遵守 workspaceOnly：工作区外仓库不被后台编译 ==')
 {
   // 现场：knownRepos 里有一个「已移出 dsh 工作区」的仓库，且 autoUpdate 开着。

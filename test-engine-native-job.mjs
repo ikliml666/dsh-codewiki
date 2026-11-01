@@ -264,9 +264,10 @@ console.log('== 用例 1：原生通道完整成功（done 只由 gate+apply 共
 
   check(submitted.submitted === true && typeof submitted.jobId === 'string', `工具提交即返回（submitted=true，jobId=${submitted.jobId}）`)
   check(job?.channel === 'native', `job.channel=native（实际 ${job?.channel}）`)
-  check(job?.stage === 'done', `终态 done（实际 ${job?.stage}）`)
+  check(job?.stage === 'done', `终态 done（实际 ${job?.stage}；blockers=${JSON.stringify(job?.blockers ?? [])}）`)
   check(job?.outcome === 'done', `outcome=done（实际 ${job?.outcome}）`)
-  check(job?.canAdvanceBaseline === true, 'canAdvanceBaseline=true（只有完整成功才推进）')
+  check(job?.canAdvanceBaseline === true && job?.baselineAdvanced === true, 'canAdvanceBaseline/baselineAdvanced 反映已推进事实')
+  check(job?.deliveryComplete === true && job?.autoCommit?.committed === true, '原生提交事实回传到 job，交付完整')
   check((job?.blockers ?? []).length === 0, 'blockers 为空（done 不许带阻塞原因）')
   check(job?.nativeResult?.gate?.outcome === 'done' && job?.nativeResult?.gate?.writable === true, '质量门 done 且 writable（不是引擎自报）')
   check(job?.nativeResult?.apply?.outcome === 'done' && job?.nativeResult?.apply?.applied === true, '落地器 done 且 applied')
@@ -310,22 +311,23 @@ console.log('== 用例 1：原生通道完整成功（done 只由 gate+apply 共
   check(!JSON.stringify(job?.nativeLogs ?? []).includes('dsh-bridge-'), '引擎/桥日志里没有模型桥占位 key')
 }
 
-// ============================ 用例 2：首次编译不得伪 done ============================
-console.log('== 用例 2：首次编译（无 wiki）引擎 done，但状态不得是 done ==')
+// ============================ 用例 2：首次编译=本轮新骨架，可完整成功 ============================
+console.log('== 用例 2：首次编译（无 wiki）→ done 且基线真的推进 ==')
 {
-  // 真实限制（阶段 5 补齐）：首次编译产生的 .codewiki/_meta.yaml 是本次才出现、
-  // 尚未提交的文件，质量门判 baseline-uncommitted，因此终态只能 partial。
-  // 这条断言的用意是**反向**的：宁可能被看见地「没完成」，也不许把未入库的基线
-  // 记成已消化（否则下一轮编译以为这些变化处理过了）。
+  // 首次编译的 .codewiki/_meta.yaml 是**本轮 cw init 刚建出来的空骨架**
+  // （last_compiled_commit: null）：它没有任何历史进度可吞，推进它不会把未提交
+  // 状态记成已消化，因此这条路径必须能走成完整成功——否则首次编译永远 partial，
+  // 而 apply 事实上又确实推进并提交了基线，终态与实际落地自相矛盾。
+  // 真正的风险（工作区里有一份**已有进度**却未入库的基线）由下面的 gate 用例守。
   const { repo } = makeRepo('fresh', { mode: 'done', preInit: false })
   const { job } = await runJob(repo)
-  check(job?.stage === 'partial', `终态 partial 而不是 done（实际 ${job?.stage}）`)
-  check(job?.canAdvanceBaseline === false, 'canAdvanceBaseline=false（baseline-failed 时不推进）')
-  check((job?.blockers ?? []).some((b) => b.kind === 'baseline-failed'), 'blockers 里有 baseline-failed')
-  check(exists(path.join(repo, 'CodeWiki.md')), '文章仍然落地了（partial 是可交付的部分成功）')
-  // baseline-failed 时 _meta.yaml 可能被创建（cw init）但基线未推进
+  check(job?.stage === 'done', `终态 done（实际 ${job?.stage}；blockers=${JSON.stringify(job?.blockers ?? [])}）`)
+  check(job?.nativeResult?.apply?.baseline?.advanced === true, 'baselineAdvanced=true（基线真的推进了）')
+  check((job?.blockers ?? []).length === 0, '首次编译没有基线阻塞')
+  check(exists(path.join(repo, 'CodeWiki.md')), '文章落地了')
   const meta = fs.readFileSync(path.join(repo, '.codewiki', '_meta.yaml'), 'utf8')
-  check(meta.includes('last_compiled_commit:'), '_meta.yaml 已创建（cw init）')
+  check(/^last_compiled_commit:\s*[0-9a-f]{7,}/m.test(meta), `_meta.yaml 记录了本次的 last_compiled_commit（实际：${meta.replace(/\s+/g, ' ').slice(0, 120)}）`)
+  check(gitShowFiles(repo, String(job?.nativeResult?.apply?.commit?.sha ?? '')).some((f) => f === '.codewiki/_meta.yaml'), '基线随产物一起入库')
 }
 
 // ============================ 用例 3：引擎 done 被质量门拦下 ============================
@@ -438,7 +440,7 @@ console.log('== 用例 10：自动提交不成立 → partial，产物保留、�
   check(job?.nativeResult?.apply?.commit?.committed === false, '提交未成立')
   check((job?.blockers ?? []).some((b) => b.kind === 'commit-failed'), `blockers 含 commit-failed（${JSON.stringify((job?.blockers ?? []).map((b) => b.kind))}）`)
   check(exists(path.join(repo, '.codewiki', 'modules', 'core.md')), '提交失败不回滚产物（不变量 3）')
-  check(job?.canAdvanceBaseline === false, 'canAdvanceBaseline=false（未入库就不算消化完）')
+  check(job?.nativeResult?.apply?.baseline?.advanced === true, 'baselineAdvanced=true（基线已推进与提交失败是两个事实）')
 }
 
 // ============================ 用例 11：取消 → 进程树终止 ============================

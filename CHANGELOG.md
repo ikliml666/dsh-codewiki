@@ -1,5 +1,116 @@
 # Changelog
 
+## 0.17.0 — 2026-11-01
+
+### 任务生命周期：从「能跑」到「换实例、被取消、半路死掉都能收场」
+
+这一版没有加新能力，全部是**生命周期与交付状态**的修补。起因是一次现状审查：主架构
+（常驻服务 + 原生引擎裁决链 + 事务落地）是合理的，但「引擎跑完」「wiki 落库」「Git 交付」
+这三种状态在代码里被同一个 `canAdvanceBaseline` 字段混着表达，于是任何一条链路出问题都会
+表现成「任务看起来做完了，其实没交付」或「已经交付了，却一直催你提交」。
+
+**1. 基线语义收敛为一个判据：`done`**
+
+`canAdvanceBaseline` 此前在三个地方各有一套算法：`lib/engine/native-run.js` 按
+`outcome==='partial' && rawTreeFiles>0` 推算、`lib/engine/apply-plan.js` 按
+`applied && baseline.advanced`、`index.js` 的 `finishJob` 又按最终 `done` 重算。同一个名字
+在 job 文件里能同时表示「质量门许可」「落地器已推进」「最终完整性」三种事实，读的人无从判断。
+
+现在拆成三个字段，各管一件事：
+
+| 字段 | 含义 | 唯一来源 |
+|------|------|---------|
+| `baselineEligible` | 质量门**许可**推进基线 | `lib/engine/quality-gate.js`（`outcome==='done'`，`canAdvanceBaseline` 作为兼容别名同值） |
+| `baselineAdvanced` | 基线**事实上**是否已前移 | `lib/engine/apply-plan.js` 的 `cw meta update` 结果 |
+| `deliveryComplete` | 本轮是否完整交付（产物入库 + 基线推进 + 无 blocker） | `index.js` 的 `finishJob` |
+
+`finishJob` 不再用 `stage==='done'` 反推基线事实，改为读 `baselineAdvanced`。因此
+「产物提交失败」这类场景能如实显示 `baselineAdvanced:true` + `deliveryComplete:false`，
+而不是二者一起为假。
+
+**2. 首次编译不再必然 `partial`**
+
+旧的质量门把本轮刚 `cw init` 出来的空骨架判成「未入库基线（`baseline-uncommitted`）」，
+于是**第一次编译无论多成功都只能 `partial`**，基线也不推进，下一轮得从头再跑一遍。测试里
+甚至有专门用例（`preInit`）绕开这个限制，说明它早被当成既成事实。
+
+修法是把「空骨架」单独判成一类：`isEmptyBaseline(base)` —— 无编译提交、来源是
+`worktree-only` 或 `git-head` 即判 `baseline-absent`（不阻塞）；已有进度的未提交基线与
+脏工作区仍然阻塞。初版实现用「读 `_meta.yaml` 里是否写着 `last_compiled_commit: null`」
+做启发式判断，在 `cw init` 已把骨架提交进 HEAD 的场景下失效（来源变成 `git-head`），
+已删除该分支，只保留结构判据。
+
+**3. 原生任务跨重启接管**
+
+此前 native 通道一旦宿主重启，`nativeRuns` 丢失，tick 直接判 failed 并提示「重新提交编译」；
+而工具描述却写着「宿主重启后活动任务自动恢复推进」。现在：
+
+- `lib/job-store.js` 的 `snapshotNativeRun` 在每次原生推进后落一份**非敏感**快照
+  （cwd、wikiPath、kind/scope、attempt、引擎通道参数，不含凭证）；
+- 重启后 `planNativeReplay` 给出重放计划：无快照/已完成/被取消 → 不重放；有快照则重跑当前
+  阶段，`attempt` 最多 3 次（取 `plan.attempt`，否则重试上限形同虚设），旧 `docsDir` 在新
+  run 之前清掉；
+- 取消是终态：`cancelRequested` 的任务不重放；
+- 被取消/已收割的结果不再丢弃：`tickNative` 先收割已有结果，再处理取消请求——此前取消分支
+  直接 `nativeResults.delete()`，会把**已经 apply/meta/commit 成功、只差收尾**的结果一起扔掉，
+  磁盘上产物落地了而任务终态写的是 cancelled。
+
+**4. 旧实例接管与幽灵任务**
+
+- `mergeFromDisk` 此前是纯并集（只增不删）：磁盘上已被清理（Temp 终态回收、`MAX_JOBS_KEPT`
+  截断、别的实例删除）的任务会永远留在本实例内存里，且因为不是终态而**永久占住单项目串行
+  闸门**，新提交一律排队、永不推进。现在按 `diskIds ∪ 自己的任务 ∪ dirty` 回收，幽灵任务
+  随 merge 消失。
+- 新增 `occupancyHeld(job)`：他人任务停更超过 `ORPHAN_TAKEOVER_MS` 就不算占闸门。此前只能
+  等原实例自己回来推进，而它可能已经不在了。
+- `stop()` 之后飞行中的 tick 仍会 `flush` 内存旧阶段，把别的实例已推进到终态的任务「复活」
+  成 `index`。新增 `stopped` 标志，`tick()` 与 `flush()` 开头直接返回。
+
+**5. 持久化与跨实例幂等（`lib/job-store.js`，新增 415 行）**
+
+`saveJobs` 此前直接 `fs.writeFileSync(JOBS_FILE)` 并吞掉异常，`loadJobs` 读失败返回空数组：
+半写/损坏的任务文件会让整个任务现场静默消失。现在：
+
+- `save` 走 tmp + fsync + rename（重试），损坏文件隔离成 `<file>.corrupt` **并显式报错**，
+  而不是当成「没有任务」返回空（fail-open 会把下一次写入变成数据丢失）；
+- tick 锁按 token 校验归属，锁存活判定只用文件 mtime（此前混用合成 `now`，会把活锁判死）；
+- `findActiveJob` / `reassignSession` 跨实例幂等：每轮 merge 之后再判，同仓不再可能出现
+  两个并行的活动任务；
+- 心跳 `HEARTBEAT_MS=30000`、`lastSeenAt` 取 `heartbeatAt/updatedAt/createdAt` 的最大值，
+  孤儿判定不再依赖单个字段。
+
+**6. 交付状态回传到会话与面板**
+
+`tickNative` 从未把原生结果的 `apply.commit` 写回 `job.autoCommit`，于是**原生任务自动提交
+成功后仍会被判成「产物待提交」并唤醒会话催人提交**；而提交提醒只筛 `stage==='done'`，所有
+`partial`（包括首次编译、提交失败）反而收不到提醒。两处都改为读同一份交付事实：
+`job.autoCommit = res.apply.commit`，提醒覆盖所有「有产物但没提交成功」的终态。
+
+**7. 旧通道（`nativeEngine:false`）终态**
+
+`tickIndex` 先 `judgeOutcome`、再把索引/基线失败塞进 `hardBlockers`，但 `finishJob` 仍用
+旧的判定结果，于是索引写失败也能收成 `done`。改为在 index/meta 之后二次 `judgeOutcome`，
+并让 `baselineAdvanced` 反映 meta 是否真的成功。同时补上 wiki 骨架前置：仓库还没有
+`.codewiki/` 时先 `cw init`；目录存在却缺 `_meta.yaml` 时记 `wiki-missing` blocker 且不推进
+基线（与 `lib/engine/apply-plan.js` 的同类判据一致，不猜也不手写）。
+
+**8. 文档与工具描述**
+
+`codewiki_generate` 的工具描述还写着旧的四阶段与「宿主重启自动恢复」；`README` 的原生引擎
+章节标题仍写「可选，默认关闭」，基线段落与 `partial` 段落互相矛盾（一处说 partial 可推进、
+一处说不可）。已统一为本文档描述的语义。
+
+### 验证
+
+- `test-job-reliability.mjs`（新增，109 项）：原子写、损坏隔离、锁归属、双实例幂等、原生
+  重启重放、取消不复活、`queued`/`submitting` 不被抢、心跳与合并；
+- `test-orchestration.mjs`（257 项）：补齐块间实例清理（此前 30+ 个 JobService 实例共享同一
+  `JOBS_FILE` 且从不 `stop`，残留任务占住串行闸门）、重启重跑与旧 plan 迁移用例补 `cw init`
+  夹具；
+- `test-engine-native-job.mjs` 116 项、`quality-gate` 31 项、`apply-plan` 41 项、
+  `native-incremental` 104 项、`contract` 19 项，全部通过；全仓 30 套测试仅
+  `test-wiki-anchors.mjs` 报 9 处符号锚点失效（文档滞后，待 `codewiki_generate` 重编译）。
+
 ## 0.16.16 — 2026-10-30
 
 ### 面板两处修正：会话记录接到原生通道；焦点任务卡自报目录
