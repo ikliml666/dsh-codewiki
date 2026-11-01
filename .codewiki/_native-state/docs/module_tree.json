@@ -53,7 +53,10 @@
             "lib\\articles-agentic.js::runPool",
             "lib\\articles-agentic.js::worker",
             "lib\\update-record.js::isTerminalStage",
-            "lib\\update-record.js::loadUpdateRecord"
+            "lib\\update-record.js::loadUpdateRecord",
+            "lib\\job-store.js::classifyOwnership",
+            "lib\\job-store.js::normKey",
+            "lib\\job-store.js::save"
         ],
         "children": {
             "agentic_support_tooling": {

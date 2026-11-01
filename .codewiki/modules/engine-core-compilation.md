@@ -82,7 +82,7 @@ flowchart TB
 1. **锁不一致 / 依赖不闭合 → 直接 failed，不跑引擎**（跑出来的产物不可信）；
 2. 引擎 done **不能**替代质量门：gate 说 partial，终态就是 partial；
 3. 落地器说 partial/failed，终态不许是 done；
-4. failed/cancelled 一律不推进基线；partial 只有在留了原始树（`rawTreeFiles > 0`）时才允许推进；
+4. failed/cancelled 一律不推进基线；partial 也一律不推进——基线只由「本轮三类问题全空（outcome=done）」这一种许可决定，不再按「写了原始树就当可推进」拿产物数量猜基线许可；
 5. 取消是终态：取消后不再 gate/apply，也不覆盖已写好的终态。
 
 终态强弱由 `RANK = { cancelled: 0, failed: 1, partial: 2, done: 3 }` 的 `weakest()` 合成——引擎、质量门、落地器三方结局取最弱的一个，绝不允许被后续步骤提升。
@@ -221,7 +221,9 @@ flowchart TD
 {
   "outcome": "done | partial | failed | cancelled",
   "updateOutcome": "incremental | no_change | full_fallback | detector_failure | null",
-  "canAdvanceBaseline": "true 仅 done，或 partial 且 rawTreeFiles > 0",
+  "canAdvanceBaseline": "兼容字段：取落地事实 baselineAdvanced（cw meta update 真的成功）；老调用方只认这个名字",
+  "baselineEligible": "质量门许可：仅 outcome=done 且受管状态完整",
+  "baselineAdvanced": "落地事实：cw meta update 真的成功",
   "incremental": {
     "resolution": "full | update",
     "baseCommit": "cw 基线",
@@ -274,7 +276,7 @@ flowchart LR
         I1["1. 锁漂移/不闭合<br/>→ failed，不跑引擎"]
         I2["2. 引擎 done ≠ 终态 done<br/>gate 说了算"]
         I3["3. apply partial/failed<br/>→ 终态不许 done"]
-        I4["4. failed/cancelled<br/>不推进基线；partial 仅留原始树才推进"]
+        I4["4. failed/cancelled/partial<br/>一律不推进基线；仅 done 许可"]
         I5["5. 取消是终态<br/>不再 gate/apply"]
     end
 ```
@@ -282,4 +284,4 @@ flowchart LR
 两条易复发的历史缺陷（注释中明确点名）：
 
 - **首次运行直接写 engine-lock.json** → `.codewiki/` 早于 `cw init` 存在 → 落地器判半截库整批失败并回滚。解法：锁进写集，由落地器与产物同事务提交；
-- **超时砍轮但已写 28 篇时死守「partial 一律不动基线」** → 同一批变化永远重跑。解法：partial 只要 `rawTreeFiles > 0`（本轮确有产物落盘）即允许推进基线。
+- **超时砍轮但已写 28 篇时死守「partial 一律不动基线」** → 同一批变化永远重跑。曾临时解法：partial 只要 `rawTreeFiles > 0`（本轮确有产物落盘）即允许推进基线；但该例外把「没消化完」记成已消化，且与落地器「partial 不推基线」互相矛盾，已撤回——死循环的正确解法是让**首次编译**能走成 done（空骨架基线不算未入库基线，见 `assessBaseline` 的 `isEmptyBaseline` 分支）。

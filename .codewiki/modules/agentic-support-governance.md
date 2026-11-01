@@ -141,7 +141,7 @@ flowchart TB
 - 0 篇成功且有失败/缺页/阻塞 → `failed`；
 - 其余（写成了一部分）→ `partial`。
 
-`canAdvanceBaseline` 的判据是显式的「`done`，或 `partial` 但有成果且无 blocker」——注释中明确记载：当前实现里 `partial` 必然至少带一条 blocker，所以该分支**当前不可达**；写全是为了把「done-only」与「有成果且无硬缺陷」两种语义显式分开，避免将来放宽 blocker 规则时静默失效。原生引擎通道（`native-run.js` / `quality-gate.js`）用的正是后者这条更宽的语义。
+`canAdvanceBaseline` 的判据是显式的「`done`，或 `partial` 但有成果且无 blocker」——注释中明确记载：当前实现里 `partial` 必然至少带一条 blocker，所以该分支**当前不可达**；写全是为了把「done-only」与「有成果且无硬缺陷」两种语义显式分开，避免将来放宽 blocker 规则时静默失效。原生引擎通道（`native-run.js` / `quality-gate.js`）已撤回「partial 也许可推进」的例外：质量门的基线许可 `baselineEligible` 现在只有 `outcome=done` 这一种来源，与落地器「partial 不推基线」的事实口径重新对齐。
 
 ### 记录的组装与存取
 

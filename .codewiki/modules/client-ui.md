@@ -62,7 +62,7 @@ flowchart LR
 | `mount` | 挂载编排：注册词典、插件页 `plugins.item`、侧边栏 `main` + `sidebar.panellist` 三处槽位 |
 | `zh` / `en` | 中文 / 英文 UI 词典工厂（`locale.register(NS, {...})`），所有文案集中维护 |
 | `CodewikiCard` | 设置页卡片：配置快照订阅、草稿编辑、模型目录联动（provider → model → reasoning effort 三段下拉）、校验与保存（`save` / `discard`） |
-| `CodewikiPanel` | 侧边栏主面板：任务列表、四标签页导航（总览/任务/会话/设置）、轮询差分采样（tps spark 窗口、批量速率 EWMA）、焦点任务与历史折叠（焦点卡自报所属仓库目录） |
+| `CodewikiPanel` | 侧边栏主面板：任务列表、四标签页导航（总览/任务/会话/设置）、轮询差分采样（tps spark 窗口、批量速率 EWMA）、焦点任务与历史折叠（焦点卡自报所属仓库目录）；`jobCard` 内对 `partial` 终态在 meta 行显示「未消化 N 项」、阻塞原因前 3 条放任务行悬停 title |
 | `PanelIcon` | 侧边栏入口的摊开书本 SVG 图标 |
 | `ReposTab` | 「总览」标签页：所有工作区 wiki 状态、自动更新调度信息、排除/取消排除、手动触发编译 |
 | `SessionView` | 「会话」视图：并发池每次 LLM 请求的列表与 prompt/输出全文（单任务或全局两种模式；`embedded=true` 时以无内边距 `sesswrap` 容器嵌入「会话」标签页，只留精简返回条，不重复大标题） |
@@ -79,7 +79,7 @@ flowchart TD
     Apply --> M3["slots.inject sidebar.panellist<br/>(PanelIcon)"]
     Panel --> Tabs{"tab 状态"}
     Tabs -->|overview| ReposTab
-    Tabs -->|tasks| JobList["jobCard 列表<br/>焦点卡带仓库目录 + 历史折叠"]
+    Tabs -->|tasks| JobList["jobCard 列表<br/>焦点卡带仓库目录 + 历史折叠<br/>（partial 终态 meta 显示「未消化 N 项」<br/>悬停 title 看阻塞原因）"]
     Tabs -->|sessions| SessionViewG["SessionView(job=null 全局, embedded=true)"]
     Tabs -->|settings| Card2["内嵌 CodewikiCard"]
     JobList -- "单任务会话按钮" --> SessionViewJ["SessionView(job=该任务, 非嵌整页)"]
@@ -157,6 +157,7 @@ sequenceDiagram
 5. **卸载安全**：轮询回包、剪贴板写入等异步回调均经 `alive` / `mountedRef` 守卫，组件卸载后不再 `setState`。
 6. **焦点卡自报归属**：焦点任务（正在进行 / 最近一个）被排除在「历史任务」的仓库分组之外，没有分组头可读，因此 `jobCard` 在焦点卡行内附 `data-dscw-p-cwd` 徽标（`repoName(cwd)` 短名，悬停显示完整 `cwd`），其余任务不重复标注。
 7. **会话视图的两种宿主形态**：单任务「会话」按钮让 `SessionView` 占满整页（`data-dscw-p-page` 容器 + 完整标题栏与 ✕ 关闭）；「会话」标签页内的全局视图传 `embedded=true`，改用无内边距的 `data-dscw-p-sesswrap` 容器并只留 `data-dscw-p-sessbar` 精简返回条——外层面板本身已是滚动容器，避免套两层 page 布局。
+8. **partial 终态的阻塞原因展示**：`partial` 表示「写成了部分文章，但有变化没被消化」。`jobCard` 在 meta 行显示「未消化 N 项」，把前 3 条阻塞原因（`blockers[].detail ?? kind`，以「；」连接）放进任务行的 `title` 悬停查看——原因是几十字的中文句子，塞进 meta 会撑爆一行、把阶段/用时挤出可视区。
 
 ## 与其他模块的关系
 
@@ -170,19 +171,19 @@ flowchart LR
     end
     subgraph 渲染["面板数据所描述的后端引擎"]
         Engine["engine_core<br/>原生引擎八段契约阶段"]
-        Agent["agentic_support<br/>agentic 写作文章阻塞项"]
+        Agent["agentic_support<br/>partial 终态 blockers 未消化项"]
         Vendor["codewiki_vendor<br/>cw CLI 产物 (.codewiki/)"]
     end
     UI["client_ui (client.js)"] --> Prim
     UI --> Core
     UI -. "nativeStage / nativeResult 字段" .-> Engine
-    UI -. "blockers 未消化清单" .-> Agent
+    UI -. "blockers 未消化清单（meta 行 + 悬停 title）" .-> Agent
     UI -. "wikiPath / repos 状态" .-> Vendor
 ```
 
 - **core_entry**：所有 `/api/codewiki/*` 端点的提供方；任务对象的字段（`stage`、`taskList`、`batchProgress`、`tps`、`usage`、`autoCommit`、`queueAhead`、`notes`、`nativeStage` 等）由其定义，本模块仅消费与渲染。详见 [core_entry](core_entry.md)。
 - **engine_core**：原生引擎通道的八段阶段名与质量门（`gate`）/落地（`apply`）结果是面板「引擎阶段」「质量门」「落地」行的数据来源。详见 [engine_core](engine_core.md)。
-- **agentic_support**：`partial` 终态下 `blockers`（未消化项）在任务行悬停标题中展示。详见 [agentic_support](agentic_support.md)。
+- **agentic_support**：`partial` 终态下 `blockers`（未消化项）的前 3 条阻塞原因放任务行悬停标题（`title`）中展示——原因是几十字的中文句子，塞进 meta 行会撑爆一行。详见 [agentic_support](agentic_support.md)。
 - **codewiki_vendor**：ReposTab 展示的各仓库 wiki 状态（clean/stale/error）与 `wikiPath` 均指向 `cw` CLI 维护的 `<repo>/.codewiki/` 产物。详见 [codewiki_vendor](codewiki_vendor.md)。
 - **构建与依赖配置**：`client.js` 经 `package.json` 的 `exports['./client']` 暴露，宿主按 `dsh.client.platform='web'` 判定为客户端模块；`cordis.patch.yml` 以 `id: codewiki` 注册插件（与本模块 `NS` 一致）。详见 [Build___Dependency_Configuration_Layer](Build___Dependency_Configuration_Layer.md)。
 

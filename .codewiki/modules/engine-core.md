@@ -111,7 +111,7 @@ flowchart LR
 | --- | --- |
 | `contract.js` | `EngineResult` / `EngineProgress` / `EngineError` 的版本化契约、四态语义硬不变量、`validateEngineResult` / `normalizeBlocker` / `describeEngineResult` |
 | `python/entry.py` | Python 侧薄入口：stdout 协议守卫（`_ProtocolOnly`）、UTF-8 补丁（`_popen_init_utf8`）、`main` 主循环，把 FSoft 调用翻成 JSON-lines 结果 |
-| `client.js::runEngine` | Node 侧进程适配：spawn 子进程、JSON-lines 读取、超时/静默/取消/协议破坏的机读失败 |
+| `client.js::runEngine` | Node 侧进程适配：spawn 子进程、JSON-lines 读取、超时/静默/取消/协议破坏的机读失败；result 到达后启「结果宽限」（`resultGraceMs`），进程不自行退出则按已收到的 result 收尾，不再等僵死收尾拖到超时 |
 | `llm-bridge.js::startLlmBridge` + `openai-bridge.js` | OpenAI-compatible loopback 桥：占位 key 校验、`isPlaceholderKey`、请求/响应双向纯转换；可选 `onRequestStart` 会话记录钩子——原生通道的每个模型请求都只经过这里，回调契约与 batch 通道一致（`onDelta` / `onError` / `onDone`） |
 
 关键设计：凭证边界——桥**不读**任何凭证文件，引擎侧只拿到
@@ -142,14 +142,23 @@ flowchart LR
 
 | 组件 | 职责 |
 | --- | --- |
-| `quality-gate.js::gateNativeOutput` | 采用门：产物自洽（复用 `output.js`）→ 渲染成 wiki 文章（frontmatter 合成）→ 逐篇契约检查 → 基线可推进性裁决；三类问题（defect / degradation / stale）机读分流 |
+| `quality-gate.js::gateNativeOutput` | 采用门：产物自洽（复用 `output.js`）→ 渲染成 wiki 文章（frontmatter 合成）→ 逐篇契约检查 → 基线可推进性裁决；三类问题（defect / degradation / stale）机读分流。基线许可 `baselineEligible` 只有一种来源：本轮三类问题全空（outcome=done）——不再允许 partial 偷偷推进；`canAdvanceBaseline` 是兼容字段，语义与 `baselineEligible` 一致。空骨架基线（`cw init` 刚建、`last_compiled_commit` 为 null）按 `baseline-absent` 记，首次编译可以走成 done |
 | `quality-gate.js::toQualityIssues` | 把门的 blockers 翻成 update-record 的 `qualityIssues` |
-| `apply-plan.js::applyNativeOutput` | 落地器：写集白名单校验 → pre-image 快照 → 写盘 → `cw index` → 链接规范化 → 索引收录核对 → `cw meta update` 基线 → 自动提交；索引/基线失败整批回滚，提交失败不回滚产物 |
+| `apply-plan.js::applyNativeOutput` | 落地器：写集白名单校验 → pre-image 快照 → 写盘 → `cw index` → 链接规范化 → 索引收录核对 → `cw meta update` 基线 → 自动提交；索引/基线失败整批回滚，提交失败不回滚产物。输出把「基线许可」与「基线落地事实」分开记账：`baselineAdvanced` 是 `cw meta update` 真的成功（落地事实），`canAdvanceBaseline` 兼容字段取 `applied && baselineAdvanced` |
 | `apply-plan.js::defaultRunCw` | 默认 cw 调用通道（同步 spawn）；`runCw` / `commit` 均可由调用方注入 |
 | `apply-plan.js::findOrphanPages` | 扫描存量模块页，找出 `source_files` 全部已失效的孤儿页，随本批删除 |
 
 关键设计：**三条硬不变量**——写集封闭（只许写 `.codewiki/` 与根 `CodeWiki.md`）、
 索引/基线失败即回滚、提交失败不回滚有价值的产物。
+
+关键设计：**基线三件事分开记账**——`native-run.js::settle` 的输出把同一件「基线」
+拆成三个互不冒充的字段：`baselineEligible`（质量门许可：本轮三类问题全空，才允许
+推进）、`baselineAdvanced`（落地器事实：`cw meta update` 真的成功）、以及兼容字段
+`canAdvanceBaseline`（老调用方只认这个名字，语义取落地事实）。受管状态采集不完整
+（缺图/树/metadata 或采集异常）时置 `stateIncomplete`：保留上一轮旧状态、不裁剪、
+不推进基线，并合成一条 `quality-gate` blocker——下一轮已经无法增量，本轮没有资格
+替下一轮记账。
+
 
 ## 数据落点速查
 

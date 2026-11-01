@@ -11,7 +11,7 @@ fsoft_page: core_entry.md
 
 ## 简介
 
-`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.16.16）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
+`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.17.0）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
 
 1. **薄封装 CodeWiki CLI（`cw`）**：提供 `cw` 工具，执行 `init` / `status` / `index` / `meta` / `path` / `projects` / `setup` / `uninstall` 等子命令，对仓库根 `.codewiki/` 目录进行初始化、判态与索引维护。
 2. **服务化编译编排**：提供 `codewiki_generate` / `codewiki_update` / `codewiki_progress` 三个工具，把编译任务提交给宿主常驻后台服务（job service），由该服务以 **10s tick** 节拍驱动阶段状态机推进（写文章 → 横切 → 校对 → 索引 → 自动提交），全程零子代理。
@@ -137,19 +137,19 @@ flowchart TB
 
 | 组件 | 职责 |
 |------|------|
-| `tick()` | 10s 节拍主循环：跨实例锁、取消标记同步、项目闸门、分发到各 stage handler |
+| `tick()` | 10s 节拍主循环：tick 入口/出口的跨实例锁（经 `lib/job-store.js` 的 `acquireTickLock`/`releaseTickLock`）、磁盘合并、心跳续期、取消标记同步、项目闸门、分发到各 stage handler |
 | `tickArticles(job)` | 写文章阶段：本地规划 → agentic 或单轮通道 → 收割 → 观察批合成 / agentic 退回判定 |
 | `tickCrosscut(job)` | 横切阶段：合成 `_architecture.md` / `_patterns.md` / 概念文章；超预算拆观察批 |
 | `tickCompose(job)` | 横切观察批的合成批收割 |
 | `tickReview(job)` | 校对阶段：本地核对 → 批量校对请求（`@@@article` 标记分节）→ 会话通道兜底 |
-| `tickIndex(job)` | 索引前：存量体检、`judgeOutcome` 完整性判定、孤儿清理、`cw index`、基线推进闸门 |
+| `tickIndex(job)` | 索引前：存量体检、`judgeOutcome` 完整性判定、孤儿清理、wiki 骨架守卫（目录不在先 `cw init`、目录在却缺 `_meta.yaml` 记 `wiki-missing` 硬阻塞）、`cw index`、基线推进闸门（`cw meta update`）、index/meta 后用 `hardBlockers` 重裁终态并落 `baselineEligible` / `baselineAdvanced` |
 | `tickCommit(job)` | 自动提交产物（`autoCommitWiki` 分支合并式） |
-| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待，结果收割后直接 `finishJob` |
-| `submit({kind, cwd, ...})` | 任务提交入口：排除清单 / worktree / 空壳目录闸门、幂等判定、占位落盘 |
-| `cancel(jobId)` | 置 `cancelRequested` 标记，跨 tick 存活 |
-| `list()` / `jobSummary(job)` | 导出任务只读视图（供工具与面板共用） |
-| `finishJob(job, outcome, blockers)` | 三态收尾：`done` / `partial` / `failed`，控制 `canAdvanceBaseline` |
-| `settleJob(job)` | 执行器结果收割；宿主重启丢失执行器时按 prompt 快照自动重跑 |
+| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待；宿主重启/旧实例退出后按持久化的非敏感执行快照（`planNativeReplay` / `snapshotNativeRun`）重放重跑，已落盘结果按事实收割；结果收割后直接 `finishJob` |
+| `submit({kind, cwd, ...})` | 任务提交入口：排除清单 / worktree / 空壳目录闸门、磁盘合并后的幂等判定（同仓库活动任务可重归属会话）、占位落盘 |
+| `cancel(jobId)` | 置 `cancelRequested` 标记，跨 tick 存活；原生结果已落地/执行器已结束时按真实结果收尾而非丢弃产物 |
+| `list()` / `jobSummary(job)` | 导出任务只读视图（供工具与面板共用）：除 `canAdvanceBaseline` 外还透出 `baselineEligible` / `baselineAdvanced` / `deliveryComplete` |
+| `finishJob(job, outcome, blockers)` | 三态收尾：`done` / `partial` / `failed`；只算 `deliveryComplete`，`canAdvanceBaseline` 直接采信 index/meta 或落地器已经实测的 `baselineAdvanced` |
+| `occupancyHeld(job)` | 项目闸门占位判定：原实例停更超过 `ORPHAN_TAKEOVER_MS` 的任务不算占位，避免重启后新任务一直卡在 queued |
 
 ### 6. 会话通道与会话记录
 
@@ -240,6 +240,9 @@ flowchart LR
     TickNative --> Start{"job.nativeStarted?"}
     Start -->|否| Run["startNativeRun<br/>runNativeJob 长任务"]
     Start -->|是| Wait{"nativeResults?"}
+    Wait -->|无结果且执行器丢失| Replay["planNativeReplay<br/>按非敏感执行快照重放"]
+    Replay -->|可重放| Run
+    Replay -->|不可重放| Fail["fail：请重新提交编译"]
     Run --> Engine["runNativeJob 子进程<br/>env: 占位 key + UTF-8"]
     Engine --> EnginePy["FSoft Python 引擎<br/>entry.py"]
     EnginePy --> Progress["onProgress 回调<br/>nativeStage/nativePercent"]
@@ -306,7 +309,7 @@ flowchart TB
     WorkerN --> LlmCallN[llmChat<br/>batchProvider/batchModel]
     LlmCallB --> Result[results.set customId]
     LlmCallN --> Result
-    Result --> Settle[settleJob 收割]
+    Result --> Harvest[结果收割并落账]
 ```
 
 **设计要点**：
@@ -320,11 +323,12 @@ flowchart TB
 
 | 机制 | 位置 | 作用 |
 |------|------|------|
-| `JOBS_FILE` | `os.tmpdir()/dsh-codewiki-jobs.json` | 任务持久化（仅保留最近 30 条） |
-| `JOBS_LOCK_FILE` | `<JOBS_FILE>.lock` | 跨实例 tick 锁，60s 过期强删 |
-| `mergeFromDisk()` | tick 前 | 吸收另一实例新增/更新的 job，防止过期快照覆盖 |
+| `JOBS_FILE` | `os.tmpdir()/dsh-codewiki-jobs.json` | 任务持久化（仅保留最近 30 条；读写由 `lib/job-store.js` 的 `createJobsStore` 收口，落盘走 `save` → 同目录临时文件 + fsync + 重试 rename 的原子写盘） |
+| tick 锁 | `lib/job-store.js` 的 `acquireTickLock` / `releaseTickLock` | 跨实例 tick 锁（原 `JOBS_LOCK_FILE` 自写锁已迁入 job-store）；现场损坏时停止推进，避免重复执行 |
+| `mergeFromDisk()` | tick 前 | 吸收另一实例新增/更新的 job，防止过期快照覆盖；同时回收「磁盘上已不存在」的幽灵任务，避免它们一直占住项目闸门 |
 | `syncCancelFlags()` | tick 开头 | 从磁盘拾取另一实例置的 `cancelRequested` |
-| `ORPHAN_TAKEOVER_MS` | 5 分钟 | 原实例停更超时的 job 由本实例接管 |
+| 心跳 | tick 每轮 | 活动任务经 `heartbeat` 更新 `lastSeenAt`，供 `occupancyHeld` 与孤儿接管判据使用；归属分类统一由 `lib/job-store.js` 的 `classifyOwnership` 收口（本实例 / 存活他例 / 孤儿 / 无执行器空闲 / 旧格式残留） |
+| `ORPHAN_TAKEOVER_MS` | 5 分钟 | 原实例停更超时的 job 由本实例经 `adoptOrphan` 接管；停更未超阈值但 owner 已消失的任务经 `occupancyHeld` 不占闸门 |
 | `REPOS_FILE` | 跟随 JOBS_FILE 名字推导 | 已知仓库清单（独立于 job 历史） |
 | 会话记录 | `<tmp>/dsh-codewiki-sessions/<jobId>/` | LLM 请求 prompt/output，24h TTL |
 
@@ -354,7 +358,7 @@ flowchart LR
 ## 关键设计约束（来自代码注释的不变量）
 
 1. **绝不中途换通道**：`nativeChannelFor` 返回 `null` 才走旧流水线；环境不闭合时以 `engine-deps` 明确失败，不悄悄降级。
-2. **基线只在 done 推进**：`partial` / `failed` / `cancelled` 一律 `canAdvanceBaseline=false`，未消化的变化下次编译还会被看见。
+2. **基线只在 done 且实测推进成功时置位**：`partial` / `failed` / `cancelled` 一律 `baselineAdvanced=false`，未消化的变化下次编译还会被看见；`finishJob` 不再自己推算 `canAdvanceBaseline`，而是采信 `tickIndex`（兼容通道 `cw meta update` 成功与否）或原生落地器已经实测的 `baselineAdvanced`。
 3. **自动提交只认两个 pathspec**：`WIKI_PATHS = ['.codewiki', 'CodeWiki.md']`，绝不用 `-A` 卷进用户其它改动。
 4. **坏文章不落盘**：`contractCheck` 的 `blocking` 级问题直接拒绝写盘；`keepInMemory` 结果还要再过 `validateArticleEnvelope`。
 5. **模型凭证不进插件**：唯一通道是宿主 `llm.stream`，原生引擎用随机占位 key，真实凭证从不进子进程环境与日志。

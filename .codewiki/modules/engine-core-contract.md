@@ -106,7 +106,7 @@ stateDiagram-v2
 
 ### 失败救援的统一口径：超时/卡死/崩溃 vs 已写产物
 
-`runEngine` 并发竞速五个事件源（`exited` / `timeout` / `silence` / `abort` / `spawnError`），超时与静默两个分支使用同一条口径判 partial——这是打破「几十分钟成果白跑」死循环的关键：
+`runEngine` 并发竞速六个事件源（`exited` / `timeout` / `silence` / `abort` / `spawnError` / `resultGrace`），超时与静默两个分支使用同一条口径判 partial——这是打破「几十分钟成果白跑」死循环的关键：
 
 ```mermaid
 flowchart TD
@@ -118,6 +118,8 @@ flowchart TD
 ```
 
 `silence`（静默）检测是 0.16.9 真机事故后加入的：默认超时 180 分钟太长，僵死引擎会占满调度闸门。判据是「多久没收到任何协议帧」，默认 10 分钟（`DSH_CODEWIKI_ENGINE_SILENCE_MS` 可覆盖），必须显著大于 Python 侧 60 秒心跳间隔。Python 入口的心跳线程（`_heartbeat`）按 `_HEARTBEAT_SEC` 重发当前阶段与真实篇数，让 Node 能区分「慢」与「卡死」。
+
+`resultGrace`（结果宽限）解决的是另一类事故：引擎把 `result(done)` 发出来之后卡在收尾（僵死线程、没关的 pipe、忘了 return 的事件循环），过去只有 `exited` 能收场，于是一轮已经确定成功的编译会被 10 分钟静默或 180 分钟超时改判成卡死/超时——产物早写完了却按 partial 交付、基线不推进、下一轮再跑一遍。现在协议读取器提供只读的 `hasResult`，`runEngine` 在收到 result 后给进程一个短暂的自行收场窗口（`resultGraceMs`，默认值见代码常量）；窗口到点还不退就杀掉进程树，按已收到的 result 收尾。被主动终止过的进程（结果宽限/静默/超时/取消）退出码是终止方式的产物，不再记 `nonzero-exit` 违规去污染已经明确的结果。
 
 ### Python 入口的守门职责
 

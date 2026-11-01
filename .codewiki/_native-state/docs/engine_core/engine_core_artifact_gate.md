@@ -43,7 +43,7 @@ flowchart TB
         G1["validateOutput<br/>复用 output.js 的自洽判定"] --> G2["逐篇 renderArticle<br/>合成 frontmatter + 原文"]
         G2 --> G3["checkRendered<br/>inspectArticle 契约 + 空正文兜底"]
         G3 --> G4["assessBaseline<br/>commit 匹配 + 基线陈旧度"]
-        G4 --> G5["GateReport<br/>outcome / writable / canAdvanceBaseline"]
+        G4 --> G5["GateReport<br/>outcome / writable / baselineEligible"]
     end
 
     subgraph Apply["apply-plan.js — 原子落地"]
@@ -71,7 +71,7 @@ flowchart LR
 
     D -->|"缺入口 / 缺页 / 空正文 /<br/>死链 / source 缺失 /<br/>commit 不匹配"| DR["处置：不算完整成功<br/>writable=false 或 partial"]
     Deg -->|"module_tree 为空 /<br/>source_files 空 /<br/>缺章节"| DgR["处置：可入库写盘<br/>但不得推进基线"]
-    St -->|"基线落后 HEAD /<br/>基线未入库 /<br/>首次编译"| StR["处置：如实报告<br/>仅 baseline-uncommitted 阻断推进"]
+    St -->|"基线落后 HEAD /<br/>基线未入库 /<br/>空骨架首次编译"| StR["处置：如实报告<br/>仅 baseline-uncommitted 阻断推进"]
 ```
 
 终态仍然严格：**只有三类皆空才是 `done`**。分类改变的是「谁来修、修什么」的定位，不是放宽闸门。
@@ -120,7 +120,7 @@ flowchart TB
 | `yamlScalar(value)` | YAML 标量安全序列化：只在确实不安全时才加双引号（`JSON.stringify` 就是正确转义） |
 | `readCommittedBaseline({repoRoot, relPath})` | 读**已提交**的基线：`git show HEAD:.codewiki/_meta.yaml`，不是工作区文件 |
 | `uncommittedSourceChanges({repoRoot})` | 工作区是否有非 wiki 的未提交改动（`.codewiki/` 与 `CodeWiki.md` 不算） |
-| `assessBaseline({repoRoot, artifactCommit, baseline, ...})` | 判「这批产物的基线能不能被推进」 |
+| `assessBaseline({repoRoot, artifactCommit, baseline, ...})` | 判「这批产物的基线能不能被推进」；空骨架基线（`cw init` 刚建、`last_compiled_commit` 为 null）按 `baseline-absent` 记，不阻断首次编译 |
 | `toContractBlockers(report)` | 把 gate 的 blockers 翻成 contract.js 的 `BLOCKER_KINDS`，供 update-record 使用 |
 | `toQualityIssues(report)` | 把 gate 结论翻成 `qualityIssues`，喂给 `judgeOutcome`——两条判定路径不能一个严一个松 |
 
@@ -247,7 +247,7 @@ sequenceDiagram
 
     Caller->>Gate: gateNativeOutput(docsDir, repoRoot)
     Gate->>Gate: 产物自洽 → 渲染 → 契约 → 基线
-    Gate-->>Caller: GateReport { outcome, writable, canAdvanceBaseline, rendered, blockers }
+    Gate-->>Caller: GateReport { outcome, writable, baselineEligible, rendered, blockers }
 
     Caller->>Apply: applyNativeOutput(repoRoot, report, extraFiles, pruneRoots, deleteFiles)
     Apply->>Apply: checkWriteTargets 白名单校验

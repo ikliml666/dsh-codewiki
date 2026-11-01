@@ -39,13 +39,14 @@ graph TD
 ```yaml
 - insert:
     - id: codewiki
-      name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js
+      name: "@local/dsh-codewiki"
       config: {}
 ```
 
 - **`id: codewiki`**：插件的唯一标识符，用于在 Cordis 框架中注册和引用
-- **`name`**：插件入口文件的路径，使用 `file:///` 协议直挂本地文件
+- **`name`**：插件入口。bundle 装法下为裸 npm 包名 `@local/dsh-codewiki`（client 半边的激活扫描只认裸包名行，不带 `/dsh` 子路径）；本地调试也可改用 `file:///<源码绝对路径>/index.js` 直挂（URL 中空格写 `%20`）
 - **`config: {}`**：默认配置为空对象，所有配置项的默认值由插件内部的 Config schema 定义
+- **覆盖语义**：要改配置时，在 profile 自己的 `cordis.patch.yml` 里写同 id 覆盖条目——同 id 覆盖是整对象替换，未写的键回落到 `index.js` 的 Config 默认值
 
 #### 2. 配置项分类
 
@@ -67,8 +68,8 @@ graph TD
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `binaryPath` | string | 空 | `cw` 可执行文件路径；留空时优先使用 PATH 中的 `cw`，找不到则使用插件自带 `bin/cw.exe` |
-| `batchProvider` | string | `workbuddy` | 编译模型提供商，必须是模型设置中已注册的 provider；留空则提交失败 |
-| `batchModel` | string | `hy3` | 编译模型 ID，默认为免费 192k 上下文模型 |
+| `batchProvider` | string | `volces-ark` | 编译模型提供商，必须是模型设置中已注册的 provider；留空则提交失败 |
+| `batchModel` | string | `glm-5.3-flash` | 编译模型 ID，默认 512k 上下文模型 |
 | `batchReasoningEffort` | string | 空 | 思考程度档位，取值来自模型目录 `reasoning.efforts`；留空使用模型默认档 |
 
 ### 并发控制配置
@@ -98,11 +99,11 @@ graph TD
 
 ### 原生引擎通道配置
 
-> **注意**：原生引擎通道在 0.15.0 引入，默认关闭，需要本机 Python 3.10+ 与闭合依赖环境。
+> **注意**：原生引擎通道在 0.15.0 引入，0.16.0 起默认开启，需要本机 Python 3.10+ 与闭合依赖环境。
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `nativeEngine` | boolean | false | `true`=编译交给上游 FSoft Python 引擎；`false`=走 Node 通道 |
+| `nativeEngine` | boolean | true | `true`（默认）=编译交给上游 FSoft Python 引擎；`false`=走内置 Node 兼容通道 |
 | `nativeEnginePython` | string | 空 | venv 解释器绝对路径；留空 → 环境变量 `DSH_CODEWIKI_PYTHON` → `'python'` |
 | `nativeEngineEntry` | string | `lib/engine/python/entry.py` | 入口脚本路径，一般不用修改 |
 | `nativeEngineTimeoutMs` | number | 2700000 | 单次引擎调用上限，默认 45 分钟 |
@@ -134,14 +135,14 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph "bundle 安装模式"
-        A1["用户安装 bundle"] --> B1["读取 package.json"]
-        B1 --> C1["加载 cordis.patch.yml"]
+    subgraph "bundle 依赖模式（推荐 A）"
+        A1["profile package.json 加 link 依赖<br/>与 dsh.profile.bundles"] --> B1["profile 目录跑 pnpm install<br/>重启 dsh"]
+        B1 --> C1["cordis.patch.yml 随包自动合并"]
         C1 --> D1["注入插件配置"]
     end
 
-    subgraph "本地开发模式"
-        A2["开发环境"] --> B2["profiles/web/cordis.patch.yml"]
+    subgraph "file:/// 直挂模式（B，本地调试）"
+        A2["改插件源码的本地调试"] --> B2["profile cordis.patch.yml 手写条目"]
         B2 --> C2["file:/// 直挂 index.js"]
         C2 --> D2["保持 id 一致: codewiki"]
     end
@@ -194,17 +195,17 @@ config:
 ```yaml
 # 不推荐：重复声明所有默认值
 config:
-  batchProvider: workbuddy
-  batchModel: hy3
+  batchProvider: volces-ark
+  batchModel: glm-5.3-flash
   maxConcurrency: 2
   # ... 冗长的默认值列表
 ```
 
-### 2. 原生引擎通道启用
+### 2. 原生引擎通道解释器指向
 
 ```yaml
 config:
-  nativeEngine: true
+  # nativeEngine 自 0.16.0 起默认开启；通常只需显式指向 venv 解释器
   nativeEnginePython: /path/to/venv/bin/python
   # 其余配置保持默认
 ```

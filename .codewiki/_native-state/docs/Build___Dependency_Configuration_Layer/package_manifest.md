@@ -17,7 +17,7 @@
 | 字段 | 值 | 作用说明 |
 |---|---|---|
 | `name` | `@local/dsh-codewiki` | 包名。`@local/` 作用域表明这是本地私有插件（不发布到 npm registry）。**客户端模块注册用它做校验**：`client.js` 中 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })` 的 id 必须与此一致（client-modules 按 nearestPackage 的 name 校验注册者） |
-| `version` | `0.16.16` | 语义化版本。description 中记录了关键版本里程碑（0.16.0 默认切原生引擎、0.16.13 更换默认模型、0.16.0 phase 7 删除 Node 侧算法重写） |
+| `version` | `0.17.0` | 语义化版本。description 中记录了关键版本里程碑（0.16.0 默认切原生引擎、0.16.13 更换默认模型、0.16.0 phase 7 删除 Node 侧算法重写） |
 | `description` | 长文本 | 插件的设计自述：声明默认通道为原生引擎（`nativeEngine: true`），Node 通道仅作最小兼容保留；默认模型 `volces-ark/glm-5.3-flash` 512k；零子代理、单项目串行 |
 | `private` | `true` | 私有包，禁止误发布到 npm |
 | `type` | `"module"` | 全仓库使用 ESM（`import`/`export`），无 CommonJS 回退 |
@@ -28,13 +28,13 @@
 | `engines.dsh` | `>=0.2.0-rc.0` | dsh 宿主平台最低版本要求 |
 | `dependencies` | `@deepseek-ai/schemastery: ^3.18.4` | **唯一运行时 npm 依赖**：Config schema 校验库。index.js 中以 `import z from '@deepseek-ai/schemastery'` 使用，用来声明插件配置的默认值与类型 |
 | `dsh.client.platform` | `web` | 声明客户端为 Web 平台（React 侧边栏面板） |
-| `dsh.bundle.patch` | `cordis.patch.yml` | 打包时应用的 cordis patch 文件路径，指向仓库根的 `cordis.patch.yml`（宿主挂载点与设置命名空间声明，详见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md)） |
+| `dsh.bundle.patch` | `./cordis.patch.yml` | 打包时应用的 cordis patch 文件路径，指向仓库根的 `cordis.patch.yml`（宿主挂载点与设置命名空间声明，详见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md)） |
 
 ## 架构图：清单在系统中的位置
 
 ```mermaid
 flowchart TD
-    PKG["package.json 清单<br/>@local/dsh-codewiki@0.16.16"]
+    PKG["package.json 清单<br/>@local/dsh-codewiki@0.17.0"]
 
     subgraph 运行时消费方
         HOST["dsh 宿主平台<br/>dsh >= 0.2.0-rc.0"]
@@ -127,13 +127,13 @@ description 字段承担了版本决策日志的角色，三个关键里程碑�
 
 - **0.16.0**：默认通道切换为原生引擎（`nativeEngine: true`），Node 侧 FSoft 算法重写（symbols/cluster/graph-diff/incremental/update-planner）在 phase 7 退役删除；Node 通道（`nativeEngine: false`）降级为仅顶层目录分组 + 文件级 source_files 归因的兼容通道，不再加新特性。
 - **0.16.13**：默认模型从 workbuddy/hy3 192k 切换为 `volces-ark/glm-5.3-flash` 512k——原因是 hy3 的窗口装不下本仓库的模块源码。
-- **0.16.16**：当前版本，零子代理、单项目串行。
+- **0.17.0**：当前版本，零子代理、单项目串行。
 
 ### 4. 原生引擎通道的版本语义
 
 description 中明确"原生引擎需要本地 Python 3.10+ venv with closed deps"。这意味着：
 
-- npm 包本身的版本（0.16.16）**不等于**原生 Python 引擎的版本；
+- npm 包本身的版本（0.17.0）**不等于**原生 Python 引擎的版本；
 - Python 引擎的版本/上游 commit 锁定由 [engine_core](../engine_core.md) 中的 `lib/engine/manifest.js`（`UPSTREAM_COMMIT` 常量与 `.codewiki/engine-lock.json` 落盘）管理——那是运行期的环境清单，与本文件的 npm 清单是两套独立机制；
 - 环境搭建由 `tools/fsoft-engine/setup-env.sh` 完成（见 [fsoft_engine_tools](../Ecosystem_Tooling___Validation_Layer/fsoft_engine_tools.md)）。
 
@@ -142,12 +142,12 @@ description 中明确"原生引擎需要本地 Python 3.10+ venv with closed dep
 ```json
 "dsh": {
   "client": { "platform": "web" },
-  "bundle": { "patch": "cordis.patch.yml" }
+  "bundle": { "patch": "./cordis.patch.yml" }
 }
 ```
 
 - `dsh.client.platform: "web"`：告诉 dsh 客户端加载器这是 Web 平台客户端（React 面板）；
-- `dsh.bundle.patch: "cordis.patch.yml"`：bundle 打包时自动应用仓库根的 patch 文件，声明宿主挂载点 id（`codewiki`）与配置命名空间。补丁文件的完整配置项注释（`batchProvider`、`nativeEngine`、`agenticArticles` 等约 20 项）见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md) 与 [build_config](build_config.md)。
+- `dsh.bundle.patch: "./cordis.patch.yml"`：bundle 打包时自动应用仓库根的 patch 文件，声明宿主挂载点 id（`codewiki`）与配置命名空间。补丁文件的完整配置项注释（`batchProvider`、`nativeEngine`、`agenticArticles` 等约 20 项）见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md) 与 [build_config](build_config.md)。
 
 ## 相关文件索引
 

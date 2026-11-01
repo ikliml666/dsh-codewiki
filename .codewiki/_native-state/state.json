@@ -3,35 +3,50 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
-    "headCommit": "c18ab5095e69ce861a7ee0fc64f2d23cbbd5406f"
+    "headCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
-    "headCommit": "c18ab5095e69ce861a7ee0fc64f2d23cbbd5406f",
-    "committed": [],
-    "staged": [],
-    "unstaged": [
+    "headCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
+    "committed": [
+      ".gitignore",
+      "CHANGELOG.md",
+      "README.md",
+      "client.js",
+      "cordis.patch.yml",
+      "docs/fsoft-native-engine.md",
+      "index.js",
+      "lib/engine/apply-plan.js",
+      "lib/engine/client.js",
+      "lib/engine/native-run.js",
+      "lib/engine/quality-gate.js",
+      "lib/job-store.js",
+      "package.json",
+      "test-engine-apply-plan.mjs",
+      "test-engine-client.mjs",
+      "test-engine-native-incremental.mjs",
       "test-engine-native-job.mjs",
-      "test-fixtures/fake-native-engine.mjs"
+      "test-engine-quality-gate.mjs",
+      "test-fixtures/fake-native-engine.mjs",
+      "test-job-reliability.mjs",
+      "test-orchestration.mjs"
     ],
+    "staged": [],
+    "unstaged": [],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [
-    "test-engine-native-job.mjs",
-    "test-fixtures/fake-native-engine.mjs"
-  ],
+  "unconsumed": [],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "工作区未提交改动已合成临时 commit 6030f36ce750（2 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxmzvkm-0-native（25 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxox8t5-3-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-01T09:40:58.083Z"
+  "updatedAt": "2026-11-01T12:11:20.818Z"
 }
