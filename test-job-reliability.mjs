@@ -409,6 +409,7 @@ console.log('== 用例 5：宿主在原生引擎跑到一半被杀 → 新实例
   const exhaustedJob = { ...mid, nativeStarted: true, stage: 'articles', owner: 'svc-gone', nativeSnapshot: { ...mid.nativeSnapshot, attempt: 3 } }
   const plan3 = planNativeReplay(exhaustedJob)
   check(plan3.replayable === false && plan3.exhausted === true, `连续中断到上限后不再重跑（${plan3.reason}）`)
+  mid.nativeSnapshot.docsDir = 'C:/temp/codewiki-crash-docs'
   const resumable = planNativeReplay(mid, { exists: () => true })
   check(resumable.resumeDocsDir === mid.nativeSnapshot.docsDir && !('staleDocsDir' in resumable), '重放保留崩溃现场供叶子断点恢复，不再标成待删除目录')
   const missing = planNativeReplay(mid, { exists: () => false })

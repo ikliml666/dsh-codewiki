@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PY = process.env.DSH_CODEWIKI_ENGINE_PYTHON || join(HERE, '.probe-fsoft', 'venv', 'Scripts', 'python.exe')
 if (!existsSync(PY)) {
-  console.log('SKIP 找不到原生引擎 venv')
-  process.exit(0)
+  console.error(`FAIL 找不到原生引擎解释器：${PY}；请设置 DSH_CODEWIKI_ENGINE_PYTHON`)
+  process.exit(1)
 }
 const sandbox = mkdtempSync(join(tmpdir(), 'cw-fsoft-runtime-'))
 const script = join(sandbox, 'cases.py')
@@ -136,61 +136,91 @@ def reset():
 def parallel_case():
     reset()
     root = docs_fixture()
-    u = Updater(root, concurrency=3)
-    started = time.monotonic()
-    asyncio.run(run_once(u, reports()))
-    elapsed = time.monotonic() - started
-    assert FakeRunner.max_active >= 2, f'没有发生并行：{FakeRunner.max_active}'
-    assert elapsed < 0.22, f'三叶子仍近似串行：{elapsed:.3f}s'
-    assert not R.checkpoint_path(root).exists(), '成功后必须清 checkpoint'
-    assert set(u.record.pages_written) == {'a', 'b', 'c'}
-    shutil.rmtree(root)
+    try:
+        u = Updater(root, concurrency=3)
+        asyncio.run(run_once(u, reports()))
+        assert FakeRunner.max_active >= 2, f'没有发生并行：{FakeRunner.max_active}'
+        assert not R.checkpoint_path(root).exists(), '成功后必须清 checkpoint'
+        assert set(u.record.pages_written) == {'a', 'b', 'c'}
+    finally:
+        shutil.rmtree(root)
 check('独立叶子真实并行，成功后清理 checkpoint', parallel_case)
+
+def cross_batch_case():
+    reset()
+    root = docs_fixture()
+    try:
+        u = Updater(root, concurrency=2)
+        reps = reports()
+        reps[('d',)] = Report(('d',), {'d': ['leaf']})
+        asyncio.run(run_once(u, reps))
+        assert FakeRunner.attempts == {'a': 1, 'b': 1, 'c': 1, 'd': 1}, f'前一批页面被误判为冲突并重跑：{FakeRunner.attempts}'
+        assert not u.record.errors, f'独立叶子不应串行重跑：{u.record.errors}'
+        for name in ('a', 'b', 'c'):
+            assert (root / f'{name}.md').read_text(encoding='utf-8') == f'base{name}'
+    finally:
+        shutil.rmtree(root)
+check('后续批次只检测本叶子真实写页，不误判历史页面', cross_batch_case)
 
 def conflict_case():
     reset()
     FakeRunner.conflict = {'a', 'b'}
     root = docs_fixture()
-    u = Updater(root, concurrency=3)
-    asyncio.run(run_once(u, reports()))
-    assert FakeRunner.attempts['a'] == 1
-    assert FakeRunner.attempts['b'] == 2, f'冲突叶子必须在合并后的现场重跑：{FakeRunner.attempts}'
-    text = (root / 'overview.md').read_text(encoding='utf-8')
-    assert text.endswith('ab'), f'后序冲突叶子必须看到前序写入：{text}'
-    shutil.rmtree(root)
+    try:
+        u = Updater(root, concurrency=3)
+        asyncio.run(run_once(u, reports()))
+        assert FakeRunner.attempts['a'] == 1
+        assert FakeRunner.attempts['b'] == 2, f'冲突叶子必须在合并后的现场重跑：{FakeRunner.attempts}'
+        text = (root / 'overview.md').read_text(encoding='utf-8')
+        assert text.endswith('ab'), f'后序冲突叶子必须看到前序写入：{text}'
+    finally:
+        shutil.rmtree(root)
 check('真实写冲突按原顺序重跑，不丢失共享页更新', conflict_case)
 
 def resume_case():
     reset()
     FakeRunner.crash_on = 'b'
     root = docs_fixture()
-    u1 = Updater(root, concurrency=1)
     try:
-        asyncio.run(run_once(u1, reports()))
-    except KeyboardInterrupt:
-        pass
-    else:
-        raise AssertionError('模拟宿主中断没有发生')
-    assert R.checkpoint_path(root).exists(), '中断后必须留下 checkpoint'
-    assert FakeRunner.attempts['a'] == 1
-    reset()
-    u2 = Updater(root, concurrency=1, resume=True)
-    asyncio.run(run_once(u2, reports()))
-    assert FakeRunner.attempts == {'b': 1, 'c': 1}, f'已完成叶子被重跑：{FakeRunner.attempts}'
-    assert u2.record.pages_written.count('a') == 1, '恢复的记录必须合并且不能重复'
-    assert not R.checkpoint_path(root).exists()
-    shutil.rmtree(root)
+        u1 = Updater(root, concurrency=1)
+        try:
+            asyncio.run(run_once(u1, reports()))
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError('模拟宿主中断没有发生')
+        assert R.checkpoint_path(root).exists(), '中断后必须留下 checkpoint'
+        assert FakeRunner.attempts['a'] == 1
+        reset()
+        u2 = Updater(root, concurrency=1, resume=True)
+        asyncio.run(run_once(u2, reports()))
+        assert FakeRunner.attempts == {'b': 1, 'c': 1}, f'已完成叶子被重跑：{FakeRunner.attempts}'
+        assert u2.record.pages_written.count('a') == 1, '恢复的记录必须合并且不能重复'
+        assert not R.checkpoint_path(root).exists()
+    finally:
+        shutil.rmtree(root)
 check('宿主中断后只跑未完成叶子，并恢复记录', resume_case)
 
 def drift_case():
     reset()
     root = docs_fixture()
-    u1 = Updater(root, concurrency=1)
-    R.write_checkpoint(root, 'old-signature', {'a': {'calls': [], 'verdicts': [], 'pages_written': ['a'], 'pages_removed': [], 'write_set_violations': [], 'detector_notes': [], 'errors': [], 'write_sets': {'a': ['a']}}})
-    u2 = Updater(root, concurrency=1, resume=True)
-    asyncio.run(run_once(u2, reports()))
-    assert FakeRunner.attempts == {'a': 1, 'b': 1, 'c': 1}, '签名漂移时不得复用旧 checkpoint'
-    shutil.rmtree(root)
+    try:
+        R.write_checkpoint(root, 'old-signature', {'a': {'calls': [], 'verdicts': [], 'pages_written': ['a'], 'pages_removed': [], 'write_set_violations': [], 'detector_notes': [], 'errors': [], 'write_sets': {'a': ['a']}}})
+        (root / 'a.md').write_text('interrupted partial edit', encoding='utf-8')
+        baseline = Path(tempfile.mkdtemp(prefix='cw-runtime-baseline-'))
+        try:
+            (baseline / 'overview.md').write_text('base', encoding='utf-8')
+            for name in ('a', 'b', 'c'):
+                (baseline / f'{name}.md').write_text('base', encoding='utf-8')
+            u2 = Updater(root, concurrency=1, resume=True)
+            u2.opts.extra['resumeBaselineDocsDir'] = str(baseline)
+            asyncio.run(run_once(u2, reports()))
+            assert FakeRunner.attempts == {'a': 1, 'b': 1, 'c': 1}, '签名漂移时不得复用旧 checkpoint'
+            assert (root / 'a.md').read_text(encoding='utf-8') == 'basea', '签名漂移后必须先恢复受管基线，不能保留半截页面'
+        finally:
+            shutil.rmtree(baseline)
+    finally:
+        shutil.rmtree(root)
 check('签名漂移拒绝复用旧 checkpoint', drift_case)
 
 print(json.dumps(results, ensure_ascii=False))

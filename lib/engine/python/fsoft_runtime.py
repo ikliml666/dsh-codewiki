@@ -34,7 +34,7 @@ from codewiki.src.be.updater.reference_index import inverse
 
 logger = logging.getLogger(__name__)
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 CHECKPOINT_FILENAME = "dsh_leaf_checkpoint.json"
 _STEP5_START = "    # ---- Step 5: sequential leaf agents\n"
 _STEP5_END = "    # ---- Step 6.1: generate any page still missing"
@@ -116,7 +116,14 @@ def _load_completed(updater: IncrementalUpdater, signature: str) -> dict[str, An
     with path.open(encoding="utf-8") as f:
         saved = json.load(f)
     if saved.get("version") != ADAPTER_VERSION or saved.get("signature") != signature:
-        logger.warning("增量断点签名已变化，丢弃旧断点：%s", path)
+        baseline = updater.opts.extra.get("resumeBaselineDocsDir")
+        if not baseline or not Path(baseline).is_dir():
+            raise RuntimeError("增量断点签名已变化，且没有可恢复的受管基线，拒绝混用旧现场")
+        retained = path.read_bytes()
+        shutil.rmtree(updater.docs_dir)
+        shutil.copytree(baseline, updater.docs_dir)
+        path.write_bytes(retained)
+        logger.warning("增量断点签名已变化，已恢复受管基线并重跑全部叶子：%s", path)
         return {}
     completed = saved["completed"]
     for key in sorted(completed, key=int):
@@ -158,7 +165,6 @@ async def run_leaf_order(
     ]
     signature = _signature(updater, order, new_tree, new_graph)
     completed = _load_completed(updater, signature)
-    baseline = P.page_hashes(updater.docs_dir)
     limit = max(1, min(int(updater.opts.extra.get("moduleConcurrency", 1)), 8))
 
     tasks = []
@@ -180,6 +186,7 @@ async def run_leaf_order(
             workspace,
             ignore=shutil.ignore_patterns(CHECKPOINT_FILENAME, CHECKPOINT_FILENAME + ".*"),
         )
+        workspace_baseline = P.page_hashes(workspace)
         config = copy.copy(updater.config)
         config.docs_dir = workspace
         task_record = UpdateRecord(options=rec.options, revision=rec.revision)
@@ -195,7 +202,7 @@ async def run_leaf_order(
         except Exception as exc:
             task_record.errors.append(f"leaf {'/'.join(path)}: {type(exc).__name__}: {exc}")
             logger.error("Leaf %s failed: %s", "/".join(path), exc)
-        changes = _page_changes(baseline, workspace)
+        changes = _page_changes(workspace_baseline, workspace)
         return task, workspace, task_record, changes, task_tree != new_tree
 
     workspaces = tempfile.mkdtemp(prefix="dsh-codewiki-leaves-", dir=os.path.dirname(updater.docs_dir))
