@@ -1,12 +1,29 @@
-# dsh-codewiki — CodeWiki (mraza007/codewiki) for DeepSeek Harness
-# （0.13.0 起吸入了 FSoft-AI4Code/CodeWiki 的 AST 聚类 / agentic 写作 / 符号级增量三层能力；
-#   0.15.0 起另有可选的原生引擎通道，直接驱动上游 Python 引擎，默认关闭）
-# 挂载方式：本文件供 bundle 形式安装用；本地开发走 profiles/web/cordis.patch.yml 的
-# file:/// 直挂（URL 中空格写 %20），二者保持 id 一致：codewiki。
+# dsh-codewiki bundle patch（随包自动合并到 profile，无需手工往 profile 里追加条目）。
+# 安装方式（二选一，推荐 A）：
+#
+#   A. bundle 依赖（标准本地插件形态，走这条就不需要在 profile 的 cordis.patch.yml 里
+#      再写任何 codewiki 条目——本文件会被自动合并）：
+#        profile package.json  dependencies += "@local/dsh-codewiki": "link:<本仓库绝对路径>"
+#        profile package.json  dsh.profile.bundles += "@local/dsh-codewiki"
+#        （在 profile 目录跑一次 pnpm install 建立 node_modules 里的 link，然后重启 dsh；
+#          bundle 层只在进程启动时装载）
+#      要改配置：在 profile 自己的 cordis.patch.yml 里写同 id 覆盖条目，例如
+#        - id: codewiki
+#          config: { batchModel: doubao-seed-2.1-lite }
+#      （同 id 覆盖条目是整对象替换，未写的键回落到 index.js 的 Config 默认值）
+#
+#   B. file:/// 直挂（不装依赖，直接指到源码入口；适合改插件源码时的本地调试）：
+#        profile cordis.patch.yml 里手写
+#        - insert:
+#            - id: codewiki
+#              name: file:///<本仓库绝对路径>/index.js    # URL 中空格写 %20
+#              config: {}
+#      两种装法保持 id 一致：codewiki。bundle 装法下 name 必须是裸 npm 包名（不带 /dsh
+#      子路径）——client 半边的激活扫描只认裸包名行。
 # 设置项（config 命名空间 = codewiki）：
 #   binaryPath:      cw 可执行文件路径；留空优先用 PATH 里的 cw，找不到再用插件自带 bin/cw.exe
-#   batchProvider:   编译模型提供商（必须是模型设置里已注册的 provider；默认 workbuddy，留空=提交失败）
-#   batchModel:      编译模型 id（默认 hy3，免费 192k 上下文）
+#   batchProvider:   编译模型提供商（必须是模型设置里已注册的 provider；默认 volces-ark，留空=提交失败）
+#   batchModel:      编译模型 id（默认 glm-5.3-flash，512k 上下文）
 #   batchReasoningEffort: 思考程度档位（取值来自模型目录 reasoning.efforts；留空=模型默认档）
 #   maxConcurrency:  默认档并发上限（1–8，默认 2）
 #   bigConcurrency:  大档并发上限（1–8，默认 0=跟随默认档）：与默认档各自独立限流、同时推进
@@ -18,8 +35,8 @@
 #   symbolIncremental: 增量按 AST 符号级判定（默认开）：只重写接口真变了的模块，注释/空白改动跳过
 #   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）
 #   autoCommit:      编译完成后自动提交 wiki 产物（默认开）
-#   --- 原生引擎通道（0.15.0，可选；默认关闭，需要本机 Python 3.10+ 与闭合依赖环境）---
-#   nativeEngine:       true=编译交给上游 FSoft Python 引擎；false（默认）=走 Node 通道
+#   --- 原生引擎通道（0.15.0 引入，0.16.0 起默认开启；需要本机 Python 3.10+ 与闭合依赖环境）---
+#   nativeEngine:       true（默认）=编译交给上游 FSoft Python 引擎；false=走内置 Node 兼容通道
 #   nativeEnginePython: venv 解释器绝对路径；留空 → 环境变量 DSH_CODEWIKI_PYTHON → 'python'
 #                       （不做「找一个能用的解释器」的启发式：猜错会把环境不闭合伪装成引擎坏了）
 #   nativeEngineEntry:  入口脚本路径（默认 lib/engine/python/entry.py，一般不用改）
@@ -28,16 +45,14 @@
 #   装法见 README「原生引擎通道（0.15.0）」，环境脚本 tools/fsoft-engine/setup-env.sh。
 - insert:
     - id: codewiki
-      name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js
+      name: "@local/dsh-codewiki"
       # 默认值不在这里重复声明：留空即用插件 Config schema 里的默认值（见 index.js 的 Config）。
       # 想改哪项就填哪项，未填的沿用默认。
       config: {}
       # 例：换编译模型、调并发、关掉 agentic 写作
       # config:
-      #   batchProvider: workbuddy
-      #   batchModel: hy3
+      #   batchProvider: volces-ark
+      #   batchModel: glm-5.3-flash
       #   maxConcurrency: 2
-      #   planMode: auto
       #   agenticArticles: true
       #   agenticMaxSteps: 30
-      #   symbolIncremental: true

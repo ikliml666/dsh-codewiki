@@ -262,22 +262,62 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `autoUpdate` / `autoUpdateMin`（0.4.0 引入，0.16.2 修正扫描来源，0.16.3 遵守 `workspaceOnly`）：自动更新默认关；开启后服务每 60s 心跳一次，距上次扫描超过扫描间隔（`autoUpdateMin`，默认 30 分钟，最小 5）时逐仓 `scope=auto` 判态提交（被排除目录、worktree、空壳目录静默跳过），单仓失败只记 `lastError` 不中断。**0.16.2 起扫描来源是「已知仓库清单 ∪ 任务历史」**（`REPOS_FILE`，`rememberRepo()` 在每次提交时写入）：只扫任务历史会让「编译过一次、后来没再手动编译」的仓库在 job 被 `MAX_JOBS_KEPT=30` 截断或 Temp 终态启动清理后永久退出自动扫描——面板仍显示过期，却永远等不到自动编译。**0.16.3 起自动调度与面板一样遵守 `workspaceOnly`**：不在已添加 dsh 工作区清单里的仓库（如已移出工作区的目录）不再被后台定时编译——旧实现只让面板过滤遵守它，会产物悄悄写进别人的 `.codewiki/` 而面板上根本看不到那条任务；被跳过的仓数在面板上以「工作区外跳过 N」显示（`scheduler.lastScanSkipped`）。心跳间隔可用环境变量 `DSH_CODEWIKI_AUTO_SCAN_MS` 覆盖（下限 100ms，仅用于测试；生产别设）；空壳判定缓存可用 `DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS` 覆盖「无源码」结论的 TTL（默认 60s，命中源码时仍缓存 10 分钟）。**0.16.6 起仓库清单的落点跟随 `JOBS_FILE` 名字**（`reposFileFor()`）：`dsh-codewiki-jobs.json` → `dsh-codewiki-repos.json`，`dsh-codewiki-jobs-test-<pid>-<token>.json` → `dsh-codewiki-repos-test-<pid>-<token>.json`；显式 `DSH_CODEWIKI_REPOS_FILE` 仍最优先。旧实现只按**目录**推导，导致任何改了 `DSH_CODEWIKI_JOBS_FILE` 的测试都写到真实宿主的清单文件里——真机上该文件曾被塞进 `%TEMP%/cw-orch-xxxxxx` 这类早已删除的 fixture 目录，每次自动扫描都要为它们空跑一轮探测。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
 
-## 安装（本地 file:/// 直挂）
+## 安装
 
-本插件遵循「本地插件源码公约」，但用 router 式 file:/// 挂载，**不需要** profile package.json/`link:` 条目：
+两种装法，按用途选一种。**装完都要重启 dsh**（bundle 层与 client 半边都只在进程启动时装载）。
+
+### 装法 A：bundle 依赖（标准本地插件形态，推荐）
+
+插件行由插件自带的 `cordis.patch.yml` 自动合并进 profile，**不需要**在 profile 的 `cordis.patch.yml` 里再手写 codewiki 条目：
 
 1. 源码放 `E:\ik\Documents\trae_projects\1\dsh plugin\dsh-codewiki`（本目录）。
-2. `profiles/web/cordis.patch.yml` 顶层追加：
+2. 在目标 profile（如 `%USERPROFILE%\.dsh\profiles\desktop`）的 `package.json` 里登记两处：
 
-   ```yaml
-   - insert:
-       - id: codewiki
-         name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js
-         config: {}
+   ```jsonc
+   {
+     "dependencies": {
+       "@local/dsh-codewiki": "link:E:/ik/Documents/trae_projects/1/dsh plugin/dsh-codewiki"
+     },
+     "dsh": {
+       "profile": {
+         "bundles": ["…", "@local/dsh-codewiki"]
+       }
+     }
+   }
    ```
 
-3. 依赖解析：插件在 profile node_modules 之外，`@deepseek-ai/schemastery`（仅 Config 用）走插件本地 junction → `/e/software/deepseek-harness/vendor/schemastery`（已建，`node_modules/@deepseek-ai/schemastery`）。工具/子代理全走注入服务，零 dsh-* import。
-4. 重启 dsh 生效。客户端半侧（设置页）由包声明驱动：`package.json` 里 `dsh.client.platform: "web"` + `exports["./client"]`，宿主 client 扫描器沿 file:/// 条目找到本包后自动把 `client.js` 送进浏览器——同样需要一次重启（「非 client 包」判定按条目缓存到重启为止）。
+3. 在该 profile 目录跑一次 `pnpm install`，让 `node_modules/@local/dsh-codewiki` 真的指向源码目录。
+4. 要改配置，在本 profile 的 `cordis.patch.yml` 里写**同 id 覆盖条目**（不是 insert）：
+
+   ```yaml
+   - id: codewiki
+     config:
+       batchModel: doubao-seed-2.1-lite
+       maxConcurrency: 3
+   ```
+
+   覆盖条目的 `config` 是**整对象替换**：上面没写的键回落到 `index.js` 的 `Config` 默认值，不会与 bundle 层里的 `config: {}` 深合并。因此只想改一项时，也要把其余改过的项一并写上（或干脆都靠默认值）。
+
+装法 A 下 `cordis.patch.yml` 里那条 insert 写的是裸包名 `"@local/dsh-codewiki"`。**name 必须是裸 npm 包名（不带 `/dsh` 子路径）**：client 半边的激活扫描（`client-modules locatePkgJson` → `exactPackageSpecifier`）只认裸包名行。
+
+### 装法 B：`file:///` 直挂（改插件源码时用）
+
+不装依赖、不碰 profile 的 `package.json`，直接在 profile 的 `cordis.patch.yml` 顶层追加：
+
+```yaml
+- insert:
+    - id: codewiki
+      name: file:///E:/ik/Documents/trae_projects/1/dsh%20plugin/dsh-codewiki/index.js
+      config: {}
+```
+
+URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自带的 bundle 层在装法 B 下不要同时启用（`bundles` 里不要有 `@local/dsh-codewiki`），否则同 id 会出现两条 insert。两种装法保持 id 一致：`codewiki`。
+
+### 依赖解析（两种装法都一样）
+
+`@deepseek-ai/schemastery`（仅 `Config` 用）走插件**自己**的 `node_modules/@deepseek-ai/schemastery` junction → `E:\software\deepseek-harness\vendor\schemastery`。link 装法下 Node 从源码真实路径解析，仍然走这个 junction，不借 profile 的 `node_modules`。工具与子代理全走注入服务，零 `dsh-*` import。
+
+客户端半侧（设置页）由包声明驱动：`package.json` 里 `dsh.client.platform: "web"` + `exports["./client"]`，宿主 client 扫描器找到本包后自动把 `client.js` 送进浏览器——同样需要一次重启（「非 client 包」判定按条目缓存到重启为止）。
 
 ## 开发
 

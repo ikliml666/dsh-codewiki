@@ -112,6 +112,23 @@
 与「我们杀」分开。顺带修 `nonzero-exit` 违规的误报：被我们主动终止的进程退出码是终止方式
 的产物，不再记成引擎的非零退出。
 
+### 安装形态：从 file:/// 直挂改为标准本地插件（profile bundle 依赖）
+
+此前本插件靠 profile `cordis.patch.yml` 里手写的 `file:///…/index.js` insert 条目挂载，混在
+一堆官方条目中间：换一台机器、换一个 profile 都得手工复制那段 YAML，`config` 还分散在两条
+同 id 条目里（一条给三项、一条给十几项），改配置的人根本分不清哪条生效。
+
+现在与 `dsh-git-worktree` / `dsh-frontend-design` / `@local/dsh-subagent-auto-router` 一致：
+`package.json` 声明 `dsh.bundle.patch: "./cordis.patch.yml"`，插件自带的那份 patch 里 insert
+的是裸包名 `"@local/dsh-codewiki"`；profile 侧只要在 `dependencies` 加一条 `link:` 并在
+`dsh.profile.bundles` 里登记包名，插件行就由 bundle 层自动合并，用户层只保留一条同 id 的
+`- id: codewiki config:` 覆盖条目。`name` 必须是裸包名（不带 `/dsh` 子路径）——client 半边
+的激活扫描只认裸包名行。
+
+`file:///` 直挂仍保留为装法 B（改插件源码时不必建 link），README「安装」章节把两种装法并列
+写清，并写明覆盖条目的 `config` 是整对象替换（未写的键回落到 `Config` 默认值，不与 bundle
+层的 `config: {}` 深合并）——这一条不写清，用户改一项就会把其余十几项一起打回默认。
+
 ### 验证
 
 - `test-job-reliability.mjs`（新增，109 项）：原子写、损坏隔离、锁归属、双实例幂等、原生
