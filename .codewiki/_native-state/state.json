@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
-    "headCommit": "9454e2cec3b6f9706bb5a5bfba5031bcd6f426a4"
+    "headCommit": "4b5aa7e7d91a4a968e1b92744c646a035b5954e9"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
-    "headCommit": "9454e2cec3b6f9706bb5a5bfba5031bcd6f426a4",
+    "headCommit": "4b5aa7e7d91a4a968e1b92744c646a035b5954e9",
     "committed": [
       "CHANGELOG.md",
       "README.md",
@@ -24,21 +24,44 @@
       "test-job-logs.mjs"
     ],
     "staged": [],
-    "unstaged": [],
-    "untracked": [],
+    "unstaged": [
+      "index.js",
+      "lib/engine/native-run.js",
+      "lib/engine/native-state.js",
+      "lib/engine/python/entry.py",
+      "lib/job-store.js",
+      "package.json",
+      "test-engine-native-incremental.mjs",
+      "test-job-reliability.mjs"
+    ],
+    "untracked": [
+      "lib/engine/python/fsoft_runtime.py",
+      "test-fsoft-runtime.mjs"
+    ],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [],
+  "unconsumed": [
+    "index.js",
+    "lib/engine/native-run.js",
+    "lib/engine/native-state.js",
+    "lib/engine/python/entry.py",
+    "lib/engine/python/fsoft_runtime.py",
+    "lib/job-store.js",
+    "package.json",
+    "test-engine-native-incremental.mjs",
+    "test-fsoft-runtime.mjs",
+    "test-job-reliability.mjs"
+  ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 63c62f0 与本次 cw 基线 920aafb 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxtrfqg-1-native（25 个文件）"
+    "工作区未提交改动已合成临时 commit 9691bf427df2（10 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxuwc09-2-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-01T13:14:57.365Z"
+  "updatedAt": "2026-11-01T13:35:14.701Z"
 }

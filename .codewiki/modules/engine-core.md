@@ -14,6 +14,7 @@ source_files:
   - lib/engine/quality-gate.js
   - lib/engine/workspace-snapshot.js
   - lib/engine/python/stage_map.py
+  - lib/engine/python/fsoft_runtime.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: engine_core.md
@@ -92,7 +93,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    env["env"] --> graph["graph"] --> cluster["cluster"] --> articles["articles"] --> validate["validate"] --> index["index"] --> baseline["baseline"] --> commit["commit"]
+    stEnv["env"] --> stGraph["graph"] --> cluster["cluster"] --> articles["articles"] --> validate["validate"] --> index["index"] --> baseline["baseline"] --> commit["commit"]
 ```
 
 其中 Python 入口 `entry.py` 只覆盖前四段（经 `stage_map.py` 从 FSoft 的五段进度
@@ -111,6 +112,24 @@ verbose 里）。增量轮还有一个语义修正：FSoft 借用「模块聚类
 `written` 为准，保证百分比单调不倒退；`articles_ceiling()` 返回 articles 槽位的
 百分比上限（阶段 3 完成时的值）。
 
+### 增量轮的 Python 侧运行时适配（`python/fsoft_runtime.py`）
+
+`entry.py::action_generate` 在跑 `update` 之前会先调 `install_incremental_runtime()`：
+用源码锚点把上游 `IncrementalUpdater._run` 的 **Step 5（叶子写作）** 整体替换成
+本层实现，其余增量主流程仍走上游原文。替换后的 Step 5 由
+`fsoft_runtime.py::run_leaf_agents` 接管——它先按拓扑给活跃叶子排序，再交给
+`run_leaf_order`：
+
+- **同层隔离并行**：每个叶子任务复制一份 docs 工作区（隔离分支），按
+  `moduleConcurrency`（钳制在 1–8）分批并发，父模块仍等子模块写完；
+- **冲突回退串行**：隔离分支之间若写集重叠（页冲突）或有人改了模块树，丢弃该
+  分支的页面结果（模型调用仍记账），改回在主 docs 上串行重跑该叶子；
+- **断点续跑（resume）**：已完成的叶子写进检查点（checkpoint），重入时直接认领其
+  页面产物；该能力由 `runNativeJob` 的 `resume` 开关一路透传到
+  `updateOptions.extra.resume`。整库模式（whole-repo）下多个活跃单元折叠成一次
+  overview 运行并记一条 `detector_notes`。
+
+
 ## 子模块划分
 
 `engine_core` 体量很大，按职责拆成三份文档：
@@ -122,7 +141,9 @@ verbose 里）。增量轮还有一个语义修正：FSoft 借用「模块聚类
 | 组件 | 职责 |
 | --- | --- |
 | `contract.js` | `EngineResult` / `EngineProgress` / `EngineError` 的版本化契约、四态语义硬不变量、`validateEngineResult` / `normalizeBlocker` / `describeEngineResult` |
-| `python/entry.py` | Python 侧薄入口：stdout 协议守卫（`_ProtocolOnly`）、UTF-8 补丁（`_popen_init_utf8`）、`main` 主循环，把 FSoft 调用翻成 JSON-lines 结果 |
+| `python/entry.py` | Python 侧薄入口：stdout 协议守卫（`_ProtocolOnly`）、UTF-8 补丁（`_popen_init_utf8`）、`main` 主循环，把 FSoft 调用翻成 JSON-lines 结果；增量轮（`is_update`）在构造 adapter 前先 `install_incremental_runtime()` 装上本层的运行时适配 |
+| `python/fsoft_runtime.py` | 增量轮的 Python 侧运行时适配：`install_incremental_runtime` 用源码锚点替换上游 `IncrementalUpdater._run` 的 Step 5（叶子写作）；`run_leaf_agents` 按拓扑排好活跃叶子后交给 `run_leaf_order`——同层隔离并行、写集冲突回退串行、检查点（checkpoint）断点续跑 |
+| `python/stage_map.py` | 把 FSoft 的五段进度翻成八段契约阶段；`articles_ceiling()` 给出 articles 槽位的百分比上限 |
 | `client.js::runEngine` | Node 侧进程适配：spawn 子进程、JSON-lines 读取、超时/静默/取消/协议破坏的机读失败；result 到达后启「结果宽限」（`resultGraceMs`），进程不自行退出则按已收到的 result 收尾，不再等僵死收尾拖到超时 |
 | `llm-bridge.js::startLlmBridge` + `openai-bridge.js` | OpenAI-compatible loopback 桥：占位 key 校验、`isPlaceholderKey`、请求/响应双向纯转换；可选 `onRequestStart` 会话记录钩子——原生通道的每个模型请求都只经过这里，回调契约与 batch 通道一致（`onDelta` / `onError` / `onDone`） |
 
@@ -138,9 +159,9 @@ verbose 里）。增量轮还有一个语义修正：FSoft 借用「模块聚类
 
 | 组件 | 职责 |
 | --- | --- |
-| `native-run.js::runNativeJob`（导出符号仅 `noop`） | 阶段 4 生产通道编排：env → 增量决议 → 快照 → 模型桥 → 引擎 → 留档 → 质量门 → 落地 → 合成终态；全部依赖注入，测试可换假实现 |
+| `native-run.js::runNativeJob`（导出符号仅 `noop`） | 阶段 4 生产通道编排：env → 增量决议 → 快照 → 模型桥 → 引擎 → 留档 → 质量门 → 落地 → 合成终态；全部依赖注入，测试可换假实现。新增 `resume` 开关：为真时水合不覆盖已有页面（`hydrateDocsDir({ overwrite: !resume })`），且水合不到文件但 docsDir 已带 `module_tree.json` 时仍认增量成立（断点续跑）；`moduleConcurrency` 与 `resume` 一并经 `updateOptions.extra` 透传给 Python 侧 |
 | `manifest.js::doctor` / `writeLock` | 环境指纹（引擎版本 + Python 版本 + 上游 commit）、`engine-lock.json` 落盘与漂移判定 |
-| `native-state.js::stateDocFiles` | 跨轮受管状态：`.codewiki/_native-state/` 下的图/模块树/文章副本、水合（hydrate）、采集（capture）、`unconsumed` 未消化账目的合并 |
+| `native-state.js::stateDocFiles` | 跨轮受管状态：`.codewiki/_native-state/` 下的图/模块树/文章副本、水合（hydrate，`overwrite` 控制是否覆盖已有页面）、采集（capture）、`unconsumed` 未消化账目的合并 |
 | `workspace-snapshot.js` | `createWorkspaceSnapshot`：用独立 index 文件把未提交改动合成不挂 ref 的临时 commit，让引擎的记账（commit_id）与内容对齐；`shortSha` / `snapshotExists` |
 
 关键设计：**增量不是调用方说的，是证据说的**——`collectChangeSet`（见

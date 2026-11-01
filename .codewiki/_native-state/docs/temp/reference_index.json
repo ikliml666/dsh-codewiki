@@ -271,6 +271,7 @@
       "runRealtimeTasks",
       "save",
       "snapshotNativeRun",
+      "startNativeRun",
       "submit",
       "syncCancelFlags",
       "tick",
@@ -302,6 +303,7 @@
     "names": [
       "_ProtocolOnly",
       "_popen_init_utf8",
+      "action_generate",
       "apply",
       "applyNativeOutput",
       "archiveDocsTree",
@@ -317,6 +319,8 @@
       "findArticlesMissingFromIndex",
       "findOrphanPages",
       "gateNativeOutput",
+      "hydrateDocsDir",
+      "install_incremental_runtime",
       "isPlaceholderKey",
       "isUpdateEligible",
       "is_incremental",
@@ -328,6 +332,8 @@
       "runCw",
       "runEngine",
       "runNativeJob",
+      "run_leaf_agents",
+      "run_leaf_order",
       "settle",
       "shortSha",
       "snapshotExists",
@@ -459,6 +465,7 @@
       "flush",
       "foldChunks",
       "handle_request",
+      "install_incremental_runtime",
       "isPlaceholderKey",
       "isTerminalStage",
       "loadUpdateRecord",
@@ -467,10 +474,13 @@
       "run",
       "runEngine",
       "runPool",
+      "run_leaf_agents",
+      "run_leaf_order",
       "startLlmBridge",
       "toLlmRequest",
       "validateEngineResult",
-      "worker"
+      "worker",
+      "write_checkpoint"
     ]
   },
   "fsoft_engine_tools": {

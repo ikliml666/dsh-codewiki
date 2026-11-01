@@ -150,7 +150,7 @@ flowchart TB
 | `tickReview(job)` | 校对阶段：本地核对 → 批量校对请求（`@@@article` 标记分节）→ 会话通道兜底 |
 | `tickIndex(job)` | 索引前：存量体检、`judgeOutcome` 完整性判定、孤儿清理、wiki 骨架守卫（目录不在先 `cw init`、目录在却缺 `_meta.yaml` 记 `wiki-missing` 硬阻塞）、`cw index`、基线推进闸门（`cw meta update`）、index/meta 后用 `hardBlockers` 重裁终态并落 `baselineEligible` / `baselineAdvanced` |
 | `tickCommit(job)` | 自动提交产物（`autoCommitWiki` 分支合并式） |
-| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待；宿主重启/旧实例退出后按持久化的非敏感执行快照（`planNativeReplay` / `snapshotNativeRun`）重放重跑，已落盘结果按事实收割；结果收割后直接 `finishJob`。收割时把引擎上报的真实 token 用量（FSoft `usage_ledger`）映射进 `job.usage`（沿用 `inputTok`/`outputTok`/`requests`/`cachedTok` 旧形状，全量记在实时侧），并在 `nativeResult.usage` 保留引擎原值 |
+| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待；宿主重启/旧实例退出后按持久化的非敏感执行快照（`planNativeReplay` / `snapshotNativeRun`）重放重跑——旧引擎产物目录不再删除，而是落成 `job.nativeResumeDocsDir` 断点，由 `startNativeRun` 以 `runNativeJob` 的 `resume: true` 传给引擎续跑（已完成的叶子直接保留，note 记「保留已完成叶子断点」）；断点目录已消失则清空它、从空目录重新跑；已落盘结果按事实收割；结果收割后直接 `finishJob`。收割时把引擎上报的真实 token 用量（FSoft `usage_ledger`）映射进 `job.usage`（沿用 `inputTok`/`outputTok`/`requests`/`cachedTok` 旧形状，全量记在实时侧），并在 `nativeResult.usage` 保留引擎原值 |
 | `submit({kind, cwd, ...})` | 任务提交入口：排除清单 / worktree / 空壳目录闸门、磁盘合并后的幂等判定（同仓库活动任务可重归属会话）、占位落盘 |
 | `cancel(jobId)` | 置 `cancelRequested` 标记，跨 tick 存活；原生结果已落地/执行器已结束时按真实结果收尾而非丢弃产物 |
 | `list()` / `jobSummary(job)` | 导出任务只读视图（供工具与面板共用）：除 `canAdvanceBaseline` 外还透出 `baselineEligible` / `baselineAdvanced` / `deliveryComplete`；0.17.1 起新增透出 `nativeLogs`（内存最近 40 条）、`logFile`（NDJSON 落盘路径，仅 native 通道）与 `logError`（日志落盘失败原因） |
@@ -246,8 +246,8 @@ flowchart LR
     TickNative --> Start{"job.nativeStarted?"}
     Start -->|否| Run["startNativeRun<br/>runNativeJob 长任务"]
     Start -->|是| Wait{"nativeResults?"}
-    Wait -->|无结果且执行器丢失| Replay["planNativeReplay<br/>按非敏感执行快照重放"]
-    Replay -->|可重放| Run
+    Wait -->|无结果且执行器丢失| Replay["planNativeReplay<br/>按非敏感执行快照重放<br/>保留已完成叶子断点"]
+    Replay -->|可重放，resume=true 续跑| Run
     Replay -->|不可重放| Fail["fail：请重新提交编译"]
     Run --> Engine["runNativeJob 子进程<br/>env: 占位 key + UTF-8"]
     Engine --> EnginePy["FSoft Python 引擎<br/>entry.py"]

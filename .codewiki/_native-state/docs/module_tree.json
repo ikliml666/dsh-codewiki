@@ -104,7 +104,8 @@
             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
             "lib\\engine\\workspace-snapshot.js::shortSha",
             "lib\\engine\\workspace-snapshot.js::snapshotExists",
-            "lib\\engine\\python\\stage_map.py::articles_ceiling"
+            "lib\\engine\\python\\stage_map.py::articles_ceiling",
+            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents"
         ],
         "children": {
             "engine_core_contract": {

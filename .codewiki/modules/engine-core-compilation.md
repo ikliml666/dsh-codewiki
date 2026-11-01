@@ -93,6 +93,8 @@ flowchart TB
 - `DEFAULT_UPDATE_OPTIONS = { rung: '3' }`：显式要求 FSoft 组件级增量（图 diff 决定重写范围），不留给引擎内部默认，避免上游语义静默漂移；
 - `DEFAULT_ENGINE_ENTRY`：`lib/engine/python/entry.py` 的绝对路径（见 [engine_core_contract](engine_core_contract.md)）。
 
+`runNativeJob` 还接收两个调用方透传的运行参数：`moduleConcurrency`（同层模块并行度，默认 1 = 上游严格串行）与 `resume`（断点续跑开关）。增量轮时两者都写进 `updateOptions.extra`：Python 侧 `fsoft_runtime.py` 据此做同层隔离并行与检查点续跑；`resume=true` 时水合以 `overwrite: false` 进行（不覆盖 docsDir 里已存在的断点页面），且「水合不到文件但 docsDir 已带 `module_tree.json`」不再退全量——断点目录本身就是有效的增量起点。
+
 统一出口 `settle()` 保证所有分支（取消、环境失败、引擎崩溃、成功收尾）都经过 `engineResult()` 归一化——done 不许带 blockers、partial 必须带 blockers、failed 必须有 error，构造不合法即抛错（接线 bug 必须响）。
 
 ### 2. `manifest.js` —— 引擎环境指纹与锁定
@@ -151,7 +153,7 @@ flowchart TB
 | `stateDocFiles(stateDir)` | 列出受管硬依赖清单（审计用） | 纯函数 |
 | `readState` | 反序列化 state.json，校验版本 | 坏了返回 `ok:false + reason` → 调用方退全量 |
 | `isUpdateEligible` | 判增量资格：硬依赖齐全 + 图存在 + 引擎版本未变 + 基线一致 | 每个不可增量原因都写进 `fallbackReason`，绝不悄悄退全量 |
-| `hydrateDocsDir` | 受管状态复制进独立 docsDir | 复制而非移动：一侧写坏不毁另一侧 |
+| `hydrateDocsDir` | 受管状态复制进独立 docsDir | 复制而非移动：一侧写坏不毁另一侧；`overwrite=false`（resume 断点续跑）时跳过已存在的页面 |
 | `captureDocsDir` | 引擎 docsDir 采集为下一轮写集 | 非 utf8（U+FFFD）直接跳过，不写坏文件 |
 | `archiveDocsTree` | 整棵原始树留档到**仓库外**临时目录 | 证据不是产物，失败只记 note |
 | `graphFileName` | 依赖图文件名（`\p{L}\p{N}` 对齐 Python `c.isalnum`） | 中文仓库名的图不能误判缺失 |
@@ -182,8 +184,8 @@ flowchart TD
     E3 --> R1["增量决议：collectChangeSet 四路 + unconsumed 合并"]
     R1 --> R2{"wantIncremental 且<br/>状态齐全 + 基线可达？"}
     R2 -- 否 --> R3["resolution=full<br/>fallbackReason 入 notes"]
-    R2 -- 是 --> R4["hydrateDocsDir 水合旧图/旧树/文章"]
-    R4 --> R5{"水合到任何文件？"}
+    R2 -- 是 --> R4["hydrateDocsDir 水合旧图/旧树/文章<br/>（resume 时 overwrite=false 跳过已存在页面）"]
+    R4 --> R5{"水合到文件，或断点目录已带 module_tree.json？"}
     R5 -- 否 --> R3
     R5 -- 是 --> R6["resolution=update"]
 

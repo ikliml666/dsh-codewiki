@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | `lib/engine/contract.js` | 跨进程契约的 Node 侧定义与校验（`ENGINE_CONTRACT_VERSION = 2`） | `engineResult`、`engineProgress`、`engineError`、`validateEngineResult`、`describeEngineResult`、`normalizeBlocker`、`ENGINE_STAGES`、`BLOCKER_KINDS`、`ENGINE_ERROR_CODES` |
 | `lib/engine/python/entry.py` | Python 侧薄入口：一行请求 JSON → 一次 FSoft 调用，进度/结果翻译成协议行 | `main`、`_ProtocolOnly`、`_popen_init_utf8`、`action_doctor`、`action_generate`、`handle_request` |
+| `lib/engine/python/fsoft_runtime.py` | 增量轮的 Python 侧运行时适配（替换上游 Step 5 叶子写作） | `install_incremental_runtime`、`run_leaf_agents`、`run_leaf_order`、`write_checkpoint` |
 | `lib/engine/client.js` | Node 侧进程 + 协议适配层（`ENGINE_PROTOCOL_VERSION = 1`） | `runEngine`、`createProtocolReader` |
 | `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**层（无 I/O、无密钥） | `isPlaceholderKey`、`toLlmRequest`、`chunksToCompletion`、`chunksToSse` |
 | `lib/engine/llm-bridge.js` | 跑在 127.0.0.1 上的进程内 HTTP 桥，把引擎请求接到宿主 `llm.stream`；可选 `onRequestStart` 会话记录钩子 | `startLlmBridge` |
@@ -123,7 +124,7 @@ flowchart LR
     Req["stdin 一行请求 JSON"] --> Main["main / handle_request"]
     Main --> A1{"action ?"}
     A1 -->|"doctor"| Doc["action_doctor<br/>版本 + pip check"]
-    A1 -->|"generate / update"| Gen["action_generate<br/>config → adapter.generate()"]
+    A1 -->|"generate / update"| Gen["action_generate<br/>config → adapter.generate()<br/>（增量轮先 install_incremental_runtime）"]
     A1 -->|"cancel"| Ack["立即应答 {cancelled: true}"]
     Gen --> FSoft["CLIDocumentationGenerator<br/>（旁路观察，不改行为）"]
     FSoft --> R["emit_result<br/>一行 JSON 到真 stdout"]
@@ -133,6 +134,7 @@ flowchart LR
 - **`_ProtocolOnly`**：sys.stdout 替身。FSoft 大量使用 `print` / `click.secho` 往 stdout 写人类文案，而 click 会缓存 text stdout 包装器——「事后替换」拦不住已缓存的引用。所以普通 `write` / `flush` 全部改道 stderr，只有本入口经 `emit()` 写出的协议行走保存下来的真实 stdout 句柄。
 - **`_popen_init_utf8`**：给 `subprocess.Popen.__init__` 打补丁——FSoft 内部的 `subprocess.run(..., text=True)` 在 Windows 上按 locale（gbk）解码，仓库路径含中文时 git 回的 UTF-8 字节会触发 `UnicodeDecodeError`。只补未显式指定 `encoding` 的 text 调用，二进制调用保持原样。
 - **不读本机凭证库**：直接构造 config dict 交给 adapter，绕开 `ConfigManager`（它会读 `~/.codewiki/config.json` 与系统 keyring）。模型通道只从进程环境变量读 `CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL`。
+- **增量轮先装运行时适配**：`action_generate` 在 `is_update` 时、构造 `CLIDocumentationGenerator` 之前调 `fsoft_runtime.install_incremental_runtime()`，用源码锚点替换上游 `IncrementalUpdater._run` 的 Step 5（叶子写作），接入本层的同层隔离并行 / 冲突回退串行 / 检查点续跑实现（见 [engine_core](../engine_core.md) 的「增量轮的 Python 侧运行时适配」）；锚点不匹配直接抛错拒绝安装。
 - **异常分类**：`_classify_exception` 按异常**类型**（不是消息文本）映射错误码；`_salvage` 在崩溃/模型失败时若已写出文章就降 partial 交付，避免「下一轮因没有持久化状态退回全量、再撞同一面墙」的循环。
 
 ## 模型通道桥：凭证边界
