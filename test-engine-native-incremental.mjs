@@ -552,6 +552,21 @@ if (want(10)) { console.log('== 用例 10：本轮缺依赖图（受管状态不
   check(graphsAfter.length === graphsBefore.length, `旧依赖图没被裁掉（${graphsBefore.length} → ${graphsAfter.length}）`)
 }
 
+// ============================ 用例 11：宿主重放保留断点现场 ============================
+if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
+  const { base, repo } = makeRepo('resume', { mode: 'done' })
+  await runJob(repo, { scope: 'full' })
+  const docs = freshDocs('resume')
+  fs.cpSync(path.join(repo, STATE_DIR, 'docs'), docs, { recursive: true })
+  fs.writeFileSync(path.join(docs, 'dsh_leaf_checkpoint.json'), '{"completed":"sentinel"}', 'utf8')
+  const r = await runNativeJob({ repoRoot: repo, scope: 'stale', docsDir: docs, resume: true, moduleConcurrency: 4, deps: baseDeps() })
+  check(r.incremental?.resolution === 'update', `保留现场时仍走增量（实际 ${r.incremental?.resolution}；${r.incremental?.fallbackReason ?? ''}）`)
+  check(fs.readFileSync(path.join(docs, 'dsh_leaf_checkpoint.json'), 'utf8').includes('sentinel'), '受管状态水合没有覆盖崩溃时留下的 checkpoint')
+  const update = readCalls(base, 'resume').filter((c) => c.action === 'update').at(-1)
+  check(update?.updateOptions?.extra?.resume === true, `引擎收到 resume=true（实际 ${JSON.stringify(update?.updateOptions)}）`)
+  check(update?.updateOptions?.extra?.moduleConcurrency === 4, '引擎收到增量叶子并行度')
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 占用留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

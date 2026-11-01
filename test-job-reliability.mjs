@@ -409,6 +409,10 @@ console.log('== 用例 5：宿主在原生引擎跑到一半被杀 → 新实例
   const exhaustedJob = { ...mid, nativeStarted: true, stage: 'articles', owner: 'svc-gone', nativeSnapshot: { ...mid.nativeSnapshot, attempt: 3 } }
   const plan3 = planNativeReplay(exhaustedJob)
   check(plan3.replayable === false && plan3.exhausted === true, `连续中断到上限后不再重跑（${plan3.reason}）`)
+  const resumable = planNativeReplay(mid, { exists: () => true })
+  check(resumable.resumeDocsDir === mid.nativeSnapshot.docsDir && !('staleDocsDir' in resumable), '重放保留崩溃现场供叶子断点恢复，不再标成待删除目录')
+  const missing = planNativeReplay(mid, { exists: () => false })
+  check(missing.replayable === true && missing.resumeDocsDir === null, '现场已丢仍可重放，但不声称能续跑')
 
   // 没有引擎快照的旧 job 真的不可续：必须显式失败，而不是假装能跑。
   const noChannel = { ...mid, nativeChannel: null }

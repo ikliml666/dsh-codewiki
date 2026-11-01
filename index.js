@@ -2680,6 +2680,7 @@ function createJobService(config, onSettled) {
         signal: ac.signal,
         timeoutMs: channel.timeoutMs,
         docsDir,
+        resume: job.nativeResumeDocsDir === docsDir,
         // 文章语言：job 提交时已按「入参 > 插件设置」解析好（submit 的 language），
         // 原生通道必须显式带下去，否则引擎按英文写、设置项形同虚设。
         language: job.language,
@@ -2865,11 +2866,12 @@ function createJobService(config, onSettled) {
         fail(job, replay.reason)
         return true
       }
-      if (replay.staleDocsDir) fs.rmSync(replay.staleDocsDir, { recursive: true, force: true })
+      job.nativeResumeDocsDir = replay.resumeDocsDir
       job.nativeSnapshot = { ...job.nativeSnapshot, attempt: replay.attempt }
-      note(job, replay.reason)
+      note(job, replay.resumeDocsDir ? `${replay.reason}；保留已完成叶子断点` : replay.reason)
     }
     job.nativeStarted = true
+    if (job.nativeResumeDocsDir && !fs.existsSync(job.nativeResumeDocsDir)) job.nativeResumeDocsDir = null
     job.nativeSnapshot = snapshotNativeRun(job, {
       channel,
       attempt: job.nativeSnapshot?.attempt ?? 1,

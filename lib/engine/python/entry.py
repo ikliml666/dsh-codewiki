@@ -982,6 +982,10 @@ def action_generate(request_id, payload, is_update=False):
     try:
         from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
 
+        if is_update:
+            from fsoft_runtime import install_incremental_runtime
+            install_incremental_runtime()
+
         adapter = CLIDocumentationGenerator(
             repo_path=repo_path,
             output_dir=docs_dir,
