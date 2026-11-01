@@ -824,6 +824,63 @@ console.log('== 用例 21：deps.onRequestStart 透传到模型桥（会话面�
   check(seenOpts?.provider === 'workbuddy' && seenOpts?.model === 'hy3', 'provider/model 仍照旧传给桥（钩子不影响其它参数）')
 }
 
+// ============================ 用例 22：落地完成后取消不得抹掉事实 ============================
+console.log('== 用例 22：原生结果与取消交错时按真实落地结果收尾 ==')
+{
+  const { repo } = makeRepo('cancel-after-apply', { mode: 'stall-after-result', preInit: true })
+  const m = makeCtx()
+  apply(m.ctx, nativeCfg())
+  try {
+    const gen = m.registered.get('codewiki_generate')
+    const submitted = await gen.execute({ cwd: repo, scope: 'full' }, { agent: { id: 'sess-cancel-after-apply' } })
+    let applied = false
+    for (let i = 0; i < 300 && !applied; i++) {
+      applied = exists(path.join(repo, '.codewiki', 'modules', 'core.md'))
+      if (!applied) await new Promise((r) => setTimeout(r, 100))
+    }
+    check(applied, '真实 apply 已落盘（取消竞态前置）')
+    const ctl = m.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const res = { code: 0, out: '', writeHead(c) { this.code = c }, end(b) { this.out = String(b ?? '') } }
+    await ctl.handler({
+      method: 'POST', socket: { remoteAddress: '127.0.0.1' },
+      on(ev, fn) { if (ev === 'data') fn(Buffer.from(JSON.stringify({ action: 'cancel', jobId: submitted.jobId }))); if (ev === 'end') fn() },
+    }, res)
+    const job = await waitJob(repo, { timeout: 30000 })
+    check(job?.stage === 'done', `取消晚于落地 → 终态必须按真实落盘结果 done（实际 ${job?.stage}）`)
+    check(job?.autoCommit?.committed === true, `产物已提交事实必须保留（实际 ${JSON.stringify(job?.autoCommit)}）`)
+  } finally {
+    for (const d of m.disposers) { try { d() } catch {} }
+  }
+}
+
+// ============================ 用例 23：partial 提交失败也必须提醒 ============================
+console.log('== 用例 23：commitHintText 使用真实 autoCommit 且覆盖 partial ==')
+{
+  const { commitHintText } = await import('./index.js')
+  const { repo } = makeRepo('hint-partial', { mode: 'done', preInit: true })
+  // finishedAt 必须严格晚于基线提交（cw init 那条）：commitHintText 用
+  // 「本轮完成时刻是否晚于 wiki 最后一次提交」判断产物是否真的待提交，同一秒
+  // 会把「刚提交完又编译完」误判成「插件已提交」，于是本用例假失败。
+  const hint = commitHintText(repo, [{
+    id: 'job-partial-hint', cwd: repo, stage: 'partial', writtenCount: 2,
+    finishedAt: new Date(Date.now() + 5000).toISOString(),
+    autoCommit: { committed: false, reason: '测试构造：提交失败' },
+  }])
+  check(
+    hint.includes('job-partial-hint') && hint.includes('部分完成'),
+    `partial + 提交失败必须提醒且带任务号（实际 ${JSON.stringify(hint.slice(0, 120))}）`,
+  )
+  // 换一个仓库：commitHintText 按 cwd 做 60s 结果缓存（一次性提醒的代价），
+  // 同一 cwd 连续调用第二次会直接命中上面那次「待提交」的缓存。
+  const repo2 = makeRepo('hint-committed', { mode: 'done' }).repo
+  const committed = commitHintText(repo2, [{
+    id: 'job-done-committed', cwd: repo2, stage: 'done', writtenCount: 2,
+    finishedAt: new Date(Date.now() + 5000).toISOString(),
+    autoCommit: { committed: true, sha: 'abc123' },
+  }])
+  check(committed === '', '提交成功不提醒')
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 上被占用的临时目录留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

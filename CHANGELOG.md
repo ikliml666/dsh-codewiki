@@ -100,6 +100,18 @@
 章节标题仍写「可选，默认关闭」，基线段落与 `partial` 段落互相矛盾（一处说 partial 可推进、
 一处说不可）。已统一为本文档描述的语义。
 
+**9. 「结果已到、进程不退」不再被改判成卡死**
+
+协议不变量 4 早写着「语义以 `result` 为准，退出码只表达进程层结果」，但进程层只等 `exit`：
+引擎发完 `result(done)` 后若卡在收尾（僵死的收尾线程、没关的 pipe、忘了 `return` 的事件
+循环），这轮**已经确定成功**的编译会被 10 分钟静默阈值或 180 分钟超时改判成「卡死」→
+`partial`、基线不推进，下一轮把同一批变化再跑一遍。
+
+现在 `runEngine` 在收到 `result` 后给进程一个 `resultGraceMs`（默认 2000ms）的自行收场
+窗口，超时就终止进程树按已有 `result` 收尾，并记一条 `result-grace` 日志把「引擎自己退」
+与「我们杀」分开。顺带修 `nonzero-exit` 违规的误报：被我们主动终止的进程退出码是终止方式
+的产物，不再记成引擎的非零退出。
+
 ### 验证
 
 - `test-job-reliability.mjs`（新增，109 项）：原子写、损坏隔离、锁归属、双实例幂等、原生
@@ -107,9 +119,12 @@
 - `test-orchestration.mjs`（257 项）：补齐块间实例清理（此前 30+ 个 JobService 实例共享同一
   `JOBS_FILE` 且从不 `stop`，残留任务占住串行闸门）、重启重跑与旧 plan 迁移用例补 `cw init`
   夹具；
-- `test-engine-native-job.mjs` 116 项、`quality-gate` 31 项、`apply-plan` 41 项、
-  `native-incremental` 104 项、`contract` 19 项，全部通过；全仓 30 套测试仅
-  `test-wiki-anchors.mjs` 报 9 处符号锚点失效（文档滞后，待 `codewiki_generate` 重编译）。
+- `test-engine-client.mjs`（29 项）：新增「`result` 已到但进程不退 → 按 `result` 收尾」
+  （`result-then-hang` 夹具，静默/超时都设得很大，证明是结果宽限先动手）；
+- `test-engine-native-job.mjs` 121 项（新增用例 22 取消与落地交错、用例 23 `commitHintText`
+  覆盖 `partial`）、`quality-gate` 31 项、`apply-plan` 41 项、`native-incremental` 104 项、
+  `contract` 19 项，全部通过；全仓 30 套测试仅 `test-wiki-anchors.mjs` 报 9 处符号锚点失效
+  （文档滞后，待 `codewiki_generate` 重编译）。
 
 ## 0.16.16 — 2026-10-30
 

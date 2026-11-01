@@ -243,6 +243,17 @@ function run(req) {
     setInterval(() => {}, 1000)
     return
   }
+  if (MODE === 'stall-after-result') {
+    const d = String(req?.docsDir ?? '')
+    writeDocs(d, String(req?.repoPath ?? process.cwd()), { action, commitId: String(req?.commitId ?? '') })
+    result(requestId, {
+      outcome: 'done', stage: 'articles', writtenCount: 2, failedCount: 0,
+      engine: { version: VERSION, python: PYVER, deps: { ok: true, summary: 'pip check ok' } },
+      artifacts: { docsDir: d, rawTreeDir: '', updateRecord: path.join(d, 'update_record.json') },
+    })
+    setInterval(() => {}, 1000)
+    return
+  }
   if (MODE === 'slow') {
     // 慢但会自己跑完：用来验证「上一个仓库还在跑时，后提交的仓库进 queued 排队」。
     // 不用 stall，是因为 stall 只能靠取消收场，串行测试不该顺带验证取消。

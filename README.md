@@ -112,6 +112,7 @@
 | `nativeEnginePython` | 空 | venv 解释器绝对路径；空 → `DSH_CODEWIKI_PYTHON` → `python` |
 | `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本，一般不用改 |
 | `nativeEngineTimeoutMs` | `0`（= 用默认 180 分钟） | 单次引擎调用上限；超时杀进程树，**已写出的文章按 partial 抢救**（不会白跑）。默认值按真机全量实测（约 174 分钟）给，不是按小 fixture 估的 |
+| —（无设置项，环境变量 `DSH_CODEWIKI_ENGINE_SILENCE_MS`） | 10 分钟 | 多久没收到任何协议帧就判引擎卡死并杀进程树，口径同上（已写文章 partial、零进展 failed）。只兜「跑太久」兜不住「已经卡死」，所以与上面的超时是两个独立判据；必须显著大于引擎 60 秒心跳。另：引擎发完 `result` 后若卡着不退，2 秒宽限后按已到的 `result` 收尾，不会被这两条改判 |
 
 模型侧不新增设置：复用 `batchProvider` / `batchModel`（聚类与写文章都用它），经上面的
 llm bridge 转发。

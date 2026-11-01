@@ -238,6 +238,13 @@ elif mode == "late":
     time.sleep(0.6)
     emit({"type": "result", "requestId": req, "result": {"outcome": "done", "writtenCount": 9}})
     sys.exit(0)
+elif mode == "result-then-hang":
+    # 引擎把结果发完了，却卡在收尾不退（僵死的收尾线程/没关的 pipe）。
+    # 语义早已确定成 done，绝不能因为进程不退就按超时/卡死改判。
+    emit({"type": "progress", "requestId": req, "stage": "articles", "percent": 100, "writtenCount": 6})
+    emit({"type": "result", "requestId": req, "result": {"outcome": "done", "writtenCount": 6, "stage": "articles"}})
+    time.sleep(300)
+    sys.exit(0)
 elif mode == "wrongid":
     emit({"type": "result", "requestId": "not-my-id", "result": {"outcome": "done"}})
     sys.exit(0)
@@ -457,6 +464,34 @@ await check('进程：静默卡死且零进展 → 仍判 failed（不能把空�
   })
   assert.equal(res.outcome, 'failed', `零进展的静默卡死必须判 failed，实际 ${res.outcome}`)
   assert.equal(res.error.code, 'engine-timeout')
+})
+
+let sawGrace = false
+await check('进程：result 已到但进程不退 → 按 result 收尾，不改判超时/卡死', async () => {
+  // 这是「协议不变量 4」的延伸：语义以 result 为准，进程寿命只表达进程层结果。
+  // 旧实现只等 'exit'，于是 result(done) 之后不退的引擎会被静默阈值改判成
+  // 「卡死」→ partial、基线不推进，一轮已经成功的编译白跑，下一轮再跑一遍。
+  const t0 = Date.now()
+  const res = await runEngine({
+    engine: pyEngine('result-then-hang'),
+    requestId: 'p-rg',
+    action: 'generate',
+    // 故意把超时/静默都设得很大：只有结果宽限先动手，才能证明是它在兜底。
+    silenceMs: 60000,
+    timeoutMs: 120000,
+    resultGraceMs: 800,
+    onLog: (m) => { if (m.kind === 'result-grace') sawGrace = true },
+  })
+  const ms = Date.now() - t0
+  assert.equal(res.outcome, 'done', `语义已 done，不得因进程不退降级，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 6)
+  assert.ok(ms < 20000, `必须在结果宽限后立刻返回，不该等满静默/超时：${ms}ms`)
+  assert.equal(res.terminated, true, '卡住不退的进程树必须被终止')
+  assert.ok(sawGrace, '必须以 result-grace 记录这次终止，便于事后区分「引擎自己退」与「我们杀」')
+  assert.equal(
+    res.protocolViolations.some((v) => v.kind === 'nonzero-exit'), false,
+    '我们主动终止不算引擎非零退出',
+  )
 })
 
 rmSync(tmp, { recursive: true, force: true })
