@@ -2,40 +2,37 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "8d155b3ca92552b70ae315306dca4883726eb408",
-    "headCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1"
+    "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
+    "headCommit": "45aac937b75b52f9fd8e0dca5510aecb73d6132e"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "8d155b3ca92552b70ae315306dca4883726eb408",
-    "headCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
-    "committed": [
-      "CHANGELOG.md",
-      "client.js",
-      "index.js",
-      "lib/engine/llm-bridge.js",
-      "lib/engine/native-run.js",
-      "package.json",
-      "test-engine-llm-bridge.mjs",
-      "test-engine-native-job.mjs",
-      "test-sessions.mjs"
-    ],
+    "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
+    "headCommit": "45aac937b75b52f9fd8e0dca5510aecb73d6132e",
+    "committed": [],
     "staged": [],
-    "unstaged": [],
+    "unstaged": [
+      "test-engine-native-job.mjs",
+      "test-fixtures/fake-native-engine.mjs"
+    ],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [],
+  "unconsumed": [
+    "test-engine-native-job.mjs",
+    "test-fixtures/fake-native-engine.mjs"
+  ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 f74fb4e 与本次 cw 基线 8d155b3 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvv0pzdx-3-native（25 个文件）"
+    "持久化基线 8d155b3 与本次 cw 基线 63c62f0 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit 4f626240184c（2 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxhluxi-4-native（25 个文件）"
   ],
-  "updatedAt": "2026-10-30T14:01:32.273Z"
+  "updatedAt": "2026-11-01T07:11:47.366Z"
 }
