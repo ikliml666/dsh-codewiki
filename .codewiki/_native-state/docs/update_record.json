@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-01T22:33:29+0800",
-  "finished_at": "2026-11-01T22:33:29+0800",
+  "started_at": "2026-11-01T23:29:16+0800",
+  "finished_at": "2026-11-01T23:29:17+0800",
   "outcome": "no_change",
   "options": {
     "rung": "3",
@@ -20,13 +20,12 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 3,
-      "resume": true,
-      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
+      "resume": false
     }
   },
   "revision": {
-    "old_commit": "9691bf427df2f9547e7d2e866ce03a7bcdf5a972",
-    "new_commit": "acfc6f4d261bb8273fb3415655fdf42b11508fce",
+    "old_commit": "acfc6f4d261bb8273fb3415655fdf42b11508fce",
+    "new_commit": "0cddac8af9f8451b9e9b621603af8eb0f52aa28c",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -60,7 +59,7 @@
   "calls": [],
   "detector_notes": [],
   "errors": [],
-  "wall_seconds": 0.06,
+  "wall_seconds": 0.16,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -77,5 +76,5 @@
     "unpriced_models": [],
     "calls": []
   },
-  "run_id": "f8183ff7-7a01-4af1-8f9b-a164e4d3a1e1"
+  "run_id": "e48b3da3-fc8e-4992-a470-84707c5afc4d"
 }
