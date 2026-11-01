@@ -29,6 +29,7 @@ import {
   createJobsStore, mergeJobLists, findActiveJob, reassignSession,
   snapshotNativeRun, planNativeReplay, heartbeat, adoptOrphan, lastSeenAt,
 } from './lib/job-store.js'
+import { appendLog, readLogTail, logStats, logFileOf as logFileFor } from './lib/job-logs.js'
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const PLUGIN_NAME = 'dsh-codewiki'
@@ -2207,6 +2208,12 @@ function jobSummary(job) {
     nativeMessage: job.nativeMessage ?? null,
     nativeTotal: job.nativeTotal ?? null,
     nativeResult: job.nativeResult ?? null,
+    // 引擎事件日志（0.17.1）：内存里最近 40 条给面板即时看；完整 NDJSON 在仓库外的
+    // 临时目录（见 lib/job-logs.js），端点 /api/codewiki/logs 按需翻全量。
+    // 此前这两个字段都不进 jobSummary，面板与 codewiki_progress 都看不到任何引擎日志。
+    nativeLogs: (job.nativeLogs ?? []).slice(-40),
+    logFile: job.channel === 'native' ? logFileFor(job.id) : null,
+    logError: job.logError ?? null,
     error: job.error ?? null,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
@@ -2633,6 +2640,23 @@ function createJobService(config, onSettled) {
     env: 'articles', graph: 'articles', cluster: 'articles', articles: 'articles',
     validate: 'review', index: 'index', baseline: 'index', commit: 'commit',
   }
+  // 引擎事件日志：内存留最近 40 条给面板即时看，同时逐条追加到仓库外的 NDJSON
+  // （lib/job-logs.js）。两条路都必须有——内存那份随任务记录截断/宿主重启消失，
+  // 落盘那份才能回答「99 分钟里到底发生了什么」。
+  const NATIVE_LOG_MEMORY = 40
+  function recordNativeLog(job, entry) {
+    const at = entry?.at || new Date().toISOString()
+    const item = { at, ...entry }
+    job.nativeLogs = [...(job.nativeLogs ?? []), item].slice(-NATIVE_LOG_MEMORY)
+    if (appendLog(job.id, item)) {
+      job.logError = null
+    } else if (!job.logError) {
+      // 落盘失败不能静默：日志是这个任务唯一的黑匣子，写不进去必须让用户看到。
+      job.logError = '引擎日志写入失败（详见宿主临时目录权限）'
+      note(job, `引擎日志写入失败 —— 后续事件只在内存里保留最近 ${NATIVE_LOG_MEMORY} 条`)
+    }
+  }
+
   // 原生通道单次编译：起一条长任务，结果为 EngineResult（含 gate/apply 现场）。
   // 失败一律进 nativeResults=null 并由这里 fail()，与 batchRuns 的约定一致：
   // 收割方（settleJob）只看「有没有结果」，不用自己猜执行器死活。
@@ -2699,9 +2723,22 @@ function createJobService(config, onSettled) {
           if (p.writtenCount) job.writtenCount = p.writtenCount
           if (p.failedCount) job.failedCount = p.failedCount
           if (p.totalCount) job.nativeTotal = p.totalCount
+          // 进度帧也进日志，但要按「阶段/百分比/篇数」去重：引擎每秒可能发好几帧，
+          // 全量落盘只会把真正的事件（桥请求失败、stderr、阶段切换）挤出去。
+          const sig = `${p.stage}|${p.percent}|${p.writtenCount ?? 0}`
+          if (job.nativeLogSig !== sig) {
+            job.nativeLogSig = sig
+            recordNativeLog(job, {
+              kind: 'progress',
+              phase: 'engine',
+              detail: `${p.stage} ${p.percent}%${p.message ? ` — ${String(p.message).slice(0, 160)}` : ''}`,
+              written: p.writtenCount ?? 0,
+              total: p.totalCount ?? null,
+            })
+          }
           touch(job)
         },
-        onLog: (e) => { job.nativeLogs = [...(job.nativeLogs ?? []), e].slice(-20) },
+        onLog: (e) => recordNativeLog(job, e),
       }))
       .then(
         (res) => nativeResults.set(job.id, res),
@@ -2741,6 +2778,23 @@ function createJobService(config, onSettled) {
       job.failedCount = Number(res.failedCount ?? 0) || 0
       job.blockers = res.blockers ?? []
       job.autoCommit = res.apply?.commit ?? null
+      // 用量：引擎侧（FSoft usage_ledger）已经把真实 token 数报回来了，此前从不写进
+      // job.usage，面板与 codewiki_progress 一直显示 0——用户看到「跑了一小时」却
+      // 看不到「烧了多少 token」，等于把成本完全藏起来。这里按字段映射落账，
+      // 并沿用旧通道的 usage 形状（inputTok/outputTok/requests）避免面板两套渲染。
+      const nu = res.usage
+      if (nu && (nu.inputTokens || nu.outputTokens || nu.requests)) {
+        job.usage = {
+          inputTok: Number(nu.inputTokens) || 0,
+          outputTok: Number(nu.outputTokens) || 0,
+          requests: Number(nu.requests) || 0,
+          cachedTok: Number(nu.cachedTokens) || 0,
+          // 原生通道没有批量/实时分层，全部记在实时侧，面板的括号说明才不会空着。
+          batchRequests: 0,
+          realtimeRequests: Number(nu.requests) || 0,
+          overTier2: 0,
+        }
+      }
       job.baselineEligible = res.gate?.baselineEligible === true
       job.baselineAdvanced = res.apply?.baseline?.advanced === true
       // 引擎/裁决给出的错误原文必须落到 job.error：finishJob 只在 blockers 非空时
@@ -2764,6 +2818,7 @@ function createJobService(config, onSettled) {
         // 回答「这一轮到底走了增量还是退了全量、变化有没有被吃干净」；
         // 不搬过来的话，外层只能看到一个 outcome，增量语义又变成不可观测。
         incremental: res.incremental ?? null,
+        usage: res.usage ?? null,
         notes: (res.notes ?? []).slice(-10),
       }
       if (Array.isArray(res.gate?.articles) && res.gate.articles.length) {
@@ -4452,6 +4507,12 @@ function progressToolDefinition(cfg, svc) {
                 batchProgress: { oneOf: [{ type: 'object' }, { type: 'null' }] },
                 stageTimings: { type: 'object' },
                 usage: { type: 'object' },
+                nativeStage: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎自报的八段契约阶段（env/graph/cluster/articles/validate/index/baseline/commit），与面板粗粒度 stage 不是一回事' },
+                nativePercent: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '引擎自报百分比；长阶段（写文章）按真实篇数插值，不再冻结' },
+                nativeMessage: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎当前正在做什么（含正在写的模块名）' },
+                nativeLogs: { type: 'array', items: { type: 'object' }, description: '引擎事件日志最近若干条（完整 NDJSON 在 logFile，可用 /api/codewiki/logs 翻全量）' },
+                logFile: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎事件日志文件路径（仓库外临时目录）' },
+                logError: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '日志落盘失败原因（非空表示日志只剩内存里最近若干条）' },
                 tps: { oneOf: [{ type: 'number' }, { type: 'null' }] },
                 notes: { type: 'array', items: { type: 'string' } },
                 autoCommit: {
@@ -4490,6 +4551,10 @@ function progressToolDefinition(cfg, svc) {
             const mark = t.state === 'done' ? '✓' : t.state === 'failed' ? '✗' : '·'
             lines.push(`  ${mark} ${t.name}`)
           }
+          if (j.nativeStage || j.nativeMessage) {
+            lines.push(`  引擎：${j.nativeStage ?? '-'} ${j.nativePercent ?? '-'}%${j.nativeMessage ? ` — ${j.nativeMessage}` : ''}`)
+          }
+          if (j.logFile) lines.push(`  日志：${j.logError ? `落盘失败（${j.logError}），仅内存最近 ${(j.nativeLogs ?? []).length} 条` : j.logFile}`)
           if (j.autoCommit) {
             lines.push(j.autoCommit.committed
               ? `  产物已自动提交：${j.autoCommit.sha ?? ''}（无需你跑 git）`
@@ -4844,6 +4909,33 @@ export function installWebServer(ctx, service, extra = {}) {
           const rec = readSessionRecord(jobId, n)
           if (!rec) { writeJson(res, 404, { error: '会话记录不存在或已过期（保留 24h）' }); return }
           writeJson(res, 200, rec)
+        } catch (err) {
+          writeJson(res, 500, { error: String(err?.message ?? err) })
+        }
+      },
+    })
+    // 引擎事件日志：GET /api/codewiki/logs?jobId=&limit=
+    // 内存里只留最近 40 条（jobSummary），完整 NDJSON 在仓库外，按需在这里翻。
+    // 没有这个端点，用户/排查者只能去临时目录里手工找文件——真机上没人会这么做。
+    ws.register({
+      kind: 'exact',
+      path: '/api/codewiki/logs',
+      handler: (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const url = new URL(req.url ?? '', 'http://localhost')
+          const jobId = String(url.searchParams.get('jobId') ?? '').trim()
+          const limit = Number(url.searchParams.get('limit')) || 200
+          if (!jobId) { writeJson(res, 400, { error: '缺少 jobId 查询参数' }); return }
+          const job = service.list().find((j) => j.id === jobId)
+          writeJson(res, 200, {
+            jobId,
+            stage: job?.stage ?? null,
+            channel: job?.channel ?? null,
+            logError: job?.logError ?? null,
+            stats: logStats(jobId),
+            entries: readLogTail(jobId, limit),
+          })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }

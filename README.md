@@ -10,6 +10,8 @@
 
 **0.17.0 起编译基线只有一个判据：`done`**（`baselineEligible`）。0.16.1 曾让「有产物的 `partial`」也推进基线来打破死循环，但那等于把「没消化完」记成已消化，与落地器的「`partial` 不推基线」直接冲突；真正的死循环来源是**首次编译**把本轮刚 `cw init` 出来的空骨架判成「未入库基线」，于是正常首编也只能 `partial`。现在空骨架（`worktree-only`/`git-head` 且无编译提交）判 `baseline-absent` 直接放行，首编能走成 `done`；`partial` 一律不推基线。同一版还补齐了**原生任务跨重启接管**、JobService 的原子持久化与跨实例幂等（详见「任务生命周期（0.17.0）」）。
 
+**0.17.1 起原生引擎的过程可观测**：真实编译一轮写文章可能跑一个多小时（本仓库实测 99.6 分钟，`stageTimings.articles` 占 99.9%），而此前面板会把这段显示成「36%、聚合类模块」僵着不动、结束后也查不到日志。现在写文章阶段的百分比按「已写篇数 / 本轮起始 `.md` 篇数」推进、增量轮不再被错标成 `cluster`、引擎自报的 token 用量落进 `job.usage`、引擎事件逐条写进仓库外的 NDJSON 并可从面板与 `GET /api/codewiki/logs` 翻查。详见「引擎日志与进度可观测性（0.17.1）」。
+
 **0.15.0 引入、0.16.0 转正的原生引擎通道**（`nativeEngine`，**0.16.0 起默认开启**）：装法见「原生引擎通道」。`nativeEngine:false` 仍然可用，是一条**兼容通道**（插件内 Node 流水线），只服务「本机装不了 Python 依赖」这一种场景，**不再接收新能力**；两条通道互不回退。
 
 ## 提供
@@ -116,6 +118,25 @@
 
 模型侧不新增设置：复用 `batchProvider` / `batchModel`（聚类与写文章都用它），经上面的
 llm bridge 转发。
+
+### 引擎日志与进度可观测性（0.17.1）
+
+原生通道有三个「引擎在跑但你看不出来」的坑，0.17.1 一并补掉：
+
+| 现象 | 根因 | 现在的行为 |
+|------|------|-----------|
+| 写文章阶段百分比长时间不动 | 上游在阶段 3（Documentation Generation）内的所有 `update_stage` 都在 `if self.verbose:` 里，入口传 `verbose=False`，于是从 `start_stage(3)` 到 `complete_stage()` 之间一帧进度都没有 | `stage_map.articles_percent` 在 `articles` 槽位内按「已写篇数 / 本轮起始 `.md` 篇数」插值，心跳帧带真实篇数；篇数口径与 `written_now` 的 baseline 快照同源，不拿模块名数当分母 |
+| 增量轮被报成「聚合类模块」 | 增量分支复用 `start_stage(2, "Incremental Update")` 的槽位，按阶段号会映射成 `cluster` | `stage_map.is_incremental` 按 description 里的 `incremental update` 识别，整轮报 `articles` |
+| 用量恒为 0 | 引擎已把 `usage_ledger` 汇总进 `result.usage`，`native-run.js` 也一路带到 `EngineResult.usage`，但收割段没写进 `job.usage` | 按旧通道字段形状落账（`inputTok`/`outputTok`/`requests`），并写进 `nativeResult.usage` |
+
+日志：`lib/job-logs.js` 把引擎事件逐条追加到**仓库外**的 NDJSON（默认
+`%TEMP%/dsh-codewiki-logs/<jobId>.ndjson`，可用 `DSH_CODEWIKI_LOG_DIR` 改目录、
+`DSH_CODEWIKI_LOG_MAX_BYTES` 改单文件上限，默认 2MB，超限保留后半段现场）。进度帧按
+「阶段|百分比|篇数」去重后入档——引擎每秒可能发好几帧，全量落盘只会把桥请求失败、
+stderr、阶段切换这些真正有用的事件挤出去。查看方式三选一：面板任务卡里可展开的
+「引擎日志」块、`GET /api/codewiki/logs?jobId=&limit=`（默认 200 条，带字节数与错误行
+计数）、或直接翻那个文件。日志写不进去不再静默：`job.logError` 会说明，并在 notes 里
+提示「后续只在内存里保留最近 40 条」。
 
 ### 真实验收记录（0.15.0）
 

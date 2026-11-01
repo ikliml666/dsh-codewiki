@@ -881,6 +881,70 @@ console.log('== 用例 23：commitHintText 使用真实 autoCommit 且覆盖 par
   check(committed === '', '提交成功不提醒')
 }
 
+// ============================ 用例 24：引擎用量必须落账 ============================
+console.log('== 用例 24：引擎自报 usage 必须落到 job.usage（此前恒为 0）==')
+{
+  const { repo } = makeRepo('usage-lands', { mode: 'done', preInit: true })
+  const m = makeCtx()
+  apply(m.ctx, nativeCfg())
+  try {
+    const gen = m.registered.get('codewiki_generate')
+    await gen.execute({ cwd: repo, scope: 'full' }, { agent: { id: 'sess-usage-lands' } })
+    const job = await waitJob(repo, { timeout: 120000 })
+    const u = job?.usage ?? {}
+    check(job?.stage === 'done', `前置：本轮应 done（实际 ${job?.stage}）`)
+    check(u.inputTok === 12345, `输入 token 必须来自引擎自报（实际 ${u.inputTok}）`)
+    check(u.outputTok === 678, `输出 token 必须来自引擎自报（实际 ${u.outputTok}）`)
+    check(u.requests === 7, `请求数必须来自引擎自报（实际 ${u.requests}）`)
+  } finally {
+    for (const d of m.disposers) { try { d() } catch {} }
+  }
+}
+
+// ============================ 用例 25：引擎事件日志必须落盘并可读 ============================
+console.log('== 用例 25：引擎事件日志落盘，且进度帧按去重入档 ==')
+{
+  const { repo } = makeRepo('log-lands', { mode: 'done', preInit: true })
+  const m = makeCtx()
+  apply(m.ctx, nativeCfg())
+  try {
+    const gen = m.registered.get('codewiki_generate')
+    const submitted = await gen.execute({ cwd: repo, scope: 'full' }, { agent: { id: 'sess-log-lands' } })
+    const job = await waitJob(repo, { timeout: 120000 })
+    check(job?.stage === 'done', `前置：本轮应 done（实际 ${job?.stage}）`)
+    // waitJob 读的是磁盘上的裸任务记录；面板与 codewiki_progress 用的是
+    // jobSummary（:/api/codewiki/jobs）。日志可见性必须验证后者——否则「日志
+    // 写了但谁也看不到」这种缺陷会从断言缝里漏过去。
+    const jobsEp = m.endpoints.find((e) => e.path === '/api/codewiki/jobs')
+    const res0 = { code: 0, out: '', writeHead(c) { this.code = c }, end(b) { this.out = String(b ?? '') } }
+    jobsEp.handler({ method: 'GET', socket: { remoteAddress: '127.0.0.1' } }, res0)
+    const summary = (JSON.parse(res0.out).jobs ?? []).find((j) => j.id === submitted.jobId)
+    check(!!summary, '面板摘要里必须有这个任务')
+    check(typeof summary?.logFile === 'string', `面板摘要必须带日志文件路径（实际 ${summary?.logFile}）`)
+    check(Array.isArray(summary?.nativeLogs) && summary.nativeLogs.length > 0,
+      `面板摘要必须带内存态日志条目（实际 ${summary?.nativeLogs?.length}）`)
+    const file = summary?.logFile
+    check(!!file && fs.existsSync(file), `日志文件必须真的存在（实际 ${file}）`)
+    const lines = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10)).map((l) => l.replace(String.fromCharCode(13), '')).filter(Boolean)
+    check(lines.length >= 3, `日志必须留下多条事件（实际 ${lines.length}）`)
+    const entries = lines.map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+    check(entries.every((e) => e.jobId === submitted.jobId), '每条日志都要带 jobId')
+    check(entries.some((e) => e.kind === 'progress'), '进度帧必须进日志（否则「99 分钟里在干什么」仍不可查）')
+    const sigs = entries.filter((e) => e.kind === 'progress').map((e) => `${e.detail}`)
+    check(new Set(sigs).size === sigs.length, `进度日志必须去重（实际 ${sigs.length} 条 / ${new Set(sigs).size} 种）`)
+    // 端点可见：完整 NDJSON 要能按 jobId 翻。
+    const ep = m.endpoints.find((e) => e.path === '/api/codewiki/logs')
+    check(!!ep, '必须注册 /api/codewiki/logs 端点')
+    const res = { code: 0, out: '', writeHead(c) { this.code = c }, end(b) { this.out = String(b ?? '') } }
+    await ep.handler({ method: 'GET', url: `/api/codewiki/logs?jobId=${submitted.jobId}&limit=50`, socket: { remoteAddress: '127.0.0.1' } }, res)
+    const payload = JSON.parse(res.out)
+    check(Array.isArray(payload.entries) && payload.entries.length > 0, `端点必须返回日志条目（实际 ${payload.entries?.length}）`)
+    check(payload.stats?.bytes > 0, '端点必须报出日志体积')
+  } finally {
+    for (const d of m.disposers) { try { d() } catch {} }
+  }
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 上被占用的临时目录留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

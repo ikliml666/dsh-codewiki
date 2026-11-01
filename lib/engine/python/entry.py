@@ -622,7 +622,12 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
     「一篇没写的一轮」也报出几十篇；而只看篇数净差又会把「原地重写 20 篇」的增量轮
     记成零进展。按路径比对 (size, mtime_ns) 两种都能算对。
     """
-    from stage_map import map_stage, percent_of
+    from stage_map import (
+        articles_percent,
+        is_incremental,
+        map_stage,
+        percent_of,
+    )
 
     tracker = adapter.progress_tracker
     orig_start, orig_update, orig_complete = (
@@ -632,10 +637,39 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
     )
     baseline = _doc_fingerprints(docs_dir) if docs_dir else {}
     counted = {"n": 0, "at": 0.0}
+    # 增量轮：FSoft 借用「模块聚类」的槽位（start_stage(2, "Incremental
+    # Update")）跑整轮文章写作，阶段号会把它谎报成 cluster。这里记住
+    # description 给的语义，后续帧一律按 articles 报。
+    mode = {"incremental": False}
+
+    def engine_stage(stage):
+        return "articles" if mode["incremental"] else map_stage(stage)
 
     def note(stage):
         if on_stage:
-            on_stage(map_stage(stage))
+            on_stage(engine_stage(stage))
+
+    def expected_total(written):
+        """本轮百分比的分母：本轮开始时 docs 里已有的 .md 篇数。
+
+        为什么不数 module_tree.json：它只有叶子模块名（本仓库 16 项），而一轮
+        真实改动覆盖 modules/ 与 crosscut/ 下的全部页（真机 28 篇），分子分母
+        不同口径会让进度瞬间冲顶再卡住。baseline 快照与 written 同源（都是
+        docs 目录里的 .md），量级一致。written 超过基线篇数（新建页）时以
+        written 为准，保证百分比单调不倒退。
+        """
+        base = sum(1 for rel in baseline if rel.lower().endswith(".md"))
+        return max(base, written)
+
+    def frame_percent(stage, stage_progress, written):
+        """进度帧的百分比。
+
+        增量轮与阶段 3 都按「已写 / 预期」算，因为这两段的 stage_progress 恒为 0
+        （FSoft 把该阶段的 update_stage 全门控在 verbose 里）。其余阶段照旧。
+        """
+        if mode["incremental"] or int(stage or 0) == 3:
+            return articles_percent(written, expected_total(written))
+        return percent_of(stage, stage_progress)
 
     def written_now(force=False):
         # 清点失败一律当 0：进度是观测值，不能因为它把编译搞崩。
@@ -660,9 +694,15 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
         counted["at"] = now
         return changed
 
-    def emit(stage, percent, message, force=False):
+    def emit(stage, stage_progress, message, force=False):
+        written = written_now(force)
         emit_progress(
-            request_id, map_stage(stage), percent, message, written=written_now(force)
+            request_id,
+            engine_stage(stage),
+            frame_percent(stage, stage_progress, written),
+            message,
+            written=written,
+            total=expected_total(written),
         )
 
     def with_detail(message):
@@ -680,16 +720,16 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
 
     def start_stage(stage, description=None):
         orig_start(stage, description)
-        emit(stage, percent_of(stage, 0.0), with_detail(description or ""), force=True)
+        if is_incremental(description):
+            mode["incremental"] = True
+        elif int(stage or 0) == 3:
+            mode["incremental"] = False
+        emit(stage, 0.0, with_detail(description or ""), force=True)
         note(stage)
 
     def update_stage(progress, message=None):
         orig_update(progress, message)
-        emit(
-            tracker.current_stage,
-            percent_of(tracker.current_stage, tracker.stage_progress),
-            with_detail(message or ""),
-        )
+        emit(tracker.current_stage, tracker.stage_progress, with_detail(message or ""))
         note(tracker.current_stage)
 
     def complete_stage(message=None):
@@ -697,11 +737,14 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
         # 阶段完成是超时判 partial 的关键帧，必须按当前真实产物重算，不吃节流缓存。
         emit(
             tracker.current_stage,
-            percent_of(tracker.current_stage, 1.0),
+            1.0,
             with_detail(message or ""),
             force=True,
         )
         note(tracker.current_stage)
+        # 增量轮跑完就回到常规槽位语义，别让后续阶段继续按 articles 算。
+        if mode["incremental"]:
+            mode["incremental"] = False
 
     tracker.start_stage = start_stage
     tracker.update_stage = update_stage
@@ -742,10 +785,11 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
                 # 硬发一帧只会让 map_stage 抛错（它按 1..5 映射）。
                 if not stage:
                     continue
+                written = written_now(True)
                 emit(
                     stage,
-                    percent_of(stage, tracker.stage_progress),
-                    f"引擎仍在运行（阶段 {stage}，已写 {counted['n']} 篇）{detail_suffix()}",
+                    tracker.stage_progress,
+                    f"引擎仍在运行（已写 {written} 篇）{detail_suffix()}",
                     force=True,
                 )
                 note(stage)

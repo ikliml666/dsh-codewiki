@@ -59,6 +59,48 @@ FSOFT_TO_ENGINE = {
 # 归到 articles 是因为第 3 段是耗时最长、最需要让用户看见的阶段。
 DEFAULT_ENGINE_STAGE = "articles"
 
+# 增量轮的旁路识别。
+#
+# FSoft 的 ``_run_incremental_update`` 复用 ``start_stage(2, "Incremental Update")``
+# （doc_generator.py:441）——拿的是「模块聚类」的槽位，可实际上整轮都在逐页写文章。
+# 照阶段号 2 映射成 cluster，面板会把 90 分钟的文章写作显示成「聚合类模块」，进度
+# 还死死钉在 ``percent_of(2, 0.0)``=36%：阶段号是 FSoft 的私有槽位，description 才是
+# 它自己给出的语义，所以增量轮按 description 认，不按阶段号。
+INCREMENTAL_DESCRIPTION_MARKER = "incremental update"
+INCREMENTAL_ENGINE_STAGE = "articles"
+# 增量轮落在 articles 槽位的百分比区间（见 percent_of(3, ·)）。
+INCREMENTAL_FSOFT_STAGE = 3
+
+
+def is_incremental(description):
+    """``start_stage`` 的 description 是否标记了增量轮。"""
+    return INCREMENTAL_DESCRIPTION_MARKER in str(description or "").lower()
+
+
+def articles_percent(written, total):
+    """按「已写篇数 / 预期篇数」算 articles 槽位内的百分比。
+
+    为什么不用 ``stage_progress``：FSoft 在阶段 3 内的所有 ``update_stage`` 都被
+    ``if self.verbose:`` 门控（doc_generator.py:378-391），而 entry.py 传的是
+    verbose=False——阶段内进度永远是 0。真实篇数才是这段长跑唯一的进度事实。
+    """
+    lo = percent_of(INCREMENTAL_FSOFT_STAGE, 0.0)
+    hi = percent_of(INCREMENTAL_FSOFT_STAGE, 1.0)
+    try:
+        n = float(written)
+        d = float(total)
+    except (TypeError, ValueError):
+        return lo
+    if d <= 0:
+        return lo
+    ratio = min(1.0, max(0.0, n / d))
+    return int(round(lo + (hi - lo) * ratio))
+
+
+def articles_ceiling():
+    """articles 槽位的百分比上限（阶段 3 完成时的值）。"""
+    return percent_of(INCREMENTAL_FSOFT_STAGE, 1.0)
+
 # 引擎内部进度只占到 90%，见模块 docstring。
 FSOFT_PROGRESS_CEILING = 90
 

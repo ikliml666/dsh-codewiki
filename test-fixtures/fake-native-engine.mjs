@@ -318,6 +318,9 @@ function run(req) {
     writtenCount: MODE === 'partial' ? 1 : 2,
     failedCount: MODE === 'partial' ? 1 : 0,
     engine: { version: VERSION, python: PYVER, deps: { ok: true, summary: 'pip check ok' } },
+    // 用量：真实 entry.py 从 FSoft usage_ledger 汇总出这四个数（entry.py:1043-1050）。
+    // 夹具照同形自报，让「引擎报了用量、Node 有没有落账」这条链在测试里真的被走过。
+    usage: { inputTokens: 12345, outputTokens: 678, cachedTokens: 900, requests: 7 },
     artifacts: {
       docsDir,
       rawTreeDir: '',

@@ -211,6 +211,8 @@ window.__ModuleLoader__.load({
       realtimeChannel: '实时',
       overTierLabel: '个超单请求预算（按大档装填）',
       activityLabel: '活动流',
+      engineLogLabel: '引擎日志',
+      engineLogFileLabel: '完整日志',
       lastCompile: '上次编译',
       nextScan: '下次扫描',
       scannedLabel: '扫描',
@@ -399,6 +401,8 @@ window.__ModuleLoader__.load({
       realtimeChannel: 'realtime',
       overTierLabel: 'over the single-request budget (large tier)',
       activityLabel: 'Activity',
+      engineLogLabel: 'Engine log',
+      engineLogFileLabel: 'Full log',
       lastCompile: 'last compile',
       nextScan: 'Next scan',
       scannedLabel: 'scanned',
@@ -491,6 +495,11 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-activity] summary { cursor: pointer; user-select: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
       '[data-dscw-p-activity] > div { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l3); }',
       '[data-dscw-p-activity] > div > div { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); word-break: break-all; }',
+      // 引擎日志：等宽、可滚动，行内换行不撑宽面板
+      '[data-dscw-p-engine-log] { margin-top: 2px; }',
+      '[data-dscw-p-engine-log] summary { cursor: pointer; user-select: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
+      '[data-dscw-p-engine-log] > div { max-height: 180px; overflow-y: auto; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l3); }',
+      '[data-dscw-p-logline] { font-family: var(--dsw-alias-font-mono, ui-monospace, monospace); font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; font-variant-numeric: tabular-nums; }',
       // 排队可见性（在等谁）
       '[data-dscw-p-queueahead] { font-size: 11px; line-height: 16px; color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); word-break: break-all; }',
       // 会话视图（LLM 请求记录）
@@ -1231,6 +1240,29 @@ window.__ModuleLoader__.load({
             u.overTier2 ? el('span', { 'data-warn': '' }, ` · ${u.overTier2} ${tBound('overTierLabel')}`) : null)
         }
 
+        // 引擎日志块：阶段推进、桥请求、stderr、终止原因都在这里。
+        // 只渲染内存里最近 40 条——完整文件可能上 MB，面板 2s 轮询不能碰它。
+        const engineLogBlock = (job) => {
+          const entries = Array.isArray(job.nativeLogs) ? job.nativeLogs : []
+          if (!entries.length && !job.logError) return null
+          const line = (e, i) => {
+            const bits = [e.at ? String(e.at).slice(11, 19) : '--:--:--']
+            if (e.phase) bits.push(`[${e.phase}]`)
+            if (e.kind) bits.push(e.kind)
+            if (e.detail) bits.push(String(e.detail))
+            else if (e.method) bits.push(`${e.method} ${e.path ?? ''} ${e.status ?? ''} ${e.ms ?? ''}ms`)
+            else if (e.text) bits.push(String(e.text).slice(0, 200))
+            else if (e.message) bits.push(String(e.message).slice(0, 200))
+            else if (e.reason) bits.push(String(e.reason))
+            return el('div', { key: i, 'data-dscw-p-logline': '' }, bits.join(' '))
+          }
+          return el('details', { 'data-dscw-p-engine-log': '' },
+            el('summary', null, `${t('engineLogLabel')} (${entries.length})`),
+            job.logError ? el('div', { 'data-dscw-p-error': '' }, job.logError) : null,
+            job.logFile ? el('div', { 'data-dscw-p-meta': '' }, `${t('engineLogFileLabel')}: ${job.logFile}`) : null,
+            el('div', null, entries.map(line)))
+        }
+
         // 总览标签页：所有工作区 wiki 的状态总览 + 自动更新调度信息（轮询 repos 端点）
         function ReposTab() {
           const t = tBound
@@ -1689,6 +1721,10 @@ window.__ModuleLoader__.load({
                   el('summary', null, `${t('activityLabel')} (${job.notes.length})`),
                   el('div', null, job.notes.map((n, i) => el('div', { key: i }, n))))
                 : null,
+              // 引擎日志（0.17.1）：此前 job.nativeLogs 既不进 jobSummary 也不渲染，
+              // 一次 99 分钟的编译在界面上完全不可解释。这里给出「最近 40 条」的
+              // 可展开视图，完整 NDJSON 引导到端点，避免把面板轮询变成大文件下载。
+              engineLogBlock(job),
               job.error ? el('div', { 'data-dscw-p-error': '' }, job.error) : null,
               active && taskList.length
                 ? el('div', { 'data-dscw-p-tasklist': '' },

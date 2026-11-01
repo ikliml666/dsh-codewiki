@@ -317,13 +317,16 @@ await check('阶段映射：FSoft 五段映射到引擎八段契约，且百分�
   const probe = `
 import json, sys
 sys.path.insert(0, ${JSON.stringify(dirname(STAGE_MAP))})
-from stage_map import map_stage, percent_of
+from stage_map import articles_ceiling, articles_percent, is_incremental, map_stage, percent_of
 out = {
   "stages": [map_stage(n) for n in (1, 2, 3, 4, 5)],
   "unknown": map_stage(99),
   "p0": percent_of(0, 0.0),
   "p1": percent_of(1, 0.5),
   "p3": percent_of(3, 1.0),
+  "incr": [is_incremental("Incremental Update"), is_incremental("Documentation Generation"), is_incremental(None)],
+  "articles": [articles_percent(w, 28) for w in (0, 7, 14, 28, 40)],
+  "ceiling": articles_ceiling(),
 }
 print(json.dumps(out))
 `
@@ -335,6 +338,13 @@ print(json.dumps(out))
   assert.equal(out.p0, 0)
   assert.ok(out.p1 > out.p0 && out.p3 > out.p1, `百分数必须单调递增：${out.p0}/${out.p1}/${out.p3}`)
   assert.ok(out.p3 <= 100, `百分数不得超过 100：${out.p3}`)
+  // 增量轮：FSoft 借「模块聚类」槽位跑整轮文章写作（doc_generator.py:441），
+  // 按阶段号会把它打成 cluster 并把进度钉在 36%。description 才是它给的语义。
+  assert.deepEqual(out.incr, [true, false, false], '增量轮只认 description 标记')
+  assert.ok(out.articles[1] > out.articles[0], `写文章阶段必须随篇数推进：${out.articles}`)
+  assert.ok(out.articles[3] === out.ceiling, `写到全部篇数时到达 articles 区段上限：${out.articles[3]} != ${out.ceiling}`)
+  assert.ok(out.articles[4] <= out.ceiling, `超出预期篇数不得越过区段上限：${out.articles[4]}`)
+  assert.ok(out.articles[0] > out.p1, 'articles 区段必须晚于聚类区段（否则面板会把写作显示成聚类）')
 })
 
 // ── 源码面 ────────────────────────────────────────────────────────────────

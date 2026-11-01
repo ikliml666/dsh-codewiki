@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.17.1 — 2026-11-01
+
+### 真机可观测性：99 分钟的编译到底在干什么，现在能查了
+
+起因是一次真实编译：本仓库一轮增量编译耗时 99.6 分钟（`stageTimings.articles` 占
+99.9%），而面板上它从第 3 分钟到第 99 分钟一直显示「已写 10 篇 · 引擎阶段 聚合类模块
+36%」，看不出是在慢跑还是已经僵死。逐条查下来是三个独立的观测缺陷——编译结果本身是
+对的（`done`、产物已提交 `5b50cdd9`），但**过程完全不可解释**。
+
+### 进度：写文章阶段的百分比不再冻结
+
+FSoft 在阶段 3（Documentation Generation）内部的所有 `update_stage` 都写在
+`if self.verbose:` 里，而 `entry.py` 传的是 `verbose=False`——于是从
+`start_stage(3)` 到 `complete_stage()` 之间一帧进度都不发，百分比停在槽位起点。
+现在 `articles` 槽位内的百分比按「本轮已写篇数 / 本轮开始时 docs 里的 `.md` 篇数」
+插值（`stage_map.articles_percent`），心跳帧也带真实篇数，面板能看出它在动。
+
+顺带修掉一处更误导的错标：增量轮的 `_run_incremental_update` 借用了
+`start_stage(2, "Incremental Update")` 的槽位，按阶段号会被映射成 `cluster`——面板把
+整场文章写作显示成「聚合类模块」。现在按 description 里的 `incremental update` 标记
+识别（`stage_map.is_incremental`），整轮报 `articles`。
+
+### 用量：引擎报的 token 不再被丢掉
+
+`entry.py` 从 FSoft 的 `usage_ledger` 汇总出 `inputTokens/outputTokens/cachedTokens/
+requests` 并随 `result` 回传，`native-run.js` 也一路带到了 `EngineResult.usage`——但
+`index.js` 的收割段从来没把它写进 `job.usage`，面板与 `codewiki_progress` 恒显示 0。
+现在按字段映射落账（沿用旧通道的 `inputTok/outputTok/requests` 形状），并写进
+`nativeResult.usage` 便于事后核对。
+
+### 日志：引擎事件落盘 + 面板可查 + 端点可翻
+
+此前 `onLog` 只把事件塞进 `job.nativeLogs` 的最近 20 条内存数组，而这个字段既不进
+`jobSummary` 也不被面板渲染——真机上 99 分钟的编译结束后，能查到的日志只有最后 3
+分钟（20 条桥请求）。现在：
+
+- 新增 `lib/job-logs.js`：逐条追加到仓库外的 NDJSON（默认
+  `%TEMP%/dsh-codewiki-logs/<jobId>.ndjson`，可用 `DSH_CODEWIKI_LOG_DIR` /
+  `DSH_CODEWIKI_LOG_MAX_BYTES` 覆盖），单文件上限 2MB，超限保留后半段现场。
+- 进度帧按「阶段|百分比|篇数」去重后入档：引擎每秒可能发好几帧，全量落盘只会把
+  桥请求失败、stderr、阶段切换这些真正有用的事件挤出去。
+- `jobSummary` 增加 `nativeLogs`（最近 40 条）、`logFile`、`logError`；面板新增可展开
+  的「引擎日志」块；新增 `GET /api/codewiki/logs?jobId=&limit=` 翻全量。
+- 日志写不进去不再静默：记 `job.logError` 并在 notes 里明说「后续只在内存里保留
+  最近 40 条」。
+
+### 验证
+
+`test-job-logs.mjs`（新增，12 项：写入/读回、坏行跳过、缺失文件、体积上限、幂等删除）、
+`test-engine-native-job.mjs` 137 项（新增用例 24 用量落账、用例 25 日志落盘与端点可见）、
+`test-engine-python-entry.mjs` 21 项（新增增量轮识别与 articles 插值断言）、
+`test-orchestration.mjs` 257 项、`test-job-reliability.mjs` 109 项、
+`test-engine-client.mjs` 29 项、`test-engine-quality-gate.mjs` 31 项、
+`test-engine-apply-plan.mjs` 41 项、`test-engine-native-incremental.mjs` 104 项、
+`test-engine-contract.mjs` 全 PASS。
+
 ## 0.17.0 — 2026-11-01
 
 ### 任务生命周期：从「能跑」到「换实例、被取消、半路死掉都能收场」
