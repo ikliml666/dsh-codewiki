@@ -13,6 +13,7 @@ source_files:
   - lib/engine/python/entry.py
   - lib/engine/quality-gate.js
   - lib/engine/workspace-snapshot.js
+  - lib/engine/python/stage_map.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: engine_core.md
@@ -98,6 +99,17 @@ flowchart LR
 翻成八段），`index` / `baseline` / `commit` 由 Node 侧的落地器执行——这就是
 进度上限刻意压在 90% 的原因（剩下 10% 留给 Node 收尾，避免「引擎说 100% 但 wiki
 还没索引」的假完成）。
+
+进度帧的百分比有两种算法：常规阶段按 `percent_of(stage, stage_progress)` 算，
+而**增量轮与阶段 3** 按 `articles_percent(written, expected_total(written))` 算——
+因为这两段的 `stage_progress` 恒为 0（FSoft 把该阶段的 `update_stage` 全门控在
+verbose 里）。增量轮还有一个语义修正：FSoft 借用「模块聚类」的槽位
+（`start_stage(2, "Incremental Update")`）跑整轮文章写作，阶段号会把它谎报成
+`cluster`，因此按 description 识别出增量轮（`is_incremental`）后，后续帧一律按
+`articles` 槽位上报，跑完即复位。分母（本轮预期篇数）取本轮开始时 docs 里
+已有的 `.md` 篇数（与 `written` 同源比对），`written` 超过基线篇数（新建页）时以
+`written` 为准，保证百分比单调不倒退；`articles_ceiling()` 返回 articles 槽位的
+百分比上限（阶段 3 完成时的值）。
 
 ## 子模块划分
 

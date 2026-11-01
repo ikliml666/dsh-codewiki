@@ -11,13 +11,15 @@ fsoft_page: core_entry.md
 
 ## 简介
 
-`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.17.0）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
+`core_entry` 是 **dsh-codewiki 插件（`@local/dsh-codewiki` v0.17.x）** 的主入口模块，位于插件根目录的 `index.js`。它承担三大职责：
 
 1. **薄封装 CodeWiki CLI（`cw`）**：提供 `cw` 工具，执行 `init` / `status` / `index` / `meta` / `path` / `projects` / `setup` / `uninstall` 等子命令，对仓库根 `.codewiki/` 目录进行初始化、判态与索引维护。
 2. **服务化编译编排**：提供 `codewiki_generate` / `codewiki_update` / `codewiki_progress` 三个工具，把编译任务提交给宿主常驻后台服务（job service），由该服务以 **10s tick** 节拍驱动阶段状态机推进（写文章 → 横切 → 校对 → 索引 → 自动提交），全程零子代理。
 3. **原生引擎通道（默认）与兼容通道（Node 流水线）**：`nativeEngine=true`（0.16.0 起默认）时，编译委托给上游 FSoft Python 引擎子进程；关闭则退回内置 Node 流水线（`nativeEngine=false`）。
 
 > 插件通过 [package.json](Build___Dependency_Configuration_Layer/package_manifest.md) 声明的 cordis 插件 id 为 `codewiki`，配置命名空间同名。挂载方式见 [cordis.patch.yml](Build___Dependency_Configuration_Layer/cordis.patch.yml)。
+
+> 0.17.1 起，原生通道新增**引擎事件日志双通道**：内存里只留最近 40 条（给面板即时看），同时逐条追加到仓库外临时目录的 NDJSON（`lib/job-logs.js`），并经 `GET /api/codewiki/logs?jobId=&limit=` 端点按需翻全量；原生通道的真实 token 用量也按 FSoft `usage_ledger` 的字段映射落进 `job.usage`。
 
 ---
 
@@ -49,6 +51,7 @@ flowchart TB
         LibAC[文章契约闸门<br/>article-contract.js]
         LibCS[变更集采集<br/>change-set.js]
         LibNE[原生引擎<br/>lib/engine/native-run.js]
+        LibJL[引擎事件日志<br/>lib/job-logs.js]
     end
 
     subgraph External[外部世界]
@@ -74,6 +77,8 @@ flowchart TB
     Svc -->|调用| LibAC
     Svc -->|调用| LibCS
     Svc -->|native 通道| LibNE
+    Svc -->|引擎事件日志落盘| LibJL
+    WebApi -->|翻全量日志| LibJL
     Svc -->|spawn| CW
     LibNE -->|spawn| PyEng
     Svc -->|llm.stream| LLM
@@ -138,16 +143,17 @@ flowchart TB
 | 组件 | 职责 |
 |------|------|
 | `tick()` | 10s 节拍主循环：tick 入口/出口的跨实例锁（经 `lib/job-store.js` 的 `acquireTickLock`/`releaseTickLock`）、磁盘合并、心跳续期、取消标记同步、项目闸门、分发到各 stage handler |
+| `recordNativeLog(job, entry)` | 引擎事件日志收口（0.17.1）：内存 `job.nativeLogs` 截断保留最近 40 条，同时经 `lib/job-logs.js` 逐条追加仓库外 NDJSON；落盘失败置 `job.logError` 并记一条 note。`onLog` 回调（桥请求失败、stderr、阶段切换）与去重后的 `onProgress` 帧（按 `阶段|百分比|篇数` 签名）都经它落账 |
 | `tickArticles(job)` | 写文章阶段：本地规划 → agentic 或单轮通道 → 收割 → 观察批合成 / agentic 退回判定 |
 | `tickCrosscut(job)` | 横切阶段：合成 `_architecture.md` / `_patterns.md` / 概念文章；超预算拆观察批 |
 | `tickCompose(job)` | 横切观察批的合成批收割 |
 | `tickReview(job)` | 校对阶段：本地核对 → 批量校对请求（`@@@article` 标记分节）→ 会话通道兜底 |
 | `tickIndex(job)` | 索引前：存量体检、`judgeOutcome` 完整性判定、孤儿清理、wiki 骨架守卫（目录不在先 `cw init`、目录在却缺 `_meta.yaml` 记 `wiki-missing` 硬阻塞）、`cw index`、基线推进闸门（`cw meta update`）、index/meta 后用 `hardBlockers` 重裁终态并落 `baselineEligible` / `baselineAdvanced` |
 | `tickCommit(job)` | 自动提交产物（`autoCommitWiki` 分支合并式） |
-| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待；宿主重启/旧实例退出后按持久化的非敏感执行快照（`planNativeReplay` / `snapshotNativeRun`）重放重跑，已落盘结果按事实收割；结果收割后直接 `finishJob` |
+| `tickNative(job, channel)` | 原生通道专属推进：启动一次长任务后只等待；宿主重启/旧实例退出后按持久化的非敏感执行快照（`planNativeReplay` / `snapshotNativeRun`）重放重跑，已落盘结果按事实收割；结果收割后直接 `finishJob`。收割时把引擎上报的真实 token 用量（FSoft `usage_ledger`）映射进 `job.usage`（沿用 `inputTok`/`outputTok`/`requests`/`cachedTok` 旧形状，全量记在实时侧），并在 `nativeResult.usage` 保留引擎原值 |
 | `submit({kind, cwd, ...})` | 任务提交入口：排除清单 / worktree / 空壳目录闸门、磁盘合并后的幂等判定（同仓库活动任务可重归属会话）、占位落盘 |
 | `cancel(jobId)` | 置 `cancelRequested` 标记，跨 tick 存活；原生结果已落地/执行器已结束时按真实结果收尾而非丢弃产物 |
-| `list()` / `jobSummary(job)` | 导出任务只读视图（供工具与面板共用）：除 `canAdvanceBaseline` 外还透出 `baselineEligible` / `baselineAdvanced` / `deliveryComplete` |
+| `list()` / `jobSummary(job)` | 导出任务只读视图（供工具与面板共用）：除 `canAdvanceBaseline` 外还透出 `baselineEligible` / `baselineAdvanced` / `deliveryComplete`；0.17.1 起新增透出 `nativeLogs`（内存最近 40 条）、`logFile`（NDJSON 落盘路径，仅 native 通道）与 `logError`（日志落盘失败原因） |
 | `finishJob(job, outcome, blockers)` | 三态收尾：`done` / `partial` / `failed`；只算 `deliveryComplete`，`canAdvanceBaseline` 直接采信 index/meta 或落地器已经实测的 `baselineAdvanced` |
 | `occupancyHeld(job)` | 项目闸门占位判定：原实例停更超过 `ORPHAN_TAKEOVER_MS` 的任务不算占位，避免重启后新任务一直卡在 queued |
 
@@ -166,11 +172,11 @@ flowchart TB
 
 | 组件 | 职责 |
 |------|------|
-| `installWebServer(ctx, service, extra)` | 注册 `/api/codewiki/jobs`、`/repos`、`/sessions`、`/models`、`/control`（仅回环） |
+| `installWebServer(ctx, service, extra)` | 注册 `/api/codewiki/jobs`、`/repos`、`/sessions`、`/models`、`/control`（仅回环）；0.17.1 起另注册 `/api/codewiki/logs?jobId=&limit=`，经 `lib/job-logs.js` 的 `logStats` / `readLogTail` 翻仓库外 NDJSON 全量日志 |
 | `cwToolDefinition(cfg)` | `cw` 工具定义 |
 | `generateToolDefinition(cfg, svc)` | `codewiki_generate` 工具定义（提交制） |
 | `updateToolDefinition(cfg, generateDef)` | `codewiki_update` 工具定义（固定 scope=auto 快捷入口） |
-| `progressToolDefinition(cfg, svc)` | `codewiki_progress` 工具定义（只读查询） |
+| `progressToolDefinition(cfg, svc)` | `codewiki_progress` 工具定义（只读查询）：输出 schema 0.17.1 起新增 `nativeStage` / `nativePercent` / `nativeMessage` / `nativeLogs` / `logFile` / `logError` 六个字段，文本视图追加「引擎：…% — message」与「日志：…」两行 |
 | `progressView(job)` | 在 `jobSummary` 上计算百分比 |
 
 ### 8. 仓库与基线辅助
@@ -247,8 +253,10 @@ flowchart LR
     Engine --> EnginePy["FSoft Python 引擎<br/>entry.py"]
     EnginePy --> Progress["onProgress 回调<br/>nativeStage/nativePercent"]
     Progress --> TickNative
+    Progress --> Log["recordNativeLog<br/>进度帧按 阶段/百分比/篇数 去重<br/>内存最近 40 条 + NDJSON 落盘"]
     Wait -->|有结果| Harvest["收割 EngineResult<br/>写 job.nativeResult"]
-    Harvest --> Record["saveRecord(outDir=仓库外)"]
+    Harvest --> Usage["映射 res.usage → job.usage<br/>(inputTok/outputTok/requests)"]
+    Usage --> Record["saveRecord(outDir=仓库外)"]
     Record --> Judge["finishJob(outcome, blockers)"]
     Judge --> Done[终态 done/partial/failed/cancelled]
     Wait -->|在跑| Skip[下轮 tick 再看]
@@ -257,6 +265,8 @@ flowchart LR
 > 原生通道的裁决链（环境检测 → 图提取 → 聚类 → 文章 → 质量门 → 落地 → 基线 → 提交）全部固定在 [engine_core](engine_core.md) 的 `native-run.js` / `apply-plan.js` 内，`index.js` 只负责「起进程 / 收进度 / 按结果判终态」，绝不在 tick 里重写裁决。
 >
 > 起进程时经 `runNativeJob` 的 `deps.onRequestStart` 把原生通道的每个模型请求（全部经 llm-bridge 打进来）接入 `beginSessionRecord`：此前不在这里接线，面板「会话」视图对原生任务永远是空列表（batch / agentic 通道早已各自接好）。桥侧回调契约与 batch 通道一致（`onDelta` / `onError` / `onDone`），且只记 messages 文本与模型输出，绝不落 Authorization 请求头或占位 key。
+>
+> 0.17.1 起，`onLog` 回调（桥请求失败、stderr、阶段切换）与去重后的 `onProgress` 帧统一经 `recordNativeLog` 双通道落账（内存最近 40 条 + 仓库外 NDJSON），`/api/codewiki/logs` 端点按需翻全量；结果收割时把引擎侧 `usage_ledger` 的真实 token 数映射进 `job.usage`，此前面板与 `codewiki_progress` 对原生通道一直显示 0。
 
 ---
 
@@ -331,6 +341,7 @@ flowchart TB
 | `ORPHAN_TAKEOVER_MS` | 5 分钟 | 原实例停更超时的 job 由本实例经 `adoptOrphan` 接管；停更未超阈值但 owner 已消失的任务经 `occupancyHeld` 不占闸门 |
 | `REPOS_FILE` | 跟随 JOBS_FILE 名字推导 | 已知仓库清单（独立于 job 历史） |
 | 会话记录 | `<tmp>/dsh-codewiki-sessions/<jobId>/` | LLM 请求 prompt/output，24h TTL |
+| 引擎事件日志 | `<tmp>` 下按 jobId 命名的 NDJSON（`lib/job-logs.js`） | 0.17.1 起：内存只留最近 40 条给面板即时看，完整日志逐条追加落盘；落盘失败置 `job.logError`（日志是任务唯一的黑匣子，写不进去必须显形），端点 `/api/codewiki/logs` 按需翻全量 |
 
 ---
 
@@ -349,7 +360,7 @@ flowchart LR
 - **[agentic_support.md](agentic_support.md)**：`runAgenticArticles` / `markBigAgenticTasks` / `judgeOutcome` / `hasBlockingIssue` 等被 `tickArticles`、`tickIndex`、`contractCheck` 直接 import。
 - **[engine_core.md](engine_core.md)**：`runNativeJob` 是原生通道的执行体，`entry.py` 是被 spawn 的 Python 入口。
 - **[codewiki_vendor.md](codewiki_vendor.md)**：`cw` CLI 的 Rust 源码 fork（基线为上游 main `64323823`），`resolveBinary` 兜底用插件自带 `bin/cw`。
-- **[client_ui.md](client_ui.md)**：侧边栏面板通过 `/api/codewiki/jobs`、`/repos`、`/sessions` 回环端点消费本模块的 `jobSummary`。
+- **[client_ui.md](client_ui.md)**：侧边栏面板通过 `/api/codewiki/jobs`、`/repos`、`/sessions`、`/logs` 回环端点消费本模块的 `jobSummary`。
 - **[Build___Dependency_Configuration_Layer.md](Build___Dependency_Configuration_Layer.md)**：插件的依赖与挂载声明（`@deepseek-ai/schemastery`、cordis 插件 id `codewiki`）。
 - **[Ecosystem_Tooling___Validation_Layer.md](Ecosystem_Tooling___Validation_Layer.md)**：`tools/fsoft-engine/setup-env.sh` 是原生引擎 venv 的建环境脚本，与 `nativeEnginePython` 配置配套。
 
@@ -363,6 +374,7 @@ flowchart LR
 4. **坏文章不落盘**：`contractCheck` 的 `blocking` 级问题直接拒绝写盘；`keepInMemory` 结果还要再过 `validateArticleEnvelope`。
 5. **模型凭证不进插件**：唯一通道是宿主 `llm.stream`，原生引擎用随机占位 key，真实凭证从不进子进程环境与日志。
 6. **worktree 与空壳目录不编译**：`submit` 与自动调度双重闸门，避免产物互相覆盖与失败任务刷屏。
+7. **引擎事件日志双通道、双路都必须有**（0.17.1）：内存留最近 40 条给面板即时看，同时逐条追加到仓库外 NDJSON——内存那份随任务记录截断/宿主重启消失，落盘那份才能回答「99 分钟里到底发生了什么」；进度帧必须按「阶段/百分比/篇数」去重（引擎每秒可能发好几帧，全量落盘会把真正的事件——桥请求失败、stderr、阶段切换——挤出去）；落盘失败不能静默，`logError` 必须显形（日志是任务唯一的黑匣子）。
 
 ---
 

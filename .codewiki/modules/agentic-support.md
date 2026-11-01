@@ -7,6 +7,7 @@ source_files:
   - lib/articles-agentic.js
   - lib/update-record.js
   - lib/job-store.js
+  - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: agentic_support.md
@@ -17,7 +18,7 @@ fsoft_page: agentic_support.md
 
 `agentic_support` 是 CodeWiki 插件中支撑「agentic 文章写作通道」的一组基础库。它对应上游 FSoft-AI4Code/CodeWiki 的 `src/be/agent_tools/` 与 `documentation_generator.py` 的 pydantic-ai 工具循环，但其价值主张是一个**可反复读代码、可对文章做精确编辑、可把大模块拆给子任务**的工作台——行号、签名这类硬事实现场核对，而不是靠把所有源码一次性塞进 prompt 后凭记忆写作。
 
-本模块由五个文件组成，各司其职：
+本模块由六个文件组成，各司其职：
 
 | 文件 | 职责 | 主要导出 |
 | --- | --- | --- |
@@ -26,6 +27,7 @@ fsoft_page: agentic_support.md
 | `lib/article-contract.js` | 文章契约闸门（纯函数）：判一篇 wiki 文章是否满足最低结构要求，区分 error / warning 两级 | `hasBlockingIssue`、`issueSummary`、`inspectArticle` |
 | `lib/update-record.js` | 更新记录：把一次编译的 ChangeSet / 计划 / 逐篇结果收成版本化 JSON，并判定终态 | `isTerminalStage`、`loadUpdateRecord`、`judgeOutcome` |
 | `lib/job-store.js` | 任务持久化与跨实例归属：jobs.json 的原子写盘、schema 化序列化（拒绝函数值与疑似凭证字段）、按仓库路径归一的去重键、job 所有权分类（本实例 / 存活他例 / 孤儿 / 无执行器空闲 / 旧格式残留） | `normKey`、`classifyOwnership`、`save` |
+| `lib/job-logs.js` | 引擎事件日志落盘与清理：按 jobId 推导仓库外 NDJSON 日志路径，任务收尾时删除对应日志文件（`force` 删除，删不掉不影响任何判定） | `removeLog` |
 
 > 版本背景：本插件当前默认通道是原生引擎（`nativeEngine: true`，驱动上游 Python 引擎子进程，见 `package.json` 描述）；agentic 通道是插件内 Node 侧写作实现的一部分，与单轮 prompt 通道并列存在，作为兼容通道（`nativeEngine: false` 时）或原生引擎产物之外的补充写作能力。
 

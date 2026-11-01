@@ -2,35 +2,26 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
-    "headCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1"
+    "baseCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
+    "headCommit": "9454e2cec3b6f9706bb5a5bfba5031bcd6f426a4"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "63c62f0985636e76c5cc99c7e626e6675fdfcfd1",
-    "headCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
+    "baseCommit": "920aafbc4b36086782ebe16b49f143b7995d47c1",
+    "headCommit": "9454e2cec3b6f9706bb5a5bfba5031bcd6f426a4",
     "committed": [
-      ".gitignore",
       "CHANGELOG.md",
       "README.md",
       "client.js",
-      "cordis.patch.yml",
-      "docs/fsoft-native-engine.md",
       "index.js",
-      "lib/engine/apply-plan.js",
-      "lib/engine/client.js",
-      "lib/engine/native-run.js",
-      "lib/engine/quality-gate.js",
-      "lib/job-store.js",
+      "lib/engine/python/entry.py",
+      "lib/engine/python/stage_map.py",
+      "lib/job-logs.js",
       "package.json",
-      "test-engine-apply-plan.mjs",
-      "test-engine-client.mjs",
-      "test-engine-native-incremental.mjs",
       "test-engine-native-job.mjs",
-      "test-engine-quality-gate.mjs",
+      "test-engine-python-entry.mjs",
       "test-fixtures/fake-native-engine.mjs",
-      "test-job-reliability.mjs",
-      "test-orchestration.mjs"
+      "test-job-logs.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -46,7 +37,8 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxox8t5-3-native（25 个文件）"
+    "持久化基线 63c62f0 与本次 cw 基线 920aafb 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvxtrfqg-1-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-01T12:11:20.818Z"
+  "updatedAt": "2026-11-01T13:14:57.365Z"
 }

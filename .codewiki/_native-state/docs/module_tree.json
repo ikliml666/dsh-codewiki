@@ -13,7 +13,8 @@
             "client.js::en",
             "client.js::mount",
             "client.js::save",
-            "client.js::zh"
+            "client.js::zh",
+            "client.js::line"
         ],
         "children": {}
     },
@@ -56,7 +57,8 @@
             "lib\\update-record.js::loadUpdateRecord",
             "lib\\job-store.js::classifyOwnership",
             "lib\\job-store.js::normKey",
-            "lib\\job-store.js::save"
+            "lib\\job-store.js::save",
+            "lib\\job-logs.js::removeLog"
         ],
         "children": {
             "agentic_support_tooling": {
@@ -101,7 +103,8 @@
             "lib\\engine\\quality-gate.js::toQualityIssues",
             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
             "lib\\engine\\workspace-snapshot.js::shortSha",
-            "lib\\engine\\workspace-snapshot.js::snapshotExists"
+            "lib\\engine\\workspace-snapshot.js::snapshotExists",
+            "lib\\engine\\python\\stage_map.py::articles_ceiling"
         ],
         "children": {
             "engine_core_contract": {
