@@ -95,12 +95,14 @@ flowchart TD
 | 端点 | 数据来源 |
 | --- | --- |
 | `GET /api/codewiki/jobs` | `service.list()`（即 `jobSummary` 逐个映射），按 `workspaceOnly`、`isDeadCompileTarget` 过滤，queued 任务附 `queueAhead`「在等谁」 |
-| `GET /api/codewiki/repos` | 已知仓库清单 + job 历史的 wiki 状态总览（30s 缓存） |
+| `GET /api/codewiki/repos` | 已知仓库清单 + job 历史的 wiki 状态总览（30s 缓存）；`lastJob` 由 `pickOverviewJob` 从该仓全部候选任务中选取 |
 | `GET /api/codewiki/sessions` | LLM 请求会话记录（`listSessionRecords` / `listAllSessionRecords` / `activeSessionJobs`） |
 | `GET /api/codewiki/sessions/item` | 单条会话全文（prompt/output） |
 | `GET /api/codewiki/logs` | 引擎事件 NDJSON 日志（`readLogTail` / `logStats`） |
 | `GET /api/codewiki/models`、`/api/codewiki/model-efforts` | 模型目录（`listModelCatalog` / `resolveModelEfforts`，30s/60s 缓存） |
 | `POST /api/codewiki/control` | `{action:"cancel"|"compile"|"refresh"}` |
+
+`GET /api/codewiki/repos` 的仓库归并与「代表任务」选取：展示路径按 `normKey` 归一（同一仓库的多种写法只保留先出现的展示形态——job 历史优先，`loadKnownRepos()` 补缺），每个展示 cwd 把该仓**全部**候选任务累积进 `jobsByCwd`，再交给 `pickOverviewJob` 选出一条 `lastJob`：**优先非终态任务**（正在排队/编译的那条），全是终态时按 `updatedAt`（缺失则退化到 `finishedAt` / `createdAt`）取最新一条。`knownRepos` 只补登记仓库、不贡献候选任务（`putCwd(dir, undefined)`）。旧实现每个 cwd 只保留「先到的那条任务 + 首个非空兜底」，同仓挂着多条历史记录时面板可能显示陈旧任务而不是正在编译的那条。
 
 ## 3. 编译任务状态机（`createJobService`）
 

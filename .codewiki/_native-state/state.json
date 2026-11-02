@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "74b4c5a878428a416bb6fe68dca867da753983ad"
+    "headCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "74b4c5a878428a416bb6fe68dca867da753983ad",
+    "headCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f",
     "committed": [
       "CHANGELOG.md",
       "README.md",
@@ -32,36 +32,24 @@
       "test-engine-python-entry.mjs",
       "test-engine-quality-gate.mjs",
       "test-fixtures/fake-native-engine.mjs",
+      "test-orchestration.mjs",
       "test-upstream-parallel.mjs"
     ],
     "staged": [],
-    "unstaged": [
-      "lib/article-contract.js",
-      "lib/engine/output.js",
-      "lib/engine/quality-gate.js",
-      "test-article-contract.mjs",
-      "test-engine-quality-gate.mjs"
-    ],
+    "unstaged": [],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [
-    "lib/article-contract.js",
-    "lib/engine/output.js",
-    "lib/engine/quality-gate.js",
-    "test-article-contract.mjs",
-    "test-engine-quality-gate.mjs"
-  ],
+  "unconsumed": [],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "工作区未提交改动已合成临时 commit 4b927b48a77d（5 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvzes2zd-0-native（40 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvzfsruh-5-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-02T15:45:17.406Z"
+  "updatedAt": "2026-11-02T16:31:06.045Z"
 }

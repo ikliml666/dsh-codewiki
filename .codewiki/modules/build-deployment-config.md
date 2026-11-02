@@ -61,7 +61,7 @@ flowchart LR
 
 `package.json`（仓库根）是插件对外的身份与打包声明。关键字段：
 
-- **身份**：`name` 为 `@local/dsh-codewiki`，`private: true`，不在公共 npm 发布；`type: module` 使用 ESM。
+- **身份**：`name` 为 `@local/dsh-codewiki`，当前版本 `version: 0.17.11`，`private: true`，不在公共 npm 发布；`type: module` 使用 ESM。
 - **入口导出**：`main: index.js`，`exports` 暴露 `.`（宿主端逻辑）与 `./client`（Web 端 [vscode_extension_client](vscode-extension-client.md) 面板）两个子路径。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——低于该版本的 DSH 无法装载本插件。
 - **运行依赖**：仅 `@deepseek-ai/schemastery`（用于把 `Config` schema 注册进 DSH 模型设置体系）。
