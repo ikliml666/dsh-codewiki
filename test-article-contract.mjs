@@ -189,6 +189,23 @@ await check('hasDuplicateFrontmatter：单份正文不误报', async () => {
 // 真机 partial（job-mvzbcw87-0）暴露的误报：正文用 ```yaml 代码块演示 frontmatter 契约时，
 // 围栏里的 --- / title: 被当成「又贴了一份头」，于是刚写好的文章被判不合格、整轮 partial。
 // 围栏内的内容是**示例**，不是文档自身的头——判定必须跳过代码块。
+// 行内代码里的链接写法是**语法示例**，不是真链接。真机 article_validation /
+// plan_application / codewiki_vendor_binary 都因为正文里写了 `[[target]]`、`](xxx.md)`
+// 这类示例，被判成「内部链接目标不存在」拒写——文档在讲契约，却被契约判违规。
+await check('collectWikiLinks：行内代码与代码块里的链接写法不算真链接', async () => {
+  const body = [
+    '正文里演示语法：`[[target]]`、`[[target|text]]`、`](xxx.md)` 都是字面量。',
+    '',
+    '```md',
+    '[链接](nowhere.md)',
+    '[[also-not-a-link]]',
+    '```',
+    '',
+    '真链接在这里：[quality_gates](quality_gates.md)。',
+  ].join('\n')
+  const links = collectWikiLinks(body)
+  assert.deepEqual(links, ['quality_gates.md'], `只应收集真链接，实际 ${JSON.stringify(links)}`)
+})
 await check('hasDuplicateFrontmatter：代码块里的 frontmatter 示例不算重复贴头', async () => {
   const fenced = [
     '# 模块页',

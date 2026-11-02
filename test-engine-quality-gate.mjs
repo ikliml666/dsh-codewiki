@@ -538,6 +538,23 @@ if (!existsSync(REAL)) {
   // agent-runtime.md，而正文链接仍写原名 —— 本仓 420 条内部链接 412 条点开 404。
   // 这条用例不看单一函数，而是盯**整份产物渲染后的结果**：每一页里的每个 .md 链接
   // 目标都必须真实存在于落地页集合里。
+  // 行内代码里的链接写法是语法示例（真机 article_validation.md 用 `](xxx.md)` 讲死链
+  // 规则）。收集与重写都必须跳过它，否则文档会因为「解释了契约」而被契约判违规。
+  await check('真实产物：行内代码里的链接写法不计入真实链接', async () => {
+    const docs = copyDocs('real-code-links')
+    // 主动注入一段「讲链接语法」的正文：真机 article_validation.md 就是这样用
+    // `](xxx.md)` 解释死链规则的，结果被自己的规则判成死链拒写。
+    const target = join(docs, 'wiki_out_1c_core_engine.md')
+    const withExample = readFileSync(target, 'utf8') + '\n死链判据会收集 `](xxx.md)` 这类写法（示例，非真实链接）。\n'
+    writeFileSync(target, withExample, 'utf8')
+    const r = gateNativeOutput({ docsDir: docs, repoRoot: REAL_REPO, requireCommittedInput: false, includeContent: true })
+    // 这个夹具的 module_tree 是空对象，本来就该 partial（empty-module-tree）；
+    // 这里只盯「代码示例有没有被当成真链接」这一件事。
+    const linkDefects = (r.defects ?? []).filter((d) => d.kind === 'dead-link')
+    assert.deepEqual(linkDefects, [], `代码示例被当成死链：${JSON.stringify(linkDefects)}`)
+    const rendered = r.rendered.map((x) => x.content).join('\n')
+    assert.ok(rendered.includes('](xxx.md)'), '示例文本应原样保留（不重写、不删除）')
+  })
   await check('真实产物：渲染后每个跨页链接都指向落地页（消除 412/420 失效链接）', async () => {
     const docs = copyDocs('real-link-targets')
     const r = gateNativeOutput({ docsDir: docs, repoRoot: REAL_REPO, requireCommittedInput: false, includeContent: true })
