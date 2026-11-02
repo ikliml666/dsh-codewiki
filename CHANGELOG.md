@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.17.3 — 2026-11-02
+
+### 面板白屏：`t is not defined`
+
+0.17.1 给侧边栏面板加引擎日志块时，`engineLogBlock` 与 `jobCard` 用的是各自组件内的
+`t`——但它们定义在 `CodewikiPanel` 之外，闭包里根本没有这个绑定。于是任何一次渲染
+（任务列表里有一个带 `nativeLogs` 的任务即可）都在 `engineLogBlock(job)` 处抛
+`ReferenceError: t is not defined`，被面板顶层 try/catch 兜成「Panel error: …」整块白屏。
+两处各补 `const t = tBound`，与同文件其它模块级渲染辅助函数一致。
+
+`node --check` 与协议层测试都发现不了这类缺陷：它不是语法错，也不经过引擎边界。新增
+`test-client-panel.mjs` 用最小 React 桩把面板真的渲染一遍（切换到任务 Tab、带一个
+含引擎日志的已完成任务），断言不出现 `Panel error` 且日志块与文案都正常渲染；该用例在
+本修复前是红的（`ReferenceError: t is not defined`）。
+
+### 验证
+
+`test-client-panel.mjs` 2 项通过；`test-engine-client.mjs` 29 项通过；`node --check
+index.js client.js` 通过。
+
 ## 0.17.2 — 2026-11-01
 
 ### 增量并行与跨重启断点续跑

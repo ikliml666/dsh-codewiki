@@ -352,13 +352,13 @@ client.js          插件页设置卡片（浏览器半侧；协议参照 ui-set
 
 验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
 
-全量测试（28 个文件，都直接 `node <file>`，无框架；0.16.0 阶段 7 后逐个实跑，27 套全绿）：
+全量测试（34 个文件，都直接 `node <file>`，无框架）：
 
 ```
 test-agentic.mjs / test-agentic-host.mjs / test-agentic-fallback.mjs / test-articles-agentic.mjs
 test-article-contract.mjs / test-change-set.mjs / test-update-record.mjs / test-batch.mjs
 test-prune-orphans.mjs / test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs
-test-cwd-paths.mjs / test-wiki-entry.mjs / test-wiki-anchors.mjs
+test-cwd-paths.mjs / test-wiki-entry.mjs / test-wiki-anchors.mjs / test-repos-isolation.mjs
 
 # 原生引擎通道（0.15.0）
 test-engine-contract.mjs / test-engine-client.mjs / test-engine-manifest.mjs
@@ -367,8 +367,14 @@ test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.m
 test-engine-llm-bridge.mjs / test-engine-native-job.mjs
 test-engine-native-incremental.mjs / test-engine-process-tree.mjs
 
-# 任务生命周期（0.17.0）
-test-job-reliability.mjs
+# 增量并行与断点续跑（0.17.2）
+test-fsoft-runtime.mjs / test-upstream-parallel.mjs
+
+# 面板渲染冒烟（0.17.3）：最小 React 桩渲染侧边栏面板，捕获渲染期异常
+test-client-panel.mjs
+
+# 任务生命周期与可观测性（0.17.0 / 0.17.1）
+test-job-reliability.mjs / test-job-logs.mjs
 ```
 
 测试用假引擎（`test-fixtures/fake-native-engine.mjs`）走真实子进程协议，所以能覆盖协议

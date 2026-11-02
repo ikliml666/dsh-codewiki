@@ -1243,6 +1243,7 @@ window.__ModuleLoader__.load({
         // 引擎日志块：阶段推进、桥请求、stderr、终止原因都在这里。
         // 只渲染内存里最近 40 条——完整文件可能上 MB，面板 2s 轮询不能碰它。
         const engineLogBlock = (job) => {
+          const t = tBound
           const entries = Array.isArray(job.nativeLogs) ? job.nativeLogs : []
           if (!entries.length && !job.logError) return null
           const line = (e, i) => {
