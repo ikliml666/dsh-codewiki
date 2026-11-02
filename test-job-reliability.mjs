@@ -29,6 +29,8 @@ const {
   findActiveJob,
   classifyOwnership,
   OWNERSHIP,
+  planForeignJob,
+  FOREIGN_ACTION,
   adoptOrphan,
   heartbeat,
   lastSeenAt,
@@ -137,9 +139,24 @@ function makeService({ store, instanceId, orphanTakeoverMs = 60000, runNative = 
     absorb()
     for (const job of jobs) {
       if (isTerminalStage(job.stage)) continue
-      const own = classifyOwnership(job, { instanceId, now, orphanTakeoverMs })
-      if (own === OWNERSHIP.LIVE_OTHER) continue
-      if (own === OWNERSHIP.ORPHAN || own === OWNERSHIP.IDLE_NO_EXECUTOR) {
+      // 与 index.js 的 tick 同源：处置决策由 job-store 的 planForeignJob 给出，
+      // 保证「没人替排队项推进」这一类死锁在测试里走的是生产算法。
+      const plan = planForeignJob(job, { instanceId, now, orphanTakeoverMs })
+      if (plan.action === FOREIGN_ACTION.LEAVE) {
+        // 自己拥有的任务照常推进，只有「别的实例还活着」才真的跳过
+        if (job.owner && job.owner !== instanceId) continue
+      } else if (plan.action === FOREIGN_ACTION.VOID) {
+        job.notes = [...(job.notes ?? []), `原实例 ${job.owner} 停更，${plan.reason}，本实例作废该任务`].slice(-50)
+        job.stage = 'failed'
+        job.outcome = 'failed'
+        job.error = plan.reason
+        job.canAdvanceBaseline = false
+        job.blockers = [...(job.blockers ?? []), { kind: 'failed', detail: plan.reason }]
+        job.finishedAt = nowIso()
+        job.voidedBy = instanceId
+        touch(job)
+        continue
+      } else {
         job.notes = [...(job.notes ?? []), `原实例 ${job.owner} 停更，本实例接管推进`].slice(-50)
         adoptOrphan(job, { instanceId, now })
       }
@@ -496,7 +513,57 @@ console.log('== 用例 7：queued/submitting 没有执行器可丢，不得被�
   check(adopted.stage === 'queued', '接管不改阶段（queued 继续排队，不会被拉起来跑）')
 }
 
-// ============================ 用例 8：合并与终态 ============================
+// ============================ 用例 7b：僵尸排队项必须被处置 ============================
+console.log('== 用例 7b：宿主重启遗留的排队项不得永久卡在 queued ==')
+{
+  const now = 10_000_000
+  const dead = { owner: 'svc-dead', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() }
+  const opts = { instanceId: 'svc-live', now, orphanTakeoverMs: 60000 }
+
+  const autoQueued = { ...dead, id: 'j-auto', stage: 'queued', auto: true }
+  const manualQueued = { ...dead, id: 'j-manual', stage: 'queued', auto: false }
+  const submitting = { ...dead, id: 'j-sub', stage: 'submitting', auto: true }
+  const liveQueued = { ...autoQueued, id: 'j-live', updatedAt: new Date(now - 1000).toISOString() }
+
+  check(planForeignJob(autoQueued, opts).action === FOREIGN_ACTION.VOID, '自动调度遗留的排队项 → 作废')
+  check(planForeignJob(manualQueued, opts).action === FOREIGN_ACTION.ADOPT, '用户手动提交的排队项 → 接管续排')
+  check(planForeignJob(submitting, opts).action === FOREIGN_ACTION.VOID, '提交中断（没有可续状态）→ 作废')
+  check(planForeignJob(liveQueued, opts).action === FOREIGN_ACTION.LEAVE, '对方还活着 → 不动')
+  check(planForeignJob({ ...manualQueued, owner: 'svc-live' }, opts).action === FOREIGN_ACTION.LEAVE, '自己的任务 → 不动')
+  check(planForeignJob({ ...manualQueued, owner: '' }, opts).action === FOREIGN_ACTION.ADOPT, '无 owner 的历史残留 → 接管')
+
+  // 端到端：两个实例共享磁盘。A 进程被杀时留下一条排队项与一条提交占位，
+  // B 起来后必须把它们从队列里清掉，否则同仓幂等会一直返回这条僵尸任务。
+  const { file } = makeWorkspace('zombie-queued')
+  const stale = [
+    { id: 'jq-auto', cwd: 'C:/work/z1', scope: 'auto', language: '中文', kind: 'stale', owner: 'svc-A', stage: 'queued', auto: true, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), notes: [] },
+    { id: 'jq-manual', cwd: 'C:/work/z2', scope: 'auto', language: '中文', kind: 'stale', owner: 'svc-A', stage: 'queued', auto: false, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), notes: [] },
+    { id: 'js-sub', cwd: 'C:/work/z3', scope: 'auto', language: '中文', kind: 'stale', owner: 'svc-A', stage: 'submitting', auto: true, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), notes: [] },
+  ]
+  createJobsStore({ file, instanceTag: 'svc-A' }).save(stale)
+
+  const b = makeService({ store: createJobsStore({ file, instanceTag: 'svc-B' }), instanceId: 'svc-B' })
+  const later = Date.now() + 10 * 60 * 1000
+  await b.tick({ now: later })
+  await b.settle()
+  const after = readJobs(file)
+  const byId = new Map(after.map((j) => [j.id, j]))
+
+  check(byId.get('jq-auto')?.stage === 'failed', `自动排队项被作废（实际 ${byId.get('jq-auto')?.stage}）`)
+  check(byId.get('jq-auto')?.owner === 'svc-A', '作废不改 owner（记录是谁遗留的）')
+  check((byId.get('jq-auto')?.notes ?? []).some((n) => n.includes('自动调度遗留')), '作废原因写进 notes')
+  check(byId.get('js-sub')?.stage === 'failed', `提交占位被作废（实际 ${byId.get('js-sub')?.stage}）`)
+  const manual = byId.get('jq-manual')
+  check(manual?.owner === 'svc-B', `用户排队项被本实例接管（owner=${manual?.owner}）`)
+  check(manual?.stage !== 'failed', `用户排队项没有被作废（实际 ${manual?.stage}）`)
+
+  // 幂等必须随之释放：作废后同仓可以重新提交，而不是又拿回那条僵尸任务。
+  const res = b.submit({ cwd: 'C:/work/z1' })
+  check(res.existed === false && res.job.id !== 'jq-auto', `作废后同仓可重新提交（existed=${res.existed}）`)
+  // 仍在排队的任务依旧占住幂等——接管不等于释放，避免同一仓库被重复提交。
+  const stillQueued = findActiveJob([{ ...manual, stage: 'queued', owner: 'svc-B' }], 'C:/work/z2')
+  check(stillQueued?.id === 'jq-manual', '排队中的任务仍是同仓幂等的依据')
+}
 console.log('== 用例 8：磁盘现场合并、终态判定 ==')
 {
   const older = { id: 'x', stage: 'articles', updatedAt: '2026-01-01T00:00:00.000Z', createdAt: '2026-01-01T00:00:00.000Z' }

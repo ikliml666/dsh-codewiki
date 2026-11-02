@@ -28,6 +28,7 @@ import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from '.
 import {
   createJobsStore, mergeJobLists, findActiveJob, reassignSession,
   snapshotNativeRun, planNativeReplay, heartbeat, adoptOrphan, lastSeenAt,
+  planForeignJob, FOREIGN_ACTION, OWNERSHIP,
 } from './lib/job-store.js'
 import { appendLog, readLogTail, logStats, logFileOf as logFileFor } from './lib/job-logs.js'
 
@@ -2407,7 +2408,7 @@ function createJobService(config, onSettled) {
     }
   }
 
-  function fail(job, msg) {
+  function fail(job, msg, { notify = true } = {}) {
     const fromSubmit = job.stage === 'submitting' // 提交期失败：错误随工具调用同步返回，无需再唤醒
     setStage(job, 'failed')
     job.error = msg
@@ -2417,7 +2418,7 @@ function createJobService(config, onSettled) {
     job.finishedAt = new Date().toISOString()
     note(job, `任务失败：${msg}`)
     touch(job)
-    if (!fromSubmit) onSettled?.(job, 'failed') // sessionId 守卫在 wakeCompileSession 内
+    if (notify && !fromSubmit) onSettled?.(job, 'failed') // sessionId 守卫在 wakeCompileSession 内
   }
 
   // 任务收尾：done / partial / failed 三态。
@@ -3790,11 +3791,19 @@ function createJobService(config, onSettled) {
       for (const job of jobs) {
         if (JOB_TERMINAL.has(job.stage)) continue
         if (job.owner && job.owner !== instanceId) {
-          if (job.stage === 'queued' || job.stage === 'submitting') continue
-          // 另一实例的 job：它活着会随批次轮询 touch（updatedAt 每 tick 前进）；
-          // 停更超时视为孤儿（宿主重启后 instanceId 变了，旧任务无人推进），接管。
+          // 别的实例拥有的任务：活着就跳过；停更则按阶段决定接手续跑还是作废。
+          // 排队/提交阶段没有执行器可丢，旧实现一律 continue，于是宿主重启前提交的排队项
+          // 会永久留在 queued——既占着闸门窗口，又让同仓幂等一直命中它，用户连重试都做不到。
+          const plan = planForeignJob(job, { instanceId, now: Date.now(), orphanTakeoverMs: ORPHAN_TAKEOVER_MS })
+          if (plan.action === FOREIGN_ACTION.LEAVE) continue
+          if (plan.action === FOREIGN_ACTION.VOID) {
+            // 作废是被取代，不是编译失败：原实例早已消失，这条排队项从未真正开始。
+            // 不唤醒会话（不等同于「编译失败」），用户下次提交会正常排进队列。
+            note(job, `原实例 ${job.owner} 停更，${plan.reason}，本实例作废该任务`)
+            fail(job, plan.reason, { notify: false })
+            continue
+          }
           const idleMs = Date.now() - lastSeenAt(job)
-          if (Number.isFinite(idleMs) && idleMs <= ORPHAN_TAKEOVER_MS) continue
           note(job, `原实例 ${job.owner} 停更 ${Math.round(idleMs / 60000)} 分钟，本实例接管推进`)
           adoptOrphan(job, { instanceId })
           touch(job)
