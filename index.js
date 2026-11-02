@@ -493,6 +493,20 @@ const normPathKey = (p) => {
   const n = path.normalize(String(p ?? '')).replace(/[\\/]+$/, '')
   return process.platform === 'win32' ? n.toLowerCase() : n
 }
+// 仓库总览该显示哪个任务：活动中的优先，其次按更新时间取最新。
+//
+// 旧实现是「先到者胜」（`if (!lastByCwd.get(k)) set(...)`），而 service.list() 按提交顺序
+// 返回，于是同仓有多个任务时永远显示最旧的那个。真机 2026-11-02 就出现过：五个仓库明明
+// 刚被自动调度拉起来在跑，面板总览却齐刷刷标着「失败」（三小时前那批 env 阶段失败的旧任务）。
+// 「上次编译」这个位置要回答的是「这个仓库现在怎么样了」，所以活动任务优先，其次最新。
+export function pickOverviewJob(jobs) {
+  const list = (Array.isArray(jobs) ? jobs : []).filter((j) => j && j.id)
+  if (!list.length) return null
+  const active = list.filter((j) => !TERMINAL.has(j.stage))
+  const pool = active.length ? active : list
+  const stamp = (j) => String(j.updatedAt ?? j.finishedAt ?? j.createdAt ?? '')
+  return pool.reduce((best, j) => (stamp(j) > stamp(best) ? j : best))
+}
 export function isWorktreeCwd(cwd) {
   const dir = String(cwd ?? '').trim()
   if (!dir) return false
@@ -4431,19 +4445,17 @@ export function installWebServer(ctx, service, extra = {}) {
           const c = liveConfig(config ?? {})
           const normKey = (p) => path.normalize(String(p ?? '')).replace(/[\\/]+$/, '').toLowerCase()
           const seen = new Map() // normKey → 展示用 cwd（job 历史形态优先，knownRepos 补缺）
-          const lastByCwd = new Map()
-          const putCwd = (dir, last) => {
+          const jobsByCwd = new Map() // 展示用 cwd → 该仓全部候选任务
+          const putCwd = (dir, job) => {
             if (!dir) return
             // 编译对象闸门（1.2.1）：worktree 目录与无可编译源码的空壳目录不进仓库总览——
             // 它们永远编译不出东西，出现在总览里只会诱导用户反复手动提交。
             if (isDeadCompileTarget(dir)) return
             const k = normKey(dir)
-            if (seen.has(k)) {
-              if (last && !lastByCwd.get(seen.get(k))) lastByCwd.set(seen.get(k), last)
-              return
-            }
-            seen.set(k, dir)
-            lastByCwd.set(dir, last ?? null)
+            const shown = seen.get(k) ?? dir
+            seen.set(k, shown)
+            if (!jobsByCwd.has(shown)) jobsByCwd.set(shown, [])
+            if (job) jobsByCwd.get(shown).push(job)
           }
           // workspaceOnly（默认开）：总览只显示已添加工作区（含其子仓库）——knownRepos/job
           // 历史里的 Temp 沙箱与任意路径目录不再出现；无清单时不过滤。
@@ -4451,10 +4463,10 @@ export function installWebServer(ctx, service, extra = {}) {
           const wsPaths = wsFilterPaths()
           const inWs = (dir) => !wsPaths || isExcluded(dir, wsPaths)
           for (const j of service.list()) if (!JOB_TERMINAL.has(j.stage) || inWs(j.cwd)) putCwd(j.cwd, j)
-          for (const dir of loadKnownRepos()) if (inWs(dir)) putCwd(dir, null)
+          for (const dir of loadKnownRepos()) if (inWs(dir)) putCwd(dir, undefined)
           const repos = []
           for (const cwd of seen.values()) {
-            const last = lastByCwd.get(cwd)
+            const last = pickOverviewJob(jobsByCwd.get(cwd))
             const base = {
               cwd,
               excluded: isExcluded(cwd, c.excludePaths),

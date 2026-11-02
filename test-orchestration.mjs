@@ -1162,6 +1162,35 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
   }
 }
 
+// 面板总览每个仓库显示的「上次编译」必须是**真正最新的那个任务**。
+// 真机缺陷（0.17.10 期间）：putCwd 用「先到者胜」，而 service.list() 按提交顺序返回，
+// 于是同仓有多个任务时永远显示最旧的那个——五个仓库明明有任务在跑，总览却全标「失败」。
+// 面板总览每个仓库显示的「上次编译」必须是**真正最新的那个任务**。
+// 真机缺陷（0.17.10 期间）：putCwd 用「先到者胜」，而 service.list() 按提交顺序返回，
+// 于是同仓有多个任务时永远显示最旧的那个——五个仓库明明刚被拉起在跑，总览却齐刷刷
+// 标着「失败」（三小时前那批 env 阶段失败的旧任务）。
+const { pickOverviewJob } = await import('./index.js')
+
+async function repoOverviewPicksLatestJob() {
+  const mk = (id, stage, updatedAt) => ({ id, stage, updatedAt })
+  // 1) 有活动任务时必须优先显示它，哪怕旧的更新时间更晚（时钟漂移/收尾补写）
+  const withActive = [mk('a', 'failed', '2026-11-02T10:00:00.000Z'), mk('b', 'queued', '2026-11-01T00:00:00.000Z')]
+  check(pickOverviewJob(withActive)?.id === 'b', `活动任务优先于旧的失败任务（实际 ${pickOverviewJob(withActive)?.id}）`)
+  // 2) 都是终态时取更新时间最新的
+  const allTerminal = [mk('c', 'failed', '2026-11-01T00:00:00.000Z'), mk('d', 'done', '2026-11-02T00:00:00.000Z')]
+  check(pickOverviewJob(allTerminal)?.id === 'd', `终态之间取最新（实际 ${pickOverviewJob(allTerminal)?.id}）`)
+  // 3) 多个活动任务取最新的那个
+  const twoActive = [mk('e', 'articles', '2026-11-02T01:00:00.000Z'), mk('f', 'queued', '2026-11-02T02:00:00.000Z')]
+  check(pickOverviewJob(twoActive)?.id === 'f', `多个活动任务取最新（实际 ${pickOverviewJob(twoActive)?.id}）`)
+  // 4) 空输入与脏输入不炸
+  check(pickOverviewJob([]) === null && pickOverviewJob(null) === null && pickOverviewJob([null, {}]) === null,
+    '空/脏输入返回 null')
+  // 5) finishedAt 兜底：老 job 没有 updatedAt 时也要能比较
+  const legacy = [{ id: 'g', stage: 'done', finishedAt: '2026-11-01T00:00:00.000Z' }, { id: 'h', stage: 'done', finishedAt: '2026-11-02T00:00:00.000Z' }]
+  check(pickOverviewJob(legacy)?.id === 'h', `回退到 finishedAt 比较（实际 ${pickOverviewJob(legacy)?.id}）`)
+}
+
+await check('repos 总览：同仓多次编译时取最新任务，不显示被取代的旧失败', repoOverviewPicksLatestJob)
 // ============================ 排除清单 / repos 总览 / compile 动作（0.4.7） ============================
 await cleanupServices()
 console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
