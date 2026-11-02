@@ -5,7 +5,7 @@ source_files:
   - lib/agentic-host.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Extension_Host_Execution_Orchestration/agent_runtime.md
+fsoft_page: agent_runtime.md
 ---
 # Agent 运行时适配层（agent_runtime）
 

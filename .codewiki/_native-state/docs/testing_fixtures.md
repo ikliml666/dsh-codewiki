@@ -116,12 +116,12 @@ sequenceDiagram
 
 ## 在整体系统中的位置
 
-本模块位于 [Code_Engine_Processing_Pipeline](../Code_Engine_Processing_Pipeline.md) 的**质量保障外围**：引擎流水线（[code_engine_module](../Code_Engine_Processing_Pipeline/code_engine_module.md)）负责实际的代码分析、模块索引与计划执行，而本模块的夹具用于在引擎交付前验证其正确性。
+本模块位于 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 的**质量保障外围**：引擎流水线（[code_engine_module](code_engine_module.md)）负责实际的代码分析、模块索引与计划执行，而本模块的夹具用于在引擎交付前验证其正确性。
 
 具体关联：
 
-- **依赖图分析**：`中文 空格 fixture` 的 `Handler → Engine` 依赖边，直接测试上游引擎 `DependencyGraphBuilder.build_dependency_graph()` 的输出，该引擎由 [python_native_runtime](../Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime.md) 中的 `entry.py` 以子进程方式驱动。
-- **环境前置条件**：夹具的探测验证依赖 [setup-env.sh](../build_deployment_config.md)（在 `tools/fsoft-engine/setup-env.sh`）构建的独立 Python venv——该脚本用 `--no-deps` 安装冻结快照并做 `pip check` 兜底，确保探测在依赖闭合的环境中运行。
+- **依赖图分析**：`中文 空格 fixture` 的 `Handler → Engine` 依赖边，直接测试上游引擎 `DependencyGraphBuilder.build_dependency_graph()` 的输出，该引擎由 [python_native_runtime](python_native_runtime.md) 中的 `entry.py` 以子进程方式驱动。
+- **环境前置条件**：夹具的探测验证依赖 [setup-env.sh](build_deployment_config.md)（在 `tools/fsoft-engine/setup-env.sh`）构建的独立 Python venv——该脚本用 `--no-deps` 安装冻结快照并做 `pip check` 兜底，确保探测在依赖闭合的环境中运行。
 - **对拍验证对象**：`gen-graphdiff-golden.py` 产出的相似度 / diff / hash 用例，验证的是已退役的 Node 侧算法移植（0.16.0 起原生引擎通道为默认），这些用例仍作为回归保护防止任何残留 Node 实现被误用。
 
 ## 使用方式

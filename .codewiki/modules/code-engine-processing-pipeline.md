@@ -30,9 +30,9 @@ fsoft_page: Code_Engine_Processing_Pipeline.md
 
 模块由三部分组成：
 
-- [code_engine_module](Code_Engine_Processing_Pipeline/code_engine_module.md)：驱动 Python FSoft 原生引擎完成知识库编译的完整子系统，把一次编译固定为从环境指纹、增量决议、模型桥、子进程协议、产物映射、质量门到原子落地的单向裁决链。
-- [article_generation_worker](Code_Engine_Processing_Pipeline/article_generation_worker.md)：agentic 文章生成执行通道，让模型像工程师一样用工具循环读源码、增量编辑文章，适合大模块。
-- [article_validation](Code_Engine_Processing_Pipeline/article_validation.md)：单篇 wiki 文章结构合规判定的纯函数模块，是两条通道共用的「落盘前闸门」。
+- [code_engine_module](code_engine_module.md)：驱动 Python FSoft 原生引擎完成知识库编译的完整子系统，把一次编译固定为从环境指纹、增量决议、模型桥、子进程协议、产物映射、质量门到原子落地的单向裁决链。
+- [article_generation_worker](article_generation_worker.md)：agentic 文章生成执行通道，让模型像工程师一样用工具循环读源码、增量编辑文章，适合大模块。
+- [article_validation](article_validation.md)：单篇 wiki 文章结构合规判定的纯函数模块，是两条通道共用的「落盘前闸门」。
 
 ## 模块架构
 
@@ -80,16 +80,16 @@ flowchart LR
 
 | 模块 | 职责一句话 |
 |------|-----------|
-| [code_engine_module](Code_Engine_Processing_Pipeline/code_engine_module.md) | Python 原生引擎编译子系统：环境校验、增量决议、子进程协议、质量门与原子落地的单向裁决链 |
-| [article_generation_worker](Code_Engine_Processing_Pipeline/article_generation_worker.md) | agentic 文章生成执行通道：工具循环、双池并发调度、子模块递归派发与写集闸门 |
-| [article_validation](Code_Engine_Processing_Pipeline/article_validation.md) | 单篇文章结构合规纯函数判定：frontmatter / 章节 / 死链 / source_files 校验与写集规范化 |
+| [code_engine_module](code_engine_module.md) | Python 原生引擎编译子系统：环境校验、增量决议、子进程协议、质量门与原子落地的单向裁决链 |
+| [article_generation_worker](article_generation_worker.md) | agentic 文章生成执行通道：工具循环、双池并发调度、子模块递归派发与写集闸门 |
+| [article_validation](article_validation.md) | 单篇文章结构合规纯函数判定：frontmatter / 章节 / 死链 / source_files 校验与写集规范化 |
 
 ## 核心不变量
 
 | # | 不变量 | 实现位置 |
 |---|--------|----------|
-| 1 | 锁不一致 / 依赖不闭合 → 直接 `failed`，不跑引擎 | [code_engine_module](Code_Engine_Processing_Pipeline/code_engine_module.md) → engine_manifest_management |
-| 2 | 引擎 `done` 不能替代质量门：gate 说 `partial`，终态就是 `partial` | [code_engine_module](Code_Engine_Processing_Pipeline/code_engine_module.md) → quality_gates |
-| 3 | error 级契约问题的页面绝不进落盘写集；warning 级放行但阻止基线前移 | [article_validation](Code_Engine_Processing_Pipeline/article_validation.md) |
-| 4 | 写集封闭：模型只能写调度器分配的路径，越界一律拒写 | [article_generation_worker](Code_Engine_Processing_Pipeline/article_generation_worker.md) + [article_validation](Code_Engine_Processing_Pipeline/article_validation.md) |
-| 5 | 空文章兜底：模型全程未产出正文时记失败，不能覆盖旧文 | [article_generation_worker](Code_Engine_Processing_Pipeline/article_generation_worker.md) |
+| 1 | 锁不一致 / 依赖不闭合 → 直接 `failed`，不跑引擎 | [code_engine_module](code_engine_module.md) → engine_manifest_management |
+| 2 | 引擎 `done` 不能替代质量门：gate 说 `partial`，终态就是 `partial` | [code_engine_module](code_engine_module.md) → quality_gates |
+| 3 | error 级契约问题的页面绝不进落盘写集；warning 级放行但阻止基线前移 | [article_validation](article_validation.md) |
+| 4 | 写集封闭：模型只能写调度器分配的路径，越界一律拒写 | [article_generation_worker](article_generation_worker.md) + [article_validation](article_validation.md) |
+| 5 | 空文章兜底：模型全程未产出正文时记失败，不能覆盖旧文 | [article_generation_worker](article_generation_worker.md) |

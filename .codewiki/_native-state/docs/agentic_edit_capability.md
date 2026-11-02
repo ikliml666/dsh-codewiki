@@ -51,7 +51,7 @@ flowchart TB
 
 要点：
 
-- **上游调用方**：[`article_generation_worker`](../Code_Engine_Processing_Pipeline/article_generation_worker.md)（`lib/articles-agentic.js`）把「模块任务清单」逐个跑成文章——它调用本模块的 `runAgenticArticle` 与 `makeArticleEditor`，并叠加子模块递归派发、写集闸门、落盘等生产语义；
+- **上游调用方**：[`article_generation_worker`](article_generation_worker.md)（`lib/articles-agentic.js`）把「模块任务清单」逐个跑成文章——它调用本模块的 `runAgenticArticle` 与 `makeArticleEditor`，并叠加子模块递归派发、写集闸门、落盘等生产语义；
 - **宿主适配**：[`agent_runtime`](agent_runtime.md)（`lib/agentic-host.js`）把本模块的裸消息 / blocks 形态适配成宿主 `llm.stream` 需要的正式 Message，并提供真实文件系统 workspace；
 - **入口调度**：[`extension_host_core`](extension_host_core.md)（`index.js`）负责生成模块任务清单、按阶段 tick 推进、管理并发池。
 
@@ -131,7 +131,7 @@ flowchart LR
 
 工具层本身只做协议与错误语义：
 
-- 真正的派发由调用方注入的 `onSubModule({ name, components, description })` 回调完成（生产实现见 [`article_generation_worker`](../Code_Engine_Processing_Pipeline/article_generation_worker.md) 的 `dispatchSub`：递归跑 `runOneArticle`，落盘到 `modules/<父 slug>/<子 slug>.md`，递归深度封顶 `subDepth`）；
+- 真正的派发由调用方注入的 `onSubModule({ name, components, description })` 回调完成（生产实现见 [`article_generation_worker`](article_generation_worker.md) 的 `dispatchSub`：递归跑 `runOneArticle`，落盘到 `modules/<父 slug>/<子 slug>.md`，递归深度封顶 `subDepth`）；
 - **不可派发时必须说实话**：
   - `subModuleBlocked === 'max-depth'`：回「已经到达子模块嵌套上限，请在本文里把它作为普通小节直接写清楚，不要写『详见某文件』之类的链接」；
   - 其他不支持递归的情况：回「当前模式不支持递归成文」。
@@ -231,9 +231,9 @@ flowchart TB
 
 | 方向 | 对象 | 说明 |
 | --- | --- | --- |
-| 被调用 | [`article_generation_worker`](../Code_Engine_Processing_Pipeline/article_generation_worker.md) | 生产链路：`runOneArticle` 导入 `runAgenticArticle`、`makeArticleEditor`、`DEFAULT_MAX_STEPS` |
+| 被调用 | [`article_generation_worker`](article_generation_worker.md) | 生产链路：`runOneArticle` 导入 `runAgenticArticle`、`makeArticleEditor`、`DEFAULT_MAX_STEPS` |
 | 被适配 | [`agent_runtime`](agent_runtime.md) | `makeHostStream` 提供 `streamFn`、`makeFsWorkspace` 提供 workspace |
 | 被编排 | [`extension_host_core`](extension_host_core.md) | `index.js` 生成模块任务清单、管理并发池与 tick 阶段 |
-| 协作 | [`article_validation`](../Code_Engine_Processing_Pipeline/article_validation.md) | 写集闸门在工作层做，本模块不感知 |
+| 协作 | [`article_validation`](article_validation.md) | 写集闸门在工作层做，本模块不感知 |
 
 本模块本身**零外部运行时依赖**（仅 `node:path`），全部通过注入接入宿主——这正是它可以被离线测试、也可以被多条执行通道复用的原因。

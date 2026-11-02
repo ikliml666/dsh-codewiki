@@ -188,11 +188,11 @@ flowchart LR
 
 | 关系 | 模块 | 说明 |
 |------|------|------|
-| 上游输入 | [Extension_Host_Execution_Orchestration/change_set_management](../../Extension_Host_Execution_Orchestration/change_set_management.md) | `collect` 产出的 ChangeSet 是 `mergeUnconsumed` 与 `buildStatePayload` 的输入 |
+| 上游输入 | [Extension_Host_Execution_Orchestration/change_set_management](change_set_management.md) | `collect` 产出的 ChangeSet 是 `mergeUnconsumed` 与 `buildStatePayload` 的输入 |
 | 下游消费 | [python_native_runtime](python_native_runtime.md) | 引擎 Python 侧读水合后的 `module_tree.json` / 依赖图决定走增量还是全量 |
 | 同事务落地 | [plan_application](plan_application.md) | 状态文件经 `captureDocsDir` 产出写集，作为 `extraFiles` 与文章同 pre-image、同回滚、同提交；落地器的写集白名单 `.codewiki/` 天然覆盖 `_native-state/` |
 | 协议边界 | [engine_client](engine_client.md) / [engine_contracts](engine_contracts.md) | `docsDir` 是引擎子进程的写盘目标，本模块在它之外负责跨轮持久化 |
-| 路径归一 | `lib/git-paths.js::toPosix` | 全模块唯一的 POSIX 归一实现（见 [job_log_management](../../State___Observability_Management/job_log_management.md)） |
+| 路径归一 | `lib/git-paths.js::toPosix` | 全模块唯一的 POSIX 归一实现（见 [job_log_management](job_log_management.md)） |
 | 原始树留档 | —— | `archiveDocsTree` 留档到仓库外临时目录，不经任何索引 |
 
 ## 公开 API 一览

@@ -166,7 +166,7 @@ flowchart TD
 1. **闸门是本模块的主要消费方**：`gateNativeOutput`（见 [`quality_gates`](quality_gates.md)）内部调用同一份映射逻辑，把 `unmapped` 升级为 defect（`unmapped-page`）、把空 `source_files` 升级为 degradation（`no-source-evidence`）——即本模块报出的「事实」会被闸门翻译成「裁决」。
 2. **本模块不做写盘**：`entry` 的写入时机由落地器 [`plan_application`](plan_application.md) 控制（`entryMode: keep / skip / overwrite`），映射层只指出 `CodeWiki.md` 应来自哪个 `source`。
 3. **契约版本对齐**：输出携带 `ENGINE_CONTRACT_VERSION`，与 [`engine_contracts`](engine_contracts.md) 的校验闭环配套——版本不符的写集会被直接拒绝。
-4. **路径工具复用**：POSIX 化依赖 [State___Observability_Management/job_log_management](../../State___Observability_Management/job_log_management.md) 中的 `toPosix`（`lib/git-paths.js`），保证跨平台（Windows `\` → `/`）路径一致。
+4. **路径工具复用**：POSIX 化依赖 [State___Observability_Management/job_log_management](job_log_management.md) 中的 `toPosix`（`lib/git-paths.js`），保证跨平台（Windows `\` → `/`）路径一致。
 
 ## 设计不变量（迁移安全边界）
 
@@ -182,4 +182,4 @@ flowchart TD
 - 上游：[`python_native_runtime`](python_native_runtime.md)（FSoft Python 引擎产出 docs 树）、[`engine_client`](engine_client.md)（`runEngine` 拉起原生运行时）
 - 消费方：[`quality_gates`](quality_gates.md)（门控裁决）、[`plan_application`](plan_application.md)（落盘与基线推进）
 - 契约：[`engine_contracts`](engine_contracts.md)（`ENGINE_CONTRACT_VERSION` 校验）
-- 全局上下文：[Code_Engine_Processing_Pipeline](../../Code_Engine_Processing_Pipeline.md)、[code_engine_module](../code_engine_module.md)
+- 全局上下文：[Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)、[code_engine_module](code_engine_module.md)

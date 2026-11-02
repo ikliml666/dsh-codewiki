@@ -2,7 +2,7 @@
 
 ## 概述
 
-`python_native_runtime` 是 [Code_Engine_Processing_Pipeline/code_engine_module.md](../code_engine_module.md) 的子模块，承担「Node 主进程 ↔ FSoft 原生引擎（`codewiki` Python 包）」之间的**跨进程协议边界**。它本身**不实现任何算法**——依赖图构建、模块聚类、文章写作、增量 diff 全部由 FSoft 自己完成；本模块只做四件事：
+`python_native_runtime` 是 [Code_Engine_Processing_Pipeline/code_engine_module.md](code_engine_module.md) 的子模块，承担「Node 主进程 ↔ FSoft 原生引擎（`codewiki` Python 包）」之间的**跨进程协议边界**。它本身**不实现任何算法**——依赖图构建、模块聚类、文章写作、增量 diff 全部由 FSoft 自己完成；本模块只做四件事：
 
 1. 把 Node 通过 stdin 发来的一行 JSON 请求（`doctor` / `generate` / `update` / `cancel`）翻译成一次 FSoft 调用；
 2. 把 FSoft 的五段进度翻译成引擎八段契约的进度帧，以 JSON 行推回 Node；
@@ -70,6 +70,8 @@ flowchart TD
 ```
 
 入口刻意**绕开 `ConfigManager`**：模型通道一律从进程环境变量读取（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），密钥只活在内存里，不落盘、不读本机 keyring。桥的另一端由 [llm_integration_bridges](llm_integration_bridges.md) 的 `startLlmBridge` 提供——它在 Node 侧起一个 loopback HTTP 服务，把 `llm.stream` 适配成 OpenAI 兼容端点。
+
+**单模块请求预算（`request_limit`）**：上游默认 100，但 `doc_guard.run_until_doc_written` 在模块没写出页面时会续发最多 2 次提醒，每次提醒都是一次独立 `agent.run(usage_limits=...)`，各自吃满一份预算——大模块会在 100 次请求处撞上限，pydantic-ai 抛「The next request would exceed the request_limit」，经 `_classify_exception` 翻成 `article-missing`，整轮从 done 掉成 partial（语义对、预算错：同一轮已写好的几十篇白写）。因此 `action_generate` 从请求行的 `requestLimit` 取值（硬顶 1000，非正值忽略），**未下发时用 300 而不是上游的 100**，避免「插件没传就退回旧坑」；`agent_retries=3` 与 `module_concurrency`（默认 1，硬顶 8）同样在此组装。
 
 **进度桥接（`bridge_progress`）** 是入口里最重的一段逻辑，负责把 FSoft 的 `ProgressTracker` 事件翻成协议帧：
 

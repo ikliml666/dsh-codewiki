@@ -165,6 +165,17 @@ export const DEFAULT_UPDATE_OPTIONS = Object.freeze({ rung: '3' })
 
 `rung: '3'` 表示组件级方法（图 diff 决定哪些模块要重写）。显式给出而不是留空，是为了让测试能断言「调用方确实要求了组件级增量」，而不是「碰巧默认成了增量」。
 
+### 引擎请求预算：同层并行度与单模块请求上限
+
+引擎 `payload` 里还有两个由调用方（插件设置）下发的预算参数：
+
+| 参数 | 语义 | 下发规则 |
+|------|------|----------|
+| `moduleConcurrency` | 同层模块并行度，引擎默认 1（严格串行） | 取 `max(1, Number(moduleConcurrency))` 显式下发；只有显式给 `>1` 才开并行 |
+| `requestLimit` | 单模块写作的 LLM 请求上限，由插件设置下发（默认 300） | **只有 `>0` 才下发**（`Math.round(Number(requestLimit))`）；不传时引擎退回自身默认（100） |
+
+`requestLimit` 的缺省值是合法预算，所以 `0` 不能原样下发——它不是合法预算。不下发就是「用引擎自己的默认」，显式给正值才覆盖；硬顶由插件设置侧收口，本层只负责透传与取整。
+
 ---
 
 ## 工作区快照：内容与账本对齐
@@ -348,4 +359,4 @@ const deps = {
 | [native_state_management](native_state_management.md) | 被 `runNativeJob` 大量使用，增量水合/状态采集/指纹比对 |
 | [workspace_snapshots](workspace_snapshots.md) | 被 `runNativeJob` 调用，合成含未提交改动的临时 commit |
 | [python_native_runtime](python_native_runtime.md) | 被 `runEngine` spawn 的 Python 入口（`entry.py`） |
-| [code_engine_module](../code_engine_module.md) | 上层模块目录 |
+| [code_engine_module](code_engine_module.md) | 上层模块目录 |

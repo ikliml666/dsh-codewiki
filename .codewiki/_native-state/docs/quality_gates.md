@@ -242,7 +242,7 @@ flowchart TD
 | 依赖 | 用途 |
 |------|------|
 | [engine_output_processing](engine_output_processing.md) | `validateOutput` 产物自洽检查（不重写任何判定） |
-| [../article_validation](../article_validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files） |
+| [../article_validation](article_validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files） |
 | [module_indexing](module_indexing.md) | `WIKI_ENTRY` / `WIKI_META_REL` 路径常量 |
 | [plan_application](plan_application.md) | 落地器消费本模块的 `GateReport`，只写 `writable=true` 的页 |
 | [engine_contracts](engine_contracts.md) | `toContractBlockers` 把 gate 问题翻译成 `BLOCKER_KINDS` |

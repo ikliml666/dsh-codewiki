@@ -5,7 +5,7 @@ source_files:
   - lib/engine/contract.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/engine_contracts.md
+fsoft_page: engine_contracts.md
 ---
 # 引擎结果契约（engine_contracts）
 
@@ -175,7 +175,7 @@ flowchart TB
    - [`plan_application`](plan_application.md) 依据 `outcome === 'done'` 且 `updateOutcome ∈ CONSUMING_UPDATE_OUTCOMES` 才允许推进 cw 基线；
    - 面板与 job tick 用 `describeEngineResult()` 展示文案、用 `engineProgress` 的 `stage` 渲染步骤条；
    - 调度层依据 `error.retryable` 决定是否自动重试；
-   - [`State___Observability_Management`](../../State___Observability_Management.md) 家族（job 状态存储、更新状态追踪）持久化结果对象，读回时经 `validateEngineResult()` 校验。
+   - [`State___Observability_Management`](State___Observability_Management.md) 家族（job 状态存储、更新状态追踪）持久化结果对象，读回时经 `validateEngineResult()` 校验。
 
 ---
 
@@ -227,5 +227,5 @@ sequenceDiagram
 - [plan_application](plan_application.md) — 依据契约结果执行落地与基线推进。
 - [python_native_runtime](python_native_runtime.md) — Python 侧入口与运行时，按同一协议帧输出结果。
 - [engine_manifest_management](engine_manifest_management.md) — `doctor` 动作产出的 `checks` 与 `engine.deps` 证据来源。
-- [State___Observability_Management](../../State___Observability_Management.md) — 结果对象的持久化与终态追踪。
-- [Code_Engine_Processing_Pipeline](../../Code_Engine_Processing_Pipeline.md) — 引擎处理管道总体文档。
+- [State___Observability_Management](State___Observability_Management.md) — 结果对象的持久化与终态追踪。
+- [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) — 引擎处理管道总体文档。

@@ -2,7 +2,7 @@
 
 ## 简介
 
-`engine_output_processing` 是 [Code_Engine_Processing_Pipeline](../../Code_Engine_Processing_Pipeline.md) 流水线中的**阶段 2**，负责把原生产物（Python 引擎在 `docs/` 目录下产出的一棵 markdown 树 + 四个 JSON）解析为结构化事实、交给映射层生成写集计划、并对「产物自身是否自洽」给出可机读的裁决。它对应实现文件 `lib/engine/output.js`。
+`engine_output_processing` 是 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 流水线中的**阶段 2**，负责把原生产物（Python 引擎在 `docs/` 目录下产出的一棵 markdown 树 + 四个 JSON）解析为结构化事实、交给映射层生成写集计划、并对「产物自身是否自洽」给出可机读的裁决。它对应实现文件 `lib/engine/output.js`。
 
 这一层的刻意边界非常窄——文件头注释明确写死了三件能做的事和三不做的事：
 
@@ -202,4 +202,4 @@ sequenceDiagram
 - [quality_gates](quality_gates.md) —— 阶段 3 采用门：复用 `validateOutput`，叠加格式契约与基线裁决。
 - [plan_application](plan_application.md) —— 阶段 3 落地器：把 `mapped` 写进 `.codewiki/` 与 `CodeWiki.md`。
 - [engine_client](engine_client.md) —— 阶段 1：驱动 Python 引擎产出本模块消费的 `docs/` 树。
-- [article_validation](../article_validation.md) —— `hasBlockingIssue` / `issueSummary` 与 `article-contract.js` 的格式判据（阶段 3 复用）。
+- [article_validation](article_validation.md) —— `hasBlockingIssue` / `issueSummary` 与 `article-contract.js` 的格式判据（阶段 3 复用）。

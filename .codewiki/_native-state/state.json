@@ -3,47 +3,45 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "dfb47664bcc9a90f01eeeb4da1a0a2d918d5a8f1"
+    "headCommit": "53a0122608a6356c7abaf8e7c49df3938d45fd0a"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "dfb47664bcc9a90f01eeeb4da1a0a2d918d5a8f1",
-    "committed": [],
-    "staged": [],
-    "unstaged": [
+    "headCommit": "53a0122608a6356c7abaf8e7c49df3938d45fd0a",
+    "committed": [
+      "CHANGELOG.md",
       "README.md",
+      "client.js",
       "docs/fsoft-native-engine.md",
+      "index.js",
       "lib/engine/manifest.js",
+      "lib/engine/native-run.js",
       "lib/engine/python/entry.py",
+      "package.json",
       "patches/README.md",
       "patches/upstream-module-parallel.patch",
+      "test-config.mjs",
+      "test-engine-native-job.mjs",
       "test-engine-python-entry.mjs",
+      "test-fixtures/fake-native-engine.mjs",
       "test-upstream-parallel.mjs"
     ],
+    "staged": [],
+    "unstaged": [],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [
-    "README.md",
-    "docs/fsoft-native-engine.md",
-    "lib/engine/manifest.js",
-    "lib/engine/python/entry.py",
-    "patches/README.md",
-    "patches/upstream-module-parallel.patch",
-    "test-engine-python-entry.mjs",
-    "test-upstream-parallel.mjs"
-  ],
+  "unconsumed": [],
   "engineVersion": "2.0.0",
-  "scope": "full",
-  "effectiveScope": "full",
-  "updateOutcome": "no_change",
+  "scope": "auto",
+  "effectiveScope": "stale",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "工作区未提交改动已合成临时 commit ac03920c80dd（8 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz63g6q-5-native（36 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvzbcw87-0-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-02T12:11:29.027Z"
+  "updatedAt": "2026-11-02T14:06:19.822Z"
 }

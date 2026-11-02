@@ -5,13 +5,13 @@ source_files:
   - lib/engine/client.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/engine_client.md
+fsoft_page: engine_client.md
 ---
 # 引擎客户端（engine_client）
 
 引擎客户端是 Node ↔ Python 原生引擎之间**唯一的跨语言边界**。它由 `lib/engine/client.js` 实现，对外暴露两个构件：`runEngine`（起进程、跑一次动作的完整编排）与 `createProtocolReader`（纯逻辑的增量 JSON-lines 协议解析器）。它把 FSoft Python 引擎的进程生命周期与 JSON-lines 协议流，翻译成系统其余部分可机读的 `EngineResult` / `EngineProgress` / `EngineError`。
 
-> 上游定位：本页只讲「如何驱动一次引擎进程并归一其结果」。整个处理管线的入口与上下游协作见 [Code_Engine_Processing_Pipeline](../../Code_Engine_Processing_Pipeline.md)，引擎整体的模块族见 [code_engine_module](../code_engine_module.md)。
+> 上游定位：本页只讲「如何驱动一次引擎进程并归一其结果」。整个处理管线的入口与上下游协作见 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)，引擎整体的模块族见 [code_engine_module](code_engine_module.md)。
 
 ## 职责边界
 

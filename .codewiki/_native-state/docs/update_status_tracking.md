@@ -18,7 +18,7 @@
 
 ## 架构定位
 
-`update_status_tracking` 是 [State___Observability_Management.md](../State___Observability_Management.md) 的三个子模块之一，与负责 job 跨进程持久化的 [job_state_storage.md](job_state_storage.md)（`lib/job-store.js`）、负责引擎事件日志的 [job_log_management.md](job_log_management.md)（`lib/job-logs.js`）并列：
+`update_status_tracking` 是 [State___Observability_Management.md](State___Observability_Management.md) 的三个子模块之一，与负责 job 跨进程持久化的 [job_state_storage.md](job_state_storage.md)（`lib/job-store.js`）、负责引擎事件日志的 [job_log_management.md](job_log_management.md)（`lib/job-logs.js`）并列：
 
 - `job-store.js` 记录「任务在系统里处于什么阶段、归谁所有」；
 - `update-record.js` 记录「这一轮编译**为什么**落成这个结局、哪些变化没被消化」；
@@ -139,7 +139,7 @@ canAdvanceBaseline: outcome === 'done'
 写成显式形式而非别名 `outcome === 'done'` 的理由：
 
 - 本函数服务**兼容通道**（`tickIndex`），它的 blocker 含「未归属变更」「缺页」这类「没消化完」语义，一旦放宽就会把未消化的变化记成已消化——下一轮这些变化不再触发文章更新，wiki 会**静默落后于代码**；
-- 而 native 通道与 [quality_gates](../Code_Engine_Processing_Pipeline/code_engine_module/quality_gates.md) 用的是另一种判据（「有成果且无硬缺陷」），两处看似矛盾、实际是通道不同。显式判据让将来有人放宽 blocker 规则时，partial 分支自动按「有成果且无缺陷才推进」生效，而不是靠 `done` 别名悄悄失效。
+- 而 native 通道与 [quality_gates](quality_gates.md) 用的是另一种判据（「有成果且无硬缺陷」），两处看似矛盾、实际是通道不同。显式判据让将来有人放宽 blocker 规则时，partial 分支自动按「有成果且无缺陷才推进」生效，而不是靠 `done` 别名悄悄失效。
 
 ---
 
@@ -147,11 +147,11 @@ canAdvanceBaseline: outcome === 'done'
 
 ### 输入：来自 ChangeSet 与 UpdatePlan
 
-`buildUpdateRecord` 消费的 `changeSet` 由 [change_set_management.md](../Extension_Host_Execution_Orchestration/change_set_management.md) 的 `collect` 产出（committed / staged / unstaged / untracked 四路合一）。记录只保留它的**摘要**（state、ok、fallback、reason、七类计数、sourceChanges/ignored 名单），原始条目不入记录——这与 job-store「job 文件只存路径与摘要」的原则一致。
+`buildUpdateRecord` 消费的 `changeSet` 由 [change_set_management.md](change_set_management.md) 的 `collect` 产出（committed / staged / unstaged / untracked 四路合一）。记录只保留它的**摘要**（state、ok、fallback、reason、七类计数、sourceChanges/ignored 名单），原始条目不入记录——这与 job-store「job 文件只存路径与摘要」的原则一致。
 
 ### 输出：面板与端点
 
-裁决结果写入 job 的 `outcome` / `blockers` / `canAdvanceBaseline` 字段后，由 `index.js::jobSummary` 统一抽取（连同 `baselineEligible` / `baselineAdvanced` / `deliveryComplete` / `updateRecord`），供 [vscode_extension_client.md](../vscode_extension_client.md) 的面板与 `codewiki_progress` 端点消费。`describeOutcome(outcome, blockers)` 提供三态一眼可分的中文文案（如「部分完成（N 项未满足：…）」「失败（…）」）。
+裁决结果写入 job 的 `outcome` / `blockers` / `canAdvanceBaseline` 字段后，由 `index.js::jobSummary` 统一抽取（连同 `baselineEligible` / `baselineAdvanced` / `deliveryComplete` / `updateRecord`），供 [vscode_extension_client.md](vscode_extension_client.md) 的面板与 `codewiki_progress` 端点消费。`describeOutcome(outcome, blockers)` 提供三态一眼可分的中文文案（如「部分完成（N 项未满足：…）」「失败（…）」）。
 
 ```mermaid
 sequenceDiagram
@@ -189,5 +189,5 @@ sequenceDiagram
 
 - 跨进程 job 持久化、原子写、孤儿接管与重放裁决 → [job_state_storage.md](job_state_storage.md)；
 - 引擎 NDJSON 事件日志（进程死后仍可查「为什么慢、为什么 partial」）→ [job_log_management.md](job_log_management.md)；
-- 原生通道的采用门（defect / degradation / stale 三分类）→ [quality_gates](../Code_Engine_Processing_Pipeline/code_engine_module/quality_gates.md)；
-- ChangeSet 四路采集与「采不全即退全量」→ [change_set_management.md](../Extension_Host_Execution_Orchestration/change_set_management.md)。
+- 原生通道的采用门（defect / degradation / stale 三分类）→ [quality_gates](quality_gates.md)；
+- ChangeSet 四路采集与「采不全即退全量」→ [change_set_management.md](change_set_management.md)。

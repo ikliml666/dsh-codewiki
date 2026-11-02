@@ -5,7 +5,7 @@ source_files:
   - index.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Extension_Host_Execution_Orchestration/extension_host_core.md
+fsoft_page: extension_host_core.md
 ---
 # extension_host_core：宿主侧编译执行编排核心
 
@@ -49,7 +49,7 @@ flowchart TB
 ```
 
 该模块处在两条下游通道的上游：
-- **原生引擎通道（默认）**：编译任务经 `nativeChannelFor` / `runNativeJob` 交给 Python 引擎，详见 [code_engine_module](../Code_Engine_Processing_Pipeline/code_engine_module.md) 与其下的 [engine_client](../Code_Engine_Processing_Pipeline/code_engine_module/engine_client.md)、[python_native_runtime](../Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime.md)、[plan_application](../Code_Engine_Processing_Pipeline/code_engine_module/plan_application.md)、[quality_gates](../Code_Engine_Processing_Pipeline/code_engine_module/quality_gates.md)。
+- **原生引擎通道（默认）**：编译任务经 `nativeChannelFor` / `runNativeJob` 交给 Python 引擎，详见 [code_engine_module](code_engine_module.md) 与其下的 [engine_client](engine_client.md)、[python_native_runtime](python_native_runtime.md)、[plan_application](plan_application.md)、[quality_gates](quality_gates.md)。
 - **内置 Node 兼容通道**：`nativeEngine=false` 时走插件内流水线（articles → crosscut → review → index → commit）。
 
 ## 2. 对外接口面
@@ -95,11 +95,11 @@ flowchart TD
     ATT -->|无归属| BLK["记录 blocker，不推进基线"]
 ```
 
-关键点：cw status 的三态判定不区分已提交与工作区未提交变更；因此原生通道即使收到 `clean` 也照常接管，把「四路变更采集 + 增量决议」的权力完全交给引擎（见 [change_set_management](change_set_management.md) 与 [engine_client](../Code_Engine_Processing_Pipeline/code_engine_module/engine_client.md)）。
+关键点：cw status 的三态判定不区分已提交与工作区未提交变更；因此原生通道即使收到 `clean` 也照常接管，把「四路变更采集 + 增量决议」的权力完全交给引擎（见 [change_set_management](change_set_management.md) 与 [engine_client](engine_client.md)）。
 
 ### 2.3 回环 HTTP 端点（`installWebServer`）
 
-所有端点由 `isLoopbackRequest` 守卫（仅 127.0.0.1 / ::1），供侧边栏面板（[vscode_extension_client](../vscode_extension_client.md)）轮询：
+所有端点由 `isLoopbackRequest` 守卫（仅 127.0.0.1 / ::1），供侧边栏面板（[vscode_extension_client](vscode_extension_client.md)）轮询：
 
 | 端点 | 数据来源 |
 | --- | --- |
@@ -265,7 +265,7 @@ flowchart LR
 
 ## 5. 输入装填、契约闸门与锚点修正
 
-兼容通道的质量防线集中在本模块（原生通道对应能力在 [quality_gates](../Code_Engine_Processing_Pipeline/code_engine_module/quality_gates.md)）：
+兼容通道的质量防线集中在本模块（原生通道对应能力在 [quality_gates](quality_gates.md)）：
 
 ```mermaid
 flowchart TD
@@ -328,14 +328,14 @@ flowchart LR
 | [agent_runtime](agent_runtime.md)（`lib/articles-agentic.js`） | agentic 写作执行器 `runAgenticArticles`、大档标记 `markBigAgenticTasks` |
 | [agentic_edit_capability](agentic_edit_capability.md)（`lib/agentic.js`） | agentic 工具循环的 prompt 构造与 `edit` 能力 |
 | [change_set_management](change_set_management.md)（`lib/change-set.js`） | 基线..HEAD + 工作区四路变更采集 |
-| [update_status_tracking](../State___Observability_Management/update_status_tracking.md) | `judgeOutcome` 完整性判定、终态集合 `TERMINAL`、update-record 落盘 |
-| [article_validation](../Code_Engine_Processing_Pipeline/article_validation.md) | `inspectArticle` 文章契约闸门（blocking/warnings） |
-| [native_runtime_support](../Code_Engine_Processing_Pipeline/code_engine_module/native_runtime_support.md) / [python_native_runtime](../Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime.md) | `runNativeJob` 子进程驱动与 Python 引擎入口 |
-| [job_state_storage](../State___Observability_Management/job_state_storage.md) | jobs 持久化、幂等合并、孤儿接管、tick 锁 |
-| [job_log_management](../State___Observability_Management/job_log_management.md) | 引擎事件 NDJSON 日志的追加与翻页 |
-| [job_log_management](../State___Observability_Management/job_log_management.md)（`lib/git-paths.js`） | `withQuotepathOff` 关闭 git 中文路径八进制转义 |
+| [update_status_tracking](update_status_tracking.md) | `judgeOutcome` 完整性判定、终态集合 `TERMINAL`、update-record 落盘 |
+| [article_validation](article_validation.md) | `inspectArticle` 文章契约闸门（blocking/warnings） |
+| [native_runtime_support](native_runtime_support.md) / [python_native_runtime](python_native_runtime.md) | `runNativeJob` 子进程驱动与 Python 引擎入口 |
+| [job_state_storage](job_state_storage.md) | jobs 持久化、幂等合并、孤儿接管、tick 锁 |
+| [job_log_management](job_log_management.md) | 引擎事件 NDJSON 日志的追加与翻页 |
+| [job_log_management](job_log_management.md)（`lib/git-paths.js`） | `withQuotepathOff` 关闭 git 中文路径八进制转义 |
 
-上游消费方：面板前端 [vscode_extension_client](../vscode_extension_client.md) 通过 `/api/codewiki/*` 端点读取 `jobSummary` / repos / sessions / logs 渲染侧边栏。
+上游消费方：面板前端 [vscode_extension_client](vscode_extension_client.md) 通过 `/api/codewiki/*` 端点读取 `jobSummary` / repos / sessions / logs 渲染侧边栏。
 
 ## 7. 配置面（`Config` + `liveConfig`）
 
@@ -346,6 +346,7 @@ flowchart LR
 | `batchProvider` / `batchModel` | `volces-ark` / `glm-5.3-flash` | 编译唯一模型通道；空则提交报错 |
 | `bigEnabled` | `true` | 关闭时 `liveConfig` 直接清空 `bigProvider`（下游五六处换模型判定不再逐处判断），模型 id 与预算保留以便重开 |
 | `maxConcurrency` / `bigConcurrency` / `moduleConcurrency` | 2 / 0 / 0 | 硬顶 8；`bigConcurrency=0` 跟随默认档；`moduleConcurrency` 控制引擎同层模块并行度（0 跟随默认档） |
+| `requestLimit` | 100 | 单模块写作请求上限，透传给原生引擎（`runNativeJob` → 请求行 `requestLimit`）；原生入口非正值/未下发时退回引擎侧默认 300 而非上游的 100，硬顶 1000；大模块撞满会抛错把整轮判成 `partial` |
 | `serialProjects` / `parallelProjects` | true / 2 | 派生 `parallelLimit`（串行=1，关闭后上限 4） |
 | `nativeEngine` | `true`（0.16.0 起） | 原生通道开关；关闭后内置 Node 流水线为兼容通道 |
 | `nativeEnginePython` | `''` | 解析顺序：配置 → `DSH_CODEWIKI_PYTHON` 环境变量 → `python`（不做「找一个能用的」启发式） |

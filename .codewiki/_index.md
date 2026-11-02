@@ -70,6 +70,7 @@
 - [[modules/native-state-management|原生引擎跨轮受管状态管理（native_state_management）]]
 - [[modules/engine-core-compilation|原生编译编排：环境锁定、受管状态与工作区快照]]
 - [[modules/native-runtime-support|原生运行时支持（native_runtime_support）]]
+- [[modules/change-set-management|变更集管理（change_set_management）]]
 - [[modules/workspace-snapshots|工作区快照（workspace_snapshots）]]
 - [[modules/engine-output-processing|引擎产物处理（engine_output_processing）]]
 - [[modules/engine-core-artifact-gate|引擎原生产物采用门与落地层（engine_core_artifact_gate）]]

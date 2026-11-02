@@ -6,7 +6,7 @@ source_files:
   - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: State___Observability_Management/job_log_management.md
+fsoft_page: job_log_management.md
 ---
 # 任务日志管理（job_log_management）
 
@@ -222,12 +222,12 @@ flowchart TB
 
 ### 引用链接
 
-- 父模块总览：[State___Observability_Management](../State___Observability_Management.md)
+- 父模块总览：[State___Observability_Management](State___Observability_Management.md)
 - 兄弟模块（任务状态持久化）：[job_state_storage](job_state_storage.md)
 - 兄弟模块（终态与更新记录）：[update_status_tracking](update_status_tracking.md)
-- 上游引擎通道（日志的主要生产者）：[Code_Engine_Processing_Pipeline](../Code_Engine_Processing_Pipeline.md)
-- 引擎客户端（协议适配）：[engine_client](../Code_Engine_Processing_Pipeline/code_engine_module/engine_client.md)
-- Python 原生运行时（进度帧/心跳/stderr 来源）：[python_native_runtime](../Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime.md)
+- 上游引擎通道（日志的主要生产者）：[Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)
+- 引擎客户端（协议适配）：[engine_client](engine_client.md)
+- Python 原生运行时（进度帧/心跳/stderr 来源）：[python_native_runtime](python_native_runtime.md)
 
 ---
 

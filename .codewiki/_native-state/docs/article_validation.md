@@ -2,7 +2,7 @@
 
 ## 概述
 
-`article_validation` 是 [Code_Engine_Processing_Pipeline](../Code_Engine_Processing_Pipeline.md) 中负责**单篇 wiki 文章结构合规判定**的纯函数模块，源码位于 `lib/article-contract.js`。它回答一个问题：「一篇由模型生成的文章，落盘进 wiki 之前，结构上够不够格？」
+`article_validation` 是 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 中负责**单篇 wiki 文章结构合规判定**的纯函数模块，源码位于 `lib/article-contract.js`。它回答一个问题：「一篇由模型生成的文章，落盘进 wiki 之前，结构上够不够格？」
 
 该模块是对旧版闸门 `validateArticleEnvelope`（曾只检查 frontmatter 「有没有开头、有没有闭合」）的审计级重写。旧闸门放过了一批坏文章入库——正文里重复贴一份 frontmatter、必需章节只有标题没有正文、`source_files` 指向不存在的文件或目录、正文里的 `[[链接]]` 指向已删除的文章、代码围栏没闭合把整篇后面的内容都吞进代码块。本模块把这些判据统一收敛到一处，并且**不碰文件系统**，因此每一条都可单测；真正的「落盘闸门」由上层（引擎质量门 `quality-gate.js`、agentic 通道的 worker）调用它来执行。
 
@@ -68,11 +68,11 @@ flowchart TD
 
 与周边模块的关系：
 
-- [quality_gates](code_engine_module/quality_gates.md)：原生引擎通道的**真正落盘闸门**。`gateNativeOutput` 逐篇渲染后调用渲染层封装的契约检查（`checkRendered`，其底层判据与本模块同源），把 error 级 issue 分流为 `defects`（该页 `action: 'skip'`，不进 `rendered`），warning 级分流为 `degradations`（记账但放行），最终合成 `outcome` 与 `baselineEligible`。
-- [plan_application](code_engine_module/plan_application.md)：落地器。它不重复契约判定，只认 gate 的结论——`report.writable === false` 时一个字都不写；`rendered` 数组里已经是契约过滤后的安全写集。
+- [quality_gates](quality_gates.md)：原生引擎通道的**真正落盘闸门**。`gateNativeOutput` 逐篇渲染后调用渲染层封装的契约检查（`checkRendered`，其底层判据与本模块同源），把 error 级 issue 分流为 `defects`（该页 `action: 'skip'`，不进 `rendered`），warning 级分流为 `degradations`（记账但放行），最终合成 `outcome` 与 `baselineEligible`。
+- [plan_application](plan_application.md)：落地器。它不重复契约判定，只认 gate 的结论——`report.writable === false` 时一个字都不写；`rendered` 数组里已经是契约过滤后的安全写集。
 - [article_generation_worker](article_generation_worker.md)：agentic 写作池。worker 拿到模型输出后，写集越界判定走 `isWritable`；越界（`writeSetViolation`）时该任务记 ok=false、本次不落盘。
-- [engine_contracts](code_engine_module/engine_contracts.md)：引擎结果的外层词表校验（`validateEngineResult`）。本模块产出的是**页面级** defects/degradations，外层契约管的是这些结果在 job 终态 JSON 里的合法形态（`done` 不许带 blockers、`partial` 必须带 blockers 等）。
-- [engine_output_processing](code_engine_module/engine_output_processing.md)：`bodyLength` 等正文计量工具，与本模块的 `fencesBalanced`、正文非空判定在「正文是否为空」这条线上互相印证（gate 对入口页同时用 `bodyLength` 和本模块契约）。
+- [engine_contracts](engine_contracts.md)：引擎结果的外层词表校验（`validateEngineResult`）。本模块产出的是**页面级** defects/degradations，外层契约管的是这些结果在 job 终态 JSON 里的合法形态（`done` 不许带 blockers、`partial` 必须带 blockers 等）。
+- [engine_output_processing](engine_output_processing.md)：`bodyLength` 等正文计量工具，与本模块的 `fencesBalanced`、正文非空判定在「正文是否为空」这条线上互相印证（gate 对入口页同时用 `bodyLength` 和本模块契约）。
 
 ## 主判定流程：inspectArticle
 

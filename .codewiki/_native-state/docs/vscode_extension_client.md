@@ -97,7 +97,18 @@ flowchart LR
 - **乐观草稿**：`draft` 从快照克隆而来，只有宿主值的 `revision` 变化（含保存成功后的回收读）才覆盖草稿，避免编辑中被轮询冲掉；
 - **乐观并发**：`form.mutate(ops, snapshot.revision)` 带 revision 作 CAS——他处同时修改时返回 `false`，显示冲突提示；
 - **校验**：`maxConcurrency`、`bigConcurrency`（0 = 跟随默认档，不算非法）必须是 1–8 的整数；
-- **逐键 diff**：只把发生变化的键（`enabled`、`batchProvider`、`excludePaths`、`autoUpdateMin` 等 22 个）发 `set` op，未列出的键不参与。
+- **逐键 diff**：只把发生变化的键（`enabled`、`batchProvider`、`excludePaths`、`autoUpdateMin` 等 23 个）发 `set` op，未列出的键不参与。
+
+
+#### 编译模型区的 `requestLimit` 字段
+
+「编译模型」分区（`secCompile`）在普通档三字段、`sessionTier`（兜底档位）之外，新增**单模块请求上限**字段（放在 `sessionTier` 字段之后）：
+
+| 字段 | 键 | 控件 | 语义 |
+|---|---|---|---|
+| 单模块请求上限 | `requestLimit` | `number` 输入（min 1 / max 1000 / step 50，默认 300） | 写一个模块时允许的 LLM 请求次数（1–1000）。页面没写出来时引擎会续发补写提醒，每次提醒各自一份预算；调大才能写完更大的模块，调得太小复杂模块会中断成「部分完成」 |
+
+校验在 `save` 提交前执行：非整数、小于 1 或大于 1000 一律拦下，显示 `invalidRequestLimit` 提示（「单模块请求上限需在 1–1000 之间」），避免 0 或负数被当成「不限制」。
 
 #### 模型目录联动（`modelTrio`）
 

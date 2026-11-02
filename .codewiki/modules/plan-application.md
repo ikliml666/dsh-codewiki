@@ -5,7 +5,7 @@ source_files:
   - lib/engine/apply-plan.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/plan_application.md
+fsoft_page: plan_application.md
 ---
 # plan_application 模块：原生产物的落地器
 
@@ -64,7 +64,7 @@ flowchart TB
 | [quality_gates](quality_gates.md) | 唯一输入源：`applyNativeOutput` 只认 `report.writable` 与 `report.outcome` 的结论，不重复做质量判定。`writable=false` 时一个字都不写。 |
 | [engine_contracts](engine_contracts.md) | 输出词表对齐：`toApplyBlockers` 把落地问题（`write-failed`/`index-failed`/…）映射到契约的 `BLOCKER_KINDS`，契约测试会枚举全表。 |
 | [module_indexing](module_indexing.md) | 写集白名单常量 `WIKI_DIR`（`.codewiki`）、`WIKI_ENTRY`（`CodeWiki.md`）、`WIKI_META_REL`（`.codewiki/_meta.yaml`）从 `mapping.js` 导入。 |
-| [article_validation](../article_validation.md) | `parseFrontmatter` 用于剥放入口页 frontmatter、以及孤儿页的 `source_files` 证据读取。 |
+| [article_validation](article_validation.md) | `parseFrontmatter` 用于剥放入口页 frontmatter、以及孤儿页的 `source_files` 证据读取。 |
 | `lib/git-paths.js` | 所有 git 读路径统一 `withQuotepathOff` + `decodeGitPaths`，否则中文页名会被八进制转义，被提交范围校验误判为「wiki 之外的路径」。 |
 | `Extension_Host_Execution_Orchestration`（宿主主入口 index.js） | 生产路径通过依赖注入替换本模块的默认实现：`deps.runCw`（异步版）、`deps.commit`（分支合并式 `autoCommitWiki`）。本模块**刻意不 import index.js**——加载它会连带拉起宿主服务与 webServer，让单测变成「为测一个写盘函数启动整个插件」。 |
 

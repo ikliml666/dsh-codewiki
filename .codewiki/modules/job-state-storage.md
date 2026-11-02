@@ -5,13 +5,13 @@ source_files:
   - lib/job-store.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: State___Observability_Management/job_state_storage.md
+fsoft_page: job_state_storage.md
 ---
 # job_state_storage（作业状态持久化存储）
 
 ## 简介
 
-`job_state_storage` 是 [State___Observability_Management](../State___Observability_Management.md) 下负责「作业现场持久化」的核心模块，源码位于 `lib/job-store.js`。它把 JobService 原本与 tick 业务推进缠绕在一起的持久化逻辑独立抽离为可单测的纯函数 / 小类层，解决三个关键问题：
+`job_state_storage` 是 [State___Observability_Management](State___Observability_Management.md) 下负责「作业现场持久化」的核心模块，源码位于 `lib/job-store.js`。它把 JobService 原本与 tick 业务推进缠绕在一起的持久化逻辑独立抽离为可单测的纯函数 / 小类层，解决三个关键问题：
 
 1. **磁盘层**：对 `jobs.json` 做原子读写、损坏检测、跨进程 tick 锁，所有读写失败显式抛错，绝不静默吞掉。
 2. **现场合并**：多宿主实例的 job 列表合并、同仓幂等查找、所有权 / 心跳判定。
@@ -189,7 +189,7 @@ flowchart TD
 
 设计动机：旧行为在「`nativeStarted === true` 且内存里没有执行器」时直接标 `failed`，把「执行器丢了」误判为「这轮编译不可续」。但原生通道的全部输入本来就在 job 上，重启后完全可重放——代价是重跑一次编译，收益是用户不必手工重新提交；而 `failed` 是纯损失（一个跑了一半的仓库被标成没有成果）。`resumeDocsDir` 逻辑则利用了宿主强杀不会执行 `finally` 这一事实：临时目录里保留的是引擎已提交的叶子终态，重放时只补缺，不覆盖。
 
-> 相关：引擎侧如何消费 `resumeDocsDir` 与原生状态目录，见 [native_state_management](../Code_Engine_Processing_Pipeline/code_engine_module/native_state_management.md)（`stateDocFiles`）；工作区基线快照见 [workspace_snapshots](../Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapshots.md)。
+> 相关：引擎侧如何消费 `resumeDocsDir` 与原生状态目录，见 [native_state_management](native_state_management.md)（`stateDocFiles`）；工作区基线快照见 [workspace_snapshots](workspace_snapshots.md)。
 
 ## 关键流程时序
 
@@ -315,10 +315,10 @@ sequenceDiagram
 
 ## 与其他模块的关系
 
-- **上游**：JobService（`index.js`）是本模块的唯一调用方，负责把这些纯函数 / store 对象编织进 tick、提交、取消、进度推进的业务循环中；宿主侧的整体编排见 [Extension_Host_Execution_Orchestration](../Extension_Host_Execution_Orchestration.md)（尤其 [extension_host_core](../Extension_Host_Execution_Orchestration/extension_host_core.md)）。
+- **上游**：JobService（`index.js`）是本模块的唯一调用方，负责把这些纯函数 / store 对象编织进 tick、提交、取消、进度推进的业务循环中；宿主侧的整体编排见 [Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md)（尤其 [extension_host_core](extension_host_core.md)）。
 - **同层兄弟**：
   - [job_log_management](job_log_management.md)：作业运行日志的删除清理（`removeLog`）与 git 路径解码（`decodeGitPath`）。
   - [update_status_tracking](update_status_tracking.md)：从外部 update-record JSON 文件（`loadUpdateRecord`）与 stage 终态判定（`isTerminalStage`）读取作业的对外可见状态。
 - **下游消费**：
-  - [native_state_management](../Code_Engine_Processing_Pipeline/code_engine_module/native_state_management.md)：`planNativeReplay` 给出的 `resumeDocsDir` 如何映射到引擎状态目录（`stateDocFiles`）。
-  - [workspace_snapshots](../Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapshots.md)：重跑前的工作区基线快照（`createWorkspaceSnapshot`）。
+  - [native_state_management](native_state_management.md)：`planNativeReplay` 给出的 `resumeDocsDir` 如何映射到引擎状态目录（`stateDocFiles`）。
+  - [workspace_snapshots](workspace_snapshots.md)：重跑前的工作区基线快照（`createWorkspaceSnapshot`）。

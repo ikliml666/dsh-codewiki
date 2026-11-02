@@ -5,7 +5,7 @@ source_files:
   - lib/engine/workspace-snapshot.js
 tags: []
 generated_by: fsoft-native
-fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapshots.md
+fsoft_page: workspace_snapshots.md
 ---
 # 工作区快照（workspace_snapshots）
 
@@ -15,7 +15,7 @@ fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapsho
 
 模块的做法是：用一个 **完全独立的临时 index 文件**（`GIT_INDEX_FILE`）走 `read-tree → add -A → write-tree → commit-tree` 流水线，合成一棵包含全部工作区改动的树对象并生成一个真实 commit，其 parent 指向当前 HEAD，**但不写任何 ref**。由此得到的 sha 是一个真实可达的 git 对象，可以安全地写进引擎产物 `metadata.generation_info.commit_id`，让下一轮增量编译拿它当 `old_commit` 时不会漏掉这些改动。
 
-与本模块平级的兄弟模块负责引擎的其余部分（客户端进程管理、契约校验、质量门、产物落地等），见 [code_engine_module](../code_engine_module.md) 的模块总览。
+与本模块平级的兄弟模块负责引擎的其余部分（客户端进程管理、契约校验、质量门、产物落地等），见 [code_engine_module](code_engine_module.md) 的模块总览。
 
 ---
 
@@ -23,7 +23,7 @@ fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapsho
 
 ### 引擎的取数边界
 
-引擎（FSoft 原生通道）只认 committed diff，工作区里未提交的改动不会进入它的 update_record。插件侧的 [change_set_management](../../Extension_Host_Execution_Orchestration/change_set_management.md) 模块（`lib/change-set.js`）能采到 committed / staged / unstaged / untracked 四路改动，但采集之后只是**记账**——存在 `state.json` 的 unconsumed 字段里，引擎本身并没有一个「本轮消费到哪」的对象可以对齐：
+引擎（FSoft 原生通道）只认 committed diff，工作区里未提交的改动不会进入它的 update_record。插件侧的 [change_set_management](change_set_management.md) 模块（`lib/change-set.js`）能采到 committed / staged / unstaged / untracked 四路改动，但采集之后只是**记账**——存在 `state.json` 的 unconsumed 字段里，引擎本身并没有一个「本轮消费到哪」的对象可以对齐：
 
 - 引擎读的是工作区文件（**内容是对的**）；
 - 但产物 `metadata.json` 的 `commit_id` 只能写 HEAD（**记账是错的**）。
@@ -73,7 +73,7 @@ fsoft_page: Code_Engine_Processing_Pipeline/code_engine_module/workspace_snapsho
 
 ### shortSha
 
-通过 `toPosix`（来自 [git 路径工具](../../State___Observability_Management/job_log_management.md)，`lib/git-paths.js`）把 Windows 反斜杠路径统一成 POSIX 风格后取前 12 位，供日志与 note 展示。
+通过 `toPosix`（来自 [git 路径工具](job_log_management.md)，`lib/git-paths.js`）把 Windows 反斜杠路径统一成 POSIX 风格后取前 12 位，供日志与 note 展示。
 
 ---
 
@@ -201,8 +201,8 @@ flowchart LR
 
 | 依赖方向 | 模块 / 文件 | 关系说明 |
 | --- | --- | --- |
-| 上游 | `lib/change-set.js`（[change_set_management](../../Extension_Host_Execution_Orchestration/change_set_management.md)） | 提供 `staged / unstaged / untracked` 三路计数，用于空工作区短路 |
-| 上游 | `lib/git-paths.js::toPosix`（[job_log_management](../../State___Observability_Management/job_log_management.md)） | `shortSha` 内部对路径风格做归一化 |
+| 上游 | `lib/change-set.js`（[change_set_management](change_set_management.md)） | 提供 `staged / unstaged / untracked` 三路计数，用于空工作区短路 |
+| 上游 | `lib/git-paths.js::toPosix`（[job_log_management](job_log_management.md)） | `shortSha` 内部对路径风格做归一化 |
 | 下游 | [engine_client](engine_client.md)（`runEngine`） | 把快照 sha 通过请求 payload 交给引擎，并落进产物 metadata |
 | 下游 | [quality_gates](quality_gates.md)（`gateNativeOutput`） | 基线裁决识别「commit_id 不是已提交基线」，据此判 `baseline-uncommitted` / partial |
 | 下游 | [native_state_management](native_state_management.md) | 产物落盘后，`metadata.generation_info.commit_id` 与 state 目录文档共同构成下一轮增量输入 |
@@ -233,8 +233,8 @@ flowchart LR
 
 ## 相关页面
 
-- 父模块：[code_engine_module](../code_engine_module.md)
+- 父模块：[code_engine_module](code_engine_module.md)
 - 引擎调用：[engine_client](engine_client.md)
 - 产物裁决：[quality_gates](quality_gates.md)
 - 原生状态落盘：[native_state_management](native_state_management.md)
-- 输入采集（上游）：[change_set_management](../../Extension_Host_Execution_Orchestration/change_set_management.md)
+- 输入采集（上游）：[change_set_management](change_set_management.md)

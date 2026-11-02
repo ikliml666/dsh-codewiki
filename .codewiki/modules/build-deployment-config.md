@@ -109,6 +109,7 @@ flowchart TD
 | 模型 | `batchReasoningEffort` | 思考程度档位（留空=模型默认档） |
 | 并发 | `maxConcurrency` | 默认档并发上限（1–8，默认 2） |
 | 并发 | `bigConcurrency` | 大档并发上限（1–8，默认 0=跟随默认档） |
+| 原生通道 | `requestLimit` | 单模块写作请求上限（透传给上游写作 agent 的硬预算，1–1000，默认 100=引擎默认值；大模块撞满会抛错把整轮判成 partial） |
 | 调度 | `serialProjects` | 单项目串行（默认开） |
 | 产物 | `articleLanguage` | 文章语言（默认中文） |
 | 规划 | `planMode` | `auto`=AST 符号 + LLM 语义聚类（默认）；`dirs`=顶层目录分组（旧行为） |

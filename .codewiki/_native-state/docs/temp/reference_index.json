@@ -1,0 +1,906 @@
+{
+  "Code_Engine_Processing_Pipeline": {
+    "ids": [],
+    "links": [
+      "article_generation_worker",
+      "article_validation",
+      "code_engine_module"
+    ],
+    "names": [
+      "done",
+      "isWritable"
+    ]
+  },
+  "Extension_Host_Execution_Orchestration": {
+    "ids": [],
+    "links": [
+      "agent_runtime",
+      "agentic_edit_capability",
+      "code_engine_module",
+      "extension_host_core",
+      "job_state_storage",
+      "vscode_extension_client"
+    ],
+    "names": [
+      "apply",
+      "makeFsWorkspace",
+      "makeHostStream",
+      "runAgenticArticle",
+      "toRequestMessages"
+    ]
+  },
+  "State___Observability_Management": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "job_log_management",
+      "job_state_storage",
+      "update_status_tracking"
+    ],
+    "names": [
+      "done",
+      "git"
+    ]
+  },
+  "Testing___Probing_Tooling": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "build_deployment_config",
+      "engine_client",
+      "module_indexing",
+      "probe_tools",
+      "python_native_runtime",
+      "testing_fixtures"
+    ],
+    "names": []
+  },
+  "agent_runtime": {
+    "ids": [],
+    "links": [
+      "agentic_edit_capability",
+      "change_set_management",
+      "extension_host_core"
+    ],
+    "names": [
+      "absOf",
+      "edit",
+      "finish",
+      "makeFsWorkspace",
+      "makeHostStream",
+      "runAgenticArticle",
+      "safeRelPath",
+      "stableKeyFor",
+      "toRequestMessages"
+    ]
+  },
+  "agentic_edit_capability": {
+    "ids": [],
+    "links": [
+      "agent_runtime",
+      "article_generation_worker",
+      "article_validation",
+      "extension_host_core"
+    ],
+    "names": [
+      "absOf",
+      "buildOpeningPrompt",
+      "git",
+      "line",
+      "makeArticleEditor",
+      "makeFsWorkspace",
+      "makeHostStream",
+      "numberLines",
+      "runAgenticArticle",
+      "runOneArticle",
+      "safeRelPath"
+    ]
+  },
+  "article_generation_worker": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "agent_runtime",
+      "agentic_edit_capability",
+      "article_validation",
+      "code_engine_module"
+    ],
+    "names": [
+      "edit",
+      "estimateTokens",
+      "fixAnchors",
+      "isWritable",
+      "makeArticleEditor",
+      "makeFsWorkspace",
+      "makeHostStream",
+      "makeWriteSet",
+      "markBigAgenticTasks",
+      "resolveTaskRoute",
+      "runAgenticArticle",
+      "runAgenticArticles",
+      "runOneArticle",
+      "runRealtimeTasks",
+      "sourceTokensOf",
+      "tickArticles"
+    ]
+  },
+  "article_validation": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "article_generation_worker",
+      "engine_contracts",
+      "engine_output_processing",
+      "plan_application",
+      "quality_gates"
+    ],
+    "names": [
+      "bodyLength",
+      "checkRendered",
+      "collectWikiLinks",
+      "done",
+      "extractSections",
+      "fencesBalanced",
+      "gateNativeOutput",
+      "hasBlockingIssue",
+      "hasDuplicateFrontmatter",
+      "inspectArticle",
+      "isRepoRelativeFile",
+      "isWritable",
+      "issueSummary",
+      "makeWriteSet",
+      "normalize",
+      "normalizeWritePath",
+      "parse",
+      "parseFrontmatter",
+      "parseYamlLite",
+      "validateArticleEnvelope",
+      "validateEngineResult"
+    ]
+  },
+  "build_deployment_config": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "Testing___Probing_Tooling",
+      "codewiki_vendor_binary",
+      "vscode_extension_client"
+    ],
+    "names": [
+      "install",
+      "main"
+    ]
+  },
+  "change_set_management": {
+    "ids": [
+      "index.js::attributeChanges",
+      "index.js::generateToolDefinition"
+    ],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "State___Observability_Management"
+    ],
+    "names": [
+      "add",
+      "attributeChanges",
+      "base",
+      "collectChangeSet",
+      "createWorkspaceSnapshot",
+      "decodeGitPath",
+      "decodeGitPaths",
+      "generateToolDefinition",
+      "git",
+      "isWikiProduct",
+      "mergeUnconsumed",
+      "normChangePath",
+      "out",
+      "parseNameStatus",
+      "run",
+      "runStaleUpdate"
+    ]
+  },
+  "code_engine_module": {
+    "ids": [],
+    "links": [
+      "engine_client",
+      "engine_contracts",
+      "engine_manifest_management",
+      "engine_output_processing",
+      "llm_integration_bridges",
+      "module_indexing",
+      "native_runtime_support",
+      "native_state_management",
+      "plan_application",
+      "python_native_runtime",
+      "quality_gates",
+      "workspace_snapshots"
+    ],
+    "names": [
+      "_salvage",
+      "apply",
+      "createProtocolReader",
+      "done",
+      "runEngine",
+      "weakest"
+    ]
+  },
+  "codewiki_vendor_binary": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "State___Observability_Management",
+      "build_deployment_config"
+    ],
+    "names": [
+      "ArticleFrontmatter",
+      "Cli",
+      "WikiMeta",
+      "add",
+      "capitalize",
+      "claude_home",
+      "cmd_index",
+      "cmd_init",
+      "cmd_meta_update",
+      "cmd_path",
+      "cmd_projects",
+      "cmd_status",
+      "codex_home",
+      "compile",
+      "currentCommit",
+      "current_commit",
+      "git",
+      "load",
+      "main",
+      "parse",
+      "project_name",
+      "rel_path_string",
+      "remove_section",
+      "resolveBinary",
+      "runCw",
+      "save",
+      "setup_claude_code",
+      "setup_codex",
+      "setup_qmd",
+      "tickCommit",
+      "uninstall_codex",
+      "wiki_home",
+      "wiki_path"
+    ]
+  },
+  "engine_client": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "code_engine_module",
+      "engine_contracts",
+      "llm_integration_bridges",
+      "native_runtime_support",
+      "plan_application",
+      "python_native_runtime"
+    ],
+    "names": [
+      "_ProtocolOnly",
+      "cancel",
+      "createProtocolReader",
+      "doctor",
+      "done",
+      "engineResult",
+      "line",
+      "progress",
+      "push",
+      "runEngine",
+      "spawnPlan",
+      "terminateProcessTree"
+    ]
+  },
+  "engine_contracts": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "State___Observability_Management",
+      "engine_client",
+      "engine_manifest_management",
+      "plan_application",
+      "python_native_runtime",
+      "quality_gates"
+    ],
+    "names": [
+      "describeEngineResult",
+      "describeOutcome",
+      "doctor",
+      "done",
+      "engineError",
+      "engineProgress",
+      "engineResult",
+      "gateNativeOutput",
+      "normalizeBlocker",
+      "num",
+      "runEngine",
+      "validateEngineResult"
+    ]
+  },
+  "engine_manifest_management": {
+    "ids": [],
+    "links": [
+      "build_deployment_config",
+      "engine_client",
+      "native_runtime_support",
+      "native_state_management",
+      "plan_application"
+    ],
+    "names": [
+      "_git_commit",
+      "apply",
+      "applyNativeOutput",
+      "buildLockBody",
+      "compareLock",
+      "doctor",
+      "fingerprintOf",
+      "install",
+      "normalizeUpstreamCommit",
+      "probeEnvironment",
+      "readLock",
+      "run",
+      "runEngine",
+      "runNativeJob",
+      "stateDocFiles",
+      "stateFileItem",
+      "writeLock"
+    ]
+  },
+  "engine_output_processing": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "article_validation",
+      "engine_client",
+      "module_indexing",
+      "overview",
+      "plan_application",
+      "quality_gates"
+    ],
+    "names": [
+      "bodyLength",
+      "buildWritePlan",
+      "collectOutput",
+      "git",
+      "hasBlockingIssue",
+      "indexModuleTree",
+      "inspectArticle",
+      "issueSummary",
+      "listMarkdownPages",
+      "mapFsoftOutput",
+      "push",
+      "readJsonIfExists",
+      "relativeLinks",
+      "validateOutput"
+    ]
+  },
+  "extension_host_core": {
+    "ids": [],
+    "links": [
+      "agent_runtime",
+      "agentic_edit_capability",
+      "article_validation",
+      "change_set_management",
+      "code_engine_module",
+      "engine_client",
+      "job_log_management",
+      "job_state_storage",
+      "native_runtime_support",
+      "plan_application",
+      "python_native_runtime",
+      "quality_gates",
+      "update_status_tracking",
+      "vscode_extension_client"
+    ],
+    "names": [
+      "activeSessionJobs",
+      "allowedLinkTargets",
+      "apply",
+      "applyTaskResult",
+      "auditExistingArticles",
+      "autoCommitWiki",
+      "autoScan",
+      "batchProofreadBatchPrompt",
+      "cancel",
+      "commitHintText",
+      "compile",
+      "createJobService",
+      "cwToolDefinition",
+      "done",
+      "edit",
+      "ensureWikiEntry",
+      "estimateTokens",
+      "fail",
+      "findActiveJob",
+      "finishJob",
+      "fixAnchors",
+      "forgetRepo",
+      "generateToolDefinition",
+      "git",
+      "inspectArticle",
+      "installUpdateReminder",
+      "installWebServer",
+      "isDeadCompileTarget",
+      "isLoopbackRequest",
+      "jobSummary",
+      "judgeOutcome",
+      "list",
+      "listAllSessionRecords",
+      "listModelCatalog",
+      "listSessionRecords",
+      "liveConfig",
+      "localPlan",
+      "localReview",
+      "logStats",
+      "markBigAgenticTasks",
+      "nativeChannelFor",
+      "packArticles",
+      "parseStatus",
+      "progressSessionTasks",
+      "progressToolDefinition",
+      "progressView",
+      "pruneOrphanModules",
+      "readLogTail",
+      "reposFileFor",
+      "resolveModelEfforts",
+      "runAgenticArticles",
+      "runNativeJob",
+      "saveRecord",
+      "settleJob",
+      "settleProofread",
+      "start",
+      "startAgenticRun",
+      "submit",
+      "symbolsOnLine",
+      "tick",
+      "tickArticles",
+      "tickCommit",
+      "tickCrosscut",
+      "tickIndex",
+      "tickNative",
+      "tickReview",
+      "updateToolDefinition",
+      "wakeCompileSession",
+      "withQuotepathOff",
+      "writeValidated"
+    ]
+  },
+  "job_log_management": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "State___Observability_Management",
+      "engine_client",
+      "job_state_storage",
+      "python_native_runtime",
+      "update_status_tracking"
+    ],
+    "names": [
+      "appendLog",
+      "apply",
+      "decodeGitPath",
+      "decodeGitPaths",
+      "doctor",
+      "git",
+      "jobSummary",
+      "list",
+      "logFileOf",
+      "logStats",
+      "normalize",
+      "note",
+      "progress",
+      "readLogTail",
+      "recordNativeLog",
+      "removeLog",
+      "toPosix",
+      "trimIfNeeded",
+      "withQuotepathOff"
+    ]
+  },
+  "job_state_storage": {
+    "ids": [],
+    "links": [
+      "Extension_Host_Execution_Orchestration",
+      "State___Observability_Management",
+      "extension_host_core",
+      "job_log_management",
+      "native_state_management",
+      "update_status_tracking",
+      "workspace_snapshots"
+    ],
+    "names": [
+      "JobsStoreError",
+      "acquireTickLock",
+      "adoptOrphan",
+      "classifyOwnership",
+      "createJobsStore",
+      "createWorkspaceSnapshot",
+      "decodeGitPath",
+      "done",
+      "findActiveJob",
+      "heartbeat",
+      "isTerminalStage",
+      "lastSeenAt",
+      "load",
+      "loadForIdempotency",
+      "loadUpdateRecord",
+      "mergeJobLists",
+      "normKey",
+      "note",
+      "planForeignJob",
+      "planNativeReplay",
+      "reassignSession",
+      "releaseTickLock",
+      "removeLog",
+      "save",
+      "serialize",
+      "serializeJobs",
+      "snapshotNativeRun",
+      "stateDocFiles",
+      "writeAtomic"
+    ]
+  },
+  "llm_integration_bridges": {
+    "ids": [],
+    "links": [
+      "build_deployment_config",
+      "code_engine_module",
+      "engine_client",
+      "engine_contracts",
+      "python_native_runtime",
+      "quality_gates"
+    ],
+    "names": [
+      "bearerOf",
+      "callSession",
+      "chunksToCompletion",
+      "chunksToSse",
+      "close",
+      "finish",
+      "foldChunks",
+      "log",
+      "messageToDsh",
+      "messagesToPrompt",
+      "start",
+      "startLlmBridge",
+      "stop",
+      "toLlmRequest"
+    ]
+  },
+  "module_indexing": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "code_engine_module",
+      "engine_client",
+      "engine_contracts",
+      "job_log_management",
+      "overview",
+      "plan_application",
+      "python_native_runtime",
+      "quality_gates"
+    ],
+    "names": [
+      "gateNativeOutput",
+      "git",
+      "indexModuleTree",
+      "mapFsoftOutput",
+      "moduleSlug",
+      "normalizeSourceFiles",
+      "runEngine",
+      "sourceFilesOf",
+      "toPosix",
+      "validateEngineResult"
+    ]
+  },
+  "native_runtime_support": {
+    "ids": [],
+    "links": [
+      "code_engine_module",
+      "engine_client",
+      "engine_contracts",
+      "engine_manifest_management",
+      "llm_integration_bridges",
+      "native_state_management",
+      "plan_application",
+      "python_native_runtime",
+      "quality_gates",
+      "workspace_snapshots"
+    ],
+    "names": [
+      "apply",
+      "base",
+      "buildLockBody",
+      "doctor",
+      "done",
+      "engineError",
+      "engineProgress",
+      "engineResult",
+      "isAlive",
+      "run",
+      "runEngine",
+      "runNativeJob",
+      "settle",
+      "terminateProcessTree",
+      "weakest"
+    ]
+  },
+  "native_state_management": {
+    "ids": [],
+    "links": [
+      "change_set_management",
+      "engine_client",
+      "engine_contracts",
+      "job_log_management",
+      "plan_application",
+      "python_native_runtime"
+    ],
+    "names": [
+      "archiveDocsTree",
+      "base",
+      "buildStatePayload",
+      "captureDocsDir",
+      "collect",
+      "findArticlesMissingFromIndex",
+      "git",
+      "graphFileName",
+      "hydrateDocsDir",
+      "isStateDocPath",
+      "isUpdateEligible",
+      "main",
+      "mergeUnconsumed",
+      "readState",
+      "readStateText",
+      "stateDocFiles",
+      "stateFileItem",
+      "stateFingerprint",
+      "toPosix"
+    ]
+  },
+  "overview": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "State___Observability_Management",
+      "Testing___Probing_Tooling",
+      "build_deployment_config",
+      "codewiki_vendor_binary",
+      "vscode_extension_client"
+    ],
+    "names": []
+  },
+  "plan_application": {
+    "ids": [],
+    "links": [
+      "article_validation",
+      "engine_contracts",
+      "module_indexing",
+      "quality_gates"
+    ],
+    "names": [
+      "add",
+      "apply",
+      "applyNativeOutput",
+      "autoCommitWiki",
+      "capturePre",
+      "checkDeleteTargets",
+      "checkTargetPath",
+      "checkWriteTargets",
+      "commitWikiArtifacts",
+      "decodeGitPaths",
+      "defaultRunCw",
+      "done",
+      "findArticlesMissingFromIndex",
+      "findOrphanPages",
+      "git",
+      "normalizeIndexLinks",
+      "parse",
+      "parseFrontmatter",
+      "restorePre",
+      "runCw",
+      "toApplyBlockers",
+      "verifyCommitScope",
+      "withQuotepathOff",
+      "writeAll"
+    ]
+  },
+  "probe_tools": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "Testing___Probing_Tooling",
+      "build_deployment_config",
+      "engine_client",
+      "module_indexing",
+      "python_native_runtime",
+      "testing_fixtures",
+      "vscode_extension_client"
+    ],
+    "names": [
+      "main",
+      "out",
+      "run",
+      "runEngine"
+    ]
+  },
+  "python_native_runtime": {
+    "ids": [],
+    "links": [
+      "code_engine_module",
+      "engine_client",
+      "engine_contracts",
+      "llm_integration_bridges",
+      "native_runtime_support",
+      "native_state_management",
+      "quality_gates"
+    ],
+    "names": [
+      "_ProtocolOnly",
+      "_classify_exception",
+      "_doc_fingerprints",
+      "_load_completed",
+      "_popen_init_utf8",
+      "_salvage",
+      "action_generate",
+      "articles_ceiling",
+      "bridge_progress",
+      "cancel",
+      "doctor",
+      "emit",
+      "gateNativeOutput",
+      "install_incremental_runtime",
+      "is_incremental",
+      "progress",
+      "run",
+      "runEngine",
+      "startLlmBridge",
+      "write_checkpoint"
+    ]
+  },
+  "quality_gates": {
+    "ids": [],
+    "links": [
+      "article_validation",
+      "engine_contracts",
+      "engine_output_processing",
+      "module_indexing",
+      "overview",
+      "plan_application"
+    ],
+    "names": [
+      "Engine",
+      "assessBaseline",
+      "checkRendered",
+      "gateNativeOutput",
+      "git",
+      "inspectArticle",
+      "isEmptyBaseline",
+      "judgeOutcome",
+      "readCommittedBaseline",
+      "renderArticle",
+      "toContractBlockers",
+      "toQualityIssues",
+      "validateOutput",
+      "yamlScalar"
+    ]
+  },
+  "testing_fixtures": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "README",
+      "build_deployment_config",
+      "code_engine_module",
+      "probe_tools",
+      "python_native_runtime"
+    ],
+    "names": [
+      "Engine",
+      "Handler",
+      "TaskQueue",
+      "build_engine",
+      "main",
+      "normalize",
+      "push",
+      "run"
+    ]
+  },
+  "update_status_tracking": {
+    "ids": [
+      "index.js::jobSummary"
+    ],
+    "links": [
+      "State___Observability_Management",
+      "change_set_management",
+      "job_log_management",
+      "job_state_storage",
+      "quality_gates",
+      "vscode_extension_client"
+    ],
+    "names": [
+      "buildUpdateRecord",
+      "collect",
+      "collectChangeSet",
+      "describeOutcome",
+      "done",
+      "ignored",
+      "isTerminalStage",
+      "jobSummary",
+      "judgeOutcome",
+      "loadUpdateRecord",
+      "tickIndex"
+    ]
+  },
+  "vscode_extension_client": {
+    "ids": [],
+    "links": [
+      "Code_Engine_Processing_Pipeline",
+      "Extension_Host_Execution_Orchestration",
+      "State___Observability_Management",
+      "build_deployment_config",
+      "codewiki_vendor_binary"
+    ],
+    "names": [
+      "CodewikiCard",
+      "CodewikiPanel",
+      "PanelIcon",
+      "ReposTab",
+      "SessionView",
+      "Spark",
+      "apiGet",
+      "apiPost",
+      "apply",
+      "byUpdated",
+      "cancel",
+      "compile",
+      "done",
+      "elapsedSplit",
+      "engineLogBlock",
+      "jobCard",
+      "jobSummary",
+      "load",
+      "main",
+      "modelTrio",
+      "overallPct",
+      "progressView",
+      "runPool",
+      "save",
+      "stageBar",
+      "usageLine",
+      "wakeCompileSession"
+    ]
+  },
+  "workspace_snapshots": {
+    "ids": [],
+    "links": [
+      "change_set_management",
+      "code_engine_module",
+      "engine_client",
+      "job_log_management",
+      "native_state_management",
+      "quality_gates"
+    ],
+    "names": [
+      "add",
+      "assessBaseline",
+      "createWorkspaceSnapshot",
+      "fail",
+      "gateNativeOutput",
+      "git",
+      "parse",
+      "runEngine",
+      "shortSha",
+      "snapshotExists",
+      "toPosix"
+    ]
+  }
+}

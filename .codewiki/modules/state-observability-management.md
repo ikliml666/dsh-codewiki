@@ -26,9 +26,9 @@ fsoft_page: State___Observability_Management.md
 
 | 子模块 | 源码入口 | 核心职责 |
 | --- | --- | --- |
-| [job_state_storage](State___Observability_Management/job_state_storage.md) | `lib/job-store.js` | `jobs.json` 原子写、损坏隔离、跨进程 tick 锁、所有权分类、孤儿接管、原生通道重放快照与裁决 |
-| [job_log_management](State___Observability_Management/job_log_management.md) | `lib/job-logs.js` + `lib/git-paths.js` | 引擎事件 NDJSON 追加日志、体量裁剪、尾部读取；git 路径 quotepath 解码与 POSIX 归一化的唯一实现 |
-| [update_status_tracking](State___Observability_Management/update_status_tracking.md) | `lib/update-record.js` | 版本化更新记录组装、六类完整性裁决、`done / partial / failed / cancelled` 终态判定、基线推进授权 |
+| [job_state_storage](job_state_storage.md) | `lib/job-store.js` | `jobs.json` 原子写、损坏隔离、跨进程 tick 锁、所有权分类、孤儿接管、原生通道重放快照与裁决 |
+| [job_log_management](job_log_management.md) | `lib/job-logs.js` + `lib/git-paths.js` | 引擎事件 NDJSON 追加日志、体量裁剪、尾部读取；git 路径 quotepath 解码与 POSIX 归一化的唯一实现 |
+| [update_status_tracking](update_status_tracking.md) | `lib/update-record.js` | 版本化更新记录组装、六类完整性裁决、`done / partial / failed / cancelled` 终态判定、基线推进授权 |
 
 三者在语义上分工互补：
 
@@ -87,8 +87,8 @@ flowchart TB
 
 ## 参考文档
 
-- 作业状态持久化：[job_state_storage](State___Observability_Management/job_state_storage.md)
-- 任务日志管理与 git 路径工具：[job_log_management](State___Observability_Management/job_log_management.md)
-- 更新状态追踪与终态裁决：[update_status_tracking](State___Observability_Management/update_status_tracking.md)
+- 作业状态持久化：[job_state_storage](job_state_storage.md)
+- 任务日志管理与 git 路径工具：[job_log_management](job_log_management.md)
+- 更新状态追踪与终态裁决：[update_status_tracking](update_status_tracking.md)
 - 上游引擎通道：[Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)
 - 宿主侧编排入口：[Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md)
