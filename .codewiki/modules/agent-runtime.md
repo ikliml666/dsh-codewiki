@@ -18,9 +18,9 @@ fsoft_page: agent_runtime.md
 - 为工具循环提供一个只认 `readFile / listDir` 的受限文件系统抽象，并用真实路径解析兜住目录逃逸。
 
 > 该模块与兄弟模块的关系：
-> - 纯逻辑工具循环与 `edit` 编辑能力 → 见 [agentic_edit_capability](agentic_edit_capability.md)
-> - 变更集收集 → 见 [change_set_management](change_set_management.md)
-> - 宿主编排入口（runPool / worker / 各 tick）→ 见 [extension_host_core](extension_host_core.md)
+> - 纯逻辑工具循环与 `edit` 编辑能力 → 见 [agentic_edit_capability](agentic-edit-capability.md)
+> - 变更集收集 → 见 [change_set_management](change-set-management.md)
+> - 宿主编排入口（runPool / worker / 各 tick）→ 见 [extension_host_core](extension-host-core.md)
 
 ## 架构定位
 
@@ -134,5 +134,5 @@ sequenceDiagram
 | --- | --- | --- |
 | 依赖 | `@deepseek-ai/dsh-llm` | `BlockAssembler`、`createUserMessage` / `createAssistantMessage` / `createToolResultMessage` |
 | 依赖 | Node 内置 `fs` / `path` | `makeFsWorkspace` 的文件读写与路径解析 |
-| 被调用 | [agentic_edit_capability](agentic_edit_capability.md)（`lib/agentic.js` 的 runAgenticArticle） | 消费本层提供的 `streamFn` 与 workspace |
-| 被编排 | [extension_host_core](extension_host_core.md)（`index.js` 的 worker / tickArticles） | 在宿主任务流程中实例化本层适配器 |
+| 被调用 | [agentic_edit_capability](agentic-edit-capability.md)（`lib/agentic.js` 的 runAgenticArticle） | 消费本层提供的 `streamFn` 与 workspace |
+| 被编排 | [extension_host_core](extension-host-core.md)（`index.js` 的 worker / tickArticles） | 在宿主任务流程中实例化本层适配器 |

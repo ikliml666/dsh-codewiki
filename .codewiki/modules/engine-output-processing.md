@@ -11,7 +11,7 @@ fsoft_page: engine_output_processing.md
 
 ## 简介
 
-`engine_output_processing` 是 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 流水线中的**阶段 2**，负责把原生产物（Python 引擎在 `docs/` 目录下产出的一棵 markdown 树 + 四个 JSON）解析为结构化事实、交给映射层生成写集计划、并对「产物自身是否自洽」给出可机读的裁决。它对应实现文件 `lib/engine/output.js`。
+`engine_output_processing` 是 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) 流水线中的**阶段 2**，负责把原生产物（Python 引擎在 `docs/` 目录下产出的一棵 markdown 树 + 四个 JSON）解析为结构化事实、交给映射层生成写集计划、并对「产物自身是否自洽」给出可机读的裁决。它对应实现文件 `lib/engine/output.js`。
 
 这一层的刻意边界非常窄——文件头注释明确写死了三件能做的事和三不做的事：
 
@@ -43,7 +43,7 @@ flowchart LR
     E -- "采用裁决 writable" --> F
 ```
 
-与阶段 3 的分界同样被写进代码注释：本模块只判「**产物自身是否自洽**」（页在不在、正文空不空、链接指向的东西在不在计划内）；frontmatter、锚点、写集冲突这类**目标格式**的闸门属于阶段 3 的 [quality_gates](quality_gates.md)。
+与阶段 3 的分界同样被写进代码注释：本模块只判「**产物自身是否自洽**」（页在不在、正文空不空、链接指向的东西在不在计划内）；frontmatter、锚点、写集冲突这类**目标格式**的闸门属于阶段 3 的 [quality_gates](quality-gates.md)。
 
 ## 核心组件
 
@@ -166,9 +166,9 @@ flowchart LR
     CLIENT -. "产出 docs/ 树供消费" .-> OUT
 ```
 
-- **`./mapping.js`** —— 唯一的映射依赖：页 → wiki 路径、slug 规范化、`source_files` 证据规则、`unmapped` 原因。详见 [module_indexing](module_indexing.md)。
+- **`./mapping.js`** —— 唯一的映射依赖：页 → wiki 路径、slug 规范化、`source_files` 证据规则、`unmapped` 原因。详见 [module_indexing](module-indexing.md)。
 - **`../git-paths.js`** —— POSIX 路径规范化（Windows 路径、quotepath 问题）。
-- **`quality-gate.js`（阶段 3）** —— 通过 `import { validateOutput, bodyLength } from './output.js'` 复用本层全部判据，自己不重写任何一条判定；它额外叠加的是「目标格式契约」（frontmatter / 围栏 / `inspectArticle`）与「基线可推进性」（commit 是否 HEAD、基线是否入库）。详见 [quality_gates](quality_gates.md)。
+- **`quality-gate.js`（阶段 3）** —— 通过 `import { validateOutput, bodyLength } from './output.js'` 复用本层全部判据，自己不重写任何一条判定；它额外叠加的是「目标格式契约」（frontmatter / 围栏 / `inspectArticle`）与「基线可推进性」（commit 是否 HEAD、基线是否入库）。详见 [quality_gates](quality-gates.md)。
 
 ## 典型流程示例
 
@@ -207,8 +207,8 @@ sequenceDiagram
 
 ## 相关模块
 
-- [module_indexing](module_indexing.md) —— `mapFsoftOutput` / `indexModuleTree` 与四条映射硬规则。
-- [quality_gates](quality_gates.md) —— 阶段 3 采用门：复用 `validateOutput`，叠加格式契约与基线裁决。
-- [plan_application](plan_application.md) —— 阶段 3 落地器：把 `mapped` 写进 `.codewiki/` 与 `CodeWiki.md`。
-- [engine_client](engine_client.md) —— 阶段 1：驱动 Python 引擎产出本模块消费的 `docs/` 树。
-- [article_validation](article_validation.md) —— `hasBlockingIssue` / `issueSummary` 与 `article-contract.js` 的格式判据（阶段 3 复用）。
+- [module_indexing](module-indexing.md) —— `mapFsoftOutput` / `indexModuleTree` 与四条映射硬规则。
+- [quality_gates](quality-gates.md) —— 阶段 3 采用门：复用 `validateOutput`，叠加格式契约与基线裁决。
+- [plan_application](plan-application.md) —— 阶段 3 落地器：把 `mapped` 写进 `.codewiki/` 与 `CodeWiki.md`。
+- [engine_client](engine-client.md) —— 阶段 1：驱动 Python 引擎产出本模块消费的 `docs/` 树。
+- [article_validation](article-validation.md) —— `hasBlockingIssue` / `issueSummary` 与 `article-contract.js` 的格式判据（阶段 3 复用）。

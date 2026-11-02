@@ -360,13 +360,13 @@ const deps = {
 
 | 模块 | 关系 |
 |------|------|
-| [engine_client](engine_client.md) | 被 `runNativeJob` 调用，负责 spawn Python 子进程与协议帧解析 |
-| [engine_contracts](engine_contracts.md) | 提供 `engineResult`/`engineError`/`engineProgress`，终态合法性在此生效 |
-| [engine_manifest_management](engine_manifest_management.md) | 提供 `doctor`/`buildLockBody`，环境校验与首次落锁 |
-| [quality_gates](quality_gates.md) | 被 `runNativeJob` 调用，产物体检与基线许可裁决 |
-| [plan_application](plan_application.md) | 被 `runNativeJob` 调用，写盘→index→基线→提交的事务性落地 |
-| [llm_integration_bridges](llm_integration_bridges.md) | 被 `runNativeJob` 调用，建立 OpenAI 兼容的本地模型桥 |
-| [native_state_management](native_state_management.md) | 被 `runNativeJob` 大量使用，增量水合/状态采集/指纹比对 |
-| [workspace_snapshots](workspace_snapshots.md) | 被 `runNativeJob` 调用，合成含未提交改动的临时 commit |
-| [python_native_runtime](python_native_runtime.md) | 被 `runEngine` spawn 的 Python 入口（`entry.py`） |
-| [code_engine_module](code_engine_module.md) | 上层模块目录 |
+| [engine_client](engine-client.md) | 被 `runNativeJob` 调用，负责 spawn Python 子进程与协议帧解析 |
+| [engine_contracts](engine-contracts.md) | 提供 `engineResult`/`engineError`/`engineProgress`，终态合法性在此生效 |
+| [engine_manifest_management](engine-manifest-management.md) | 提供 `doctor`/`buildLockBody`，环境校验与首次落锁 |
+| [quality_gates](quality-gates.md) | 被 `runNativeJob` 调用，产物体检与基线许可裁决 |
+| [plan_application](plan-application.md) | 被 `runNativeJob` 调用，写盘→index→基线→提交的事务性落地 |
+| [llm_integration_bridges](llm-integration-bridges.md) | 被 `runNativeJob` 调用，建立 OpenAI 兼容的本地模型桥 |
+| [native_state_management](native-state-management.md) | 被 `runNativeJob` 大量使用，增量水合/状态采集/指纹比对 |
+| [workspace_snapshots](workspace-snapshots.md) | 被 `runNativeJob` 调用，合成含未提交改动的临时 commit |
+| [python_native_runtime](python-native-runtime.md) | 被 `runEngine` spawn 的 Python 入口（`entry.py`） |
+| [code_engine_module](code-engine-module.md) | 上层模块目录 |

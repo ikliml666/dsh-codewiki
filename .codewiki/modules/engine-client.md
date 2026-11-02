@@ -11,7 +11,7 @@ fsoft_page: engine_client.md
 
 引擎客户端是 Node ↔ Python 原生引擎之间**唯一的跨语言边界**。它由 `lib/engine/client.js` 实现，对外暴露两个构件：`runEngine`（起进程、跑一次动作的完整编排）与 `createProtocolReader`（纯逻辑的增量 JSON-lines 协议解析器）。它把 FSoft Python 引擎的进程生命周期与 JSON-lines 协议流，翻译成系统其余部分可机读的 `EngineResult` / `EngineProgress` / `EngineError`。
 
-> 上游定位：本页只讲「如何驱动一次引擎进程并归一其结果」。整个处理管线的入口与上下游协作见 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)，引擎整体的模块族见 [code_engine_module](code_engine_module.md)。
+> 上游定位：本页只讲「如何驱动一次引擎进程并归一其结果」。整个处理管线的入口与上下游协作见 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md)，引擎整体的模块族见 [code_engine_module](code-engine-module.md)。
 
 ## 职责边界
 
@@ -151,7 +151,7 @@ stateDiagram-v2
 
 - **静默检测（silenceMs）**：单靠整体超时兜不住「已经卡死」。源码注释记录了 0.16.9 真机事故 —— 僵死引擎会把 180 分钟超时全部占满，调度闸门被锁死，其它仓库一条都推不动。判据改为「多久没收到任何协议帧」：Python 侧心跳线程按 60s（`_HEARTBEAT_SEC`）补帧，正常在跑的引擎绝不静默；真静默即卡死。默认阈值留 10 倍余量（10 分钟），以区分「慢」（单模块模型调用实测 20 秒级）与「死」。
 - **结果宽限（resultGraceMs）**：协议约定「语义以 result 为准」。若引擎把 `result(done)` 发出后卡在收尾（僵死线程、没关的 pipe），已**确定成功**的编译会被静默/超时改判成 partial 或超时。因此 result 到达后给进程 2 秒自行收场窗口，超时即杀、按已有 result 收尾，绝不把已确定的成功改判。
-- **整棵进程树终止**：FSoft 的 Python 进程还会派生 flake8、find 乃至模型子进程，只 kill 直接子进程会留下孤儿继续烧 token。`terminateProcessTree` 在 POSIX 上按独立进程组先 SIGTERM 后 SIGKILL，在 Windows 上走 `taskkill /T /F`；根进程仍存活时返回 `ok=false` 并经 `onLog` 上报，而不是假装取消成功。详见 [native_runtime_support](native_runtime_support.md)。
+- **整棵进程树终止**：FSoft 的 Python 进程还会派生 flake8、find 乃至模型子进程，只 kill 直接子进程会留下孤儿继续烧 token。`terminateProcessTree` 在 POSIX 上按独立进程组先 SIGTERM 后 SIGKILL，在 Windows 上走 `taskkill /T /F`；根进程仍存活时返回 `ok=false` 并经 `onLog` 上报，而不是假装取消成功。详见 [native_runtime_support](native-runtime-support.md)。
 
 ## 终态判定口径
 
@@ -188,7 +188,7 @@ flowchart TD
 
 ## 与 Python 入口的协议握手
 
-本模块的对端是 [python_native_runtime](python_native_runtime.md) 中的 `lib/engine/python/entry.py`：
+本模块的对端是 [python_native_runtime](python-native-runtime.md) 中的 `lib/engine/python/entry.py`：
 
 - **请求行**：`{ requestId, action, ...payload }` 一行 JSON + 换行，随后立即关闭 stdin —— 引擎读到 EOF 即开始干活。
 - **hello 帧**：引擎启动即发 `{ type: "hello", protocolVersion, engine }`，本端校验协议版本是否为 1，不符记违规但继续。
@@ -199,12 +199,12 @@ flowchart TD
 
 - 引擎命令本身由上层（宿主 job 循环）依据已建好的独立 venv 拼出；该 venv 由 `tools/fsoft-engine/setup-env.sh` 按冻结清单 `--no-deps` 落盘并经 `pip check` 反向验证依赖闭合。`runEngine` 只负责调用，不负责建环境。
 - Node 版本要求见 `package.json` 的 `engines.node >= 20`；`runEngine` 使用的 `unref()` 计时器行为、`detached` 进程组语义都以此为基线。
-- 模型凭证不落盘：引擎侧只拿到 loopback 地址与占位 key，真实凭证经 [llm_integration_bridges](llm_integration_bridges.md) 的宿主 `llm.stream` 间接注入。`runEngine` 对此无感知 —— 模型通道是环境变量与进程外桥的事。
+- 模型凭证不落盘：引擎侧只拿到 loopback 地址与占位 key，真实凭证经 [llm_integration_bridges](llm-integration-bridges.md) 的宿主 `llm.stream` 间接注入。`runEngine` 对此无感知 —— 模型通道是环境变量与进程外桥的事。
 
 ## 相关模块
 
-- 结果/进度/错误的归一与校验：[engine_contracts](engine_contracts.md)
-- 整棵进程树的终止与存活探测：[native_runtime_support](native_runtime_support.md)
-- 协议对端（Python 入口、心跳、阶段映射）：[python_native_runtime](python_native_runtime.md)
-- 模型通道桥：[llm_integration_bridges](llm_integration_bridges.md)
-- 产物落盘 / 索引 / 基线（本模块交付结果之后的落地层）：[plan_application](plan_application.md)
+- 结果/进度/错误的归一与校验：[engine_contracts](engine-contracts.md)
+- 整棵进程树的终止与存活探测：[native_runtime_support](native-runtime-support.md)
+- 协议对端（Python 入口、心跳、阶段映射）：[python_native_runtime](python-native-runtime.md)
+- 模型通道桥：[llm_integration_bridges](llm-integration-bridges.md)
+- 产物落盘 / 索引 / 基线（本模块交付结果之后的落地层）：[plan_application](plan-application.md)

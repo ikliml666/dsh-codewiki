@@ -207,11 +207,11 @@ sequenceDiagram
 
 本模块在系统中的位置：
 
-- **上游调用方**：[native_runtime_support](native_runtime_support.md)（`runNativeJob` 的 env 段与 3.6 段）—— 本模块的唯一生产消费者
-- **探测来源**：[engine_client](engine_client.md)（`runEngine` 的 `action='doctor'`）—— `probe` 函数的真实实现
-- **落盘目的地**：[plan_application](plan_application.md)（`applyNativeOutput` 的 `extraFiles`）—— `buildLockBody` 的正文作为写集一项被消费
-- **环境修复**：`tools/fsoft-engine/setup-env.sh`（仓库脚本，详见 [build_deployment_config](build_deployment_config.md)）—— `unhealthy` 状态时上层建议运行
-- **受管状态协同**：[native_state_management](native_state_management.md)（`stateDocFiles` / `stateFileItem`）—— 与 lock 文件同在 `.codewiki/` 下，同批写入
+- **上游调用方**：[native_runtime_support](native-runtime-support.md)（`runNativeJob` 的 env 段与 3.6 段）—— 本模块的唯一生产消费者
+- **探测来源**：[engine_client](engine-client.md)（`runEngine` 的 `action='doctor'`）—— `probe` 函数的真实实现
+- **落盘目的地**：[plan_application](plan-application.md)（`applyNativeOutput` 的 `extraFiles`）—— `buildLockBody` 的正文作为写集一项被消费
+- **环境修复**：`tools/fsoft-engine/setup-env.sh`（仓库脚本，详见 [build_deployment_config](build-deployment-config.md)）—— `unhealthy` 状态时上层建议运行
+- **受管状态协同**：[native_state_management](native-state-management.md)（`stateDocFiles` / `stateFileItem`）—— 与 lock 文件同在 `.codewiki/` 下，同批写入
 
 ---
 

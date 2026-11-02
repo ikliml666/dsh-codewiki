@@ -22,7 +22,7 @@ fsoft_page: Extension_Host_Execution_Orchestration.md
 - **agentic 写作能力**：实现「模型边读代码边编辑文章」的纯逻辑工具循环，并通过宿主适配层接入真实 LLM 流与文件系统；
 - **变更集采集**：在兼容通道下收集基线..HEAD 与工作区的四路变更，支撑增量编译决议。
 
-该模块处于两条执行通道的上游：默认走原生 Python 引擎通道（详见 [Code_Engine_Processing_Pipeline](code_engine_module.md)），当 `nativeEngine=false` 时回退到内置 Node 流水线（articles → crosscut → review → index → commit）。
+该模块处于两条执行通道的上游：默认走原生 Python 引擎通道（详见 [Code_Engine_Processing_Pipeline](code-engine-module.md)），当 `nativeEngine=false` 时回退到内置 Node 流水线（articles → crosscut → review → index → commit）。
 
 ## 架构总览
 
@@ -68,9 +68,9 @@ flowchart TB
 
 | 层级 | 组件 | 职责 |
 | --- | --- | --- |
-| 编排层 | [extension_host_core](extension_host_core.md) | 插件入口、job 状态机、工具注册、HTTP 面板、自动提交与会话唤醒 |
-| 适配层 | [agent_runtime](agent_runtime.md) | 把纯逻辑工具循环的裸消息转换为宿主 `RequestMessage`，提供 `llm.stream` 适配与路径沙箱 |
-| 能力层 | [agentic_edit_capability](agentic_edit_capability.md) | 与具体 LLM/文件系统解耦的工具循环：`read_code`、`list_files`、`edit_article`、`generate_sub_module` |
+| 编排层 | [extension_host_core](extension-host-core.md) | 插件入口、job 状态机、工具注册、HTTP 面板、自动提交与会话唤醒 |
+| 适配层 | [agent_runtime](agent-runtime.md) | 把纯逻辑工具循环的裸消息转换为宿主 `RequestMessage`，提供 `llm.stream` 适配与路径沙箱 |
+| 能力层 | [agentic_edit_capability](agentic-edit-capability.md) | 与具体 LLM/文件系统解耦的工具循环：`read_code`、`list_files`、`edit_article`、`generate_sub_module` |
 | 采集层 | `change_set_management` | 基线..HEAD + 工作区四路变更采集，供兼容通道做增量归属判定 |
 
 ## 核心数据流：从提交到编译完成
@@ -112,12 +112,12 @@ sequenceDiagram
 
 ## 核心组件文档
 
-- [extension_host_core](extension_host_core.md) — 宿主侧编译执行编排核心：插件入口、job 状态机、四个工具、回环 HTTP 端点、自动提交与唤醒。
-- [agent_runtime](agent_runtime.md) — Agent 运行时适配层：`toRequestMessages` 消息身份缓存、`makeHostStream` 流式收敛、`makeFsWorkspace` 路径沙箱。
-- [agentic_edit_capability](agentic_edit_capability.md) — Agentic 写作工具循环：`runAgenticArticle`、`read_code`/`list_files`/`edit_article`/`generate_sub_module` 四工具、坏 JSON 三级兜底与路径越界防护。
+- [extension_host_core](extension-host-core.md) — 宿主侧编译执行编排核心：插件入口、job 状态机、四个工具、回环 HTTP 端点、自动提交与唤醒。
+- [agent_runtime](agent-runtime.md) — Agent 运行时适配层：`toRequestMessages` 消息身份缓存、`makeHostStream` 流式收敛、`makeFsWorkspace` 路径沙箱。
+- [agentic_edit_capability](agentic-edit-capability.md) — Agentic 写作工具循环：`runAgenticArticle`、`read_code`/`list_files`/`edit_article`/`generate_sub_module` 四工具、坏 JSON 三级兜底与路径越界防护。
 
 ## 关联模块
 
-- [vscode_extension_client](vscode_extension_client.md) — 侧边栏面板前端，通过 `/api/codewiki/*` 端点读取 job 与仓库状态。
-- [Code_Engine_Processing_Pipeline](code_engine_module.md) — 下游原生 Python 引擎、引擎客户端、计划应用与质量闸门。
-- [State___Observability_Management](job_state_storage.md) — job 状态持久化、日志管理与更新状态追踪。
+- [vscode_extension_client](vscode-extension-client.md) — 侧边栏面板前端，通过 `/api/codewiki/*` 端点读取 job 与仓库状态。
+- [Code_Engine_Processing_Pipeline](code-engine-module.md) — 下游原生 Python 引擎、引擎客户端、计划应用与质量闸门。
+- [State___Observability_Management](job-state-storage.md) — job 状态持久化、日志管理与更新状态追踪。

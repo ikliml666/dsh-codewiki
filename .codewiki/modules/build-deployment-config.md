@@ -62,7 +62,7 @@ flowchart LR
 `package.json`（仓库根）是插件对外的身份与打包声明。关键字段：
 
 - **身份**：`name` 为 `@local/dsh-codewiki`，`private: true`，不在公共 npm 发布；`type: module` 使用 ESM。
-- **入口导出**：`main: index.js`，`exports` 暴露 `.`（宿主端逻辑）与 `./client`（Web 端 [vscode_extension_client](vscode_extension_client.md) 面板）两个子路径。
+- **入口导出**：`main: index.js`，`exports` 暴露 `.`（宿主端逻辑）与 `./client`（Web 端 [vscode_extension_client](vscode-extension-client.md) 面板）两个子路径。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——低于该版本的 DSH 无法装载本插件。
 - **运行依赖**：仅 `@deepseek-ai/schemastery`（用于把 `Config` schema 注册进 DSH 模型设置体系）。
 - **DSH 集成声明**（`dsh` 字段）：
@@ -123,7 +123,7 @@ flowchart TD
 | 原生通道 | `nativeEngineEntry` | 入口脚本路径（默认 `lib/engine/python/entry.py`） |
 | 原生通道 | `nativeEngineTimeoutMs` | 单次引擎调用上限（默认 2700000 ms = 45 分钟） |
 
-**两条通道并存、互不回退**：原生通道环境不闭合时以 `engine-deps` 明确失败，不会悄悄回退到 Node 通道。这一契约由引擎客户端（见 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)）强制执行。
+**两条通道并存、互不回退**：原生通道环境不闭合时以 `engine-deps` 明确失败，不会悄悄回退到 Node 通道。这一契约由引擎客户端（见 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md)）强制执行。
 
 ---
 
@@ -193,10 +193,10 @@ sequenceDiagram
 
 ## 与其他模块的关系
 
-- **运行时消费方**：`cordis.patch.yml` 中声明的 `nativeEngine*`、`batch*`、`agentic*` 等配置项，最终由 [Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md)（宿主端 `index.js` 装载与调度）与 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)（引擎子进程驱动、质量门禁、工作区快照）读取并强制执行。
-- **客户端激活**：`package.json` 的 `exports["./client"]` 与 `dsh.client.platform: web` 支撑 [vscode_extension_client](vscode_extension_client.md) 侧边栏面板的注入；bundle 形态下裸包名行是客户端激活扫描的识别依据。
-- **环境验收参照**：[Testing___Probing_Tooling](Testing___Probing_Tooling.md) 中的 `probe-no-llm-graph.py` 等探测工具，复用本脚本构造的同一 venv 做无 LLM 图生成验证。
-- **二进制侧**：`cw` CLI 由 [codewiki_vendor_binary](codewiki_vendor_binary.md)（Rust 源码）编译产出，`binaryPath` 配置项指向该可执行文件。
+- **运行时消费方**：`cordis.patch.yml` 中声明的 `nativeEngine*`、`batch*`、`agentic*` 等配置项，最终由 [Extension_Host_Execution_Orchestration](extension-host-execution-orchestration.md)（宿主端 `index.js` 装载与调度）与 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md)（引擎子进程驱动、质量门禁、工作区快照）读取并强制执行。
+- **客户端激活**：`package.json` 的 `exports["./client"]` 与 `dsh.client.platform: web` 支撑 [vscode_extension_client](vscode-extension-client.md) 侧边栏面板的注入；bundle 形态下裸包名行是客户端激活扫描的识别依据。
+- **环境验收参照**：[Testing___Probing_Tooling](testing-probing-tooling.md) 中的 `probe-no-llm-graph.py` 等探测工具，复用本脚本构造的同一 venv 做无 LLM 图生成验证。
+- **二进制侧**：`cw` CLI 由 [codewiki_vendor_binary](codewiki-vendor-binary.md)（Rust 源码）编译产出，`binaryPath` 配置项指向该可执行文件。
 
 ---
 

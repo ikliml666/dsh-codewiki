@@ -11,7 +11,7 @@ fsoft_page: article_generation_worker.md
 
 ## 简介
 
-`article_generation_worker` 是 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 下的 **agentic 文章生成执行通道**，对应唯一文件 `lib/articles-agentic.js`。它负责把「模块任务清单」真正跑成一篇篇落盘的文章：模型不再一次性吞下整包源码，而是像工程师一样**自己用工具循环读源码、增量编辑文章**。
+`article_generation_worker` 是 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) 下的 **agentic 文章生成执行通道**，对应唯一文件 `lib/articles-agentic.js`。它负责把「模块任务清单」真正跑成一篇篇落盘的文章：模型不再一次性吞下整包源码，而是像工程师一样**自己用工具循环读源码、增量编辑文章**。
 
 与 `index.js` 里的 `runRealtimeTasks`（单轮 prompt → 全文通道）并列，本模块是吸收自 FSoft-AI4Code/CodeWiki `module agent` 的第二条执行通道：
 
@@ -250,12 +250,12 @@ flowchart TB
 
 | 模块 | 关系 | 说明 |
 | --- | --- | --- |
-| [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) | 父模块 | 本模块是其文章生成执行通道 |
-| [Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md) | 上游调用方 | `index.js tickArticles` 通过本模块跑 agentic 通道，失败时降级到单轮通道 |
-| [agentic_edit_capability](agentic_edit_capability.md) | 下游依赖 | `makeArticleEditor` 的 `edit` 工具实现（view / str_replace / insert） |
-| [agent_runtime](agent_runtime.md) | 下游依赖 | `makeFsWorkspace` / `makeHostStream` 的宿主适配层 |
-| [article_validation](article_validation.md) | 下游依赖 | `makeWriteSet` / `isWritable` 写集契约；质量门反馈 |
-| [code_engine_module](code_engine_module.md) | 兄弟模块 | Python 原生引擎通道（`nativeEngine: true` 时的默认通道） |
+| [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) | 父模块 | 本模块是其文章生成执行通道 |
+| [Extension_Host_Execution_Orchestration](extension-host-execution-orchestration.md) | 上游调用方 | `index.js tickArticles` 通过本模块跑 agentic 通道，失败时降级到单轮通道 |
+| [agentic_edit_capability](agentic-edit-capability.md) | 下游依赖 | `makeArticleEditor` 的 `edit` 工具实现（view / str_replace / insert） |
+| [agent_runtime](agent-runtime.md) | 下游依赖 | `makeFsWorkspace` / `makeHostStream` 的宿主适配层 |
+| [article_validation](article-validation.md) | 下游依赖 | `makeWriteSet` / `isWritable` 写集契约；质量门反馈 |
+| [code_engine_module](code-engine-module.md) | 兄弟模块 | Python 原生引擎通道（`nativeEngine: true` 时的默认通道） |
 
 ## 关键设计要点
 

@@ -13,11 +13,11 @@ fsoft_page: python_native_runtime.md
 
 ## 概述
 
-`python_native_runtime` 是 [Code_Engine_Processing_Pipeline/code_engine_module.md](code_engine_module.md) 的子模块，承担「Node 主进程 ↔ FSoft 原生引擎（`codewiki` Python 包）」之间的**跨进程协议边界**。它本身**不实现任何算法**——依赖图构建、模块聚类、文章写作、增量 diff 全部由 FSoft 自己完成；本模块只做四件事：
+`python_native_runtime` 是 [Code_Engine_Processing_Pipeline/code_engine_module.md](code-engine-module.md) 的子模块，承担「Node 主进程 ↔ FSoft 原生引擎（`codewiki` Python 包）」之间的**跨进程协议边界**。它本身**不实现任何算法**——依赖图构建、模块聚类、文章写作、增量 diff 全部由 FSoft 自己完成；本模块只做四件事：
 
 1. 把 Node 通过 stdin 发来的一行 JSON 请求（`doctor` / `generate` / `update` / `cancel`）翻译成一次 FSoft 调用；
 2. 把 FSoft 的五段进度翻译成引擎八段契约的进度帧，以 JSON 行推回 Node；
-3. 把成功 / 失败 / 取消翻译成结构化的 `EngineResult`，与 [engine_contracts](engine_contracts.md) 的语义完全一致；
+3. 把成功 / 失败 / 取消翻译成结构化的 `EngineResult`，与 [engine_contracts](engine-contracts.md) 的语义完全一致；
 4. 守住两条红线：**不读本机凭证库**、**不让 FSoft 的人类打印污染协议流**。
 
 ## 架构定位
@@ -47,7 +47,7 @@ flowchart TB
     ENTRY --> FSOFT
 ```
 
-Node 侧通过 `spawn` 启动 `python entry.py`，请求以**一行 JSON + 换行**从 stdin 注入，协议帧（`hello` / `progress` / `result`）以 JSON Lines 从 stdout 逐行读出。这条管道的语义由 [engine_client](engine_client.md) 的 `runEngine` 负责收发与超时/静默/取消裁决，本模块只负责 Python 这一端。
+Node 侧通过 `spawn` 启动 `python entry.py`，请求以**一行 JSON + 换行**从 stdin 注入，协议帧（`hello` / `progress` / `result`）以 JSON Lines 从 stdout 逐行读出。这条管道的语义由 [engine_client](engine-client.md) 的 `runEngine` 负责收发与超时/静默/取消裁决，本模块只负责 Python 这一端。
 
 ## 核心组成
 
@@ -80,7 +80,7 @@ flowchart TD
     F --> M
 ```
 
-入口刻意**绕开 `ConfigManager`**：模型通道一律从进程环境变量读取（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），密钥只活在内存里，不落盘、不读本机 keyring。桥的另一端由 [llm_integration_bridges](llm_integration_bridges.md) 的 `startLlmBridge` 提供——它在 Node 侧起一个 loopback HTTP 服务，把 `llm.stream` 适配成 OpenAI 兼容端点。
+入口刻意**绕开 `ConfigManager`**：模型通道一律从进程环境变量读取（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），密钥只活在内存里，不落盘、不读本机 keyring。桥的另一端由 [llm_integration_bridges](llm-integration-bridges.md) 的 `startLlmBridge` 提供——它在 Node 侧起一个 loopback HTTP 服务，把 `llm.stream` 适配成 OpenAI 兼容端点。
 
 **单模块请求预算（`request_limit`）**：上游默认 100，但 `doc_guard.run_until_doc_written` 在模块没写出页面时会续发最多 2 次提醒，每次提醒都是一次独立 `agent.run(usage_limits=...)`，各自吃满一份预算——大模块会在 100 次请求处撞上限，pydantic-ai 抛「The next request would exceed the request_limit」，经 `_classify_exception` 翻成 `article-missing`，整轮从 done 掉成 partial（语义对、预算错：同一轮已写好的几十篇白写）。因此 `action_generate` 从请求行的 `requestLimit` 取值（硬顶 1000，非正值忽略），**未下发时用 300 而不是上游的 100**，避免「插件没传就退回旧坑」；`agent_retries=3` 与 `module_concurrency`（默认 1，硬顶 8）同样在此组装。
 
@@ -88,14 +88,14 @@ flowchart TD
 
 - 替换 `start_stage` / `update_stage` / `complete_stage` 三个方法（旁路观察，不改 FSoft 行为）；
 - `writtenCount` 靠**产物指纹表**（`_doc_fingerprints`，按 `(size, mtime_ns)` 比对）真实清点本轮改动篇数，并做 2 秒节流；
-- **心跳线程**：阶段 3（Documentation Generation）在 `verbose=False` 下一帧进度都不发，实测可跑 40 分钟以上——入口每 60 秒重发当前阶段与真实篇数，让 Node 侧能区分「慢」与「僵死」（这与 [engine_client](engine_client.md) 的 `silenceMs` 静默判定配套）；
+- **心跳线程**：阶段 3（Documentation Generation）在 `verbose=False` 下一帧进度都不发，实测可跑 40 分钟以上——入口每 60 秒重发当前阶段与真实篇数，让 Node 侧能区分「慢」与「僵死」（这与 [engine_client](engine-client.md) 的 `silenceMs` 静默判定配套）；
 - **细节探针**：把 `codewiki.src.be` logger 临时降到 INFO 并挂只读 handler，从日志文本抽出「正在写哪个模块 / 正在聚类哪个子树」拼进进度消息；任何观测异常都被吞掉，绝不因观测失败弄崩编译。
 
 **终态合成**：异常分类（`_classify_exception`）按异常**类型**而非消息文本分派（文本随版本漂移）；崩溃或模型失败时走 `_salvage`——只要已写出文章就降成 `partial` 交付，而不是整轮判 `failed`，从而打破「failed → 不持久化状态 → 下一轮退回全量 → 再撞同一堵墙」的循环。
 
 ### 2. 阶段映射 `stage_map.py`
 
-这是 Node 与 Python 唯一共享的**枚举口径**，纯函数、无副作用。FSoft 的 `ProgressTracker` 只有五段（依赖分析 40% / 模块聚类 20% / 文档生成 30% / HTML 5% / 收尾 5%），而契约（[engine_contracts](engine_contracts.md) 的 `ENGINE_STAGES`）有八段。映射规则：
+这是 Node 与 Python 唯一共享的**枚举口径**，纯函数、无副作用。FSoft 的 `ProgressTracker` 只有五段（依赖分析 40% / 模块聚类 20% / 文档生成 30% / HTML 5% / 收尾 5%），而契约（[engine_contracts](engine-contracts.md) 的 `ENGINE_STAGES`）有八段。映射规则：
 
 | FSoft 阶段 | 权重 | 契约阶段 |
 |---|---|---|
@@ -127,12 +127,12 @@ flowchart TD
 
 | 方向 | 模块 | 关系 |
 |---|---|---|
-| 上游（调用方） | [engine_client](engine_client.md) | `runEngine` spawn 本入口、收发协议行、做超时/静默/取消裁决 |
-| 上游（编排） | [native_runtime_support](native_runtime_support.md) | 裁决链组装、注入环境变量、决定 `full` / `update` |
-| 契约 | [engine_contracts](engine_contracts.md) | `EngineResult` / `EngineProgress` / `ENGINE_STAGES` 的形状由 Node 侧校验，`contractVersion` 两侧同步 |
-| 模型通道 | [llm_integration_bridges](llm_integration_bridges.md) | loopback 桥提供 base_url 与占位 key，本入口只从环境变量读 |
-| 产物落地 | [quality_gates](quality_gates.md) | 本入口产出的 docsDir 再由 `gateNativeOutput` 裁决产物自洽性与基线许可 |
-| 状态采集 | [native_state_management](native_state_management.md) | 本入口在 `artifacts.stateFiles` 报出引擎**真实产出**的跨轮状态文件（module_tree / 依赖图 / update_record），供上层交叉校验 |
+| 上游（调用方） | [engine_client](engine-client.md) | `runEngine` spawn 本入口、收发协议行、做超时/静默/取消裁决 |
+| 上游（编排） | [native_runtime_support](native-runtime-support.md) | 裁决链组装、注入环境变量、决定 `full` / `update` |
+| 契约 | [engine_contracts](engine-contracts.md) | `EngineResult` / `EngineProgress` / `ENGINE_STAGES` 的形状由 Node 侧校验，`contractVersion` 两侧同步 |
+| 模型通道 | [llm_integration_bridges](llm-integration-bridges.md) | loopback 桥提供 base_url 与占位 key，本入口只从环境变量读 |
+| 产物落地 | [quality_gates](quality-gates.md) | 本入口产出的 docsDir 再由 `gateNativeOutput` 裁决产物自洽性与基线许可 |
+| 状态采集 | [native_state_management](native-state-management.md) | 本入口在 `artifacts.stateFiles` 报出引擎**真实产出**的跨轮状态文件（module_tree / 依赖图 / update_record），供上层交叉校验 |
 
 ## 环境与部署依赖
 

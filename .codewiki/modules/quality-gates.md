@@ -13,7 +13,7 @@ fsoft_page: quality_gates.md
 
 `quality_gates` 是引擎原生产物进入 wiki 之前的**采用门**（quality gate）。它的职责位置是：引擎把 docs 树交回来之后、产物真正写进 `.codewiki/` 与 `CodeWiki.md` 之前。它把三类独立来源的检查合成一份可机读的裁决报告（`GateReport`），决定这批产物能否被 wiki 采用、基线能否推进。
 
-与上游[产物自洽校验](engine_output_processing.md)（`output.js` 的 `validateOutput`）的分界很关键：上游只判「产物自身是否自洽」（页在不在、正文空不空、链接指的东西在不在计划内）；质量门判的是「这批产物能不能被 wiki 采用」。
+与上游[产物自洽校验](engine-output-processing.md)（`output.js` 的 `validateOutput`）的分界很关键：上游只判「产物自身是否自洽」（页在不在、正文空不空、链接指的东西在不在计划内）；质量门判的是「这批产物能不能被 wiki 采用」。
 
 ---
 
@@ -250,11 +250,11 @@ flowchart TD
 
 | 依赖 | 用途 |
 |------|------|
-| [engine_output_processing](engine_output_processing.md) | `validateOutput` 产物自洽检查（不重写任何判定） |
-| [../article_validation](article_validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files） |
-| [module_indexing](module_indexing.md) | `WIKI_ENTRY` / `WIKI_META_REL` 路径常量 |
-| [plan_application](plan_application.md) | 落地器消费本模块的 `GateReport`，只写 `writable=true` 的页 |
-| [engine_contracts](engine_contracts.md) | `toContractBlockers` 把 gate 问题翻译成 `BLOCKER_KINDS` |
+| [engine_output_processing](engine-output-processing.md) | `validateOutput` 产物自洽检查（不重写任何判定） |
+| [../article_validation](article-validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files） |
+| [module_indexing](module-indexing.md) | `WIKI_ENTRY` / `WIKI_META_REL` 路径常量 |
+| [plan_application](plan-application.md) | 落地器消费本模块的 `GateReport`，只写 `writable=true` 的页 |
+| [engine_contracts](engine-contracts.md) | `toContractBlockers` 把 gate 问题翻译成 `BLOCKER_KINDS` |
 
 ---
 

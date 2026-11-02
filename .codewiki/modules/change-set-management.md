@@ -473,7 +473,7 @@ if (!baseCommit) {
 
 ## 扩展阅读
 
-- 增量编译的终态判定与基线推进闸门：[State___Observability_Management](State___Observability_Management.md)
-- 原生引擎的增量决议（full vs update）：[Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)
-- 旧 Node 通道的任务编排与阶段机：[Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md)
+- 增量编译的终态判定与基线推进闸门：[State___Observability_Management](state-observability-management.md)
+- 原生引擎的增量决议（full vs update）：[Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md)
+- 旧 Node 通道的任务编排与阶段机：[Extension_Host_Execution_Orchestration](extension-host-execution-orchestration.md)
 - git 路径转义与 POSIX 归一：`lib/git-paths.js`（本仓内）

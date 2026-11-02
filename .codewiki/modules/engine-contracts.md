@@ -169,13 +169,13 @@ flowchart TB
 
 关键协作关系：
 
-1. **上游生产者**：[`engine_client`](engine_client.md)（`runEngine`）在 timeout、silence、abort、协议破坏、正常退出等每条分支上，都用 `engineResult()` + `engineError()` 构造结果——例如超时但已写文章时，必须判 `partial` 并携带 `{kind: 'engine-timeout'}` 的 blocker，这正是 contract.js 中登记该 kind 的原因。[`quality_gates`](quality_gates.md)（`gateNativeOutput`）则把产物缺陷/降级分流成 `done/partial/failed` 与 blocker 列表。
+1. **上游生产者**：[`engine_client`](engine-client.md)（`runEngine`）在 timeout、silence、abort、协议破坏、正常退出等每条分支上，都用 `engineResult()` + `engineError()` 构造结果——例如超时但已写文章时，必须判 `partial` 并携带 `{kind: 'engine-timeout'}` 的 blocker，这正是 contract.js 中登记该 kind 的原因。[`quality_gates`](quality-gates.md)（`gateNativeOutput`）则把产物缺陷/降级分流成 `done/partial/failed` 与 blocker 列表。
 2. **结果宽限协议**：client.js 约定「语义以 result 为准」——result 帧到达后给进程短暂的自行收场窗口，超时按已有 result 收尾，避免已成功的编译被静默/超时误判。
 3. **下游消费者**：
-   - [`plan_application`](plan_application.md) 依据 `outcome === 'done'` 且 `updateOutcome ∈ CONSUMING_UPDATE_OUTCOMES` 才允许推进 cw 基线；
+   - [`plan_application`](plan-application.md) 依据 `outcome === 'done'` 且 `updateOutcome ∈ CONSUMING_UPDATE_OUTCOMES` 才允许推进 cw 基线；
    - 面板与 job tick 用 `describeEngineResult()` 展示文案、用 `engineProgress` 的 `stage` 渲染步骤条；
    - 调度层依据 `error.retryable` 决定是否自动重试；
-   - [`State___Observability_Management`](State___Observability_Management.md) 家族（job 状态存储、更新状态追踪）持久化结果对象，读回时经 `validateEngineResult()` 校验。
+   - [`State___Observability_Management`](state-observability-management.md) 家族（job 状态存储、更新状态追踪）持久化结果对象，读回时经 `validateEngineResult()` 校验。
 
 ---
 
@@ -222,10 +222,10 @@ sequenceDiagram
 
 ## 相关模块
 
-- [engine_client](engine_client.md) — 引擎进程的 spawn、协议帧解析与超时/静默/取消判定，是 EngineResult 的主要生产者。
-- [quality_gates](quality_gates.md) — 产物自洽校验，决定 `done/partial/failed` 与 blocker 列表。
-- [plan_application](plan_application.md) — 依据契约结果执行落地与基线推进。
-- [python_native_runtime](python_native_runtime.md) — Python 侧入口与运行时，按同一协议帧输出结果。
-- [engine_manifest_management](engine_manifest_management.md) — `doctor` 动作产出的 `checks` 与 `engine.deps` 证据来源。
-- [State___Observability_Management](State___Observability_Management.md) — 结果对象的持久化与终态追踪。
-- [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) — 引擎处理管道总体文档。
+- [engine_client](engine-client.md) — 引擎进程的 spawn、协议帧解析与超时/静默/取消判定，是 EngineResult 的主要生产者。
+- [quality_gates](quality-gates.md) — 产物自洽校验，决定 `done/partial/failed` 与 blocker 列表。
+- [plan_application](plan-application.md) — 依据契约结果执行落地与基线推进。
+- [python_native_runtime](python-native-runtime.md) — Python 侧入口与运行时，按同一协议帧输出结果。
+- [engine_manifest_management](engine-manifest-management.md) — `doctor` 动作产出的 `checks` 与 `engine.deps` 证据来源。
+- [State___Observability_Management](state-observability-management.md) — 结果对象的持久化与终态追踪。
+- [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) — 引擎处理管道总体文档。

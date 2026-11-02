@@ -49,7 +49,7 @@ flowchart TB
 ```
 
 该模块处在两条下游通道的上游：
-- **原生引擎通道（默认）**：编译任务经 `nativeChannelFor` / `runNativeJob` 交给 Python 引擎，详见 [code_engine_module](code_engine_module.md) 与其下的 [engine_client](engine_client.md)、[python_native_runtime](python_native_runtime.md)、[plan_application](plan_application.md)、[quality_gates](quality_gates.md)。
+- **原生引擎通道（默认）**：编译任务经 `nativeChannelFor` / `runNativeJob` 交给 Python 引擎，详见 [code_engine_module](code-engine-module.md) 与其下的 [engine_client](engine-client.md)、[python_native_runtime](python-native-runtime.md)、[plan_application](plan-application.md)、[quality_gates](quality-gates.md)。
 - **内置 Node 兼容通道**：`nativeEngine=false` 时走插件内流水线（articles → crosscut → review → index → commit）。
 
 ## 2. 对外接口面
@@ -95,11 +95,11 @@ flowchart TD
     ATT -->|无归属| BLK["记录 blocker，不推进基线"]
 ```
 
-关键点：cw status 的三态判定不区分已提交与工作区未提交变更；因此原生通道即使收到 `clean` 也照常接管，把「四路变更采集 + 增量决议」的权力完全交给引擎（见 [change_set_management](change_set_management.md) 与 [engine_client](engine_client.md)）。
+关键点：cw status 的三态判定不区分已提交与工作区未提交变更；因此原生通道即使收到 `clean` 也照常接管，把「四路变更采集 + 增量决议」的权力完全交给引擎（见 [change_set_management](change-set-management.md) 与 [engine_client](engine-client.md)）。
 
 ### 2.3 回环 HTTP 端点（`installWebServer`）
 
-所有端点由 `isLoopbackRequest` 守卫（仅 127.0.0.1 / ::1），供侧边栏面板（[vscode_extension_client](vscode_extension_client.md)）轮询：
+所有端点由 `isLoopbackRequest` 守卫（仅 127.0.0.1 / ::1），供侧边栏面板（[vscode_extension_client](vscode-extension-client.md)）轮询：
 
 | 端点 | 数据来源 |
 | --- | --- |
@@ -153,6 +153,8 @@ stateDiagram-v2
 | `tickCommit` | `autoCommitWiki` 提交产物（主题分支提交后合并回原分支），随后 `finishJob` 置终态 |
 
 **原生通道的分支**：job 一旦在 `articles` 起始时被 `nativeChannelFor` 锁定为 `channel='native'`，之后所有 tick 都只走 `tickNative`——绝不落入 `STAGE_HANDLER` 的同名 handler，避免两套实现重复写同一批产物。
+
+**已退役的阶段**：`compose`（「拆观察批 → 合成」路径的合成阶段）已随观察→合成分割通道在 0.17.5 删除，本模块不再有该阶段——横切只做「单批直出」：`packArticles` 保证装得下（超预算的文章只截头部并标注），总量超普通预算就把任务标成大档换大上下文模型。因此 `codewiki_progress` 的 `stage` 取值与本节阶段机图一致：`articles`/`crosscut`/`review`/`index`/`commit` 加终态 `done`/`partial`/`failed`/`cancelled`，不会出现 `compose`。
 
 ### 3.2 双执行器与收割约定
 
@@ -265,7 +267,7 @@ flowchart LR
 
 ## 5. 输入装填、契约闸门与锚点修正
 
-兼容通道的质量防线集中在本模块（原生通道对应能力在 [quality_gates](quality_gates.md)）：
+兼容通道的质量防线集中在本模块（原生通道对应能力在 [quality_gates](quality-gates.md)）：
 
 ```mermaid
 flowchart TD
@@ -325,17 +327,17 @@ flowchart LR
 
 | 依赖 | 用途 |
 | --- | --- |
-| [agent_runtime](agent_runtime.md)（`lib/articles-agentic.js`） | agentic 写作执行器 `runAgenticArticles`、大档标记 `markBigAgenticTasks` |
-| [agentic_edit_capability](agentic_edit_capability.md)（`lib/agentic.js`） | agentic 工具循环的 prompt 构造与 `edit` 能力 |
-| [change_set_management](change_set_management.md)（`lib/change-set.js`） | 基线..HEAD + 工作区四路变更采集 |
-| [update_status_tracking](update_status_tracking.md) | `judgeOutcome` 完整性判定、终态集合 `TERMINAL`、update-record 落盘 |
-| [article_validation](article_validation.md) | `inspectArticle` 文章契约闸门（blocking/warnings） |
-| [native_runtime_support](native_runtime_support.md) / [python_native_runtime](python_native_runtime.md) | `runNativeJob` 子进程驱动与 Python 引擎入口 |
-| [job_state_storage](job_state_storage.md) | jobs 持久化、幂等合并、孤儿接管、tick 锁 |
-| [job_log_management](job_log_management.md) | 引擎事件 NDJSON 日志的追加与翻页 |
-| [job_log_management](job_log_management.md)（`lib/git-paths.js`） | `withQuotepathOff` 关闭 git 中文路径八进制转义 |
+| [agent_runtime](agent-runtime.md)（`lib/articles-agentic.js`） | agentic 写作执行器 `runAgenticArticles`、大档标记 `markBigAgenticTasks` |
+| [agentic_edit_capability](agentic-edit-capability.md)（`lib/agentic.js`） | agentic 工具循环的 prompt 构造与 `edit` 能力 |
+| [change_set_management](change-set-management.md)（`lib/change-set.js`） | 基线..HEAD + 工作区四路变更采集 |
+| [update_status_tracking](update-status-tracking.md) | `judgeOutcome` 完整性判定、终态集合 `TERMINAL`、update-record 落盘 |
+| [article_validation](article-validation.md) | `inspectArticle` 文章契约闸门（blocking/warnings） |
+| [native_runtime_support](native-runtime-support.md) / [python_native_runtime](python-native-runtime.md) | `runNativeJob` 子进程驱动与 Python 引擎入口 |
+| [job_state_storage](job-state-storage.md) | jobs 持久化、幂等合并、孤儿接管、tick 锁 |
+| [job_log_management](job-log-management.md) | 引擎事件 NDJSON 日志的追加与翻页 |
+| [job_log_management](job-log-management.md)（`lib/git-paths.js`） | `withQuotepathOff` 关闭 git 中文路径八进制转义 |
 
-上游消费方：面板前端 [vscode_extension_client](vscode_extension_client.md) 通过 `/api/codewiki/*` 端点读取 `jobSummary` / repos / sessions / logs 渲染侧边栏。
+上游消费方：面板前端 [vscode_extension_client](vscode-extension-client.md) 通过 `/api/codewiki/*` 端点读取 `jobSummary` / repos / sessions / logs 渲染侧边栏。
 
 ## 7. 配置面（`Config` + `liveConfig`）
 

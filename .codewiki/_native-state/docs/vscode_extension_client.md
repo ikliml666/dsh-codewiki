@@ -74,6 +74,8 @@ flowchart LR
 
 词典不仅承载界面文案，还**编码了全部配置项语义**（如 `autoCommitHint`、`bigConcurrencyHint`），是用户理解各设置含义的主要来源。
 
+步骤条与阶段标签的文案由**键名派生**，不是硬编码在组件里：`stepName(s)` 取 `step` + 阶段名首字母大写（现为 `stepQueued`/`stepArticles`/`stepCrosscut`/`stepReview`/`stepIndex`/`stepCommit`），`stageLabel(s)` 同理取 `stage` 前缀。因此**每个 `ACTIVE_STAGES` 里的阶段都必须在词典中有对应的 `step*` 键**——增删阶段时两侧的键要一起动，否则步骤条会直接显示键名。`compose` 阶段已从 `ACTIVE_STAGES` 移除，词典里对应的 `stepCompose`（「合成 / Compose」）随之删除，`stepCommit`（「提交 / Commit」）改为紧跟 `stepIndex`，让 `en` 与 `zh` 的键序与新的渲染顺序一致；`stageCompose` 仍保留，用于给历史任务里残留的旧阶段名兜底出中文标签。
+
 ### 设置卡片：`CodewikiCard`
 
 设置表单组件（`view='summary'` 时只渲染一行简介），数据流如下：
@@ -123,7 +125,7 @@ flowchart LR
 面板入口，聚合四个标签页（`overview` / `tasks` / `sessions` / `settings`）：
 
 - **jobs 轮询**：每 `POLL_MS = 2000` ms 拉一次 `GET /api/codewiki/jobs`；`inFlightRef` 保证服务卡顿不重叠拉取；卸载后不再 setState；
-- **焦点任务**：`byUpdated(a, b)` 按 `updatedAt/createdAt` 排序——活动任务（七阶段内）优先，其余收进「历史任务」折叠区，并按 `cwd` 分组（保持首次出现顺序）；
+- **焦点任务**：`byUpdated(a, b)` 按 `updatedAt/createdAt` 排序——活动任务（六阶段内）优先，其余收进「历史任务」折叠区，并按 `cwd` 分组（保持首次出现顺序）；
 - **面板侧派生数据**（不在服务端）：
   - `sparkRef`：每 job 的 `tps` 滚动窗口（最近 30 点），喂给 `Spark` 微趋势线；
   - `batchRateRef`：批量完成速率 EWMA（`rate = prev*0.6 + inst*0.4`），用于吞吐徽标的篇/分与 ETA；
@@ -134,8 +136,8 @@ flowchart LR
 
 | 区块 | 数据来源 | 说明 |
 |---|---|---|
-| 阶段步骤条 `stageBar` | `ACTIVE_STAGES = ['queued','articles','crosscut','compose','review','index','commit']` | 七步圆点；失败/取消在最后计时阶段标红/黄；`partial` 与 `done` 一样全绿（活干完了，只是完整性没成立） |
-| 引擎阶段行 | `channel === 'native'` 时的 `nativeStage/nativePercent` | 八段契约（env/graph/cluster/articles/validate/index/baseline/commit）与粗粒度七步粒度不同，另起一行不改动步骤条序号 |
+| 阶段步骤条 `stageBar` | `ACTIVE_STAGES = ['queued','articles','crosscut','review','index','commit']` | 六步圆点（`compose` 阶段已随单轮写作通道退役，词典的 `stepCompose` 一并删除）；每步标签取自 `step*` 键；失败/取消在最后计时阶段标红/黄；`partial` 与 `done` 一样全绿（活干完了，只是完整性没成立） |
+| 引擎阶段行 | `channel === 'native'` 时的 `nativeStage/nativePercent` | 八段契约（env/graph/cluster/articles/validate/index/baseline/commit）与粗粒度六步粒度不同，另起一行不改动步骤条序号 |
 | 总进度条 `overallPct` | 定权 `STAGE_WEIGHTS` + 阶段内 taskList 完成率 | 封顶 99，`done/partial` 才 100 |
 | 已用时 `elapsedSplit` | `stageTimings.queued` 与总时长差 | 拆「排队 / 执行」，不让 2 小时排队被看成编译跑了 2 小时 |
 | 排队可见性 | `queueAhead` | queued 任务显示「在等：A → B」 |

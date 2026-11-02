@@ -46,9 +46,9 @@ flowchart LR
     LlmBridge -- "onRequestStart 会话钩子" --> Panel
 ```
 
-本模块在[代码引擎（code_engine_module）](code_engine_module.md)中是一个叶子能力模块，不负责进程管理、协议行或产物落地：
+本模块在[代码引擎（code_engine_module）](code-engine-module.md)中是一个叶子能力模块，不负责进程管理、协议行或产物落地：
 
-- **上游调用方**：[引擎客户端（engine_client）](engine_client.md) 起 Python 子进程时，会把桥的 `url` 与 `placeholderKey` 以进程环境变量的形式注入引擎（见 [Python 原生运行时（python_native_runtime）](python_native_runtime.md)中 `entry.py` 对「不读本机凭证库、密钥只存在于进程环境变量」的守护）。
+- **上游调用方**：[引擎客户端（engine_client）](engine-client.md) 起 Python 子进程时，会把桥的 `url` 与 `placeholderKey` 以进程环境变量的形式注入引擎（见 [Python 原生运行时（python_native_runtime）](python-native-runtime.md)中 `entry.py` 对「不读本机凭证库、密钥只存在于进程环境变量」的守护）。
 - **下游依赖**：只依赖 Node 内置模块（`node:http`、`node:crypto`）与宿主注入的 `llm` 对象，不读任何凭证文件、不 import 插件主入口。
 
 ## 架构分层
@@ -196,12 +196,12 @@ sequenceDiagram
 
 ## 与引擎环境的配合
 
-桥注入引擎的方式是**进程环境变量**，而不是引擎自己的配置文件——这与 [Python 原生运行时](python_native_runtime.md)中 `entry.py` 绕开 `ConfigManager`（不读 `~/.codewiki/config.json` / keyring）的决策互为表里：密钥不落盘、不读本机凭证库。引擎运行环境本身由 [build_deployment_config](build_deployment_config.md) 中的 `tools/fsoft-engine/setup-env.sh` 一次性建好（venv + 冻结依赖快照 + editable 安装 FSoft 本体），桥则保证运行期模型通道始终走宿主凭证。
+桥注入引擎的方式是**进程环境变量**，而不是引擎自己的配置文件——这与 [Python 原生运行时](python-native-runtime.md)中 `entry.py` 绕开 `ConfigManager`（不读 `~/.codewiki/config.json` / keyring）的决策互为表里：密钥不落盘、不读本机凭证库。引擎运行环境本身由 [build_deployment_config](build-deployment-config.md) 中的 `tools/fsoft-engine/setup-env.sh` 一次性建好（venv + 冻结依赖快照 + editable 安装 FSoft 本体），桥则保证运行期模型通道始终走宿主凭证。
 
 ## 相关模块链接
 
-- [代码引擎（code_engine_module）](code_engine_module.md) —— 本模块的父模块
-- [引擎客户端（engine_client）](engine_client.md) —— 注入桥 `url` / `placeholderKey` 的调用方
-- [Python 原生运行时（python_native_runtime）](python_native_runtime.md) —— 凭证边界的 Python 侧实现
-- [引擎契约（engine_contracts）](engine_contracts.md) —— 引擎结果的机读契约
-- [质量门禁（quality_gates）](quality_gates.md) —— 产物入库前的裁决
+- [代码引擎（code_engine_module）](code-engine-module.md) —— 本模块的父模块
+- [引擎客户端（engine_client）](engine-client.md) —— 注入桥 `url` / `placeholderKey` 的调用方
+- [Python 原生运行时（python_native_runtime）](python-native-runtime.md) —— 凭证边界的 Python 侧实现
+- [引擎契约（engine_contracts）](engine-contracts.md) —— 引擎结果的机读契约
+- [质量门禁（quality_gates）](quality-gates.md) —— 产物入库前的裁决

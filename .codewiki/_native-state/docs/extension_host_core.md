@@ -145,6 +145,8 @@ stateDiagram-v2
 
 **原生通道的分支**：job 一旦在 `articles` 起始时被 `nativeChannelFor` 锁定为 `channel='native'`，之后所有 tick 都只走 `tickNative`——绝不落入 `STAGE_HANDLER` 的同名 handler，避免两套实现重复写同一批产物。
 
+**已退役的阶段**：`compose`（「拆观察批 → 合成」路径的合成阶段）已随观察→合成分割通道在 0.17.5 删除，本模块不再有该阶段——横切只做「单批直出」：`packArticles` 保证装得下（超预算的文章只截头部并标注），总量超普通预算就把任务标成大档换大上下文模型。因此 `codewiki_progress` 的 `stage` 取值与本节阶段机图一致：`articles`/`crosscut`/`review`/`index`/`commit` 加终态 `done`/`partial`/`failed`/`cancelled`，不会出现 `compose`。
+
 ### 3.2 双执行器与收割约定
 
 ```mermaid

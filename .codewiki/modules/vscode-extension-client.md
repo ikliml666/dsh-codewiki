@@ -16,9 +16,9 @@ fsoft_page: vscode_extension_client.md
 1. **插件设置卡片**（`plugins.item` 插槽，id = `codewiki`）：读写宿主 Config 服务 `codewiki` 命名空间的编译模型、并发、自动提交、调度等全部设置；
 2. **侧边栏面板**（`main` 渲染内容 + `sidebar.panellist` 出入口，key = `codewiki`）：编译任务进度、取消、会话（LLM 请求）查看、仓库总览与自动更新调度。
 
-客户端本身**不含任何编译逻辑**——所有数据来自宿主半侧（webServer）的 REST 端点（见 [Extension_Host_Execution_Orchestration.md](Extension_Host_Execution_Orchestration.md)），所有状态持久化经 configForms 热生效。
+客户端本身**不含任何编译逻辑**——所有数据来自宿主半侧（webServer）的 REST 端点（见 [Extension_Host_Execution_Orchestration.md](extension-host-execution-orchestration.md)），所有状态持久化经 configForms 热生效。
 
-包形态见 [build_deployment_config.md](build_deployment_config.md)（`package.json` 的 `exports."./client"` 即本文件，`dsh.client.platform = "web"`）。
+包形态见 [build_deployment_config.md](build-deployment-config.md)（`package.json` 的 `exports."./client"` 即本文件，`dsh.client.platform = "web"`）。
 
 ## 架构总览
 
@@ -83,6 +83,8 @@ flowchart LR
 
 词典不仅承载界面文案，还**编码了全部配置项语义**（如 `autoCommitHint`、`bigConcurrencyHint`），是用户理解各设置含义的主要来源。
 
+步骤条与阶段标签的文案由**键名派生**，不是硬编码在组件里：`stepName(s)` 取 `step` + 阶段名首字母大写（现为 `stepQueued`/`stepArticles`/`stepCrosscut`/`stepReview`/`stepIndex`/`stepCommit`），`stageLabel(s)` 同理取 `stage` 前缀。因此**每个 `ACTIVE_STAGES` 里的阶段都必须在词典中有对应的 `step*` 键**——增删阶段时两侧的键要一起动，否则步骤条会直接显示键名。`compose` 阶段已从 `ACTIVE_STAGES` 移除，词典里对应的 `stepCompose`（「合成 / Compose」）随之删除，`stepCommit`（「提交 / Commit」）改为紧跟 `stepIndex`，让 `en` 与 `zh` 的键序与新的渲染顺序一致；`stageCompose` 仍保留，用于给历史任务里残留的旧阶段名兜底出中文标签。
+
 ### 设置卡片：`CodewikiCard`
 
 设置表单组件（`view='summary'` 时只渲染一行简介），数据流如下：
@@ -132,7 +134,7 @@ flowchart LR
 面板入口，聚合四个标签页（`overview` / `tasks` / `sessions` / `settings`）：
 
 - **jobs 轮询**：每 `POLL_MS = 2000` ms 拉一次 `GET /api/codewiki/jobs`；`inFlightRef` 保证服务卡顿不重叠拉取；卸载后不再 setState；
-- **焦点任务**：`byUpdated(a, b)` 按 `updatedAt/createdAt` 排序——活动任务（七阶段内）优先，其余收进「历史任务」折叠区，并按 `cwd` 分组（保持首次出现顺序）；
+- **焦点任务**：`byUpdated(a, b)` 按 `updatedAt/createdAt` 排序——活动任务（六阶段内）优先，其余收进「历史任务」折叠区，并按 `cwd` 分组（保持首次出现顺序）；
 - **面板侧派生数据**（不在服务端）：
   - `sparkRef`：每 job 的 `tps` 滚动窗口（最近 30 点），喂给 `Spark` 微趋势线；
   - `batchRateRef`：批量完成速率 EWMA（`rate = prev*0.6 + inst*0.4`），用于吞吐徽标的篇/分与 ETA；
@@ -143,8 +145,8 @@ flowchart LR
 
 | 区块 | 数据来源 | 说明 |
 |---|---|---|
-| 阶段步骤条 `stageBar` | `ACTIVE_STAGES = ['queued','articles','crosscut','compose','review','index','commit']` | 七步圆点；失败/取消在最后计时阶段标红/黄；`partial` 与 `done` 一样全绿（活干完了，只是完整性没成立） |
-| 引擎阶段行 | `channel === 'native'` 时的 `nativeStage/nativePercent` | 八段契约（env/graph/cluster/articles/validate/index/baseline/commit）与粗粒度七步粒度不同，另起一行不改动步骤条序号 |
+| 阶段步骤条 `stageBar` | `ACTIVE_STAGES = ['queued','articles','crosscut','review','index','commit']` | 六步圆点（`compose` 阶段已随单轮写作通道退役，词典的 `stepCompose` 一并删除）；每步标签取自 `step*` 键；失败/取消在最后计时阶段标红/黄；`partial` 与 `done` 一样全绿（活干完了，只是完整性没成立） |
+| 引擎阶段行 | `channel === 'native'` 时的 `nativeStage/nativePercent` | 八段契约（env/graph/cluster/articles/validate/index/baseline/commit）与粗粒度六步粒度不同，另起一行不改动步骤条序号 |
 | 总进度条 `overallPct` | 定权 `STAGE_WEIGHTS` + 阶段内 taskList 完成率 | 封顶 99，`done/partial` 才 100 |
 | 已用时 `elapsedSplit` | `stageTimings.queued` 与总时长差 | 拆「排队 / 执行」，不让 2 小时排队被看成编译跑了 2 小时 |
 | 排队可见性 | `queueAhead` | queued 任务显示「在等：A → B」 |
@@ -249,8 +251,8 @@ flowchart TD
     Client -.->|settings 命名空间=id| Build
 ```
 
-- **[Extension_Host_Execution_Orchestration.md](Extension_Host_Execution_Orchestration.md)**：客户端全部端点的服务端实现——`jobSummary`（jobs 行的字段组装）、`progressView`、`runPool`、`wakeCompileSession`、调度与排除清单；
-- **[Code_Engine_Processing_Pipeline.md](Code_Engine_Processing_Pipeline.md)**：`channel === 'native'` 时客户端渲染的 `nativeStage`（八段契约）、`nativeLogs`、`gate.apply` 结果均来自原生 Python 引擎通道；
-- **[State___Observability_Management.md](State___Observability_Management.md)**：jobs 行数据（stageTimings、updatedAt、日志）的持久化后端；
-- **[codewiki_vendor_binary.md](codewiki_vendor_binary.md)**：`ReposTab` 的仓库 wiki 状态由宿主调 `cw status` 判定；
-- **[build_deployment_config.md](build_deployment_config.md)**：包导出与 bundle patch（`id: codewiki`）决定客户端的注册命名空间与安装形态。
+- **[Extension_Host_Execution_Orchestration.md](extension-host-execution-orchestration.md)**：客户端全部端点的服务端实现——`jobSummary`（jobs 行的字段组装）、`progressView`、`runPool`、`wakeCompileSession`、调度与排除清单；
+- **[Code_Engine_Processing_Pipeline.md](code-engine-processing-pipeline.md)**：`channel === 'native'` 时客户端渲染的 `nativeStage`（八段契约）、`nativeLogs`、`gate.apply` 结果均来自原生 Python 引擎通道；
+- **[State___Observability_Management.md](state-observability-management.md)**：jobs 行数据（stageTimings、updatedAt、日志）的持久化后端；
+- **[codewiki_vendor_binary.md](codewiki-vendor-binary.md)**：`ReposTab` 的仓库 wiki 状态由宿主调 `cw status` 判定；
+- **[build_deployment_config.md](build-deployment-config.md)**：包导出与 bundle patch（`id: codewiki`）决定客户端的注册命名空间与安装形态。

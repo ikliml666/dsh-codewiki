@@ -11,7 +11,7 @@ fsoft_page: probe_tools.md
 
 ## 简介
 
-`probe_tools` 是 [Testing___Probing_Tooling 测试与探针工具](Testing___Probing_Tooling.md) 模块下的一个子模块，当前仅包含一个验收探针：`tools/fsoft-engine/probe-no-llm-graph.py`。它的唯一入口是文件中的 `main` 函数。
+`probe_tools` 是 [Testing___Probing_Tooling 测试与探针工具](testing-probing-tooling.md) 模块下的一个子模块，当前仅包含一个验收探针：`tools/fsoft-engine/probe-no-llm-graph.py`。它的唯一入口是文件中的 `main` 函数。
 
 该探针是 **FSoft 原生引擎迁移到本插件过程中的「阶段 1A」引擎侧验收工具**，核心目标是：在**完全不依赖 LLM、不依赖 DSH 插件进程、不需要任何模型凭证**的前提下，验证上游 FSoft CodeWiki 引擎的原生依赖图分析链路（`handle_analyze_repo`，基于 tree-sitter 静态分析）能否在**含中文与空格的路径**下跑通。
 
@@ -47,8 +47,8 @@ flowchart TB
 
 要点：
 
-- 探针是**开发期/验收期**工具，不参与插件运行时；但它验证的 `handle_analyze_repo` / `DependencyGraphBuilder` 正是正式链路 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 中 `native-run`（见 [python_native_runtime](python_native_runtime.md)）与 `runEngine`（见 [engine_client](engine_client.md)）所驱动的上游 Python 引擎能力。
-- 探针使用的 fixture 是 [testing_fixtures](testing_fixtures.md) 子模块的一部分（`中文 空格 fixture`），二者配合构成「探针 + 被测仓库」的完整验收组合。
+- 探针是**开发期/验收期**工具，不参与插件运行时；但它验证的 `handle_analyze_repo` / `DependencyGraphBuilder` 正是正式链路 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) 中 `native-run`（见 [python_native_runtime](python-native-runtime.md)）与 `runEngine`（见 [engine_client](engine-client.md)）所驱动的上游 Python 引擎能力。
+- 探针使用的 fixture 是 [testing_fixtures](testing-fixtures.md) 子模块的一部分（`中文 空格 fixture`），二者配合构成「探针 + 被测仓库」的完整验收组合。
 
 ---
 
@@ -67,7 +67,7 @@ python tools/fsoft-engine/probe-no-llm-graph.py \
 | `--fixture` | 否 | `tools/fsoft-engine/fixtures/中文 空格 fixture` | 被测小仓库路径，默认 fixture 本身就带「中文 + 空格」以验证非 ASCII 路径健壮性 |
 | `--out` | 否 | `tools/fsoft-engine/out-1a` | 工作/输出目录，自动创建，引擎会在此落 workspace artifacts |
 
-前置环境准备：在运行探针之前，通常先用同目录的 [setup-env.sh](build_deployment_config.md) 搭建独立 venv（冻结依赖快照 `locked-requirements.txt` + 约束 `constraints.txt`，再 editable 安装 `codewiki`，最后 `pip check` + import 冒烟）。注意 setup 脚本只在插件仓库**之外**建环境，不把 venv 提交进 git。
+前置环境准备：在运行探针之前，通常先用同目录的 [setup-env.sh](build-deployment-config.md) 搭建独立 venv（冻结依赖快照 `locked-requirements.txt` + 约束 `constraints.txt`，再 editable 安装 `codewiki`，最后 `pip check` + import 冒烟）。注意 setup 脚本只在插件仓库**之外**建环境，不把 venv 提交进 git。
 
 ---
 
@@ -122,7 +122,7 @@ flowchart TB
 
 ## 与 fixture 的对应关系
 
-探针的 R2/R3/R5 判据不是任意的——它们精准对应 [testing_fixtures](testing_fixtures.md) 中 `中文 空格 fixture` 的结构：
+探针的 R2/R3/R5 判据不是任意的——它们精准对应 [testing_fixtures](testing-fixtures.md) 中 `中文 空格 fixture` 的结构：
 
 ```mermaid
 flowchart LR
@@ -172,15 +172,15 @@ flowchart LR
 ## 设计约束与注意事项
 
 1. **完全无模型**：探针构造 `Config` 时把 `llm_base_url` / `llm_api_key` 置为 `"not-needed"`，`main_model` / `cluster_model` 置为 `"unused"`——明确表达「这条链路不该碰网络/凭证」。这也是它能在离线 CI 中运行的前提。
-2. **不碰 DSH 插件进程**：探针直接以 `python` 解释器运行，绕过 [Extension_Host_Execution_Orchestration](Extension_Host_Execution_Orchestration.md) 与 [vscode_extension_client](vscode_extension_client.md) 这条插件主线，仅验证上游 Python 引擎本身。
+2. **不碰 DSH 插件进程**：探针直接以 `python` 解释器运行，绕过 [Extension_Host_Execution_Orchestration](extension-host-execution-orchestration.md) 与 [vscode_extension_client](vscode-extension-client.md) 这条插件主线，仅验证上游 Python 引擎本身。
 3. **路径敏感性**：默认 `--fixture` 指向含空格与中文的目录，任何一步若对路径编码处理不当（`Path` 解析、`json.dumps(ensure_ascii=False)`、tree-sitter 读取）都会在 R1/R4 暴露。
-4. **与环境搭建的耦合**：探针能否导入 `codewiki` 依赖先由 [setup-env.sh](build_deployment_config.md) 装好独立 venv；若直接用系统 python 跑，通常会因缺 `tree_sitter` / `openai` 等依赖而以退出码 3 失败。
+4. **与环境搭建的耦合**：探针能否导入 `codewiki` 依赖先由 [setup-env.sh](build-deployment-config.md) 装好独立 venv；若直接用系统 python 跑，通常会因缺 `tree_sitter` / `openai` 等依赖而以退出码 3 失败。
 
 ---
 
 ## 相关页面
 
-- 父模块：[Testing___Probing_Tooling](Testing___Probing_Tooling.md)
-- 配套 fixture：[testing_fixtures](testing_fixtures.md)
-- 所验证引擎的正式运行时封装：[Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md)（尤其 [python_native_runtime](python_native_runtime.md)、[engine_client](engine_client.md)、[module_indexing](module_indexing.md)）
-- 环境搭建脚本（同属 [build_deployment_config](build_deployment_config.md)）：`tools/fsoft-engine/setup-env.sh`
+- 父模块：[Testing___Probing_Tooling](testing-probing-tooling.md)
+- 配套 fixture：[testing_fixtures](testing-fixtures.md)
+- 所验证引擎的正式运行时封装：[Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md)（尤其 [python_native_runtime](python-native-runtime.md)、[engine_client](engine-client.md)、[module_indexing](module-indexing.md)）
+- 环境搭建脚本（同属 [build_deployment_config](build-deployment-config.md)）：`tools/fsoft-engine/setup-env.sh`
