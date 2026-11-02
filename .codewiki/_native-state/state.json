@@ -2,20 +2,14 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "0cddac8af9f8451b9e9b621603af8eb0f52aa28c",
-    "headCommit": "36fb85ad93d9f91ae70bc404f7aa7e03439b3c93"
+    "baseCommit": "36fb85ad93d9f91ae70bc404f7aa7e03439b3c93",
+    "headCommit": "93b7812f1b579d5aceec8a849c78662adbb76097"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "0cddac8af9f8451b9e9b621603af8eb0f52aa28c",
-    "headCommit": "36fb85ad93d9f91ae70bc404f7aa7e03439b3c93",
-    "committed": [
-      "CHANGELOG.md",
-      "README.md",
-      "client.js",
-      "package.json",
-      "test-client-panel.mjs"
-    ],
+    "baseCommit": "36fb85ad93d9f91ae70bc404f7aa7e03439b3c93",
+    "headCommit": "93b7812f1b579d5aceec8a849c78662adbb76097",
+    "committed": [],
     "staged": [],
     "unstaged": [],
     "untracked": [],
@@ -31,10 +25,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvyjv58y-1-native（25 个文件）"
+    "持久化基线 0cddac8 与本次 cw 基线 36fb85a 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvylhaey-2-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T01:07:36.633Z"
+  "updatedAt": "2026-11-02T01:46:28.199Z"
 }
