@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.8 — 2026-11-02
+
+### 单模块请求上限可配置（默认 300）
+
+上游 `1b4af43` 给写作加了补写校验：模块跑完没写出页面时，会在同一对话里续发最多
+2 次提醒，**每次提醒都是一次独立的 `agent.run(usage_limits=...)`，各自吃满一份请求
+预算**。而 `entry.py` 把 `request_limit` 硬编码成上游默认的 100。真机上本仓库全量
+编译时，大模块 `Extension_Host_Execution_Orchestration/change_set_management` 撞满
+100 次请求，pydantic-ai 抛 `The next request would exceed the request_limit of 100`，
+经 `_classify_exception` 翻成 `article-missing`，整轮从 `done` 掉成 `partial`——
+**已经写好的 31 篇白写，基线也不推进**。失败显式化本身是对的（这正是同步上游要的
+语义），错的是预算。
+
+现在它是设置项 `requestLimit`（默认 300，范围 1–1000）：`index.js` 的 `Config` 与
+`liveConfig` → `runNativeJob({ requestLimit })` → 引擎 `payload.requestLimit` →
+`config["request_limit"]`。非正值一律退回默认 300（0 会让 agent 循环一开就撞上限，
+比用 100 更糟），超 1000 夹到 1000。设置页在「编译模型」区加了对应输入框与保存期
+校验。
+
+### 验证
+
+`test-config.mjs` 新增 5 项断言（默认 300、显式值透出、下限 1、硬顶 1000、非正值
+退回默认）；`test-engine-python-entry.mjs` 22 项、`test-engine-native-job.mjs` 137 项、
+`test-client-panel.mjs` 4 项、`test-orchestration.mjs` 全部通过。
+
 ## 0.17.7 — 2026-11-02
 
 ### 修引擎锁：升级上游后不能自己卡死在 env 阶段

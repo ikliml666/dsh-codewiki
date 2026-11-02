@@ -51,6 +51,11 @@ const DEFAULT_BIG_PROVIDER = 'volces-ark'
 const DEFAULT_BIG_MODEL = 'glm-5.3-flash'
 // 大档单请求输入预算：模型 512k 上下文，留出输出与系统提示余量后取 420k
 const DEFAULT_BIG_TOKEN_BUDGET = 420000
+// 单模块写作的 LLM 请求上限（上游叫 request_limit）：上游默认 100，但 1b4af43 起
+// 写作校验会为写不出页面的模块续发最多 2 次补写提醒，每次提醒各自吃一份预算；
+// 真机上 change_set_management 模块撞满 100 次请求后抛错，已写好的 31 篇被记成 partial。
+// 300 是「大模块一轮能写完」的经验上限，同时保留硬顶 1000 防止配置失误拖成一小时。
+const DEFAULT_REQUEST_LIMIT = 300
 // 编译产物路径：自动提交、忽略检测、待提交提醒共用的唯一定义。永远只认这两个 pathspec，
 // 不扩成 -A / 整个工作树（否则会把用户手上的其它改动卷进自动提交）。
 const WIKI_PATHS = ['.codewiki', 'CodeWiki.md']
@@ -82,6 +87,7 @@ export const Config = z.object({
   sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且大档已关闭时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
   moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（与 bigConcurrency 同一约定，真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
+  requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 300；上游默认 100 时大模块会撞上限中断整轮编译（真机 change_set_management 撞 100 抛错，已写 31 篇被记成 partial）'),
   bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
@@ -134,6 +140,12 @@ export function liveConfig(config) {
     moduleConcurrency: (() => {
       const raw = Number(val(c.moduleConcurrency))
       return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), CONCURRENCY_HARD_CAP) : 0
+    })(),
+    // 单模块请求上限：非正值一律退回默认（0 会让 agent 循环一开就撞上限，整轮断在
+    // articles 阶段）；硬顶 1000 防止配置失误把一轮编译拖成几小时。
+    requestLimit: (() => {
+      const raw = Number(val(c.requestLimit))
+      return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), 1000) : DEFAULT_REQUEST_LIMIT
     })(),
     serialProjects: val(c.serialProjects) !== false,
     parallelLimit: (() => {
@@ -2483,6 +2495,9 @@ function createJobService(config, onSettled) {
         // 同层模块并行度：独立设置项，0/未填 跟随默认档并发（与 bigConcurrency 同约定），
         // 填 1 = 上游原本的严格串行。不复用同一个配置键，两者语义不同。
         moduleConcurrency: c.moduleConcurrency || c.maxConcurrency,
+        // 单模块写作请求上限：上游写作 agent 的硬预算，不传就等于用引擎默认 100，
+        // 大模块会撞满抛错把整轮判成 partial。
+        requestLimit: c.requestLimit,
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),

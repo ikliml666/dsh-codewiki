@@ -30,6 +30,18 @@ for (const key of ['planMode', 'symbolIncremental', 'agenticArticles', 'agenticM
   }
 }
 
+// ── 单模块请求上限（0.17.8）────────────────────────────────────────────────
+// 上游 1b4af43 的 doc_guard 会给单个模块最多 2 次补写提醒，每次都是独立的
+// agent.run(usage_limits=UsageLimits(request_limit=N))。原先硬编码 100，大模块
+// 在真机上撞上限抛 DocumentationWriteError，整轮从 done 掉成 partial——语义对，
+// 但预算明显不够。这里钉住默认值与夹取规则，别让它再悄悄回到偏小值。
+check(liveConfig(defaults).requestLimit === 300, '单模块请求上限默认 300（原先硬编码 100 不够大模块用）')
+{
+  check(liveConfig(Config({ requestLimit: 500 })).requestLimit === 500, '显式配置的请求上限原样透出')
+  check(liveConfig(Config({ requestLimit: 1 })).requestLimit === 1, '下限 1 允许（等价于不写文章的极端预算）')
+  check(liveConfig(Config({ requestLimit: 5000 })).requestLimit === 1000, '超过硬顶 1000 时夹到 1000')
+  check(liveConfig(Config({ requestLimit: 0 })).requestLimit === 300, '0 / 非正值退回默认 300，不把 agent 循环卡死在 0')
+}
 // ── 大档开关 ────────────────────────────────────────────────────────────────
 // schemastery 返回带 get() 的包装对象，取值一律走 liveConfig（运行期也是它）
 check(liveConfig(defaults).bigEnabled === true, '大档默认开启（沿用既有行为，升级后不改变编译结果）')

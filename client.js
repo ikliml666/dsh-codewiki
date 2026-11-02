@@ -96,6 +96,9 @@ window.__ModuleLoader__.load({
       secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。关掉上方开关即退回会话通道兜底。',
       bigEnabled: '启用大档模型（超长输入）',
       bigEnabledHint: '关闭后超过普通预算的请求不再换大上下文模型，直接按普通档处理；大档的模型、预算与并发配置都保留，重新开启无需重填。',
+      requestLimit: '单模块请求上限',
+      requestLimitHint: '写一个模块时允许的 LLM 请求次数（1–1000）。页面没写出来时引擎会续发补写提醒，每次提醒各自一份预算。调大才能写完更大的模块；调得太小，复杂模块会中断成「部分完成」。',
+      invalidRequestLimit: '单模块请求上限需在 1–1000 之间',
       bigProvider: '大档提供商',
       bigProviderOff: '（未启用大档）',
       bigProviderHint: '来自模型设置里已注册的提供商。默认火山方舟（volces-ark）。留空则关闭大档通道。',
@@ -281,6 +284,9 @@ window.__ModuleLoader__.load({
       secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Turn the switch above off to fall back to the session channel.',
       bigEnabled: 'Enable large-tier model (very long input)',
       bigEnabledHint: 'When off, requests above the normal budget no longer switch to a larger-context model and are handled at the normal tier. The large tier model, budget and concurrency settings are kept, so re-enabling needs no re-entry.',
+      requestLimit: 'Per-module request limit',
+      requestLimitHint: 'LLM requests allowed while writing one module (1-1000). When the page is missing the engine sends follow-up reminders, each with its own budget. Raise it to finish bigger modules; set it too low and complex modules stop as partial.',
+      invalidRequestLimit: 'Per-module request limit must be between 1 and 1000',
       bigProvider: 'Large-tier provider',
       bigProviderOff: '(large tier off)',
       bigProviderHint: 'A provider registered in model settings. Default Volcengine Ark (volces-ark). Empty disables the large tier.',
@@ -804,9 +810,15 @@ window.__ModuleLoader__.load({
               setError(t('invalidConcurrency'))
               return
             }
+            // 单模块请求上限：提交前拦住非整数与越界，避免 0 或负数被当成「不限制」
+            const reqLimit = Number(draft?.requestLimit)
+            if (!Number.isInteger(reqLimit) || reqLimit < 1 || reqLimit > 1000) {
+              setError(t('invalidRequestLimit'))
+              return
+            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'bigEnabled']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'bigEnabled', 'requestLimit']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -942,6 +954,15 @@ window.__ModuleLoader__.load({
                     placeholder: 'default',
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('sessionTierHint')),
+                ),
+                el('label', null, t('requestLimit')),
+                el('div', { 'data-dscw-field': '' },
+                  el(Input, {
+                    type: 'number', min: 1, max: 1000, step: 50,
+                    value: String(draft.requestLimit ?? 300),
+                    onChange: (e) => setPath('requestLimit', e.target.value),
+                  }),
+                  el('div', { 'data-dscw-hint': '' }, t('requestLimitHint')),
                 ),
               ),
             ),

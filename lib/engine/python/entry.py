@@ -919,7 +919,23 @@ def action_generate(request_id, payload, is_update=False):
     config["max_token_per_module"] = 36369
     config["max_token_per_leaf_module"] = 16000
     config["max_depth"] = 2
-    config["request_limit"] = 100
+    # 单模块写作的 LLM 请求上限（上游叫 request_limit）。
+    #
+    # 上游默认 100，但 1b4af43 起 `doc_guard.run_until_doc_written` 会在模块没写出
+    # 页面时续发最多 2 次提醒，每次提醒都是一次独立 `agent.run(usage_limits=...)`，
+    # 各自吃满一份预算。于是大模块（真机 change_set_management）在 100 次请求处撞
+    # 上限，pydantic-ai 抛「The next request would exceed the request_limit of 100」，
+    # 经 _classify_exception 翻成 article-missing，整轮从 done 掉成 partial——语义是
+    # 对的（失败必须显式），但预算是错的：同一轮已写好的 31 篇白写。
+    #
+    # 由插件设置 requestLimit 下发（默认 300，硬顶 1000）；未下发时用 300 而不是
+    # 上游的 100，避免「插件没传就退回旧坑」。非正值一律忽略：0 会让 agent 循环一开
+    # 就撞上限。
+    try:
+        request_limit = int(payload.get("requestLimit") or 0)
+    except (TypeError, ValueError):
+        request_limit = 0
+    config["request_limit"] = max(1, min(request_limit, 1000)) if request_limit > 0 else 300
     config["agent_retries"] = 3
     # 同层模块并行度（0.16.14）。默认 1 = 上游原始的严格串行。
     #

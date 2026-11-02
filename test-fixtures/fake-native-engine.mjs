@@ -212,6 +212,9 @@ function run(req) {
   logCall(req?.repoPath ?? process.cwd(), action, {
     updateOptions: req?.updateOptions ?? null,
     commitId: req?.commitId ?? null,
+    // 单模块请求上限：真引擎读它组装 config["request_limit"]，所以这里也要能回读到。
+    // 调用方漏传时表现为 undefined——「插件设置写了却不生效」这类缺陷只有足迹能钉住。
+    requestLimit: req?.requestLimit ?? null,
     ...readStateInputs(req?.docsDir, req?.repoPath),
   })
 
