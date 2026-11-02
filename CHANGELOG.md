@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.17.7 — 2026-11-02
+
+### 修引擎锁：升级上游后不能自己卡死在 env 阶段
+
+0.17.6 把 `UPSTREAM_COMMIT` 从 `03d0a294` 换到 `1b4af43` 之后，所有既有仓库的
+`.codewiki/engine-lock.json` 仍指向旧 commit，`compareLock` 因此报 `drift`，而
+`lib/engine/native-run.js:291` 对 `drift` 是直接 `settle({outcome:"failed", stage:"env"})`
+（`engine-deps`）——下一轮原生编译会在环境校验这一步就失败，而不是跑起来。落锁原本只
+在 `absent` 时发生（那时把 `buildLockBody` 放进 apply 写集，与产物同批提交），`drift`
+没有对应的自动修复路径。
+
+这次用 `buildLockBody` 生成与引擎自己落锁完全一致的正文，把 5 个受管仓库的锁重写到当前
+上游：指纹 `08d65ee03119e8eb` → `815347593ef61e2a`。`version`/`pythonVersion` 沿用旧锁定
+值——本次只修「上游源码 commit 指错了」，环境本身没有变化。
+
+### 验证
+
+- 用生产路径（`nativeEnginePlan` + `runEngine`）跑真实 doctor：`outcome: done`，
+  `engine: 2.0.0 / python 3.12.10 / deps ok`。
+- 对 5 个仓库逐个 `doctor({ probe, repoRoot })`：全部 `status: match`，无 `diffs`。
+- `test-engine-manifest.mjs` 27 passed；`test-engine-python-entry.mjs` 22 passed；
+  `test-upstream-parallel.mjs` 8 passed。
+
 ## 0.17.6 — 2026-11-02
 
 ### 同步上游 15 个提交：写作失败不再静默、模块边界按文件归属
