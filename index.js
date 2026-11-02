@@ -28,7 +28,7 @@ import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from '.
 import {
   createJobsStore, mergeJobLists, findActiveJob, reassignSession,
   snapshotNativeRun, planNativeReplay, heartbeat, adoptOrphan, lastSeenAt,
-  planForeignJob, FOREIGN_ACTION, OWNERSHIP,
+  planForeignJob, FOREIGN_ACTION,
 } from './lib/job-store.js'
 import { appendLog, readLogTail, logStats, logFileOf as logFileFor } from './lib/job-logs.js'
 
