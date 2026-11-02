@@ -133,7 +133,7 @@ flowchart TB
 
 | 组件 | 职责 |
 |------|------|
-| `tick()` | 10s 节拍主循环：tick 入口/出口的跨实例锁（经 `lib/job-store.js` 的 `acquireTickLock`/`releaseTickLock`）、磁盘合并、心跳续期、取消标记同步、项目闸门、分发到各 stage handler |
+| `tick()` | 10s 节拍主循环：tick 入口/出口的跨实例锁（经 `lib/job-store.js` 的 `acquireTickLock`/`releaseTickLock`）、磁盘合并、心跳续期、取消标记同步、项目闸门、分发到各 stage handler。**别例任务的处置统一收口到 `lib/job-store.js` 的 `planForeignJob`**（返回 `FOREIGN_ACTION.LEAVE`/`ADOPT`/`VOID`）：原实例停更的排队/提交占位不再一律跳过——`submitting` 占位（无凭证、没有可续状态）一律作废，`auto=true` 的排队项（自动调度遗留，下一轮扫描会重提）作废，手动提交的排队项经 `adoptOrphan` 按 FIFO 接管续排；作废经 `fail(job, reason, { notify: false })` 落地（占位从未真正开始，不等同「编译失败」，不唤醒发起会话） |
 | `recordNativeLog(job, entry)` | 引擎事件日志收口（0.17.1）：内存 `job.nativeLogs` 截断保留最近 40 条，同时经 `lib/job-logs.js` 逐条追加仓库外 NDJSON；落盘失败置 `job.logError` 并记一条 note。`onLog` 回调（桥请求失败、stderr、阶段切换）与去重后的 `onProgress` 帧（按 `阶段|百分比|篇数` 签名）都经它落账 |
 | `tickArticles(job)` | 写文章阶段：本地规划 → agentic 或单轮通道 → 收割 → 观察批合成 / agentic 退回判定 |
 | `tickCrosscut(job)` | 横切阶段：合成 `_architecture.md` / `_patterns.md` / 概念文章；超预算拆观察批 |
@@ -329,7 +329,7 @@ flowchart TB
 | `mergeFromDisk()` | tick 前 | 吸收另一实例新增/更新的 job，防止过期快照覆盖；同时回收「磁盘上已不存在」的幽灵任务，避免它们一直占住项目闸门 |
 | `syncCancelFlags()` | tick 开头 | 从磁盘拾取另一实例置的 `cancelRequested` |
 | 心跳 | tick 每轮 | 活动任务经 `heartbeat` 更新 `lastSeenAt`，供 `occupancyHeld` 与孤儿接管判据使用；归属分类统一由 `lib/job-store.js` 的 `classifyOwnership` 收口（本实例 / 存活他例 / 孤儿 / 无执行器空闲 / 旧格式残留） |
-| `ORPHAN_TAKEOVER_MS` | 5 分钟 | 原实例停更超时的 job 由本实例经 `adoptOrphan` 接管；停更未超阈值但 owner 已消失的任务经 `occupancyHeld` 不占闸门 |
+| `ORPHAN_TAKEOVER_MS` | 5 分钟 | 原实例停更超时的 job 由本实例经 `planForeignJob` 裁决：执行中的阶段经 `adoptOrphan` 接管续跑，`submitting` 占位与自动调度遗留的 `queued` 项作废（`fail(..., { notify: false })`，不唤醒会话），手动排队项接管后按 FIFO 续排；停更未超阈值但 owner 已消失的任务经 `occupancyHeld` 不占闸门 |
 | `REPOS_FILE` | 跟随 JOBS_FILE 名字推导 | 已知仓库清单（独立于 job 历史） |
 | 会话记录 | `<tmp>/dsh-codewiki-sessions/<jobId>/` | LLM 请求 prompt/output，24h TTL |
 | 引擎事件日志 | `<tmp>` 下按 jobId 命名的 NDJSON（`lib/job-logs.js`） | 0.17.1 起：内存只留最近 40 条给面板即时看，完整日志逐条追加落盘；落盘失败置 `job.logError`（日志是任务唯一的黑匣子，写不进去必须显形），端点 `/api/codewiki/logs` 按需翻全量 |

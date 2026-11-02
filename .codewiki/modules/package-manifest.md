@@ -26,7 +26,7 @@ fsoft_page: Build___Dependency_Configuration_Layer/package_manifest.md
 | 字段 | 值 | 作用说明 |
 |---|---|---|
 | `name` | `@local/dsh-codewiki` | 包名。`@local/` 作用域表明这是本地私有插件（不发布到 npm registry）。**客户端模块注册用它做校验**：`client.js` 中 `window.__ModuleLoader__.load({ id: '@local/dsh-codewiki', ... })` 的 id 必须与此一致（client-modules 按 nearestPackage 的 name 校验注册者） |
-| `version` | `0.17.3` | 语义化版本。description 中记录了关键版本里程碑（0.16.0 默认切原生引擎、0.16.13 更换默认模型、0.16.0 phase 7 删除 Node 侧算法重写） |
+| `version` | `0.17.4` | 语义化版本。description 中记录了关键版本里程碑（0.16.0 默认切原生引擎、0.16.13 更换默认模型、0.16.0 phase 7 删除 Node 侧算法重写） |
 | `description` | 长文本 | 插件的设计自述：声明默认通道为原生引擎（`nativeEngine: true`），Node 通道仅作最小兼容保留；默认模型 `volces-ark/glm-5.3-flash` 512k；零子代理、单项目串行 |
 | `private` | `true` | 私有包，禁止误发布到 npm |
 | `type` | `"module"` | 全仓库使用 ESM（`import`/`export`），无 CommonJS 回退 |
@@ -43,7 +43,7 @@ fsoft_page: Build___Dependency_Configuration_Layer/package_manifest.md
 
 ```mermaid
 flowchart TD
-    PKG["package.json 清单<br/>@local/dsh-codewiki@0.17.3"]
+    PKG["package.json 清单<br/>@local/dsh-codewiki@0.17.4"]
 
     subgraph 运行时消费方
         HOST["dsh 宿主平台<br/>dsh >= 0.2.0-rc.0"]
@@ -139,13 +139,14 @@ description 字段承担了版本决策日志的角色，关键里程碑：
 - **0.17.0**：零子代理、单项目串行的当前形态确立。
 - **0.17.1**：原生通道引擎事件日志双通道（内存最近 40 条 + 仓库外 NDJSON，见 [core_entry](../core_entry.md)）；该增量落在插件代码内部，无清单字段层面的语义变化。
 - **0.17.2**：清单字段层面无新的语义变化。
-- **0.17.3**：当前补丁版本，清单字段层面无新的语义变化。
+- **0.17.3**：清单字段层面无新的语义变化。
+- **0.17.4**：当前补丁版本，清单字段层面无新的语义变化。
 
 ### 4. 原生引擎通道的版本语义
 
 description 中明确"原生引擎需要本地 Python 3.10+ venv with closed deps"。这意味着：
 
-- npm 包本身的版本（0.17.3）**不等于**原生 Python 引擎的版本；
+- npm 包本身的版本（0.17.4）**不等于**原生 Python 引擎的版本；
 - Python 引擎的版本/上游 commit 锁定由 [engine_core](../engine_core.md) 中的 `lib/engine/manifest.js`（`UPSTREAM_COMMIT` 常量与 `.codewiki/engine-lock.json` 落盘）管理——那是运行期的环境清单，与本文件的 npm 清单是两套独立机制；
 - 环境搭建由 `tools/fsoft-engine/setup-env.sh` 完成（见 [fsoft_engine_tools](../Ecosystem_Tooling___Validation_Layer/fsoft_engine_tools.md)）。
 
