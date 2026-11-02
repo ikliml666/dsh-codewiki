@@ -2,29 +2,14 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
-    "headCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4"
+    "baseCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
+    "headCommit": "19721a5478389e8ce4d73de10d5939451a90e703"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
-    "headCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
-    "committed": [
-      "CHANGELOG.md",
-      "README.md",
-      "client.js",
-      "index.js",
-      "lib/agentic.js",
-      "package.json",
-      "test-agentic-fallback.mjs",
-      "test-batch.mjs",
-      "test-client-panel.mjs",
-      "test-config.mjs",
-      "test-engine-native-incremental.mjs",
-      "test-engine-native-job.mjs",
-      "test-orchestration.mjs",
-      "test-sessions.mjs"
-    ],
+    "baseCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
+    "headCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
+    "committed": [],
     "staged": [],
     "unstaged": [],
     "untracked": [],
@@ -38,10 +23,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz26th0-9-native（25 个文件）"
+    "持久化基线 89a96aa 与本次 cw 基线 b8252f8 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz5uk7b-0-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T09:58:51.443Z"
+  "updatedAt": "2026-11-02T11:16:27.638Z"
 }
