@@ -45,7 +45,7 @@ flowchart TD
     end
 
     subgraph 循环["工具循环本体（lib/agentic.js）"]
-        LOOP["runAgenticArticle<br/>步数循环 maxSteps=30"]
+        LOOP["runAgenticArticle<br/>步数循环 DEFAULT_MAX_STEPS=30（内置常量）"]
         TOOLS["工具集 buildToolset<br/>read_code / list_files<br/>edit_article / generate_sub_module"]
         EDIT["makeArticleEditor<br/>闭包内维护文章全文"]
     end

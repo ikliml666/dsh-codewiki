@@ -2,32 +2,47 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "4b03fbea14520e8847b131e8e37f0ef211f9e0cf",
-    "headCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1"
+    "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
+    "headCommit": "5ecb23d720903d36c93bb8e65a4d60b95eba5a67"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "4b03fbea14520e8847b131e8e37f0ef211f9e0cf",
-    "headCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
+    "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
+    "headCommit": "5ecb23d720903d36c93bb8e65a4d60b95eba5a67",
     "committed": [],
     "staged": [],
-    "unstaged": [],
-    "untracked": [],
+    "unstaged": [
+      "index.js",
+      "lib/agentic.js",
+      "test-engine-native-incremental.mjs",
+      "test-engine-native-job.mjs",
+      "test-orchestration.mjs"
+    ],
+    "untracked": [
+      "test-config.mjs"
+    ],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
   "unconsumed": [
-    "lib/engine/python/entry.py"
+    "index.js",
+    "lib/agentic.js",
+    "lib/engine/python/entry.py",
+    "test-config.mjs",
+    "test-engine-native-incremental.mjs",
+    "test-engine-native-job.mjs",
+    "test-orchestration.mjs"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 7584cf6 与本次 cw 基线 4b03fbe 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvyuk9bj-5-native（25 个文件）"
+    "持久化基线 4b03fbe 与本次 cw 基线 89a96aa 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit c2098a836ff1（6 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvywdout-6-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T06:01:13.706Z"
+  "updatedAt": "2026-11-02T06:59:24.662Z"
 }

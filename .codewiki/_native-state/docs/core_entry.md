@@ -135,7 +135,7 @@ flowchart TB
 |------|------|
 | `tick()` | 10s 节拍主循环：tick 入口/出口的跨实例锁（经 `lib/job-store.js` 的 `acquireTickLock`/`releaseTickLock`）、磁盘合并、心跳续期、取消标记同步、项目闸门、分发到各 stage handler。**别例任务的处置统一收口到 `lib/job-store.js` 的 `planForeignJob`**（返回 `FOREIGN_ACTION.LEAVE`/`ADOPT`/`VOID`）：原实例停更的排队/提交占位不再一律跳过——`submitting` 占位（无凭证、没有可续状态）一律作废，`auto=true` 的排队项（自动调度遗留，下一轮扫描会重提）作废，手动提交的排队项经 `adoptOrphan` 按 FIFO 接管续排；作废经 `fail(job, reason, { notify: false })` 落地（占位从未真正开始，不等同「编译失败」，不唤醒发起会话） |
 | `recordNativeLog(job, entry)` | 引擎事件日志收口（0.17.1）：内存 `job.nativeLogs` 截断保留最近 40 条，同时经 `lib/job-logs.js` 逐条追加仓库外 NDJSON；落盘失败置 `job.logError` 并记一条 note。`onLog` 回调（桥请求失败、stderr、阶段切换）与去重后的 `onProgress` 帧（按 `阶段|百分比|篇数` 签名）都经它落账 |
-| `tickArticles(job)` | 写文章阶段：本地规划 → agentic 或单轮通道 → 收割 → 观察批合成 / agentic 退回判定 |
+| `tickArticles(job)` | 写文章阶段：本地规划 → 有任务即走 agentic 通道（不再有 `agenticArticles` 开关）→ 收割 → 观察批合成 / agentic 退回判定 |
 | `tickCrosscut(job)` | 横切阶段：合成 `_architecture.md` / `_patterns.md` / 概念文章；超预算拆观察批 |
 | `tickCompose(job)` | 横切观察批的合成批收割 |
 | `tickReview(job)` | 校对阶段：本地核对 → 批量校对请求（`@@@article` 标记分节）→ 会话通道兜底 |
@@ -204,7 +204,7 @@ sequenceDiagram
 
     Note over Svc: 10s tick 节拍
     Svc->>Svc: tickArticles: localPlan 生成分模块清单
-    Svc->>Pool: startBatchChatRun(tasks)
+    Svc->>Pool: startAgenticRun(tasks)（有任务即走 agentic 通道）
     Pool->>LLM: llm.stream(prompt) 并发 N 路
     LLM-->>Pool: 流式文章输出
     Pool->>Pool: applyTaskResult → 契约闸门 → fixAnchors → 落盘
@@ -315,6 +315,7 @@ flowchart TB
 
 **设计要点**：
 - 大档任务（单批输入超 110k 普通预算）走 `bigProvider/bigModel`（默认 512k 上下文的 `volces-ark/glm-5.3-flash`），与默认档独立限流、同时推进——两者配额互不相干。
+- `bigEnabled=false` 或 `bigProvider` 留空时，`markBigAgenticTasks` 原样返回任务，不拆大档池（所有任务一律走默认档）。
 - `bigConcurrency=0` 时回落跟随默认档并发（向后兼容）。
 - 总在飞请求数 = 默认档并发 + 大档并发，硬顶各 8。
 
@@ -374,7 +375,8 @@ flowchart LR
 | 配置 | 默认值 | 含义 |
 |------|--------|------|
 | `batchProvider` / `batchModel` | `volces-ark` / `glm-5.3-flash` | 编译主模型（512k 上下文） |
-| `bigProvider` / `bigModel` | 同上 | 大档模型（单批输入超 110k 时切换） |
+| `bigProvider` / `bigModel` | 同上 | 大档模型（单批输入超 110k 时切换；`bigEnabled=false` 时 `bigProvider` 按空处理，不拆大档池） |
+| `bigEnabled` | `true` | 大档总开关：关闭后超大模块不再走大档，`bigProvider` 收敛为空串 |
 | `bigTokenBudget` | 420000 | 大档单请求输入预算 |
 | `maxConcurrency` | 2（硬顶 8） | 默认档并发 |
 | `bigConcurrency` | 0（跟随默认档） | 大档并发 |
@@ -383,7 +385,9 @@ flowchart LR
 | `nativeEngineTimeoutMs` | 180 分钟 | 单次原生编译超时 |
 | `autoCommit` | `true` | 编译完成后自动提交产物 |
 | `serialProjects` | `true` | 单项目串行 |
-| `agenticArticles` | `true` | 文章写作走 agentic 工具循环 |
-| `agenticMaxSteps` | 30（硬顶 100） | 单篇 agentic 最大步数 |
+| `agenticArticles` | 已移除 | 文章写作走 agentic 工具循环：运行时不再读取，有任务即走 agentic 通道 |
+| `agenticMaxSteps` | 已移除 | 单篇 agentic 步数上限固定为内置常量 `DEFAULT_MAX_STEPS`（30 步），不再可配 |
 | `autoUpdate` | `false` | 定时扫描自动增量编译 |
 | `updateReminder` | `true` | 会话系统提示注入维护提醒 |
+
+> `planMode` / `symbolIncremental` 也不再经 `liveConfig` 收敛（增量规划已由原生通道接管）。

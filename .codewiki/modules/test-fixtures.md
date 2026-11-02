@@ -17,7 +17,7 @@ fsoft_page: Ecosystem_Tooling___Validation_Layer/test_fixtures.md
 
 ## 1. 为什么需要「对拍黄金集」
 
-图 diff 模块承担「模块正文相似度比对」「body 哈希生成」「unified diff 渲染」三类职责，是增量编译（symbolIncremental）判定「接口是否真变了」的底层算法。这类移植容易踩的坑：
+图 diff 模块承担「模块正文相似度比对」「body 哈希生成」「unified diff 渲染」三类职责，是符号级增量编译（历史上由 `symbolIncremental` 配置驱动，现已移除，由原生通道接管）判定「接口是否真变了」的底层算法。这类移植容易踩的坑：
 
 | 风险类别 | 典型边界情形 |
 |---|---|
@@ -158,7 +158,7 @@ sequenceDiagram
 
 ## 5. 与系统其它模块的关系
 
-`test_fixtures` 是**纯验证工具**，不参与运行时编译链路。它的存在只为一类目标：让增量编译判定逻辑（`symbolIncremental`，在 [核心入口](../core_entry.md) 与 [agentic 支持](../agentic_support.md) 中被驱动）有可信赖的算法基准。
+`test_fixtures` 是**纯验证工具**，不参与运行时编译链路。它的存在只为一类目标：让增量编译判定逻辑（历史上由 `symbolIncremental` 配置驱动，现已移除；符号级增量由原生通道接管）有可信赖的算法基准。
 
 ```mermaid
 flowchart LR

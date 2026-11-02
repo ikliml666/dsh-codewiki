@@ -123,7 +123,10 @@
       "fsoft_engine_tools",
       "package_manifest"
     ],
-    "names": []
+    "names": [
+      "buildPlan",
+      "liveConfig"
+    ]
   },
   "client_ui": {
     "ids": [],

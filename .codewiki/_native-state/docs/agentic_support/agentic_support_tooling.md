@@ -44,7 +44,7 @@ flowchart TB
     end
 
     APPLY --> TICK
-    TICK -- "agenticArticles=true 时" --> RUNPOOL
+    TICK -- "有任务即走 agentic 通道" --> RUNPOOL
     RUNPOOL --> EDIT
     EDIT --> LLM
     EDIT -- "每步产出后校验" --> CONTRACT
@@ -106,7 +106,7 @@ sequenceDiagram
     participant Gate as article-contract 校验
 
     Pool->>Edit: 启动单篇写作（agentic=true）
-    loop 每步（≤ agenticMaxSteps，默认 30）
+    loop 每步（≤ DEFAULT_MAX_STEPS=30，内置常量不可配）
         Edit->>LLM: 下发当前状态 + 可用工具（read_code / edit_article）
         LLM-->>Edit: 模型自主决策的工具调用
         alt 调用 read_code
@@ -134,10 +134,10 @@ tooling 层的行为由 [cordis.patch.yml](../cordis.patch.yml) 中声明的 `co
 
 | 配置项 | 默认值 | 作用域 | 说明 |
 |--------|--------|--------|------|
-| `agenticArticles` | `true` | tooling 总开关 | 文章写作走 agentic 工具循环；关闭则退回「整包内联 + 观察批合成」旧通道 |
-| `agenticMaxSteps` | `30`（1–100） | `edit` | 单篇写作步数上限，超限即终止该篇 |
+| ~~`agenticArticles`~~ | ~~`true`~~ | ~~tooling 总开关~~ | 已移除：文章阶段有任务即走 agentic 通道，不再有开关 |
+| ~~`agenticMaxSteps`~~ | ~~`30`~~ | ~~`edit`~~ | 已移除：单篇步数上限固定为内置常量 `DEFAULT_MAX_STEPS`（30 步），不再可配 |
 | `batchProvider` / `batchModel` | workbuddy / hy3 | `runPool` 默认档 | agentic 通道使用的默认模型 |
-| `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget` | 空 | `runPool` 大档池 | 超大模块（源文本量超限）切换的大上下文模型；空则 `markBigAgenticTasks` 原样返回任务 |
+| `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget` / `bigEnabled` | 空 / `true` | `runPool` 大档池 | 超大模块（源文本量超限）切换的大上下文模型；`bigEnabled=false` 或大档模型留空时 `markBigAgenticTasks` 原样返回任务 |
 | `maxConcurrency` / `bigConcurrency` | 2 / 跟随默认档 | `runPool` | 默认档与大档各自独立限流、同时推进 |
 
 ---
@@ -151,7 +151,7 @@ stateDiagram-v2
     [*] --> 任务组装: tickArticles 构建 tasks
     任务组装 --> 大档标记: markBigAgenticTasks
     大档标记 --> 在池执行: startAgenticRun + runPool
-    在池执行 --> 单步循环: edit（≤30 步）
+    在池执行 --> 单步循环: edit（≤ DEFAULT_MAX_STEPS=30 步）
     单步循环 --> 成功落账: results.set(ok=true)
     单步循环 --> 单篇失败: 异常/步数耗尽/契约阻塞
     成功落账 --> 推进阶段: 全部收割后 setStage(crosscut/review)

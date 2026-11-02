@@ -56,8 +56,8 @@ graph TD
 |-----|--------|------|
 | **二进制路径** | `binaryPath` | `cw` 可执行文件路径 |
 | **编译模型** | `batchProvider`<br>`batchModel`<br>`batchReasoningEffort` | 编译使用的模型提供商、模型 ID、思考程度 |
-| **并发控制** | `maxConcurrency`<br>`bigConcurrency`<br>`serialProjects` | 默认档并发、大档并发、单项目串行 |
-| **写作模式** | `planMode`<br>`agenticArticles`<br>`agenticMaxSteps`<br>`symbolIncremental` | 模块划分方式、agentic 写作开关、步数上限、符号级增量 |
+| **并发控制** | `maxConcurrency`<br>`bigConcurrency`<br>`bigEnabled`<br>`serialProjects` | 默认档并发、大档并发、大档总开关、单项目串行 |
+| **写作模式** | ~~`planMode`~~<br>~~`agenticArticles`~~<br>~~`agenticMaxSteps`~~<br>~~`symbolIncremental`~~ | 已从运行时快照移除：模块划分固定本地规划、agentic 通道无条件启用、步数上限固定为内置常量、符号级增量由原生通道接管 |
 | **会话行为** | `articleLanguage`<br>`updateReminder`<br>`autoCommit` | 文章语言、维护提醒注入、自动提交 |
 | **原生引擎** | `nativeEngine`<br>`nativeEnginePython`<br>`nativeEngineEntry`<br>`nativeEngineTimeoutMs` | 原生引擎开关、Python 解释器路径、入口脚本、超时时间 |
 
@@ -78,16 +78,19 @@ graph TD
 |--------|------|--------|---------|------|
 | `maxConcurrency` | number | 2 | 1–8 | 默认档并发上限 |
 | `bigConcurrency` | number | 0 | 1–8 | 大档并发上限；0 表示跟随默认档，与默认档各自独立限流、同时推进 |
+| `bigEnabled` | boolean | true | - | 大档总开关；关闭时 `bigProvider` 按空处理，超大模块不再拆大档池 |
 | `serialProjects` | boolean | true | - | 单项目串行模式开启；同一时刻只推进一个仓库的编译任务，其余排队 |
 
 ### 写作模式配置
 
+> 以下四项已从运行时快照（`liveConfig`）移除，保留在此仅作历史记录。
+
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `planMode` | string | `auto` | 模块划分模式：`auto`=AST 符号 + LLM 语义聚类；`dirs`=顶层目录分组（旧行为） |
-| `agenticArticles` | boolean | true | 文章写作走 agentic 工具循环：模型自己 `read_code` / `edit_article`，不整包内联 |
-| `agenticMaxSteps` | number | 30 | agentic 单篇步数上限，取值范围 1–100 |
-| `symbolIncremental` | boolean | true | 增量按 AST 符号级判定：只重写接口真变了的模块，注释/空白改动跳过 |
+| ~~`planMode`~~ | ~~string~~ | ~~`auto`~~ | 已移除：模块划分固定为本地规划（`buildPlan`），不再区分 `auto`/`dirs` |
+| ~~`agenticArticles`~~ | ~~boolean~~ | ~~`true`~~ | 已移除：文章阶段有任务即走 agentic 通道，不再有开关 |
+| ~~`agenticMaxSteps`~~ | ~~number~~ | ~~`30`~~ | 已移除：单篇步数上限固定为内置常量 `DEFAULT_MAX_STEPS`（30 步），不再可配 |
+| ~~`symbolIncremental`~~ | ~~boolean~~ | ~~`true`~~ | 已移除：符号级增量判定由原生通道接管 |
 
 ### 会话行为配置
 
@@ -166,7 +169,7 @@ graph TD
     E -->|"bundle.patch 引用"| A
     B -->|"读取 config 命名空间"| A
     C -->|"nativeEngine* 配置"| A
-    D -->|"agentic* 配置"| A
+    D -->|"bigEnabled / batch* 配置"| A
 
     style A fill:#e8f5e9
     style E fill:#e3f2fd
@@ -189,7 +192,7 @@ graph TD
 config:
   batchModel: glm-5.3-flash
   maxConcurrency: 4
-  agenticArticles: true
+  bigEnabled: true
 ```
 
 ```yaml

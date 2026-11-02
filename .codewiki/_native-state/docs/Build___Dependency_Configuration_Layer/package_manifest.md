@@ -151,7 +151,7 @@ description 中明确"原生引擎需要本地 Python 3.10+ venv with closed dep
 ```
 
 - `dsh.client.platform: "web"`：告诉 dsh 客户端加载器这是 Web 平台客户端（React 面板）；
-- `dsh.bundle.patch: "./cordis.patch.yml"`：bundle 打包时自动应用仓库根的 patch 文件，声明宿主挂载点 id（`codewiki`）与配置命名空间。补丁文件的完整配置项注释（`batchProvider`、`nativeEngine`、`agenticArticles` 等约 20 项）见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md) 与 [build_config](build_config.md)。
+- `dsh.bundle.patch: "./cordis.patch.yml"`：bundle 打包时自动应用仓库根的 patch 文件，声明宿主挂载点 id（`codewiki`）与配置命名空间。补丁文件的完整配置项注释（`batchProvider`、`nativeEngine`、`bigEnabled` 等约 20 项）见 [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md) 与 [build_config](build_config.md)。
 
 ## 相关文件索引
 
