@@ -2,32 +2,48 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
-    "headCommit": "19721a5478389e8ce4d73de10d5939451a90e703"
+    "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
+    "headCommit": "dfb47664bcc9a90f01eeeb4da1a0a2d918d5a8f1"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
-    "headCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
+    "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
+    "headCommit": "dfb47664bcc9a90f01eeeb4da1a0a2d918d5a8f1",
     "committed": [],
     "staged": [],
-    "unstaged": [],
+    "unstaged": [
+      "README.md",
+      "docs/fsoft-native-engine.md",
+      "lib/engine/manifest.js",
+      "lib/engine/python/entry.py",
+      "patches/README.md",
+      "patches/upstream-module-parallel.patch",
+      "test-engine-python-entry.mjs",
+      "test-upstream-parallel.mjs"
+    ],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
   "unconsumed": [
-    "lib/engine/python/entry.py"
+    "README.md",
+    "docs/fsoft-native-engine.md",
+    "lib/engine/manifest.js",
+    "lib/engine/python/entry.py",
+    "patches/README.md",
+    "patches/upstream-module-parallel.patch",
+    "test-engine-python-entry.mjs",
+    "test-upstream-parallel.mjs"
   ],
   "engineVersion": "2.0.0",
-  "scope": "auto",
-  "effectiveScope": "stale",
+  "scope": "full",
+  "effectiveScope": "full",
   "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 89a96aa 与本次 cw 基线 b8252f8 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz5uk7b-0-native（25 个文件）"
+    "工作区未提交改动已合成临时 commit ac03920c80dd（8 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz63g6q-5-native（36 个文件）"
   ],
-  "updatedAt": "2026-11-02T11:16:27.638Z"
+  "updatedAt": "2026-11-02T12:11:29.027Z"
 }
