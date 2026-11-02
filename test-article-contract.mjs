@@ -186,6 +186,35 @@ await check('hasDuplicateFrontmatter：单份正文不误报', async () => {
   assert.equal(hasDuplicateFrontmatter('\n---\ntitle: t\n---\n'), true)
 })
 
+// 真机 partial（job-mvzbcw87-0）暴露的误报：正文用 ```yaml 代码块演示 frontmatter 契约时，
+// 围栏里的 --- / title: 被当成「又贴了一份头」，于是刚写好的文章被判不合格、整轮 partial。
+// 围栏内的内容是**示例**，不是文档自身的头——判定必须跳过代码块。
+await check('hasDuplicateFrontmatter：代码块里的 frontmatter 示例不算重复贴头', async () => {
+  const fenced = [
+    '# 模块页',
+    '',
+    '元数据形如：',
+    '',
+    '```yaml',
+    '---',
+    'title: "模块标题"',
+    'type: module',
+    '---',
+    '```',
+    '',
+    '## Overview',
+    '',
+    '正文。',
+  ].join('\n')
+  assert.equal(hasDuplicateFrontmatter(fenced), false, '围栏内的示例被误判为重复贴头')
+  // ~~~ 围栏同样要跳过
+  const tilde = ['# T', '', '~~~yaml', '---', 'title: x', '---', '~~~', '', '## Overview', '正文'].join('\n')
+  assert.equal(hasDuplicateFrontmatter(tilde), false, '~~~ 围栏内的示例被误判')
+  // 围栏之外的真重复仍必须判出：跳过围栏不能顺手把闸门关掉
+  const outside = ['# T', '', '```yaml', '---', 'title: x', '---', '```', '', '---', 'title: dup', '---', '正文'].join('\n')
+  assert.equal(hasDuplicateFrontmatter(outside), true, '围栏外的真重复漏判')
+})
+
 await check('必需章节表按类型配置（concept 不要求 Key Components）', async () => {
   assert.deepEqual(REQUIRED_SECTIONS.concept, ['Overview'])
   assert.ok(REQUIRED_SECTIONS.module.includes('Key Components'))

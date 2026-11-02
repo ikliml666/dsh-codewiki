@@ -1621,7 +1621,7 @@ async function wikiPathFor(cwd, binary, signal) {
 // ---------------------------------------------------------------------------
 // 编排服务：全批量流水线（零子代理）
 // codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
-//   full   = articles → crosscut →（超预算拆分时 compose）→ review → index（0.10.7 删规划阶段）
+//   full   = articles → crosscut → review → index（0.10.7 删规划阶段，0.17.5 删合成阶段）
 //   stale  = articles（任务在提交时预构建）→ review → index
 // 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 volces-ark/glm-5.3-flash）；单文件超
 // 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。横切/校对结果
@@ -2820,9 +2820,8 @@ function createJobService(config, onSettled) {
       // bigTier: true 必须一起持久化——它是并发分池的唯一依据，丢了会让重跑的请求
       // 全部挤进默认档池，把默认档配额吃光。
       ...(t.bigTier ? { bigTier: true, provider: t.provider, model: t.model, ...(t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}) } : {}),
-      // 分割观察任务（#obs）的合成重建元数据：splitFor 指向所属文章 name，
-      // composePlan 携带 mission/articlePath/prevArticlePath——收割时从持久化快照重建合成任务
-      ...(t.splitFor ? { splitFor: t.splitFor, composePlan: t.composePlan } : {}),
+      // 观察→合成分割通道 0.17.5 已删除，任务不再带 splitFor/composePlan；
+      // 旧 jobs 里可能残留这两个字段，读侧按缺省处理即可，不需要迁移。
       // 批量校对任务：逐篇回写清单（settleProofread 按标记拆回、宿主重启重跑都依赖）
       ...(t.proofreadItems ? { proofreadItems: t.proofreadItems } : {}),
     }))
@@ -4118,7 +4117,7 @@ function progressToolDefinition(cfg, svc) {
     description: [
       '查询 CodeWiki 编译任务进度（只读，立即返回，不等待编译完成）。',
       'codewiki_generate 是提交制：调用即返回，编译由宿主后台服务推进——提交后直接继续手头工作，需要进度时再调用本工具（数据与侧边栏 CodeWiki 面板同源）。',
-      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（articles/crosscut/compose/review/index/commit/done/partial/failed/cancelled）、outcome（done=完整成功、partial=部分完成且有未消化变化、failed=无成果）、blockers（未消化的具体原因）、canAdvanceBaseline（是否已推进编译基线）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
+      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（articles/crosscut/review/index/commit/done/partial/failed/cancelled）、outcome（done=完整成功、partial=部分完成且有未消化变化、failed=无成果）、blockers（未消化的具体原因）、canAdvanceBaseline（是否已推进编译基线）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
     ].join('\n'),
     parameters: {
       type: 'object',

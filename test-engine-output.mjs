@@ -197,6 +197,21 @@ await check('validateOutput：链接指向计划外的 md → dead-link', async 
   assert.equal(p.target, 'Gone.md')
 })
 
+// 真机 partial（job-mvzbcw87-0）暴露的误报：testing_fixtures.md 里写
+// [Testing___Probing_Tooling](./README.md)，被当成「该页不在本次产出里」。上游把根页
+// 叫 README.md，而本仓库的 wiki 入口是 CodeWiki.md —— 同一个页的两个名字，不是死链。
+await check('validateOutput：指向根页的 README.md 链接不算死链（本 wiki 入口是 CodeWiki.md）', async () => {
+  const dir = makeDocs('rootlink', { 'CodeWiki.md': '# 入口\n\n根页。\n', 'Core.md': '# Core\n\n见 [入口](./README.md)。\n' })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.equal(v.problems.some((p) => p.kind === 'dead-link'), false, JSON.stringify(v.problems))
+})
+
+// 但指向不存在的子目录 README 仍是死链：别名只豁免根页这一种写法
+await check('validateOutput：sub/README.md 这类非根页链接仍判死链', async () => {
+  const dir = makeDocs('sublink', { 'Core.md': '# Core\n\n见 [x](sub/README.md)。\n' })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.ok(v.problems.some((p) => p.kind === 'dead-link'), JSON.stringify(v.problems))
+})
 await check('validateOutput：链接到仓库源文件（../src/...）不算死链', async () => {
   const dir = makeDocs('srclink', { 'Core.md': '# Core\n\n见 [engine](../src/core/engine.py)。\n' })
   const v = validateOutput({ docsDir: dir, repoRoot })

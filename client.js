@@ -30,7 +30,7 @@ window.__ModuleLoader__.load({
     const GENERIC_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
-    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'compose', 'review', 'index', 'commit']
+    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'review', 'index', 'commit']
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -194,9 +194,9 @@ window.__ModuleLoader__.load({
       excludePathsHint: '这些目录（含子目录）不编译 CodeWiki；换行/分号/逗号分隔绝对路径。',
       stepArticles: '文章',
       stepCrosscut: '横切',
-      stepCompose: '合成',
       stepReview: '校对',
       stepIndex: '索引',
+      stepCommit: '提交',
       perMin: '篇/分',
       etaLabel: '剩余',
       batchRunLabel: '执行中',
@@ -380,9 +380,9 @@ window.__ModuleLoader__.load({
       excludePathsHint: 'CodeWiki is never compiled under these directories (subtree included). Separate absolute paths with newlines, semicolons or commas.',
       stepArticles: 'Write',
       stepCrosscut: 'Cross',
-      stepCompose: 'Compose',
       stepReview: 'Proof',
       stepIndex: 'Index',
+      stepCommit: 'Commit',
       perMin: 'articles/min',
       etaLabel: 'remaining',
       batchRunLabel: 'Running',
@@ -1149,8 +1149,10 @@ window.__ModuleLoader__.load({
                 el('span', { title: `${stageLabel(s)}${dur ? ` · ${fmtMs(dur)}` : ''}` }, label))
             }))
         }
-        // 总进度：五阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100
-        const STAGE_WEIGHTS = { queued: 0, articles: 0.63, crosscut: 0.1, compose: 0.05, review: 0.15, index: 0.05, commit: 0.02 }
+        // 总进度：各阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100。
+        // compose（合成）阶段 0.17.5 已随单轮写作通道退役，权重按去掉它之后的阶段重新分配，
+        // 保持总和为 1——否则百分比会在横切→校对之间凭空跳掉 5 个点。
+        const STAGE_WEIGHTS = { queued: 0, articles: 0.66, crosscut: 0.11, review: 0.16, index: 0.05, commit: 0.02 }
         const overallPct = (job) => {
           const idx = ACTIVE_STAGES.indexOf(job.stage)
           // partial 是所有阶段都跑完但完整性没成立：进度按 100 显示（活干完了），

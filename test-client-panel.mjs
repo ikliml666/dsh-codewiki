@@ -206,6 +206,35 @@ const gotoTab = (Panel, React, reset, key = 'tabTasks') => {
   tab.props.onClick()
 }
 
+// 步骤条每个阶段都必须有字典项：漏一个就在面板上显示裸键名。真机截图里第 7 项就这样
+// 显示了 stepCommit —— 0.17.5 把「提交」接进步骤条，却没有补对应文案。
+const STEP_KEYS = [
+  'stepQueued', 'stepArticles', 'stepCrosscut', 'stepReview', 'stepIndex', 'stepCommit',
+]
+
+await check('面板：步骤条每个阶段都有中英文文案（防裸键名）', async () => {
+  let dicts = null
+  const react = makeReact()
+  platform()
+  const { plugin } = loadPlugin(react.React)
+  plugin.apply({
+    locale: { bind: () => (k) => k, register: (_ns, d) => { dicts = d; return () => {} } },
+    effect: (fn) => { fn(); return () => {} },
+    configForms: {
+      get: () => ({ getSnapshot: () => ({ status: 'ready', revision: 1, value: {}, writable: true, subscribe: () => () => {} }), mutate: async () => ({}) }),
+      whileServed: () => () => {},
+    },
+    slots: { inject: (_n, fn) => fn(), register: () => () => {} },
+  })
+  assert.ok(dicts?.zh && dicts?.en, '插件没有注册中英文字典')
+  for (const locale of ['zh', 'en']) {
+    for (const key of STEP_KEYS) {
+      assert.equal(typeof dicts[locale][key], 'string', `${locale} 字典缺步骤键 ${key}`)
+      assert.ok(dicts[locale][key].length > 0, `${locale} 字典的 ${key} 是空串`)
+    }
+  }
+})
+
 await check('面板：含引擎日志的已完成任务能渲染，不出现 Panel error', async () => {
   const { Panel, React, reset, cleanups } = mountPanel()
   try {

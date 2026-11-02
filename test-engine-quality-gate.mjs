@@ -16,7 +16,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import path, { join } from 'node:path'
+import { toPosix } from './lib/git-paths.js'
 import { execFileSync } from 'node:child_process'
 import {
   GATE_VERSION,
@@ -338,19 +339,45 @@ await check('assessBaseline：基线落后 HEAD 只是 stale（本轮编译正�
 
 // ── 6. 渲染：正文一字不动 + frontmatter 安全 ──────────────────────────────
 
-await check('renderArticle：正文一字不动（不删 H1、不重写链接、不补章节）', async () => {
+await check('renderArticle：除跨页链接外正文一字不动（不删 H1、不补章节）', async () => {
   const body = '# Core Engine\n\n## Purpose\n\n见 [web](Web.md) 与 [src](../src/core/engine.py)。\n\n```python\nx = 1\n```\n'
   const out = renderArticle({
     article: { wikiPath: '.codewiki/modules/core.md', type: 'module', sourceFiles: ['src/core/engine.py'], source: 'Core.md' },
     body,
+    // 不给 pageMap：没有可重写的目标，正文应当逐字保留
+    pageMap: null,
   })
   const fm = parseFrontmatter(out)
   assert.ok(fm.fields, '合成的 frontmatter 必须能被自己的解析器读回')
   assert.equal(fm.fields.title, 'Core Engine')
   assert.equal(fm.fields.type, 'module')
   assert.deepEqual(fm.fields.source_files, ['src/core/engine.py'])
-  assert.equal(fm.body, body, '正文必须与原产物逐字相同')
+  assert.equal(fm.body, body, '没有 pageMap 时正文必须与原产物逐字相同')
   assert.equal(fm.fields.fsoft_page, 'Core.md', '可回溯到 FSoft 原始页')
+})
+
+// 真机 partial（job-mvzcxmxg-0）暴露的缺陷：上游页名是 agent_runtime.md，落地后被
+// slug 化成 agent-runtime.md，而正文里的跨页链接仍写下划线原名 —— 全仓 412/420 条
+// wiki 内部链接点开就是 404。链接是**路径**，不是正文内容，必须跟着改名一起走。
+await check('renderArticle：跨页链接按落地路径重写（原始页名 → slug 后的 wikiPath）', async () => {
+  const body = '# Router\n\n## Purpose\n\n见 [设置面板](dsh-subagent-auto-router_settings-panel.md) 与 [概览](./overview.md)。\n'
+  const pageMap = new Map([
+    ['dsh-subagent-auto-router_settings-panel.md', '.codewiki/modules/dsh-subagent-auto-router-settings-panel.md'],
+    ['overview.md', 'CodeWiki.md'],
+  ])
+  const out = renderArticle({
+    article: { wikiPath: '.codewiki/modules/dsh-subagent-auto-router-decision-dispatch.md', type: 'module', sourceFiles: ['index.js'], source: 'dsh-subagent-auto-router_decision-dispatch.md' },
+    body,
+    pageMap,
+  })
+  const fm = parseFrontmatter(out)
+  assert.ok(fm.body.includes('](dsh-subagent-auto-router-settings-panel.md)'), `同目录链接应改写为落地名：${fm.body.slice(0, 200)}`)
+  assert.ok(!fm.body.includes('dsh-subagent-auto-router_settings-panel.md'), '下划线原名不应再出现在链接里')
+  assert.ok(fm.body.includes('](../../CodeWiki.md)'), `根页链接应指向 CodeWiki.md：${fm.body.slice(0, 200)}`)
+  // 非 .md 的相对链接（源码引用）不动
+  const body2 = '# X\n\n见 [src](../src/core/engine.py)。\n'
+  const out2 = renderArticle({ article: { wikiPath: '.codewiki/modules/x.md', source: 'X.md' }, body: body2, pageMap })
+  assert.equal(parseFrontmatter(out2).body, body2, '非 .md 链接必须原样保留')
 })
 
 await check('renderArticle：空 source_files 显式写成 []（省略会被误读为「没声明」）', async () => {
@@ -507,6 +534,28 @@ if (!existsSync(REAL)) {
     assert.equal(r.rendered.some((p) => /web_layer/.test(p.source)), false)
   })
 
+  // 真机 job-mvzcxmxg-0 的截图暴露的缺陷：引擎页名 agent_runtime.md 落地改名成
+  // agent-runtime.md，而正文链接仍写原名 —— 本仓 420 条内部链接 412 条点开 404。
+  // 这条用例不看单一函数，而是盯**整份产物渲染后的结果**：每一页里的每个 .md 链接
+  // 目标都必须真实存在于落地页集合里。
+  await check('真实产物：渲染后每个跨页链接都指向落地页（消除 412/420 失效链接）', async () => {
+    const docs = copyDocs('real-link-targets')
+    const r = gateNativeOutput({ docsDir: docs, repoRoot: REAL_REPO, requireCommittedInput: false, includeContent: true })
+    const landed = new Set(r.rendered.map((p) => toPosix(p.wikiPath)))
+    landed.add('CodeWiki.md')
+    const missing = []
+    for (const page of r.rendered) {
+      const baseDir = path.posix.dirname(toPosix(page.wikiPath))
+      for (const m of page.content.matchAll(/\]\(([^)\s]+\.md)(?:#[^)\s]*)?\)/g)) {
+        const target = m[1]
+        if (/^[a-z]+:/i.test(target)) continue
+        const abs = path.posix.normalize(path.posix.join(baseDir, target))
+        if (!landed.has(abs)) missing.push(`${page.wikiPath} -> ${target}`)
+      }
+    }
+    assert.deepEqual(missing, [], `存在指向不存在页面的链接：${missing.slice(0, 5).join('、')}`)
+    assert.equal(r.rendered.length, 2, '夹具应有 2 篇落地页')
+  })
   await check('真实产物 + 断开一个跨页链接 → dead-link defect', async () => {
     const docs = copyDocs('real-dead-link')
     const p = join(docs, 'wiki_out_1c_core_engine.md')

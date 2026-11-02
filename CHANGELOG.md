@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.17.9 — 2026-11-02
+
+### 跨页链接全部失效：wiki 里点任何一页都是 404
+
+起因是面板截图里三条 `quality-gate` 阻塞项。逐个核下去，其中一条不是误报，而是把
+一个更严重的问题暴露了出来：**引擎产出的每一篇之间都互相链不起来**。
+
+引擎的页名是下划线形态（`agent_runtime.md`），落地时 `mapping.js` 的 `moduleSlug()`
+把非字母数字一律换成 `-` 并小写（`agent-runtime.md`），而正文里的跨页链接仍然写着
+原名。实测本仓 420 条 wiki 内部链接里 **412 条点开即 404**——`19721a54` 之后产出的
+页全部如此。质量门此前也报不出来：死链判定的命中集合里带着「浏览器里不存在的原始
+页名」，把「页存在于引擎产物、但落地后被改名」这种情况当成了命中放过。
+
+- `lib/engine/quality-gate.js` 新增 `rewritePageLinks(text, pageMap, articleWikiPath)`，
+  `renderArticle` 增加 `pageMap` 参数：只重写指向 `.md` 的链接，外链与非 md 相对路径
+  （源码引用）原样保留；同目录链接直接写文件名，跨目录补 `./`。
+- `gateNativeOutput` 由映射结果构造 `pageMap`（`source → wikiPath`，根页指向
+  `CodeWiki.md`），既传给渲染做重写，也作为契约层的允许链接集合。
+- `lib/engine/output.js` 的死链判定改为只认「能落地的页」：保留原始页名是为了照顾
+  渲染前的形态，去掉 `collected.pages.includes(resolved)` 这条放宽——页在产物里但没被
+  映射进落地方案，落地后就是真死链。根页别名（`README.md`/`overview.md`）继续豁免。
+
+### 质量门两处误报
+
+- `hasDuplicateFrontmatter` 不跳代码围栏，把正文里演示 frontmatter 的 ```yaml 示例
+  当成「重复贴头」拒写。改为带 `inFence` 状态机的实现，围栏内的 `---` 不参与配对，
+  围栏外真重复仍然判出（真机 `codewiki_vendor_binary.md`）。
+- 根页别名：上游把入口页写 `README.md`/`overview.md`，本 wiki 入口是 `CodeWiki.md`，
+  链接到它们不是死链（真机 `job-mvzbcw87-0` 因这条误报判了 partial）。只豁免根目录下
+  这两个名字，子目录里的 `README.md` 仍按真实目标校验。
+
+### 面板：步骤条裸键名与已退役的合成阶段
+
+- 步骤条第 7 项显示裸键名 `stepCommit`：0.17.5 把「提交」接进步骤条，字典里却没补这项。
+  补 `stepCommit`（提交 / Commit），删除已退役的 `stepCompose`。
+- 步骤条仍画「合成」：`ACTIVE_STAGES` 与 `STAGE_WEIGHTS` 里还有 compose，而 0.17.5 起
+  `STAGE_HANDLER` 已无该阶段。去掉 compose，权重重新分配为
+  `articles 0.66 / crosscut 0.11 / review 0.16 / index 0.05 / commit 0.02`（合计仍为 1）。
+- `codewiki_progress` 的工具描述同步去掉 compose。
+
+### 验证
+
+- `test-engine-quality-gate.mjs` 33 项：新增「跨页链接按落地路径重写」「真实产物渲染后
+  每个链接都指向落地页」；`test-engine-output.mjs` 22 项：新增根页别名与子目录对照。
+- `test-client-panel.mjs` 5 项：新增「步骤条每个阶段都有中英文文案」，该用例在修复前
+  对 `HEAD` 的 client.js 是红的。
+- `test-article-contract.mjs` 30 项：新增围栏内 frontmatter 示例不算重复贴头。
+
 ## 0.17.8 — 2026-11-02
 
 ### 单模块请求上限可配置（默认 300）
