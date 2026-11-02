@@ -14,7 +14,7 @@ fsoft_page: client_ui.md
 `client_ui` 是插件 `@local/dsh-codewiki`（见 [package_manifest](Build___Dependency_Configuration_Layer/package_manifest.md)）的**浏览器端模块**，全部实现集中在单个文件 `client.js`（v0.4.1）。它在 DeepSeek Harness（dsh）宿主的 web 界面上挂载两个入口：
 
 1. **插件设置页** —— 注入宿主 `plugins.item` 槽位（`id = codewiki`，与 profile patch 条目一致），提供完整的编译运行设置表单；
-2. **侧边栏面板** —— 注入 `main` 槽位（key = `codewiki`）渲染任务面板，同时在 `sidebar.panellist` 注册面板入口（`PanelIcon`），用于实时观察编译任务进度（焦点任务行标注所属仓库目录）、取消任务、查看仓库 wiki 总览、打开 LLM 请求会话视图（全局视图以嵌入形态留在标签页内）。
+2. **侧边栏面板** —— 注入 `main` 槽位（key = `codewiki`）渲染任务面板，同时在 `sidebar.panellist` 注册面板入口（`PanelIcon`），用于实时观察编译任务进度（焦点任务行标注所属仓库目录）、取消任务、查看仓库 wiki 总览、打开 LLM 请求会话视图（全局视图以嵌入形态留在标签页内，0.17.5 起同时在视图顶部列出尚未发出请求的进行中任务）。
 
 所有数据交换走宿主后端（core_entry 半侧）暴露的一组 JSON 端点：设置读写经宿主 `configForms` 服务的 `codewiki` 命名空间热生效，任务/仓库/会话数据经 `GET/POST /api/codewiki/*` 轮询获取。
 
@@ -25,7 +25,7 @@ flowchart LR
         Panel["CodewikiPanel<br/>侧边栏面板"]
         Icon["PanelIcon<br/>侧边栏入口"]
         Repos["ReposTab<br/>仓库总览"]
-        Sess["SessionView<br/>LLM 请求记录<br/>(单任务整页 / 标签内嵌两种形态)"]
+        Sess["SessionView<br/>LLM 请求记录 + 进行中任务区<br/>(单任务整页 / 标签内嵌两种形态)"]
     end
     subgraph 宿主["dsh 宿主 web 界面"]
         SlotItem["plugins.item 槽"]
@@ -37,7 +37,7 @@ flowchart LR
         JobsEP["/api/codewiki/jobs"]
         CtrlEP["/api/codewiki/control"]
         ReposEP["/api/codewiki/repos"]
-        SessEP["/api/codewiki/sessions"]
+        SessEP["/api/codewiki/sessions<br/>(sessions[] + active[])"]
         ModelsEP["/api/codewiki/models<br/>/api/codewiki/model-efforts"]
         LogsEP["/api/codewiki/logs"]
     end
@@ -63,15 +63,15 @@ flowchart LR
 | --- | --- |
 | `mount` | 挂载编排：注册词典、插件页 `plugins.item`、侧边栏 `main` + `sidebar.panellist` 三处槽位 |
 | `zh` / `en` | 中文 / 英文 UI 词典工厂（`locale.register(NS, {...})`），所有文案集中维护 |
-| `CodewikiCard` | 设置页卡片：配置快照订阅、草稿编辑、模型目录联动（provider → model → reasoning effort 三段下拉）、校验与保存（`save` / `discard`） |
+| `CodewikiCard` | 设置页卡片：配置快照订阅、草稿编辑、模型目录联动（provider → model → reasoning effort 三段下拉）、校验与保存（`save` / `discard`）；0.17.5 起「大档模型」节以 `bigEnabled` 开关为唯一入口——关闭时整组大档字段收起但取值保留在配置里（重开无需重填），原靠 `bigProvider` 留空的隐式关闭语义废止；「编译流程」节（`planMode` / `agenticArticles` / `agenticMaxSteps` / `symbolIncremental`）已整节删除 |
 | `CodewikiPanel` | 侧边栏主面板：任务列表、四标签页导航（总览/任务/会话/设置）、轮询差分采样（tps spark 窗口、批量速率 EWMA）、焦点任务与历史折叠（焦点卡自报所属仓库目录）；`jobCard` 内对 `partial` 终态在 meta 行显示「未消化 N 项」、阻塞原因前 3 条放任务行悬停 title；`jobCard` 底部渲染 `engineLogBlock(job)`（引擎日志） |
 | `engineLogBlock` / `line` | 引擎日志块（0.17.1）：把 `job.nativeLogs`（最近 40 条）渲染成可展开的 `<details>` 视图，行内逐条经 `line(e, i)` 格式化为「时间 [phase] kind detail」（HTTP 请求行另拼 `method path status ms`）；`job.logError` 一并显形，完整 NDJSON 日志经 `job.logFile` 路径引导到端点（避免面板轮询变成大文件下载），无日志且无 `logError` 时整块返回 null |
 | `PanelIcon` | 侧边栏入口的摊开书本 SVG 图标 |
 | `ReposTab` | 「总览」标签页：所有工作区 wiki 状态、自动更新调度信息、排除/取消排除、手动触发编译 |
-| `SessionView` | 「会话」视图：并发池每次 LLM 请求的列表与 prompt/输出全文（单任务或全局两种模式；`embedded=true` 时以无内边距 `sesswrap` 容器嵌入「会话」标签页，只留精简返回条，不重复大标题） |
+| `SessionView` | 「会话」视图：并发池每次 LLM 请求的列表与 prompt/输出全文（单任务或全局两种模式；`embedded=true` 时以无内边距 `sesswrap` 容器嵌入「会话」标签页，只留精简返回条，不重复大标题）；0.17.5 起回包的 `active[]` 渲染成「进行中的任务」区块——会话记录只在发出过 LLM 请求后才存在，正在跑依赖图/聚类/收尾的任务原本完全不可见，每行显示引擎阶段（经 `nativeStageName` 映射）、原生百分比、批进度、已写篇数与请求数 |
 | `Spark` | 纯 SVG polyline 的 tps 微趋势线 |
 | `byUpdated` | 任务按 `updatedAt` 倒序排序器（焦点任务选取） |
-| `save` / `discard` | 设置草稿的提交（`form.mutate(ops, revision)` 乐观并发）与回滚 |
+| `save` / `discard` | 设置草稿的提交（`form.mutate(ops, revision)` 乐观并发）与回滚；0.17.5 起保存前的校验只剩并发两项（默认档 1–8、大档 0 或 1–8），原先的 `agenticMaxSteps`（1–100）与 `planMode` 白名单校验随设置节删除一并移除，键清单以 `bigEnabled` 替换 `planMode` / `agenticArticles` / `agenticMaxSteps` / `symbolIncremental` |
 
 ```mermaid
 flowchart TD
@@ -83,7 +83,7 @@ flowchart TD
     Panel --> Tabs{"tab 状态"}
     Tabs -->|overview| ReposTab
     Tabs -->|tasks| JobList["jobCard 列表<br/>焦点卡带仓库目录 + 历史折叠<br/>（partial 终态 meta 显示「未消化 N 项」<br/>悬停 title 看阻塞原因）<br/>底部附引擎日志块（engineLogBlock）"]
-    Tabs -->|sessions| SessionViewG["SessionView(job=null 全局, embedded=true)"]
+    Tabs -->|sessions| SessionViewG["SessionView(job=null 全局, embedded=true)<br/>顶部「进行中的任务」区块（active[]）+ 请求记录列表"]
     Tabs -->|settings| Card2["内嵌 CodewikiCard"]
     JobList -- "单任务会话按钮" --> SessionViewJ["SessionView(job=该任务, 非嵌整页)"]
 ```
@@ -108,7 +108,7 @@ sequenceDiagram
     U->>Card: 编辑字段（setPath → draft）
     Card->>Card: dirty = draft != snapshot.value
     U->>Card: 点保存 save()
-    Card->>Card: 校验（并发 1–8、步数 1–100、planMode 白名单）
+    Card->>Card: 校验（默认档并发 1–8、大档并发 0 或 1–8）
     Card->>Form: mutate(ops, revision)
     alt revision 仍匹配（无冲突）
         Form-->>Card: accepted=true
@@ -121,7 +121,7 @@ sequenceDiagram
 
 要点：
 - 仅当 `revision` 变化时才用服务端值覆盖草稿，避免输入过程中被回收打断；
-- 保存只提交「draft 与基线有差异」的键（逐键 `set` op 列表）；
+- 保存只提交「draft 与基线有差异」的键（逐键 `set` op 列表）；0.17.5 起键清单含 `bigEnabled`，`planMode` / `agenticArticles` / `agenticMaxSteps` / `symbolIncremental` 已从清单移除（对应设置节整节删除）；
 - `mount` 用 `configForms.whileServed([NS], ...)` 保证插件页仅在宿主服务该配置命名空间期间显形。
 
 ### 任务面板轮询与差分采样
@@ -159,9 +159,11 @@ sequenceDiagram
 4. **样式隔离**：所有 CSS 写在一条 `[data-plugin='@local/dsh-codewiki']` 样式表里（属性前缀 `data-dscw-*`，新增 `data-dscw-p-cwd` / `data-dscw-p-sesswrap` / `data-dscw-p-sessbar` / `data-dscw-p-engine-log` / `data-dscw-p-logline`），HMR/重复加载时先查存在性再注入，避免样式堆叠；主题色全部引用宿主 CSS 变量（`--dsw-alias-*`）。
 5. **卸载安全**：轮询回包、剪贴板写入等异步回调均经 `alive` / `mountedRef` 守卫，组件卸载后不再 `setState`。
 6. **焦点卡自报归属**：焦点任务（正在进行 / 最近一个）被排除在「历史任务」的仓库分组之外，没有分组头可读，因此 `jobCard` 在焦点卡行内附 `data-dscw-p-cwd` 徽标（`repoName(cwd)` 短名，悬停显示完整 `cwd`），其余任务不重复标注。
-7. **会话视图的两种宿主形态**：单任务「会话」按钮让 `SessionView` 占满整页（`data-dscw-p-page` 容器 + 完整标题栏与 ✕ 关闭）；「会话」标签页内的全局视图传 `embedded=true`，改用无内边距的 `data-dscw-p-sesswrap` 容器并只留 `data-dscw-p-sessbar` 精简返回条——外层面板本身已是滚动容器，避免套两层 page 布局。
+7. **会话视图的两种宿主形态**：单任务「会话」按钮让 `SessionView` 占满整页（`data-dscw-p-page` 容器 + 完整标题栏与 ✕ 关闭）；「会话」标签页内的全局视图传 `embedded=true`，改用无内边距的 `data-dscw-p-sesswrap` 容器并只留 `data-dscw-p-sessbar` 精简返回条——外层面板本身已是滚动容器，避免套两层 page 布局。0.17.5 起两种形态都在列表上方先渲染「进行中的任务」区块（见约定 11）。
 8. **partial 终态的阻塞原因展示**：`partial` 表示「写成了部分文章，但有变化没被消化」。`jobCard` 在 meta 行显示「未消化 N 项」，把前 3 条阻塞原因（`blockers[].detail ?? kind`，以「；」连接）放进任务行的 `title` 悬停查看——原因是几十字的中文句子，塞进 meta 会撑爆一行、把阶段/用时挤出可视区。
 9. **引擎日志块（0.17.1）**：此前 `job.nativeLogs` 既不进 `jobSummary` 也不渲染，一次 99 分钟的编译在界面上完全不可解释。`jobCard` 在活动流折叠区之后、`job.error` 之前挂 `engineLogBlock(job)`：可展开的「引擎日志（N）」视图（`data-dscw-p-engine-log`，行容器 `data-dscw-p-logline`），逐条按「时间 [phase] kind detail」格式化（HTTP 请求行另拼 `method path status ms`）；`job.logError` 一并显形，完整 NDJSON 经 `job.logFile` 给出端点路径引导——只渲染「最近 40 条」进轮询快照，避免把面板轮询变成大文件下载。
+10. **大档开关显式化（0.17.5）**：大档原先靠「`bigProvider` 留空 = 关闭」隐式判定，`save` 的键清单里也没有 `bigEnabled`。0.17.5 起设置页新增「启用大档模型」开关（`bigEnabled`，默认开）并进入保存键清单：关闭时整组大档字段（provider/model/effort/budget/`bigConcurrency`）在表单里收起，但取值保留在配置里，重新开启无需重填；留空提供商的语义随之收敛为「这条任务不走指定 provider」，不再承担「大档关闭」的开关职责。
+11. **会话视图的进行中任务区（0.17.5）**：LLM 请求会话记录只在发出过请求后才存在，正在跑依赖图解析/模块聚类/收尾、或本轮无需写文章的任务原本在会话页完全不可见。`SessionView` 从回包新增的 `active[]` 渲染顶部「进行中的任务（N）」区块（`data-dscw-p-active` / `data-dscw-p-activerow`），每行以「阶段 <原生引擎阶段名> · 百分比 · 批进度 · 已写 N 篇 · 已发 N 个请求」呈现；一条请求都没发时显示「尚未发出请求（正在做准备/收尾）」。引擎阶段名经 `nativeStageName`（`NATIVE_STAGE_KEYS` → `tBound`）映射，与会话列表共存、互不替代。
 
 ## 与其他模块的关系
 
@@ -171,7 +173,7 @@ flowchart LR
         Prim["@deepseek-ai/dsh-client-ui-primitives<br/>Switch/Button/Input/Tag"]
     end
     subgraph 数据["数据来源（后端）"]
-        Core["core_entry<br/>jobs/control/repos/sessions/models/logs 端点"]
+        Core["core_entry<br/>jobs/control/repos/sessions/models/logs 端点<br/>sessions 回包含 active[] 进行中任务"]
     end
     subgraph 渲染["面板数据所描述的后端引擎"]
         Engine["engine_core<br/>原生引擎八段契约阶段"]
@@ -185,7 +187,7 @@ flowchart LR
     UI -. "wikiPath / repos 状态" .-> Vendor
 ```
 
-- **core_entry**：所有 `/api/codewiki/*` 端点（含 0.17.1 新增的 `/api/codewiki/logs`）的提供方；任务对象的字段（`stage`、`taskList`、`batchProgress`、`tps`、`usage`、`autoCommit`、`queueAhead`、`notes`、`nativeStage`、`nativeLogs`、`logError`、`logFile` 等）由其定义，本模块仅消费与渲染。详见 [core_entry](core_entry.md)。
+- **core_entry**：所有 `/api/codewiki/*` 端点（含 0.17.1 新增的 `/api/codewiki/logs`）的提供方；任务对象的字段（`stage`、`taskList`、`batchProgress`、`tps`、`usage`、`autoCommit`、`queueAhead`、`notes`、`nativeStage`、`nativeLogs`、`logError`、`logFile` 等）由其定义，本模块仅消费与渲染；0.17.5 起 `/api/codewiki/sessions` 回包新增的 `active[]`（进行中任务：`jobId` / `cwd` / `stage` / `nativeStage` / `nativePercent` / `batchProgress` / `writtenCount` / `requests`）由本模块「进行中的任务」区块消费。详见 [core_entry](core_entry.md)。
 - **engine_core**：原生引擎通道的八段阶段名与质量门（`gate`）/落地（`apply`）结果是面板「引擎阶段」「质量门」「落地」行的数据来源；任务的 `nativeLogs`（最近 40 条内存 NDJSON 记录）由 [core_entry](core_entry.md) 的 `recordNativeLog` 收口、经 `jobSummary` 透出，完整 NDJSON 经 `/api/codewiki/logs` 翻全量——是「引擎日志」折叠块的数据来源。详见 [engine_core](engine_core.md)。
 - **agentic_support**：`partial` 终态下 `blockers`（未消化项）的前 3 条阻塞原因放任务行悬停标题（`title`）中展示——原因是几十字的中文句子，塞进 meta 行会撑爆一行。详见 [agentic_support](agentic_support.md)。
 - **codewiki_vendor**：ReposTab 展示的各仓库 wiki 状态（clean/stale/error）与 `wikiPath` 均指向 `cw` CLI 维护的 `<repo>/.codewiki/` 产物。详见 [codewiki_vendor](codewiki_vendor.md)。
@@ -198,7 +200,7 @@ flowchart LR
 | `/api/codewiki/jobs` | GET | 全部编译任务快照（`nativeLogs` 仅最近 40 条；完整 NDJSON 见 `job.logFile` 指向的日志端点） | 2000ms |
 | `/api/codewiki/control` | POST | `cancel`（取消任务）/ `compile`（手动触发编译）/ `refresh`（失效总览缓存） | 事件驱动 |
 | `/api/codewiki/repos` | GET | 各工作区 wiki 状态 + 调度器信息 | 10000ms |
-| `/api/codewiki/sessions` | GET | LLM 请求列表（可带 `?jobId=` 单任务过滤） | 5000ms |
+| `/api/codewiki/sessions` | GET | LLM 请求列表（可带 `?jobId=` 单任务过滤）；回包的 `active[]` 是尚未发出 LLM 请求、但仍在跑（依赖图/聚类/收尾）的进行中任务，由会话视图顶部「进行中的任务」区块渲染 | 5000ms |
 | `/api/codewiki/sessions/item` | GET | 单条请求的 prompt/输出全文（`?jobId=&n=`） | 选中时拉取 |
 | `/api/codewiki/models` | GET | 模型提供商 + 模型目录 | 设置页挂载时 |
 | `/api/codewiki/model-efforts` | GET | 指定 (provider, model) 的 reasoning 档位（`?provider=&model=`） | provider/model 变化时 |

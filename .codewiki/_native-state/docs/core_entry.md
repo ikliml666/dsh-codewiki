@@ -163,7 +163,7 @@ flowchart TB
 
 | 组件 | 职责 |
 |------|------|
-| `installWebServer(ctx, service, extra)` | 注册 `/api/codewiki/jobs`、`/repos`、`/sessions`、`/models`、`/control`（仅回环）；0.17.1 起另注册 `/api/codewiki/logs?jobId=&limit=`，经 `lib/job-logs.js` 的 `logStats` / `readLogTail` 翻仓库外 NDJSON 全量日志 |
+| `installWebServer(ctx, service, extra)` | 注册 `/api/codewiki/jobs`、`/repos`、`/sessions`、`/models`、`/model-efforts`、`/control`（仅回环）；0.17.1 起另注册 `/api/codewiki/logs?jobId=&limit=`，经 `lib/job-logs.js` 的 `logStats` / `readLogTail` 翻仓库外 NDJSON 全量日志。`/api/codewiki/sessions` 回包在两种视图下都附 `active`（进行中任务清单，经 `activeSessionJobs` 汇总，带 `requests` 计数）：单任务视图（`?jobId=`）用它回答「任务在跑但还没有任何请求」，全局视图给跨任务的「现在在跑什么」 |
 | `cwToolDefinition(cfg)` | `cw` 工具定义 |
 | `generateToolDefinition(cfg, svc)` | `codewiki_generate` 工具定义（提交制） |
 | `updateToolDefinition(cfg, generateDef)` | `codewiki_update` 工具定义（固定 scope=auto 快捷入口） |
@@ -315,7 +315,7 @@ flowchart TB
 
 **设计要点**：
 - 大档任务（单批输入超 110k 普通预算）走 `bigProvider/bigModel`（默认 512k 上下文的 `volces-ark/glm-5.3-flash`），与默认档独立限流、同时推进——两者配额互不相干。
-- `bigEnabled=false` 或 `bigProvider` 留空时，`markBigAgenticTasks` 原样返回任务，不拆大档池（所有任务一律走默认档）。
+- `bigEnabled=false` 时 `liveConfig` 把 `bigProvider` 清空，`markBigAgenticTasks` 原样返回任务，不拆大档池（所有任务一律走默认档）；设置页显式关闭之外的 `bigProvider` 留空（如用户手删）也被同一口径兜住。
 - `bigConcurrency=0` 时回落跟随默认档并发（向后兼容）。
 - 总在飞请求数 = 默认档并发 + 大档并发，硬顶各 8。
 
@@ -376,7 +376,7 @@ flowchart LR
 |------|--------|------|
 | `batchProvider` / `batchModel` | `volces-ark` / `glm-5.3-flash` | 编译主模型（512k 上下文） |
 | `bigProvider` / `bigModel` | 同上 | 大档模型（单批输入超 110k 时切换；`bigEnabled=false` 时 `bigProvider` 按空处理，不拆大档池） |
-| `bigEnabled` | `true` | 大档总开关：关闭后超大模块不再走大档，`bigProvider` 收敛为空串 |
+| `bigEnabled` | `true` | 大档总开关：关闭后超大模块不再走大档，按普通档处理；0.17.5 起为设置页显式开关（关闭时大档字段在表单内收起但取值保留，重开无需重填），此前靠 `bigProvider` 留空隐式关闭 |
 | `bigTokenBudget` | 420000 | 大档单请求输入预算 |
 | `maxConcurrency` | 2（硬顶 8） | 默认档并发 |
 | `bigConcurrency` | 0（跟随默认档） | 大档并发 |

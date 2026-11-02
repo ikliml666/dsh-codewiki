@@ -34,7 +34,7 @@ flowchart TD
 
 | 模块 | 入口路径 | 说明 | 文档 |
 | --- | --- | --- | --- |
-| 客户端 UI | `client.js` | 面向用户的代码知识库交互界面 | [client_ui](client_ui.md) |
+| 客户端 UI | `client.js` | 面向用户的代码知识库交互界面（设置表单与侧边栏任务面板） | [client_ui](client_ui.md) |
 | 核心入口 | `index.js` | 应用启动与模块装配的主入口 | [core_entry](core_entry.md) |
 | Agentic 支持 | `lib/` | 为 AI 代理提供的工具与治理能力 | [agentic_support](agentic_support.md) |
 | 引擎核心 | `lib/engine/` | 知识库编译引擎的契约、流水线与门禁实现 | [engine_core](engine_core.md) |
