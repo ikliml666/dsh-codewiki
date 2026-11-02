@@ -77,7 +77,7 @@ flowchart TD
 | `article-missing` | 模块树里有模块、但引擎没产出对应页（mapping 的 warning「未产出」在此升级为 problem） | 缺陷 |
 | `unmapped-page` | 页在 docs 里、但映射不到 wiki 的任何位置（由 mapping.js 给出可机读原因） | 缺陷 |
 | `source-missing` | `source_files` 指向的文件在仓库里不存在（仅在传入 `repoRoot` 时检查） | 缺陷 |
-| `dead-link` | 正文相对链接指向计划外的 `.md` 页；不查 http 外链（网络不是本层责任） | 缺陷 |
+| `dead-link` | 正文相对链接指向计划外的 `.md` 页；docs 根目录的 `README.md` / `overview.md` 视为 wiki 入口（天然存在）不算死链，也不查 http 外链（网络不是本层责任） | 缺陷 |
 
 > 设计要点：在 `validateOutput` 里 `push()` 一个未登记的 `kind` 会直接 `throw`——契约测试枚举全表，写错的 kind 会让面板与终态判定同时失明。
 
@@ -110,7 +110,7 @@ flowchart TD
         S4["3 unmapped-page 透传"]
         S5["4 article-missing：warnings 升级"]
         S6["5 source-missing：repoRoot 存在性"]
-        S7["6 dead-link：relativeLinks 解析"]
+        S7["6 dead-link：relativeLinks 解析<br/>根页别名 plannedPages landedPages 命中即豁免"]
     end
 
     subgraph 输出["返回值"]
@@ -137,7 +137,7 @@ flowchart TD
 
 3. **`empty-module-tree` 的微妙定性**：whole-repository 模式下 `module_tree.json` 本来就是 `{}`，而 agent 仍然写了自己的页。这时页面是真产物、必须进写集（mapping 给 `attribution=unattributed`），但归属证据整体缺失——所以报 problem 让上层看见，而不是判整批失败。
 
-4. **死链检查只查 docs 内**：`relativeLinks` 取出目标后用页面所在目录解析；以 `../` 开头（链接到仓库源文件如 `../src/x.py`）的交给阶段 3 的 source 校验，本层只查目标既不在计划页集合 `plannedPages`、也不在本次产出里的 `.md` 链接。
+4. **死链检查只查 docs 内**：`relativeLinks` 取出目标后用页面所在目录解析；以 `../` 开头（链接到仓库源文件如 `../src/x.py`）的交给阶段 3 的 source 校验，本层只查 `.md` 链接。命中判定是三条「或」：目标是 **docs 根目录下的 `README.md` / `overview.md`**（`ROOT_PAGE_ALIASES`，指的就是 wiki 入口，天然存在）、目标在计划页集合 `plannedPages` 里、或目标的 basename 落在本次真会写出的落地页名集合 `landedPages` 里（落地目录是扁平的，所以引擎原始页名与 slug 后的落地名两种写法都认）。根页别名不再要求「入口页已在产物/落地集合里」——入口缺页由单独的 `entry-missing` 负责，这里再报一次就是重复缺陷：真机 `testing_fixtures.md` 引用同属父模块的 `./README.md` 就是这样被误判成死链的。豁免只认根目录下这两个名字，`sub/README.md` 仍按真实目标校验；而「页在产物里、但没被映射进落地方案」也仍然算死链（早先按 `collected.pages` 放行是错的）。
 
 5. **`collected` 原样带出**：返回值保留 `collected`，是为了让阶段 3 的质量门直接读 `metadata.generation_info.commit_id` 判「产物对应哪个 commit」，不必再读一遍 docs 目录——两次读之间目录可能被改，判据就漂移了。
 
@@ -182,7 +182,7 @@ sequenceDiagram
     end
     V->>V: unmapped → unmapped-page；warnings「未产出」→ article-missing
     V->>F: source_files 逐文件 existsSync（repoRoot 给定时）
-    V->>V: relativeLinks 逐页解析 → dead-link
+    V->>V: relativeLinks 逐页解析（根页别名/plannedPages/landedPages 命中即豁免）→ dead-link
     V-->>G: {ok, problems, mapped, collected, stats}
 ```
 

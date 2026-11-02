@@ -13,7 +13,7 @@ fsoft_page: plan_application.md
 
 `plan_application`（实现于 `lib/engine/apply-plan.js`）是 Code Engine 处理管线中**质量闸门通过之后、产物真正进入仓库之前**的最后一道落地层。它回答一个单一问题：「gate 裁决说这批产物可以入库，那么入库这件事本身有没有成立？」
 
-它不做质量判断——那是 [quality_gates](quality_gates.md)（`quality-gate.js`）的职责；本模块只负责把一份已经被批准的产物**原子地**写盘、建索引、推进基线、自动提交，并在任意一步失败时把磁盘恢复到应用前的状态。它存在的直接动因是 0.14.0 的教训：「1 篇成功 + 19 篇失败也报 done」——把「写成几篇」当成「成立」。
+它不做质量判断——那是 [quality_gates](quality-gates.md)（`quality-gate.js`）的职责；本模块只负责把一份已经被批准的产物**原子地**写盘、建索引、推进基线、自动提交，并在任意一步失败时把磁盘恢复到应用前的状态。它存在的直接动因是 0.14.0 的教训：「1 篇成功 + 19 篇失败也报 done」——把「写成几篇」当成「成立」。
 
 ### 三条硬不变量（本模块唯一的验收标准）
 
@@ -61,10 +61,10 @@ flowchart TB
 
 | 相邻模块 | 关系 |
 | --- | --- |
-| [quality_gates](quality_gates.md) | 唯一输入源：`applyNativeOutput` 只认 `report.writable` 与 `report.outcome` 的结论，不重复做质量判定。`writable=false` 时一个字都不写。 |
-| [engine_contracts](engine_contracts.md) | 输出词表对齐：`toApplyBlockers` 把落地问题（`write-failed`/`index-failed`/…）映射到契约的 `BLOCKER_KINDS`，契约测试会枚举全表。 |
-| [module_indexing](module_indexing.md) | 写集白名单常量 `WIKI_DIR`（`.codewiki`）、`WIKI_ENTRY`（`CodeWiki.md`）、`WIKI_META_REL`（`.codewiki/_meta.yaml`）从 `mapping.js` 导入。 |
-| [article_validation](article_validation.md) | `parseFrontmatter` 用于剥放入口页 frontmatter、以及孤儿页的 `source_files` 证据读取。 |
+| [quality_gates](quality-gates.md) | 唯一输入源：`applyNativeOutput` 只认 `report.writable` 与 `report.outcome` 的结论，不重复做质量判定。`writable=false` 时一个字都不写。 |
+| [engine_contracts](engine-contracts.md) | 输出词表对齐：`toApplyBlockers` 把落地问题（`write-failed`/`index-failed`/…）映射到契约的 `BLOCKER_KINDS`，契约测试会枚举全表。 |
+| [module_indexing](module-indexing.md) | 写集白名单常量 `WIKI_DIR`（`.codewiki`）、`WIKI_ENTRY`（`CodeWiki.md`）、`WIKI_META_REL`（`.codewiki/_meta.yaml`）从 `mapping.js` 导入。 |
+| [article_validation](article-validation.md) | `parseFrontmatter` 用于剥放入口页 frontmatter、以及孤儿页的 `source_files` 证据读取。 |
 | `lib/git-paths.js` | 所有 git 读路径统一 `withQuotepathOff` + `decodeGitPaths`，否则中文页名会被八进制转义，被提交范围校验误判为「wiki 之外的路径」。 |
 | `Extension_Host_Execution_Orchestration`（宿主主入口 index.js） | 生产路径通过依赖注入替换本模块的默认实现：`deps.runCw`（异步版）、`deps.commit`（分支合并式 `autoCommitWiki`）。本模块**刻意不 import index.js**——加载它会连带拉起宿主服务与 webServer，让单测变成「为测一个写盘函数启动整个插件」。 |
 

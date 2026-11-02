@@ -15,12 +15,12 @@ fsoft_page: testing_fixtures.md
 
 ## 概述
 
-`testing_fixtures` 是 [Testing___Probing_Tooling](./README.md) 模块下的测试夹具集合，为引擎移植对拍和上游 FSoft Python 引擎的探测验证提供确定性输入数据与最小可分析代码样本。它解决两个核心问题：
+`testing_fixtures` 是 [Testing___Probing_Tooling](../../CodeWiki.md) 模块下的测试夹具集合，为引擎移植对拍和上游 FSoft Python 引擎的探测验证提供确定性输入数据与最小可分析代码样本。它解决两个核心问题：
 
 1. **移植正确性对拍**：Node 侧算法若与上游 Python 原版在边界情形（空序列、重复 token、中文路径）下行为不一致，靠肉眼核对无法发现，必须用同一批输入喂两侧实现并逐位比对输出。
 2. **依赖图边界验证**：上游引擎在真实仓库路径（含中文、空格）下的符号提取、依赖边建图、artifact 节点采集行为，需要一个结构最小但覆盖关键路径的样本仓库来触发与验证。
 
-本模块的产出物是**测试输入数据**而非运行时代码，它与同属 [Testing___Probing_Tooling](./README.md) 的 [probe_tools](probe_tools.md) 配套使用：夹具提供被探测的目标，探测脚本负责执行断言。
+本模块的产出物是**测试输入数据**而非运行时代码，它与同属 [Testing___Probing_Tooling](../../CodeWiki.md) 的 [probe_tools](probe-tools.md) 配套使用：夹具提供被探测的目标，探测脚本负责执行断言。
 
 ## 组成与职责
 
@@ -129,12 +129,12 @@ sequenceDiagram
 
 ## 在整体系统中的位置
 
-本模块位于 [Code_Engine_Processing_Pipeline](Code_Engine_Processing_Pipeline.md) 的**质量保障外围**：引擎流水线（[code_engine_module](code_engine_module.md)）负责实际的代码分析、模块索引与计划执行，而本模块的夹具用于在引擎交付前验证其正确性。
+本模块位于 [Code_Engine_Processing_Pipeline](code-engine-processing-pipeline.md) 的**质量保障外围**：引擎流水线（[code_engine_module](code-engine-module.md)）负责实际的代码分析、模块索引与计划执行，而本模块的夹具用于在引擎交付前验证其正确性。
 
 具体关联：
 
-- **依赖图分析**：`中文 空格 fixture` 的 `Handler → Engine` 依赖边，直接测试上游引擎 `DependencyGraphBuilder.build_dependency_graph()` 的输出，该引擎由 [python_native_runtime](python_native_runtime.md) 中的 `entry.py` 以子进程方式驱动。
-- **环境前置条件**：夹具的探测验证依赖 [setup-env.sh](build_deployment_config.md)（在 `tools/fsoft-engine/setup-env.sh`）构建的独立 Python venv——该脚本用 `--no-deps` 安装冻结快照并做 `pip check` 兜底，确保探测在依赖闭合的环境中运行。
+- **依赖图分析**：`中文 空格 fixture` 的 `Handler → Engine` 依赖边，直接测试上游引擎 `DependencyGraphBuilder.build_dependency_graph()` 的输出，该引擎由 [python_native_runtime](python-native-runtime.md) 中的 `entry.py` 以子进程方式驱动。
+- **环境前置条件**：夹具的探测验证依赖 [setup-env.sh](build-deployment-config.md)（在 `tools/fsoft-engine/setup-env.sh`）构建的独立 Python venv——该脚本用 `--no-deps` 安装冻结快照并做 `pip check` 兜底，确保探测在依赖闭合的环境中运行。
 - **对拍验证对象**：`gen-graphdiff-golden.py` 产出的相似度 / diff / hash 用例，验证的是已退役的 Node 侧算法移植（0.16.0 起原生引擎通道为默认），这些用例仍作为回归保护防止任何残留 Node 实现被误用。
 
 ## 使用方式
@@ -159,7 +159,7 @@ python tools/fsoft-engine/probe-no-llm-graph.py \
   --out /tmp/probe-out
 ```
 
-探测脚本的详细检查项（R1–R5）与返回码语义见 [probe_tools](probe_tools.md)。
+探测脚本的详细检查项（R1–R5）与返回码语义见 [probe_tools](probe-tools.md)。
 
 ## 设计要点
 

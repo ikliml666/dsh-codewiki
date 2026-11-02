@@ -62,6 +62,8 @@ flowchart LR
 
 对一批原生产物做采用裁决。纯组合函数：读产物（`output.js`）→ 渲染 → 契约 → 基线。
 
+渲染前先构造 `pageMap`（引擎原始页路径 → 落地后的 wiki 页路径），跨页链接据此改写。上游把入口页叫 `README.md` / `overview.md`，本 wiki 的入口却是 `CodeWiki.md`：正文里写 `./README.md` 指的就是根页（真机 `testing_fixtures.md` 就是这样引用父模块的），因此这两个名字在没被真实映射占用时被补成指向入口的别名——否则改写后它们会变成 `modules/README.md` 这个不存在的路径。契约层用的「允许链接集合」就是 `pageMap` 的全部落地值加上根页入口名。
+
 ```mermaid
 flowchart TD
     Start["gateNativeOutput 调用"] --> V["validateOutput<br/>来自 output.js"]
@@ -74,9 +76,10 @@ flowchart TD
     V --> Entry{"有 overview 入口?"}
     Entry -->|"无"| Def3["defect<br/>entry-missing"]
     Entry -->|"有但空/围栏坏"| Def3
-    Entry -->|"OK"| Render
+    Entry -->|"OK"| PageMap["构造 pageMap<br/>落地页名 + README.md/overview.md 别名指向入口"]
+    PageMap --> Render
 
-    Render["逐篇渲染<br/>renderArticle"] --> Check["checkRendered<br/>inspectArticle + 空正文兜底"]
+    Render["逐篇渲染<br/>renderArticle（含 rewritePageLinks）"] --> Check["checkRendered<br/>inspectArticle + 空正文兜底"]
     Check --> Severity{"严重级别"}
     Severity -->|"error"| PageDef["defect<br/>article-contract"]
     Severity -->|"warning"| PageDeg["degradation"]
@@ -173,7 +176,7 @@ flowchart TD
 
 把映射出的一篇文章渲染成 wiki 文章的**完整文本**：合成的 frontmatter + FSoft 原文。三条硬约束（测试钉死）：
 
-1. **正文一字不动**——不删 H1、不改标题、不重写链接、不补章节。产物规范化只处理格式与路径。
+1. **正文的措辞与结构一字不动**——不删 H1、不改标题、不补章节；只允许两类规范化：剥 BOM、把跨页 `.md` 链接改写成落地后的路径（改写只作用于非代码区域，入口别名按上一节所述指向根页）。
 2. **frontmatter 只填有证据的字段**——`source_files` 原样来自映射（空就是空），绝不按目录名猜；`type` 由映射给；`tags` 空列表。
 3. **可回溯**——`fsoft_page` 记住正文来自 FSoft 原始树的哪个文件。
 
@@ -181,7 +184,8 @@ flowchart TD
 flowchart LR
     A["mapping 产出<br/>{wikiPath, type, sourceFiles, source}"] --> B["renderArticle"]
     B --> C["合成 frontmatter<br/>title / type / source_files / tags / generated_by / fsoft_page"]
-    C --> D["原样拼接 FSoft 正文<br/>（一字不动）"]
+    C --> R["跨页 .md 链接改写成落地路径<br/>（只作用于非代码区域）"]
+    R --> D["拼接 FSoft 正文<br/>（措辞与结构不动）"]
     D --> E["完整 wiki 文章文本"]
 ```
 
@@ -238,7 +242,7 @@ flowchart TD
 flowchart TD
     QG["quality-gate.js"]
     QG -->|"validateOutput / bodyLength"| OUT["output.js<br/>产物自洽校验"]
-    QG -->|"inspectArticle / fencesBalanced / parseFrontmatter"| AC["article-contract.js<br/>文章结构契约"]
+    QG -->|"inspectArticle / fencesBalanced / parseFrontmatter / stripCode"| AC["article-contract.js<br/>文章结构契约"]
     QG -->|"WIKI_ENTRY / WIKI_META_REL"| MAP["mapping.js<br/>模块映射"]
     QG -->|"toPosix"| GP["git-paths.js<br/>路径处理"]
     QG -->|"execFileSync git"| GIT["git CLI 只读调用"]
@@ -251,7 +255,7 @@ flowchart TD
 | 依赖 | 用途 |
 |------|------|
 | [engine_output_processing](engine-output-processing.md) | `validateOutput` 产物自洽检查（不重写任何判定） |
-| [../article_validation](article-validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files） |
+| [../article_validation](article-validation.md) | `inspectArticle` 目标格式契约（frontmatter / 围栏 / 死链 / source_files），以及 `stripCode`（链接改写时屏蔽代码区域） |
 | [module_indexing](module-indexing.md) | `WIKI_ENTRY` / `WIKI_META_REL` 路径常量 |
 | [plan_application](plan-application.md) | 落地器消费本模块的 `GateReport`，只写 `writable=true` 的页 |
 | [engine_contracts](engine-contracts.md) | `toContractBlockers` 把 gate 问题翻译成 `BLOCKER_KINDS` |

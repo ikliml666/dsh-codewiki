@@ -156,6 +156,8 @@
       "parse",
       "parseFrontmatter",
       "parseYamlLite",
+      "rewritePageLinks",
+      "stripCode",
       "validateArticleEnvelope",
       "validateEngineResult"
     ]
@@ -362,7 +364,8 @@
       "module_indexing",
       "overview",
       "plan_application",
-      "quality_gates"
+      "quality_gates",
+      "testing_fixtures"
     ],
     "names": [
       "bodyLength",
@@ -774,7 +777,8 @@
       "engine_output_processing",
       "module_indexing",
       "overview",
-      "plan_application"
+      "plan_application",
+      "testing_fixtures"
     ],
     "names": [
       "Engine",
@@ -787,6 +791,7 @@
       "judgeOutcome",
       "readCommittedBaseline",
       "renderArticle",
+      "stripCode",
       "toContractBlockers",
       "toQualityIssues",
       "validateOutput",
@@ -875,6 +880,8 @@
       "runPool",
       "save",
       "stageBar",
+      "stageLabel",
+      "stepName",
       "usageLine",
       "wakeCompileSession"
     ]

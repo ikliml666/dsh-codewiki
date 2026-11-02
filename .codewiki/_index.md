@@ -33,6 +33,7 @@
 - [[modules/change_set|change_set]]
 - [[modules/client-ui|client_ui —— dsh-codewiki 客户端半侧（浏览器）]]
 - [[modules/clustering|clustering]]
+- [[modules/codewiki-vendor-binary|codewiki_vendor_binary]]
 - [[modules/codewiki-vendor|codewiki_vendor（cw CLI 上游 Rust 供应商副本）]]
 - [[modules/core-entry|core_entry 模块文档]]
 - [[modules/engine_apply|engine_apply]]
