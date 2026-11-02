@@ -2,13 +2,13 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "4c0f0cd016c8092187d375a6962263f384526981",
-    "headCommit": "21dedbc8a994ed15b7a78186665e563d2f87be38"
+    "baseCommit": "21dedbc8a994ed15b7a78186665e563d2f87be38",
+    "headCommit": "b34dbf15a3371e43c091f145ef50610ff8b31b52"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "4c0f0cd016c8092187d375a6962263f384526981",
-    "headCommit": "21dedbc8a994ed15b7a78186665e563d2f87be38",
+    "baseCommit": "21dedbc8a994ed15b7a78186665e563d2f87be38",
+    "headCommit": "b34dbf15a3371e43c091f145ef50610ff8b31b52",
     "committed": [],
     "staged": [],
     "unstaged": [],
@@ -28,8 +28,8 @@
   "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 93b7812 与本次 cw 基线 4c0f0cd 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvyprmln-5-native（25 个文件）"
+    "持久化基线 4c0f0cd 与本次 cw 基线 21dedbc 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvyqh6a1-0-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T03:46:41.950Z"
+  "updatedAt": "2026-11-02T04:07:31.142Z"
 }
