@@ -1,5 +1,10 @@
-// test-batch.mjs — 编译执行链自检：纯函数（源码装填/token 估算/任务装配/本地规划/
-// 横切装填/仓库勘探/会话通道收割）+ mock 宿主 llm 服务（并发池/取消/失败记账/思考档位下发）
+// test-batch.mjs — 编译执行链自检：纯函数（源码装填/token 估算/本地规划/横切装填/仓库勘探/
+// 会话通道收割）+ mock 宿主 llm 服务（并发池/取消/失败记账/思考档位下发）
+//
+// 0.17.5 起「单轮通道」（整包内联 → 观察批 → 合成）已删除，文章写作只剩 agentic 通道。
+// 原先这里的三节 prepareArticleTasks 断言（prompt 装配 / oversized 拆分 / 大档接管超长输入）
+// 随之退役：写作与工具循环的等价性质由 test-articles-agentic.mjs 覆盖，大档标记由
+// test-config.mjs 的 markBigAgenticTasks 用例覆盖。
 // 跑法：node test-batch.mjs（Node ≥20）
 import fs from 'node:fs'
 import os from 'node:os'
@@ -7,7 +12,7 @@ import path from 'node:path'
 import {
   collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   buildSessionSteerText,
-  prepareArticleTasks, runRealtimeTasks,
+  runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
   validateArticleEnvelope,
 } from './index.js'
@@ -51,85 +56,12 @@ check(numberLines('a\n\n').endsWith('2| '), '双尾换行：第二个空行是�
 check(numberLines('a\r\nb\r\n').endsWith('2| b'), 'CRLF：前缀正确、行尾 \\r 已剥离（末行）')
 check(numberLines('').trim() === '1|', '空文件输出 1|（可接受）')
 
-// ---------- 3. prepareArticleTasks ----------
-section('prepareArticleTasks：prompt 装配与 oversized 拆分')
+// 落盘相关用例共用的临时工作区。原先由单轮通道那节顺手创建，0.17.5 删掉那节后
+// 这里必须自己建立，否则 test-batch 第 117 行起会 ReferenceError: outDir is not defined。
 const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dscw-batch-work-'))
-fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
-fs.writeFileSync(path.join(workRoot, 'big.ts'), 'x'.repeat(420 * 1024))
-fs.writeFileSync(path.join(workRoot, 'huge.ts'), 'x'.repeat(800 * 1024))
 const outDir = path.join(workRoot, 'wiki', 'modules')
-const plainTasks = ['t0', 't1', 't2'].map((_id, i) => ({
-  name: `modules/m${i}.md`,
-  mission: `任务t${i}`,
-  sources: ['src.ts'],
-  articlePath: path.join(outDir, `m${i}.md`),
-}))
-const prep = prepareArticleTasks(plainTasks, { cwd: workRoot, language: '中文' })
-check(prep.prepared.length === 3 && prep.sessionTasks.length === 0, '普通任务全部进 prepared（无会话通道任务）')
-check(prep.prepared[0].customId === 't0' && prep.prepared[2].customId === 't2', 'customId 按序分配')
-check(prep.prepared[0].batchPrompt.includes('任务t0') && prep.prepared[0].batchPrompt.includes('中文'), 'prompt 含 mission 与语言')
-check(prep.prepared[0].batchPrompt.includes('export const S = 3'), 'prompt 内联源码')
-check(prep.prepared[0].batchPrompt.trimStart().startsWith('你') || prep.prepared[0].batchPrompt.includes('frontmatter'), 'prompt 含 frontmatter 规范')
-const prevPath = path.join(outDir, 'm0.md')
 fs.mkdirSync(outDir, { recursive: true })
-fs.writeFileSync(prevPath, '---\ntitle: 旧文\n---\n旧内容')
-const withPrev = prepareArticleTasks([{ name: 'modules/m0.md', mission: '更新', sources: ['src.ts'], articlePath: prevPath, prevArticlePath: prevPath }], { cwd: workRoot, language: '中文' })
-check(withPrev.prepared[0].batchPrompt.includes('旧内容'), '已有旧文作上下文进 prompt')
-// 单文件超 110k 预算但在 128k 大档内：0.10.2 起不再误转会话通道，直接用大档单请求插件内写完
-const bigPrep = prepareArticleTasks([{ name: 'modules/big.md', mission: '大任务', sources: ['big.ts'], articlePath: path.join(outDir, 'big.md') }], { cwd: workRoot, language: '中文' })
-check(bigPrep.prepared.length === 1 && bigPrep.sessionTasks.length === 0, '单文件超 110k 但装得进 128k 大档 → 插件内大档单请求（不转会话通道）')
-check(bigPrep.prepared[0].batchPrompt.includes('xxx') && bigPrep.prepared[0].batchPrompt.length > 300 * 1024, '大档单请求 prompt 内联完整源码（未被截断）')
-check(!bigPrep.prepared[0].name.includes('#obs'), '大档单请求不拆观察批（单文件分不出多批）')
-const hugePrep = prepareArticleTasks([{ name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') }], { cwd: workRoot, language: '中文' })
-check(hugePrep.prepared.length === 0 && hugePrep.sessionTasks.length === 1, '单文件连 128k 大档都装不下 → 会话通道（唯一兜底）')
-check(estimateTokens(hugePrep.sessionTasks[0].batchPrompt) > 128000, '连大档都装不下时 prompt 仍按原始全长装填（交会话模型自行处理）')
-
-// 3b. prepareArticleTasks：多文件超预算 → 观察→合成分割
-section('prepareArticleTasks：多文件超预算 → 观察批分割')
-for (let i = 0; i < 4; i += 1) {
-  fs.writeFileSync(path.join(workRoot, `part${i}.ts`), 'y'.repeat(140 * 1024))
-}
-const splitPrep = prepareArticleTasks([{
-  name: 'modules/splitme.md', mission: '分割任务',
-  sources: ['part0.ts', 'part1.ts', 'part2.ts', 'part3.ts'],
-  articlePath: path.join(outDir, 'splitme.md'),
-}], { cwd: workRoot, language: '中文' })
-check(splitPrep.sessionTasks.length === 0, '分割任务不进会话通道（仍走观察批）')
-const obsTasks = splitPrep.prepared.filter((t) => t.name.endsWith('#obs0') || t.name.includes('#obs'))
-check(obsTasks.length >= 2, `多文件超预算拆出 ≥2 个观察批（实际 ${obsTasks.length}）`)
-check(obsTasks.every((t) => t.keepInMemory === true), '观察任务 keepInMemory（不直接落盘）')
-check(obsTasks.every((t) => estimateTokens(t.batchPrompt) <= 110000), `观察批 prompt 全部 ≤110k token（最大 ${Math.max(...obsTasks.map((t) => estimateTokens(t.batchPrompt)))}）`)
-check(obsTasks.every((t) => t.splitFor === 'modules/splitme.md'), '观察任务 splitFor 指向所属文章')
-check(obsTasks.every((t) => t.composePlan?.articlePath === path.join(outDir, 'splitme.md') && t.composePlan?.mission === '分割任务'), 'composePlan 携带 articlePath 与 mission')
-check(obsTasks.some((t) => t.batchPrompt.includes('第 1 批')) && obsTasks.some((t, i) => t.batchPrompt.includes(`第 ${i + 1} 批`)), '观察 prompt 标注批次序号')
-const plainStill = prepareArticleTasks([{ name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') }], { cwd: workRoot, language: '中文' })
-check(plainStill.prepared.length === 1 && !plainStill.prepared[0].name.includes('#obs'), '预算内普通任务不分割')
-
-// 3d. 大档模型（0.10.4）：超 128k 也不交会话模型，改用 bigProvider/bigModel 在插件内写完
-section('prepareArticleTasks：大档模型接管超长输入（不再交会话模型）')
-const BIG = { bigProvider: 'volces-ark', bigModel: 'glm-5.3-flash', bigReasoningEffort: 'high', bigBudget: 420000 }
-// huge.ts 是 800KB 文本（≈200k+ token）：hy3 的 128k 装不下，但 420k 大档装得下
-const bigTierPrep = prepareArticleTasks([
-  { name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') },
-], { cwd: workRoot, language: '中文', ...BIG })
-check(bigTierPrep.sessionTasks.length === 0, '开了大档：超 128k 的单文件不再进会话通道')
-check(bigTierPrep.prepared.length === 1, `超长文件改由大档单请求（实际 prepared=${bigTierPrep.prepared.length}）`)
-const bt = bigTierPrep.prepared[0]
-check(bt.bigTier === true, '大档任务带 bigTier 标记（submitBatchFor 据此持久化模型）')
-check(bt.provider === 'volces-ark' && bt.model === 'glm-5.3-flash', `大档任务自带 provider/model（实际 ${bt.provider}/${bt.model}）`)
-check(bt.reasoningEffort === 'high', '大档任务自带思考档位')
-check(estimateTokens(bt.batchPrompt) > 128000 && estimateTokens(bt.batchPrompt) <= 420000, `大档 prompt 介于 128k–420k（实际 ${estimateTokens(bt.batchPrompt)}）`)
-// 关掉大档（留空 provider）：退回旧行为——超 128k 仍走会话通道
-const noBigPrep = prepareArticleTasks([
-  { name: 'modules/huge.md', mission: '超大任务', sources: ['huge.ts'], articlePath: path.join(outDir, 'huge.md') },
-], { cwd: workRoot, language: '中文', bigProvider: '' })
-check(noBigPrep.sessionTasks.length === 1, '大档关闭时超 128k 仍走会话通道（保持既有兜底）')
-// 普通任务在开大档时仍走普通档（不被误标）
-const normalPrep = prepareArticleTasks([
-  { name: 'modules/plain.md', mission: '普通任务', sources: ['src.ts'], articlePath: path.join(outDir, 'plain.md') },
-], { cwd: workRoot, language: '中文', ...BIG })
-check(normalPrep.prepared.length === 1 && normalPrep.prepared[0].bigTier !== true, '普通任务不被标成大档')
-check(normalPrep.prepared[0].provider === undefined && normalPrep.prepared[0].model === undefined, '普通任务不带 provider/model（沿用设置里的普通档）')
+fs.writeFileSync(path.join(workRoot, 'src.ts'), 'export const S = 3\n')
 
 // ---------- 3c. 会话通道任务收割判定 ----------
 section('classifySessionTask：会话通道收割三态')

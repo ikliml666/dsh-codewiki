@@ -110,7 +110,8 @@ const fakeLlm = {
 }
 
 // 旧 Node 流水线的最小可用假 llm：按 prompt 首行特征分发，产出符合文章契约的 markdown。
-// 只服务用例 13（证明「nativeEngine 默认关闭时旧通道照常完成」），不追求覆盖旧通道细节。
+// 只服务用例 13（证明「nativeEngine 默认关闭时兼容通道照常完成」），不追求覆盖通道细节。
+// 0.17.5 起写作只剩 agentic 工具循环：兼容通道发的也是 agentic prompt，所以这里认「任务：…」。
 //
 // 为什么按仓库真实文件算 source_files：旧通道的文章契约闸门会校验 source_files 指向的
 // 文件**真实存在**，模块名却由 localPlan 现场生成（fixture 里会出现 root 之类不对应
@@ -148,7 +149,18 @@ function legacyLlmFor(repo) {
     async *stream(opts) {
       const prompt = String(opts?.messages?.[0]?.content?.[0]?.text ?? '')
       let content = '---\ntitle: unknown\n---\nunknown task'
-      if (prompt.includes('你是 CodeWiki 文章观察员')) {
+      // agentic 工具循环（0.17.5 起唯一写作通道）：从 mission 里取目标文章路径，
+      // 按目录决定 type，source_files 仍取真实存在的文件（契约闸门会校验）。
+      if (prompt.includes('可用工具：')) {
+        const mission = (prompt.match(/^任务：(.+)$/m) ?? [])[1] ?? ''
+        const target = (mission.match(/((?:modules|concepts|learnings)\/[^\s：]+|_(?:architecture|patterns)\.md)/) ?? [])[1]
+        if (target) {
+          const dir = target.split('/')[0]
+          const type = dir === 'concepts' ? 'concept' : dir === 'learnings' ? 'learning' : target.startsWith('_architecture') ? 'architecture' : target.startsWith('_patterns') ? 'pattern' : 'module'
+          const mn = target.split('/').pop().replace(/\.md$/, '')
+          content = articleMd(target, pick(mn), type)
+        }
+      } else if (prompt.includes('你是 CodeWiki 文章观察员')) {
         content = '观察：模块职责与关键实现（来自分批观察）。\n'
       } else if (prompt.includes('你是 CodeWiki 文章作者')) {
         const mn = (prompt.match(/modules\/([a-z0-9-]+)\.md/) ?? [])[1] ?? 'core'
@@ -209,11 +221,6 @@ function nativeCfg(extra = {}) {
   return {
     batchProvider: 'workbuddy',
     batchModel: 'hy3',
-    // 旧通道三档显式关闭：本文件测的是原生通道，不该被语义规划/agentic/符号增量
-    // 的额外请求干扰（旧通道行为由 test-orchestration.mjs 等守护）。
-    planMode: 'dirs',
-    agenticArticles: false,
-    symbolIncremental: false,
     nativeEngine: true,
     // 假引擎用 node 当「解释器」、本文件当「入口」：client.js 走完全真实的 spawn 路径。
     nativeEnginePython: process.execPath,

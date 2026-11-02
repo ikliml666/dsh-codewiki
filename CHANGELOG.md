@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.17.5 — 2026-11-02
+
+### 会话页看不见「正在进行的任务」
+
+会话标签页只读「LLM 请求记录」，而记录只在真的发出请求后才存在。于是一个正在跑依赖图/
+聚类/落盘、或本轮根本无需写文章（增量直接命中）的任务，在会话页里完全不可见：面板任务页
+明明显示它在动，会话页却只有一堆旧记录，看起来像「没在跑」。真机上一轮增量编译的会话
+目录里连该 job 的子目录都不存在（NDJSON 只有 11 条 progress + 2 条 stderr，http 条目 0 条），
+正是这个原因。
+
+现在会话端点在原有 `sessions` 之外多返回一个 `active`：仍在跑的任务本身，带阶段、原生阶段与
+百分比、已写篇数、批量进度和**已发请求数**（0 表示此刻还没发），按开始时间倒序。面板在请求
+列表上方单独列出这一块，有进行中任务时不再显示「暂无会话记录」。
+
+### 设置页清理与大档开关
+
+- 删除 `planMode`、`symbolIncremental`、`agenticArticles`、`agenticMaxSteps` 四个设置项。
+  `planMode`/`symbolIncremental` 早已是纯兼容残留（对应实现随 0.16.0 阶段 7 退役）；
+  `agenticArticles`/`agenticMaxSteps` 描述的是「写作走哪条通道」「工具循环最多几步」，
+  而写作通道已经只剩一条。
+- 大档模型改为显式开关 `bigEnabled`（默认开）。此前靠「`bigProvider` 留空」表达关闭——一个
+  空字符串承担开关语义，设了模型再清空就等于关掉，而模型名与预算一并丢失。现在 `bigEnabled`
+  是唯一判据：关闭时 `liveConfig` 直接把 `bigProvider` 置空，五处按「大档是否配置」判定的
+  下游路径（文章写作双池、横切/校对大档装填、`markBigAgenticTasks`）一并退回默认档，而
+  `bigModel`/`bigReasoningEffort`/`bigTokenBudget`/`bigConcurrency` 的取值保留，重新打开
+  不需要重填。设置页把大档整组字段收进开关之下，关闭时折叠。
+
+### 单轮写作通道退役
+
+写作原本有两条通道：agentic 工具循环（模型按需 `read_code`）与「整包内联」单轮（把整个模块
+源码塞进一个 prompt，超预算就拆观察批→合成批）。后者在 0.13.0 后只剩兼容价值，而它带来的
+是三类长期问题：大模块必须拆两轮才能写、拆分决策要写进 notes 却没人看得懂、以及模块源码
+超预算时的一次性失败。现在整条删除：`prepareArticleTasks`、`batchArticlePrompt`、
+`shouldFallBackFromAgentic`、`batchObservePrompt`、`batchArticleObservePrompt`、
+`batchArticleComposePrompt`，以及 `tickArticles` 的观察批收割、`tickCrosscut` 的
+`crosscutSplit` 分支、`tickCompose` 与 `submitComposeBatch`。横切改为单批直出（仅超预算时
+打大档标记）。
+
+校对阶段的「单篇源码连大档都装不下就转会话模型」兜底**保留**——它服务的对象是超大单文件，
+与写作通道是两件事。
+
+### 验证
+
+新增 `test-config.mjs`（设置项契约：四个退役字段不得回流、`bigEnabled` 两侧行为、真实
+`markBigAgenticTasks` 的标记结果）。`test-sessions.mjs` 增加 8 项 `activeSessionJobs` 断言
+（终态剔除、排序、请求计数、零请求仍列出）；`test-client-panel.mjs` 增加 2 项会话页渲染断言，
+在改动前的 client.js 上是红的。`test-orchestration.mjs` 的 mock 改为会写含 `type`/
+`source_files` 的 agentic 文章，两组依赖观察批/合成批计数的用例随通道退役改写；
+`test-batch.mjs` 删掉三节单轮通道断言；`test-agentic-fallback.mjs` 按「逐篇收敛、互不牵连」
+重写。全套 35 个测试文件通过。
+
+
 ## 0.17.4 — 2026-11-02
 
 ### 僵尸排队项永久卡死

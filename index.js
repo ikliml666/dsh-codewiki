@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { runAgenticArticles, markBigAgenticTasks, sourceTokensOf } from './lib/articles-agentic.js'
-import { buildOpeningPrompt, TOOL_SCHEMAS } from './lib/agentic.js'
+import { buildOpeningPrompt, TOOL_SCHEMAS, DEFAULT_MAX_STEPS } from './lib/agentic.js'
 import { collectChangeSet } from './lib/change-set.js'
 import { withQuotepathOff } from './lib/git-paths.js'
 import {
@@ -74,21 +74,18 @@ export const Config = z.object({
   batchProvider: z.string().default(DEFAULT_BATCH_PROVIDER).volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
   batchModel: z.string().default(DEFAULT_BATCH_MODEL).volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id'),
   batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
-  bigProvider: z.string().default(DEFAULT_BIG_PROVIDER).volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：留空=不启用大档，退回会话通道兜底'),
+  bigEnabled: z.boolean().default(true).volatile().description('大档模型（超长输入）开关：关闭后超过普通预算的请求不再换大上下文模型，直接按大档预算兜底或退回会话通道；大档的模型与预算配置保留，重新开启无需重填'),
+  bigProvider: z.string().default(DEFAULT_BIG_PROVIDER).volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：bigEnabled 关闭时不生效，退回会话通道兜底'),
   bigModel: z.string().default(DEFAULT_BIG_MODEL).volatile().description('大档模型 id（该 provider 下）。默认火山方舟 glm-5.3-flash（512k 上下文）'),
   bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取'),
   bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
-  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且 bigProvider 留空时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
+  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且大档已关闭时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
   moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（与 bigConcurrency 同一约定，真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
   bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
-  planMode: z.string().default('auto').volatile().description('【兼容通道专用，nativeEngine=false 时才有意义】模块划分方式。0.16.0 阶段 7 起语义聚类（AST 符号提取 + LLM 聚类）已随 lib/{symbols,cluster}.js 退役，两条取值现在都只按顶层目录分组；该字段仅为兼容既有 settings.json 而保留'),
-  agenticArticles: z.boolean().default(true).volatile().description('文章写作走 agentic 工具循环（模型自己 read_code/list_files 读源码、edit_article 增量写，不再把源码整包内联进 prompt）：关闭则走单轮整包装填的旧通道'),
-  agenticMaxSteps: z.number().default(30).volatile().description('agentic 写作单篇最大步数（工具调用轮次），硬顶 100；步数越多越细致也越慢'),
-  symbolIncremental: z.boolean().default(true).volatile().description('【兼容通道专用，nativeEngine=false 时才有意义】符号级增量判定。0.16.0 阶段 7 起该能力随 lib/{symbols,graph-diff,incremental}.js 退役，兼容通道统一按文件级 source_files 归属判定；符号级增量现由原生引擎在 Python 侧完成。该字段仅为兼容既有 settings.json 而保留'),
   updateReminder: z.boolean().default(true).volatile().description('会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）'),
   autoCommit: z.boolean().default(true).volatile().description('编译完成后由插件自己在主题分支上提交产物再合并回原分支（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀；不动其它改动）：会话模型因此无需等待编译完成、也无需提交；非 git 仓库或提交失败时降级为提醒会话模型提交'),
   excludePaths: z.string().default('').volatile().description('排除清单：这些目录（含子目录）不编译 CodeWiki。换行/分号/逗号分隔绝对路径'),
@@ -105,17 +102,22 @@ function val(x) {
   return x && typeof x === 'object' && typeof x.get === 'function' ? x.get() : x
 }
 
-function liveConfig(config) {
+// 配置 → 内部运行参数。大档开关在这里一次性收口：下游有五六处按「bigProvider 非空」
+// 决定要不要换大上下文模型，逐个判断迟早漏一处，所以关闭时直接清空 provider。
+// 模型 id 与预算保留——重新开启时不必重填。
+export function liveConfig(config) {
   const c = config ?? {}
   const concurrency = Number(val(c.maxConcurrency))
   const bigConcurrency = Number(val(c.bigConcurrency))
+  const bigEnabled = val(c.bigEnabled) !== false
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
     batchProvider: String(val(c.batchProvider) ?? '').trim(),
     batchModel: String(val(c.batchModel) ?? '').trim() || DEFAULT_BATCH_MODEL,
     batchReasoningEffort: String(val(c.batchReasoningEffort) ?? '').trim(),
-    bigProvider: String(val(c.bigProvider) ?? '').trim(),
+    bigEnabled,
+    bigProvider: bigEnabled ? String(val(c.bigProvider) ?? '').trim() : '',
     bigModel: String(val(c.bigModel) ?? '').trim() || DEFAULT_BIG_MODEL,
     bigReasoningEffort: String(val(c.bigReasoningEffort) ?? '').trim(),
     bigTokenBudget: Math.max(BATCH_TOKEN_BUDGET, Number(val(c.bigTokenBudget)) || DEFAULT_BIG_TOKEN_BUDGET),
@@ -140,13 +142,6 @@ function liveConfig(config) {
       return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), 4) : 2
     })(),
     articleLanguage: String(val(c.articleLanguage) ?? '').trim() || '中文',
-    planMode: ['auto', 'dirs'].includes(String(val(c.planMode) ?? '').trim()) ? String(val(c.planMode)).trim() : 'auto',
-    agenticArticles: val(c.agenticArticles) !== false,
-    agenticMaxSteps: (() => {
-      const n = Number(val(c.agenticMaxSteps))
-      return Number.isFinite(n) && n >= 1 ? Math.min(Math.round(n), 100) : 30
-    })(),
-    symbolIncremental: val(c.symbolIncremental) !== false,
     excludePaths: String(val(c.excludePaths) ?? ''),
     autoUpdate: val(c.autoUpdate) === true,
     autoUpdateMin: Math.max(5, Number(val(c.autoUpdateMin)) || 30),
@@ -1228,139 +1223,50 @@ export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
   return { text, skipped, oversized: false }
 }
 
-// 批量模式单轮文章 prompt：与智能体版共享格式条款（articleFormatSection），
-// 区别是源码内联、文章由插件落盘，因此要求「只输出文章本身」。
-function batchArticlePrompt({ language, mission, sourcesText, prevArticle }) {
-  const parts = [
-    `你是 CodeWiki 文章作者。文章全文用${language}书写。`,
-    '',
-    `任务：${mission}`,
-    '',
-    '以下是你需要的全部源码（路径相对仓库根；每行以「行号| 」前缀标注行号，引用行号一律以前缀为准）：',
-    '',
-    sourcesText,
-  ]
-  if (prevArticle) {
-    parts.push(
-      '',
-      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags；其中引用的行号可能已过期，一律不得沿用，行号必须按源码「行号| 」前缀重新标注）：',
-      '',
-      prevArticle,
-    )
+// 本地规划：按顶层目录分组生成模块清单（0.10.7 起是唯一规划路径——模型勘探的单独
+// 规划阶段已删，编译模型上下文足够大，模块划分不再值得一次独立请求）。
+// 宁可粗也不中断整条流水线。
+// 0.16.0 阶段 7 受控退役：原生引擎（默认通道）自带 AST 符号提取 + 语义聚类，
+// localPlan 只服务 nativeEngine=false 的兼容通道。
+export function localPlan(files) {
+  const groups = new Map()
+  for (const f of files) {
+    const top = f.path.split('/')[0]
+    const name = slugify(top === f.path ? 'root' : top)
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name).push(f.path)
   }
-  parts.push(
-    '',
-    '直接输出完整文章：以 --- frontmatter 开始（title/type/source_files/tags），',
-    'source_files 列出上文中你实际引用的源文件（POSIX 风格相对路径，含上文的测试文件）。',
-    '只输出文章本身——禁止用 markdown 代码围栏整体包裹、禁止任何解释文字。',
-    '',
-    articleFormatSection(),
-  )
-  return parts.join('\n')
+  return {
+    project: '（本地规划：按顶层目录分组）',
+    modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
+    concepts: [],
+  }
 }
 
-// 把通用任务（sources+mission+可选 prevArticle）装配成批量请求：内联源码、拼 prompt、
-// 分配 customId。
-// 分割（观察→合成，复用横切先例）：模块源码总量超单请求预算时按文件装填拆成多个小
-// 观察批（_split/ 任务，keepInMemory），收割后拼观察包提交一个合成请求写完整文章。
-// 存在单文件连观察批预算都装不下时，该任务走「大档通道」——改用 bigProvider/bigModel
-// （默认 volces-ark/glm-5.3-flash，512k 上下文）在插件内直接写完，不再交会话模型。
-// 只有大档也装不下（即 bigTokenBudget 都超）时，才落到会话通道兜底（见 dispatchSessionTasks），
-// 且仅当 bigProvider 留空才允许这条兜底路径。
-// 返回 { prepared, sessionTasks }：prepared 含普通任务、_split/ 观察任务与大档任务，
-// 任务上的 model/provider/reasoningEffort 指该任务用哪个模型跑；
-// sessionTasks 带 batchPrompt（大档装填，派发时写入任务文件供子智能体读取）。
-export function prepareArticleTasks(tasks, { cwd, language, bigProvider = '', bigModel = '', bigReasoningEffort = '', bigBudget = DEFAULT_BIG_TOKEN_BUDGET } = {}) {
-  const prepared = []
-  const sessionTasks = []
-  // 大档可用：配置了 bigProvider 才算启用；启用后普通档装不下的任务改走大档，不再交会话模型
-  const bigTier = String(bigProvider ?? '').trim()
-    ? {
-        provider: String(bigProvider).trim(),
-        model: String(bigModel ?? '').trim() || DEFAULT_BIG_MODEL,
-        ...(String(bigReasoningEffort ?? '').trim() ? { reasoningEffort: String(bigReasoningEffort).trim() } : {}),
-        budget: Math.max(BATCH_TOKEN_BUDGET, Number(bigBudget) || DEFAULT_BIG_TOKEN_BUDGET),
+// 横切输入装配：整篇装填成功文章；装不下的装头部（frontmatter + Overview 段）并标注截断。
+// articles: [{name, text}]；预算按 token 计（与批量单请求同预算）。
+export function packArticles(articles, budget = BATCH_TOKEN_BUDGET) {
+  const parts = []
+  let used = 0
+  for (const a of articles) {
+    let text = a.text
+    const size = estimateTokens(text)
+    if (used + size > budget && parts.length) {
+      const head = text.slice(0, Math.max(0, text.indexOf('## Key Components')))
+      const headSize = estimateTokens(head)
+      if (used + headSize <= budget) {
+        parts.push(`#### ${a.name}（超预算，仅头部）\n\n${head}`)
+        used += headSize
       }
-    : null
-  const markBig = (t) => {
-    if (!bigTier) return false
-    t.provider = bigTier.provider
-    t.model = bigTier.model
-    if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
-    else delete t.reasoningEffort
-    t.bigTier = true
-    return true
-  }
-  for (const t of tasks) {
-    // 装填直接按单文件上限（大档开启=大档预算，否则 128k 硬上限）。hy3 适配（0.10.8）：
-    // 超 110k 普通预算的模块先整任务按大档（或硬上限）单请求一次写完，观察→合成分割
-    // 只保留给连大档都装不下的超大模块——不再为 32k 时代的比价而拆批。
-    const singleLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
-    let { text, oversized: tooBig, skipped } = collectSources(cwd, t.sources, singleLimit)
-    const prevArticle = t.prevArticlePath
-      ? (() => { try { return fs.readFileSync(t.prevArticlePath, 'utf8') } catch { return '' } })()
-      : ''
-    const promptOf = (sourcesText) => batchArticlePrompt({ language, mission: t.mission, sourcesText, prevArticle })
-    const emitSingle = (sourcesText) => {
-      t.batchPrompt = promptOf(sourcesText)
-      delete t.splitFor; delete t.composePlan
-      if (estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET) markBig(t)
-      t.customId = t.customId ?? `t${prepared.length}`
-      prepared.push(t)
-    }
-    const emitSession = (sourcesText) => {
-      t.batchPrompt = promptOf(sourcesText)
-      delete t.splitFor; delete t.composePlan // 复用任务对象时清残留分割字段
-      sessionTasks.push(t)
-    }
-    if (tooBig) { emitSession(text); continue } // 单文件连大档都装不下：唯一兜底=会话通道
-    const pt = skipped.length ? Infinity : estimateTokens(promptOf(text))
-    // 整任务一个请求装得下（预算内走普通档，110k–singleLimit 走大档/硬上限）：主路径
-    if (!skipped.length && pt <= singleLimit) { emitSingle(text); continue }
-    // 装不下（有文件被跳过或总量超单请求上限）：按普通预算逐文件装填拆成多个观察批
-    // （keepInMemory），收割后拼观察包提交一个合成请求写完整文章。
-    const batches = []
-    let hasOversizeSingle = false
-    for (const rel of t.sources) {
-      const one = collectSources(cwd, [rel], singleLimit)
-      if (one.oversized) { hasOversizeSingle = true; break } // 单文件连大档都超：整任务转兜底
-      const last = batches[batches.length - 1]
-      if (last && estimateTokens(last.text + '\n' + one.text) <= BATCH_TOKEN_BUDGET) {
-        last.text += '\n' + one.text
-        last.files.push(rel)
-      } else {
-        batches.push({ text: one.text, files: [rel] })
-      }
-    }
-    if (hasOversizeSingle) { emitSession(text); continue }
-    if (batches.length > 1) {
-      const base = `split${prepared.length}`
-      batches.forEach((b, i) => {
-        prepared.push({
-          customId: `${base}o${i}`,
-          name: `${t.name}#obs${i}`,
-          keepInMemory: true,
-          batchPrompt: batchArticleObservePrompt(language, t.name, b.text, i, batches.length),
-          splitFor: t.name,
-          composePlan: {
-            mission: t.mission, articlePath: t.articlePath,
-            prevArticlePath: t.prevArticlePath ?? null,
-            batchCount: batches.length, files: b.files,
-          },
-        })
-      })
       continue
     }
-    // 拆完只剩一批（装填边界：整包超限但逐文件重排后单批装下）：按普通预算单请求写完
-    emitSingle(batches[0]?.text ?? text)
+    parts.push(`#### ${a.name}\n\n${text}`)
+    used += size
   }
-  return { prepared, sessionTasks }
+  return parts.join('\n\n')
 }
 
-// ---------------------------------------------------------------------------
-// prompt 模板（条款取自上游 skills/codewiki-session.md）
-// ---------------------------------------------------------------------------
-
+// 文章格式条款：agentic 通道（读代码 → edit_article）与横切 prompt 共用。
 function articleFormatSection() {
   return [
     '文章格式（严格遵守）：',
@@ -1390,59 +1296,6 @@ function articleFormatSection() {
     '- Connections 用 Obsidian [[backlinks]]（[[other-module]]）连接相关模块',
     '- 写给对这个代码库零上下文的未来 agent：具体到文件名、函数名、类型、行号；宁可多细节，不许概括省略',
   ].join('\n')
-}
-
-// 本地规划：按顶层目录分组生成模块清单（0.10.7 起是唯一规划路径——模型勘探的单独
-// 规划阶段已删，编译模型上下文足够大，模块划分不再值得一次独立请求）。
-// 宁可粗也不中断整条流水线。
-// 0.16.0 阶段 7 受控退役：原生引擎（默认通道）自带 AST 符号提取 + 语义聚类，
-// localPlan 只服务 nativeEngine=false 的兼容通道。
-export function localPlan(files) {
-  const groups = new Map()
-  for (const f of files) {
-    const top = f.path.split('/')[0]
-    const name = slugify(top === f.path ? 'root' : top)
-    if (!groups.has(name)) groups.set(name, [])
-    groups.get(name).push(f.path)
-  }
-  return {
-    project: '（本地规划：按顶层目录分组）',
-    modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
-    concepts: [],
-  }
-}
-
-// agentic 通道退回判定（模块级导出便于单测）：本批 agentic 结果里失败过半才算「系统性失败」。
-// 一两篇失败是模型偶发（步数用尽 / 空文章），整批重跑的代价大于收益；单篇失败已由 tally 记账。
-// 调用方另需守 job.agenticRetried —— 只退一次，否则退回后仍失败会每 tick 重新提交成死循环。
-export function shouldFallBackFromAgentic(results) {
-  const relevant = Array.isArray(results) ? results : []
-  if (!relevant.length) return false
-  const failed = relevant.filter((r) => !r.ok).length
-  return failed * 2 > relevant.length
-}
-
-// 横切输入装配：整篇装填成功文章；装不下的装头部（frontmatter + Overview 段）并标注截断。
-// articles: [{name, text}]；预算按 token 计（与批量单请求同预算）。
-export function packArticles(articles, budget = BATCH_TOKEN_BUDGET) {
-  const parts = []
-  let used = 0
-  for (const a of articles) {
-    let text = a.text
-    const size = estimateTokens(text)
-    if (used + size > budget && parts.length) {
-      const head = text.slice(0, Math.max(0, text.indexOf('## Key Components')))
-      const headSize = estimateTokens(head)
-      if (used + headSize <= budget) {
-        parts.push(`#### ${a.name}（超预算，仅头部）\n\n${head}`)
-        used += headSize
-      }
-      continue
-    }
-    parts.push(`#### ${a.name}\n\n${text}`)
-    used += size
-  }
-  return parts.join('\n\n')
 }
 
 function crosscutIntro(language, what, requirements) {
@@ -1483,81 +1336,6 @@ function batchConceptPrompt(language, concept, articlesText) {
   ) + `\n\n以下全部模块文章：\n\n${articlesText}`
 }
 
-// 模块观察 prompt（横切 map 阶段）：每篇模块文章一个小任务，输出紧凑观察。
-// 输出刻意不带 frontmatter——观察批不走 tally 落盘，只在合成批拼包。
-function batchObservePrompt(language, moduleName, articleText) {
-  return [
-    `你是 CodeWiki 架构观察员。观察全文用${language}书写。`,
-    '',
-    `任务：通读下文模块「${moduleName}」的完整文章，输出该模块的架构观察（紧凑 markdown）。必含：`,
-    '1. 模块职责（一句话）；',
-    '2. 对外接口/入口：函数、类、路由名 + 文中行号；',
-    '3. 依赖方向：依赖哪些模块、被谁依赖（从文中引用推断）；',
-    '4. 值得进入系统总览的模式、约定或风险；',
-    '5. `source_files:` 原样列出文章 frontmatter 里的源文件（POSIX 相对路径）。',
-    '',
-    '只输出观察正文——禁止 frontmatter、禁止用代码围栏整体包裹。',
-    '',
-    `### ${moduleName}`,
-    '',
-    articleText,
-  ].join('\n')
-}
-
-// 文章分割观察 prompt（模块源码超单请求预算时）：一批源码 → 该批源码的紧凑技术观察。
-// 与横切观察不同，这里观察对象是源码而非文章，输出要保留写文章所需的全部细节。
-function batchArticleObservePrompt(language, moduleName, sourcesText, batchIndex, batchTotal) {
-  return [
-    `你是 CodeWiki 文章观察员。观察全文用${language}书写。`,
-    '',
-    `任务：模块「${moduleName}」的源码量大，已按文件分成 ${batchTotal} 批（本批为第 ${batchIndex + 1} 批）。`,
-    '通读下文本批源码，输出紧凑而完整的技术观察（markdown），供后续不看源码直接写整篇模块文章。必含：',
-    '1. 本批每个文件的职责与关键实现（保留全部函数/类/导出名、重要常量与默认值、关键行号——行号以源码「行号| 」前缀为准，禁止自行数行）；',
-    '2. 文件间调用关系与数据流（谁调用谁、入参/返回值形状）；',
-    '3. 错误处理、边界条件与非显然行为；',
-    '4. 本批文件清单（POSIX 相对路径）。',
-    '',
-    '要求：宁全勿简——被你省略的细节合成阶段将永远缺失；但禁止贴大段源码，引用「文件:行号」（行号以源码「行号| 」前缀为准）即可。',
-    '只输出观察正文——禁止 frontmatter、禁止用代码围栏整体包裹。',
-    '',
-    sourcesText,
-  ].join('\n')
-}
-
-// 文章分割合成 prompt：全部批次观察（+可选旧文）→ 完整模块文章。
-// 输入体积 = 各批观察之和，远小于原始源码，天然不超单请求预算。
-function batchArticleComposePrompt({ language, mission, moduleName, observationsText, prevArticle }) {
-  const parts = [
-    `你是 CodeWiki 文章作者。文章全文用${language}书写。`,
-    '',
-    `任务：${mission}`,
-    '',
-    `模块「${moduleName}」源码量大，已由多个观察员分批通读并产出观察。以下观察覆盖该模块全部源码：`,
-    '',
-    observationsText,
-  ]
-  if (prevArticle) {
-    parts.push(
-      '',
-      '这篇文章的当前内容（基于旧版代码，供保留章节结构与 title/type/tags；其中引用的行号可能已过期，一律不得沿用，行号必须按源码「行号| 」前缀重新标注）：',
-      '',
-      prevArticle,
-    )
-  }
-  parts.push(
-    '',
-    '只依据上述观察写完整文章；观察中引用的「文件:行号」直接沿用，不得发明未出现的文件或符号。',
-    '直接输出完整文章：以 --- frontmatter 开始（title/type/source_files/tags），',
-    'source_files 汇总各批观察列出的全部源文件（POSIX 风格相对路径）。',
-    '只输出文章本身——禁止用 markdown 代码围栏整体包裹、禁止任何解释文字。',
-    '',
-    articleFormatSection(),
-  )
-  return parts.join('\n')
-}
-
-// 批量校对 prompt：输入=文章全文+source_files 源码，输出=修正后整文（服务侧校验后才落盘）。
-// 行号抽查这类机械核对由模型一次完成，不再需要多轮工具的审校智能体。
 function batchProofreadPrompt({ language, articleText, sourcesText }) {
   return [
     `你是 CodeWiki 审校员。文章全文用${language}书写。`,
@@ -1929,6 +1707,34 @@ export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
   out.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')) || (b.n ?? 0) - (a.n ?? 0))
   return out.slice(0, Math.max(1, limit))
 }
+// 进行中任务（0.17.5）：会话页原本只读「LLM 请求记录」，而记录只在真的发出请求后才存在——
+// 正在跑依赖图/聚类/落盘、或本轮无需写文章（增量直接命中）的任务在会话页完全不可见：
+// 面板任务页显示它在动，会话页却只有一堆旧记录。这里把仍在跑的任务本身也列出来，
+// requests 给出「已发几个请求」（0 表示此刻还没发），前端据此区分「进行中」与「尚未发请求」。
+// 纯函数、jobs 由调用方传入：与端点解耦，才能直接钉住排序与字段契约。
+export function activeSessionJobs(jobs, { requestCount = () => 0, isTerminal = (stage) => TERMINAL.has(stage) } = {}) {
+  const out = []
+  for (const j of jobs ?? []) {
+    if (!j?.id || isTerminal(j.stage)) continue
+    out.push({
+      jobId: j.id,
+      cwd: j.cwd ?? '',
+      stage: j.stage,
+      nativeStage: j.nativeStage ?? null,
+      nativePercent: j.nativePercent ?? null,
+      kind: j.kind ?? null,
+      auto: j.auto === true,
+      startedAt: j.createdAt ?? j.stageStartedAt ?? null,
+      writtenCount: j.writtenCount ?? 0,
+      batchProgress: j.batchProgress ?? null,
+      requests: requestCount(j.id) ?? 0,
+    })
+  }
+  // 最新开始的排最前：面板首屏就是「现在在跑什么」
+  out.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
+  return out
+}
+
 // 过期清理：删超 TTL 的记录文件与随之为空的 job 目录。返回删除数（供 note/测试）。
 export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) {
   let removed = 0
@@ -2579,17 +2385,6 @@ function createJobService(config, onSettled) {
     }
   }
 
-  // agentic 通道是否要退回单轮通道：只在「本批过半失败」且「本 job 还没退回过」时重跑。
-  // 判定逻辑见模块级 shouldFallBackFromAgentic（导出以便单测）。
-  function shouldFallBackHere(job, results, tasks) {
-    if (job.agenticRetried) return false
-    const list = Array.isArray(tasks) ? tasks : []
-    const agenticList = list.filter((t) => t?.agentic === true)
-    if (!agenticList.length) return false
-    const isAgentic = (r) => agenticList.some((t) => t.name === r.name)
-    return shouldFallBackFromAgentic(results.filter(isAgentic))
-  }
-
   // 批量校对收割：一个结果覆盖多篇——按「@@@article: 名 / @@@end」标记拆回逐篇，
   // writeValidated 校验通过才覆写；缺席或非法的文章保留原文（校对失败不推翻已写成功的文章）
   function settleProofread(job, results, tasks) {
@@ -2949,7 +2744,7 @@ function createJobService(config, onSettled) {
         cwd: job.cwd,
         language: job.language,
         articleFormat: articleFormatSection(),
-        maxSteps: c.agenticMaxSteps,
+        maxSteps: DEFAULT_MAX_STEPS,
         fixAnchors,
         // agentic 通道的写集（吸收自 FSoft 的 write-set）：父任务只能写自己目标文章，
         // 子模块只能写调度器分配的路径。不传时旧行为不变（供既有调用方沿用）。
@@ -3125,106 +2920,7 @@ function createJobService(config, onSettled) {
       const tasks = job.tasks
       job.batchRef = null
       job.tasks = []
-      // 文章分割观察批收割：拼观察包，为每篇分割文章提交一个合成请求（keepInMemory，直写盘）
-      const splitObs = results.filter((r) => r.name.includes('#obs'))
-      if (splitObs.length) {
-        const byArticle = new Map()
-        for (const r of splitObs) {
-          const articleName = r.name.slice(0, r.name.indexOf('#obs'))
-          if (!byArticle.has(articleName)) byArticle.set(articleName, { batches: [], failed: 0 })
-          const slot = byArticle.get(articleName)
-          if (r.ok && r.content) slot.batches.push(r.content)
-          else slot.failed += 1
-        }
-        const composeTasks = []
-        const composedArticles = new Set() // 每篇文章只重建一条合成任务（多批共享）
-        for (const r of tasks) {
-          if (!r.name.includes('#obs') || !r.composePlan) continue
-          const articleName = r.name.slice(0, r.name.indexOf('#obs'))
-          if (composedArticles.has(articleName)) continue
-          composedArticles.add(articleName)
-          const slot = byArticle.get(articleName)
-          if (!slot) continue
-          if (slot.failed >= slot.batches.length || !slot.batches.length) {
-            note(job, `模块文章 ${articleName} 观察全部失败，该篇缺席本轮编译`)
-            continue
-          }
-          if (slot.failed) note(job, `${slot.failed} 个观察批失败，合成基于剩余观察进行`)
-          const plan = r.composePlan
-          const prevArticle = plan.prevArticlePath
-            ? (() => { try { return fs.readFileSync(plan.prevArticlePath, 'utf8') } catch { return '' } })()
-            : ''
-          composeTasks.push({
-            customId: `${r.customId.replace(/o\d+$/, '')}c`,
-            name: articleName,
-            keepInMemory: true,
-            articlePath: plan.articlePath,
-            batchPrompt: batchArticleComposePrompt({
-              language: job.language,
-              mission: plan.mission,
-              moduleName: articleName,
-              observationsText: slot.batches.map((b, i) => `#### 观察批 ${i + 1}\n\n${b}`).join('\n\n'),
-              prevArticle,
-            }),
-          })
-        }
-        if (composeTasks.length) {
-          try {
-            await submitBatchFor(job, composeTasks)
-            note(job, `收到 ${splitObs.length} 份观察，提交 ${composeTasks.length} 个文章合成请求`)
-            return
-          } catch (err) {
-            fail(job, `文章合成批次提交失败 —— ${String(err?.message ?? err)}`)
-            return
-          }
-        }
-        // 观察全部失败：若有会话通道任务在途，等它收割后再统一收尾；否则照旧推进（不因观察失败 fail 整个 job）
-        if (!job.sessionTasks?.length) {
-          setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
-          return
-        }
-      } else if (shouldFallBackHere(job, results, tasks)) {
-        // agentic 通道大面积失败：本批里失败的篇目退回单轮整包装填通道再跑一次。
-        // 只重排失败篇——已经写成功的文章不再重写（重复写同一路径既费 token 又会
-        // 覆盖掉 agentic 在场读代码后写出的更好版本）。
-        const failedNames = new Set(results.filter((r) => !r.ok).map((r) => r.name))
-        const okResults = results.filter((r) => r.ok)
-        if (okResults.length) tally(job, okResults, tasks, { mergeByName: true })
-        const retryTasks = tasks
-          .filter((t) => failedNames.has(t.name) && t.mission && t.articlePath)
-          .map((t, i) => ({
-            customId: `${t.customId ?? 'a'}r${i}`,
-            name: t.name, mission: t.mission, sources: t.sources, cwd: t.cwd ?? job.cwd,
-            articlePath: t.articlePath, prevArticlePath: t.prevArticlePath ?? null,
-          }))
-        const cF = liveConfig(config)
-        const { prepared, sessionTasks } = prepareArticleTasks(retryTasks, {
-          cwd: job.cwd, language: job.language,
-          bigProvider: cF.bigProvider, bigModel: cF.bigModel,
-          bigReasoningEffort: cF.bigReasoningEffort, bigBudget: cF.bigTokenBudget,
-        })
-        job.agenticRetried = true
-        if (sessionTasks.length) {
-          const snap = dispatchSessionTasks(job, sessionTasks)
-          if (!snap) return
-          job.sessionTasks = snap
-        }
-        if (prepared.length) {
-          try {
-            note(job, `agentic 写作失败 ${failedNames.size}/${results.length} 篇，已退回单轮通道重跑 ${prepared.length} 篇`)
-            await submitBatchFor(job, prepared)
-            return
-          } catch (err) {
-            fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
-            return
-          }
-        }
-        if (!job.sessionTasks?.length) {
-          note(job, `agentic 写作失败 ${failedNames.size} 篇，退回单轮通道也无可装填内容`)
-        }
-      } else {
-        tally(job, results, tasks, { mergeByName: true })
-      }
+      tally(job, results, tasks, { mergeByName: true })
     } else if (!job.sessionTasks?.length) {
       // 组装文章任务并提交：stale 用预构建任务；full 就地本地规划生成清单；resume 不经此处（batchRef 已设）
       let tasks
@@ -3256,10 +2952,10 @@ function createJobService(config, onSettled) {
       // agentic 写作通道（吸收自 FSoft CodeWiki 的 module agent）：模型自己读源码、增量写文章。
       // 它不需要「源码整包内联 → 超预算拆观察批 → 合成」这套装填，因此没有 sessionTasks。
       // 单篇失败只记账；失败率过半且旧通道可用时退回单轮通道重跑一次（见下）。
-      if (c0.agenticArticles && tasks.length) {
+      if (tasks.length) {
         // 按模块源文本量给超大模块打大档标记（与单轮通道 markBig 同语义：吃不下就换大上下文模型），
         // 再交给双池执行器——大档任务走 bigProvider，其余走默认档，两池独立限流。
-        // 大档未配置（bigProvider 留空）时 markBigAgenticTasks 原样返回。
+        // 大档关闭（liveConfig 已把 bigProvider 清空）时 markBigAgenticTasks 原样返回。
         const agenticTasks = markBigAgenticTasks(
           tasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` })),
           {
@@ -3282,29 +2978,12 @@ function createJobService(config, onSettled) {
         job.batchSubmittedAt = new Date().toISOString()
         job.batchProgress = { completed: 0, total: agenticTasks.length }
         startAgenticRun(job, agenticTasks)
-        note(job, `阶段已启动：${agenticTasks.length} 篇 agentic 写作（模型 ${c0.batchProvider}/${c0.batchModel}，并发 ${c0.maxConcurrency}，单篇≤${c0.agenticMaxSteps} 步）`)
+        note(job, `阶段已启动：${agenticTasks.length} 篇 agentic 写作（模型 ${c0.batchProvider}/${c0.batchModel}，并发 ${c0.maxConcurrency}，单篇≤${DEFAULT_MAX_STEPS} 步）`)
         touch(job)
         return
       }
-      const { prepared, sessionTasks } = prepareArticleTasks(tasks, {
-        cwd: job.cwd, language: job.language,
-        bigProvider: c0.bigProvider, bigModel: c0.bigModel,
-        bigReasoningEffort: c0.bigReasoningEffort, bigBudget: c0.bigTokenBudget,
-      })
-      if (sessionTasks.length) {
-        const snap = dispatchSessionTasks(job, sessionTasks)
-        if (!snap) return // 会话不可用/写文件失败：fail 已记账
-        job.sessionTasks = snap
-      }
-      if (prepared.length) {
-        try {
-          await submitBatchFor(job, prepared)
-        } catch (err) {
-          fail(job, `文章批次提交失败 —— ${String(err?.message ?? err)}`)
-        }
-        return
-      }
-      if (!job.sessionTasks?.length) { fail(job, '没有可写的文章任务'); return }
+      fail(job, '没有可写的文章任务')
+      return
     }
     // 会话通道收割：全部终态才推进（超时/失败已在 progressSessionTasks 记账）
     if (job.sessionTasks?.length) {
@@ -3344,25 +3023,6 @@ function createJobService(config, onSettled) {
       const tasks = job.tasks
       job.batchRef = null
       job.tasks = []
-      if (job.crosscutSplit) {
-        // 观察批收尾：不走 tally（不写盘不计数），收观察文本拼合成批
-        job.crosscutSplit = false
-        const observations = []
-        for (const r of results) {
-          if (r.ok && r.content) observations.push({ name: r.name, text: r.content })
-          else note(job, `${r.name}：模块观察失败，该模块缺席横切合成`)
-        }
-        if (!observations.length) {
-          note(job, '全部模块观察失败，跳过横切')
-          setStage(job, 'review')
-          return
-        }
-        const pack = observations.map((o) => `#### ${o.name}\n\n${o.text}`).join('\n\n')
-        note(job, `收到 ${observations.length} 份模块观察，提交横切合成批次`)
-        setStage(job, 'compose')
-        await submitComposeBatch(job, pack)
-        return
-      }
       tally(job, results, tasks, { mergeByName: true })
       setStage(job, 'review')
       return
@@ -3388,64 +3048,22 @@ function createJobService(config, onSettled) {
       : null
     const bigLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
     const totalTokens = texts.reduce((n, a) => n + estimateTokens(a.text), 0)
-    if (totalTokens <= bigLimit) {
-      // 总量装得进单请求（普通或大档）预算：单批直出，零拆分开销
-      try {
-        const tasks = crosscutTasks(job, packArticles(texts, bigLimit))
-        if (bigTier && totalTokens > BATCH_TOKEN_BUDGET) {
-          for (const t of tasks) {
-            t.provider = bigTier.provider
-            t.model = bigTier.model
-            if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
-            t.bigTier = true // 分池依据：进大档并发池，不吃默认档配额
-          }
+    // 单批直出：packArticles 保证装得下（超预算的文章只截头部并标注），不再有
+    // 「拆观察批 → 合成」那条路（0.17.5 随单轮通道退役）。总量超普通预算就换大档。
+    try {
+      const tasks = crosscutTasks(job, packArticles(texts, bigLimit))
+      if (bigTier && totalTokens > BATCH_TOKEN_BUDGET) {
+        for (const t of tasks) {
+          t.provider = bigTier.provider
+          t.model = bigTier.model
+          if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
+          t.bigTier = true // 分池依据：进大档并发池，不吃默认档配额
         }
-        await submitBatchFor(job, tasks)
-        note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念${bigTier && totalTokens > BATCH_TOKEN_BUDGET ? '（大档装填）' : ''}`)
-      } catch (err) {
-        fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
       }
-      return
-    }
-    // 精准拆分：每篇模块文章一个观察小任务（并发跑），合成批只吃观察（远小于原文，永不超限）
-    const tasks = texts.map((a, i) => ({
-      customId: `obs${i}`, name: `_obs/${a.name}`, keepInMemory: true,
-      batchPrompt: batchObservePrompt(lang, a.name, a.text),
-    }))
-    job.crosscutSplit = true
-    try {
       await submitBatchFor(job, tasks)
-      note(job, `模块文章总量超单请求预算，横切拆为 ${tasks.length} 个观察任务并发执行，随后合成`)
+      note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念${bigTier && totalTokens > BATCH_TOKEN_BUDGET ? '（大档装填）' : ''}`)
     } catch (err) {
-      job.crosscutSplit = false
-      fail(job, `观察批次提交失败 —— ${String(err?.message ?? err)}`)
-    }
-  }
-
-  // 合成批收尾：观察批已 settle，合成结果与单批路径同样走 tally 写盘
-  async function tickCompose(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      tally(job, results, job.tasks, { mergeByName: true })
-      job.batchRef = null
-      job.tasks = []
-    } else {
-      // 合成批断点丢失（stage 落盘与提交落盘之间进程中断）：留痕降级，不静默
-      note(job, '合成批次未落盘（上次进程中断于提交后落盘前），跳过横切进校对')
-    }
-    setStage(job, 'review')
-  }
-
-  function submitComposeBatch(job, observationsText) {
-    // 0.6.0 起 submitBatchFor 是同步函数（返回 undefined），不能再 .then 链——改为 try/catch
-    try {
-      submitBatchFor(job, crosscutTasks(job, observationsText))
-      note(job, `横切合成批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念（输入=模块观察）`)
-    } catch (err) {
-      // 文章已写成功，合成提交失败降级跳过横切，不推翻整个任务
-      setStage(job, 'review')
-      note(job, `横切合成批次提交失败，跳过横切 —— ${String(err?.message ?? err)}`)
+      fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
     }
   }
 
@@ -3739,7 +3357,6 @@ function createJobService(config, onSettled) {
   const STAGE_HANDLER = {
     articles: tickArticles,
     crosscut: tickCrosscut,
-    compose: tickCompose,
     review: tickReview,
     index: tickIndex,
     commit: tickCommit,
@@ -4893,7 +4510,13 @@ export function installWebServer(ctx, service, extra = {}) {
         try {
           const url = new URL(req.url ?? '', 'http://localhost')
           const jobId = String(url.searchParams.get('jobId') ?? '').trim()
-          if (jobId) { writeJson(res, 200, { sessions: listSessionRecords(jobId) }); return }
+          if (jobId) {
+            // 单任务会话视图同样要能看出「任务在跑但还没有请求」
+            const job = service.list().find((j) => j.id === jobId)
+            const active = activeSessionJobs(job ? [job] : [], { requestCount: (id) => listSessionRecords(id).length })
+            writeJson(res, 200, { sessions: listSessionRecords(jobId), active })
+            return
+          }
           // 全局聚合：带上 cwd（面板行里显示是哪个仓库在编译），只给最近 limit 条
           const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 200))
           const byId = new Map()
@@ -4901,7 +4524,8 @@ export function installWebServer(ctx, service, extra = {}) {
           const sessions = listAllSessionRecords({ limit }).map((s) => ({
             ...s, cwd: byId.get(s.jobId) ?? '',
           }))
-          writeJson(res, 200, { sessions })
+          const active = activeSessionJobs(service.list(), { requestCount: (id) => listSessionRecords(id).length })
+          writeJson(res, 200, { sessions, active })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }

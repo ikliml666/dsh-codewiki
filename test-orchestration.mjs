@@ -50,7 +50,7 @@ const articleMd = (title, source, marker = 'Batch-written', type = 'module') =>
 // 起 nativeEngine 默认 true，不在这里钉住 false 的话整条链路会走原生引擎（需要真 Python
 // 环境），断言会因「通道换了」而不是「功能坏了」失败。原生通道的验证见
 // test-engine-native-job.mjs 与 test-engine-native-incremental.mjs。
-const LEGACY_CHANNEL = { nativeEngine: false, planMode: 'dirs', agenticArticles: false, symbolIncremental: false }
+const LEGACY_CHANNEL = { nativeEngine: false }
 const batchCfg = (extra = {}) => ({ batchProvider: 'workbuddy', batchModel: 'hy3', ...LEGACY_CHANNEL, ...extra })
 
 // mock 宿主上下文：按 inject 依赖路由；webServer/tools/agents/llm 全部可捕获。
@@ -213,6 +213,29 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       // 文章分割观察批：应答一段观察文本（合成阶段凭它产文）
       return '观察：模块职责与关键实现（来自分批观察）。\n\n文件清单：见上文。\n'
     }
+    // agentic 文章通道（0.17.5 起唯一通道）：首轮提示词是「任务：为模块「X」撰写文章 modules/x.md」，
+    // 没有工具调用就视为写完，正文即文章。契约闸门要求 frontmatter 的 type 与 source_files 正确，
+    // 所以这里和 stale 分支一样按目标位置给类型与真实 fixture 路径。
+    if (prompt.includes('可用工具：')) {
+      // stale 的 mission 形如「更新过期文章 modules/core.md：...」，全量的形如
+      // 「为模块「core」撰写文章 modules/core.md：...」；目标是行首的路径，后面可能跟冒号。
+      const mission = (prompt.match(/^任务：(.+)$/m) ?? [])[1] ?? ''
+      // 全量 mission 是「为模块「core」撰写文章 modules/core.md」——路径里可能带全角冒号说明
+      const target = (mission.match(/(?:更新过期文章|撰写文章)\s+((?:modules|concepts|learnings)\/[^\s：]+|_(?:architecture|patterns)\.md)/) ?? [])[1]
+      if (target) {
+        // 目标自带目录前缀（modules/、concepts/、learnings/），file 是裸文件名
+        const file = target.split('/').pop().replace(/\.md$/, '')
+        const type = target === '_architecture.md' ? 'architecture'
+          : target === '_patterns.md' ? 'pattern'
+            : target.startsWith('concepts/') ? 'concept'
+              : target.startsWith('learnings/') ? 'learning' : 'module'
+        const src = target === '_architecture.md' ? 'core/core.py'
+          : target === '_patterns.md' ? 'util/util.py'
+            : `${file}/${file}.py`
+        // 大 wiki 用例靠「文章本身很长」把横切输入顶过预算，从而触发观察批拆分
+        return articleMd(target, src, articleMarker, type) + (bigArticle ? `\n\n${'长'.repeat(70000)}` : '')
+      }
+    }
     if (prompt.includes('你是 CodeWiki 文章作者')) {
       // stale 逐篇更新：目标文章名写在任务 mission 里。文章契约闸门（0.14.0）会校验
       // type 与所在目录一致，所以 fixture 必须按目标位置给对类型——根目录 _architecture.md
@@ -248,11 +271,11 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
         return names.map((n) => {
           const seg = prompt.slice(Math.max(0, prompt.indexOf(`@@@article: ${n}`)))
           const body = seg.slice(0, seg.indexOf('==== 该篇 source_files') >= 0 ? seg.indexOf('==== 该篇 source_files') : undefined)
-          const fm = (body.match(/---\ntitle:[\s\S]*?\n---/) ?? [])[0]
+          const fm = (body.match(/---\r?\ntitle:[\s\S]*?\r?\n---/) ?? [])[0]
           return `@@@article: ${n}\n${fm ?? `---\ntitle: ${n}\n---`}\n\nPROOFED article.\n@@@end`
         }).join('\n')
       }
-      const fm = prompt.match(/---\ntitle:[\s\S]*?\n---/)
+      const fm = prompt.match(/---\r?\ntitle:[\s\S]*?\r?\n---/)
       return fm ? `${fm[0]}\n\nPROOFED article.\n` : articleMd('Proofed', 'core/core.py', 'PROOFED')
     }
     return '---\ntitle: unknown\n---\nunknown task'
@@ -756,9 +779,9 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
   }
 }
 
-// ============================ 大 wiki：横切精准拆分 ============================
+// ============================ 大 wiki：横切输入超预算 → 大档单批直出 ============================
 await cleanupServices()
-console.log('== 横切精准拆分：模块文章总量超预算 → 观察任务 map + 合成批 reduce ==')
+console.log('== 大 wiki：模块文章总量超预算 → 横切按大档单批直出（不再拆观察批） ==')
 {
   const bigRepo = makeFixtureRepo()
   const mock = makeBatchMock({ bigArticle: true })
@@ -766,61 +789,18 @@ console.log('== 横切精准拆分：模块文章总量超预算 → 观察任�
     const r = await gen.execute({ cwd: bigRepo }, { agent: 'test-agent' })
     check(r.submitted === true, '大 wiki 提交即返回')
     const job = await waitJob(r.cwd)
-    console.log('  notes:', (job?.notes ?? []).join(' | '))
-    const obsPrompts = mock.batchPrompts().filter((p) => p.includes('架构观察员'))
-    check(obsPrompts.length === 2, `端点收到 2 个观察请求（实际 ${obsPrompts.length}）`)
-    check(!mock.realtimePrompts().some((p) => p.includes('勘探员')) && !mock.batchPrompts().some((p) => p.includes('勘探员')), '全程无规划请求（0.10.7 删规划阶段）')
-    for (const p of obsPrompts) {
-      check((p.match(/^### /gm) ?? []).length === 1, '观察请求输入只含一篇模块文章')
-    }
-    check(!mock.batchPrompts().some((p) => p.includes('写系统总览') && p.includes('长'.repeat(100))), '合成请求输入不含原文全文（只吃观察）')
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 经合成批落盘')
-    check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 经合成批落盘')
+    // 0.17.5 起横切没有「观察批 map + 合成批 reduce」这条路径：整篇装填（超预算只截头部）
+    // 后单批直出，总量超普通预算就整批换大档模型。这里钉住的是这条唯一路径。
+    check(!mock.batchPrompts().some((p) => p.includes('架构观察员')), '不再产生横切观察请求（拆分路径已删）')
+    check(!mock.batchPrompts().some((p) => p.includes('文章观察员')), '不再产生文章观察批请求（拆分路径已删）')
+    check((job.notes ?? []).some((n) => n.includes('横切批次已提交')), '横切输入超普通预算仍单批提交（截头部保装填，不拆批）')
+    check(fs.existsSync(path.join(job.wikiPath, '_architecture.md')), '_architecture.md 落盘')
+    check(fs.existsSync(path.join(job.wikiPath, '_patterns.md')), '_patterns.md 落盘')
     check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '大 wiki 校对批次照常回写（动态预算）')
-    check((job.notes ?? []).some((n) => n.includes('观察任务并发执行')), 'notes 记录拆分决策')
-    check((job.notes ?? []).some((n) => n.includes('超单请求预算')), '单请求输入超预算时 notes 明示按大档装填')
-    check((job.notes ?? []).some((n) => n.includes('提交横切合成批次')), '观察批 settle 后进入合成批')
   } finally {
     mock.restore()
     fs.rmSync(bigRepo, { recursive: true, force: true })
-  }
-}
-
-// ============================ 大模块：文章观察→合成分割 ============================
-await cleanupServices()
-console.log('== 文章阶段分割：模块源码超预算 → 观察批 map + 合成请求 reduce ==')
-{
-  const splitRepo = makeFixtureRepo()
-  // 每模块 15 个 100KB 源文件（扫描层上限 256KB/文件）：合计 ≈439k token，超 420k 大档
-  // 预算才触发观察批分割（0.10.8 起 110k–420k 区间直接大档单请求写完，不再分割）
-  for (const mn of ['core', 'util']) {
-    for (let i = 0; i < 15; i += 1) {
-      fs.writeFileSync(path.join(splitRepo, mn, `${mn}${i}.py`), `${String(i).padStart(2, '0')}:` + 'y'.repeat(100 * 1024))
-    }
-  }
-  execFileSync('git', ['add', '-A'], { cwd: splitRepo })
-  execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'big'], { cwd: splitRepo })
-  const mock = makeBatchMock()
-  try {
-    const r = await gen.execute({ cwd: splitRepo }, { agent: 'test-agent' })
-    check(r.submitted === true, '分割仓库提交即返回')
-    const job = await waitJob(r.cwd, { timeout: 45000 })
-    console.log('  notes:', (job?.notes ?? []).join(' | '))
-    const obsPrompts = mock.batchPrompts().filter((p) => p.includes('你是 CodeWiki 文章观察员'))
-    const composePrompts = mock.batchPrompts().filter((p) => p.includes('多个观察员分批通读'))
-    check(obsPrompts.length === 10, `10 个观察批请求（2 模块 × 5 批，实际 ${obsPrompts.length}）`)
-    check(obsPrompts.every((p) => !p.includes('你是 CodeWiki 文章作者')), '观察请求不是文章请求')
-    check(composePrompts.length === 2, `2 个合成请求（每模块 1 个，实际 ${composePrompts.length}）`)
-    check(composePrompts.every((p) => p.includes('分批观察')), '合成请求吃观察包')
-    check(job?.stage === 'done', `job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
-    check(fs.existsSync(path.join(job.wikiPath, 'modules', 'core.md')), 'modules/core.md 经合成落盘')
-    check(fs.existsSync(path.join(job.wikiPath, 'modules', 'util.md')), 'modules/util.md 经合成落盘')
-    check(fs.readFileSync(path.join(job.wikiPath, 'modules', 'core.md'), 'utf8').includes('PROOFED'), '分割文章照常进校对回写')
-    check(!(job.notes ?? []).some((n) => n.includes('超单请求预算')), '文章阶段观察批全部装进单请求预算（无超档明示）')
-  } finally {
-    mock.restore()
-    fs.rmSync(splitRepo, { recursive: true, force: true })
   }
 }
 

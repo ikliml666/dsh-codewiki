@@ -5,7 +5,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 
 process.env.DSH_CODEWIKI_JOBS_FILE = path.join(os.tmpdir(), `cw-sess-test-${process.pid}-${crypto.randomBytes(3).toString('hex')}.json`)
-const { SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords } = await import('./index.js')
+const { SESSIONS_DIR, listSessionRecords, readSessionRecord, pruneSessionRecords, listAllSessionRecords, activeSessionJobs } = await import('./index.js')
 
 let failures = 0
 const check = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { failures++; console.error(`  ✗ ${msg}`) } }
@@ -96,6 +96,28 @@ const { beginSessionRecord } = await import('./index.js')
   fs.rmSync(path.join(SESSIONS_DIR, 'job_hook'), { recursive: true, force: true })
   fs.rmSync(path.join(SESSIONS_DIR, 'job_hook_err'), { recursive: true, force: true })
 }
+
+// ── 进行中任务（0.17.5）──────────────────────────────────────────────────
+// 会话页原本只能看到「已经发出 LLM 请求」的任务；跑图/聚类/落盘、或本轮无需写文章的
+// 任务在会话页完全不可见（面板任务页显示它在动，会话页却只有旧记录）。
+// 这里钉住 activeSessionJobs 的契约：终态剔除、requests 计数如实反映、最新在前。
+const NOW = '2026-11-02T00:00:00.000Z'
+const jobsSample = [
+  { id: 'job_a', cwd: 'C:/repo/a', stage: 'articles', createdAt: '2026-11-02T00:00:05.000Z', nativeStage: 'articles', nativePercent: 36, writtenCount: 3, kind: 'stale', auto: false },
+  { id: 'job_b', cwd: 'C:/repo/b', stage: 'queued', createdAt: NOW, batchProgress: { completed: 1, total: 4 }, kind: 'stale', auto: true },
+  { id: 'job_c', cwd: 'C:/repo/c', stage: 'done', createdAt: '2026-11-02T00:00:09.000Z' },
+  { id: 'job_d', cwd: 'C:/repo/d', stage: 'failed', createdAt: '2026-11-02T00:00:09.000Z' },
+]
+const activeAll = activeSessionJobs(jobsSample, { requestCount: (id) => (id === 'job_a' ? 7 : 0) })
+check(activeAll.length === 2, `进行中任务只含有非终态（实际 ${activeAll.length}）`)
+check(activeAll[0].jobId === 'job_a' && activeAll[1].jobId === 'job_b', '进行中任务按开始时间倒序（最新的在前）')
+check(activeAll[0].requests === 7 && activeAll[1].requests === 0, 'requests 如实反映已发请求数（0 = 尚未发出请求）')
+check(activeAll[0].nativePercent === 36 && activeAll[0].writtenCount === 3, '原生阶段/百分比/已写篇数原样带出')
+check(activeAll[1].batchProgress?.total === 4 && activeAll[1].auto === true, '批量进度与自动标记原样带出')
+check(activeSessionJobs([]).length === 0 && activeSessionJobs(null).length === 0, '空输入 → 空数组（面板不会拿到 undefined）')
+check(activeSessionJobs([{ id: 'job_x', stage: 'partial' }]).length === 0, 'partial 是终态，不算进行中')
+// 真实任务里「还没发过任何请求」的进行中任务也必须出现（正是用户报告看不到的那一类）
+check(activeSessionJobs([{ id: 'job_z', stage: 'articles' }], { requestCount: () => 0 })[0].requests === 0, '零请求的进行中任务照常列出')
 
 fs.rmSync(path.join(SESSIONS_DIR, 'job_manual'), { recursive: true, force: true })
 fs.rmSync(process.env.DSH_CODEWIKI_JOBS_FILE, { force: true })

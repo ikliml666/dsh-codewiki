@@ -115,9 +115,6 @@ function nativeCfg(extra = {}) {
   return {
     batchProvider: 'workbuddy',
     batchModel: 'hy3',
-    planMode: 'dirs',
-    agenticArticles: false,
-    symbolIncremental: false,
     nativeEngine: true,
     nativeEnginePython: process.execPath,
     nativeEngineEntry: FAKE_ENGINE,
@@ -510,7 +507,7 @@ if (want(8)) { console.log('== 用例 8：增量轮取消 → cancelled，基线
 if (want(9)) { console.log('== 用例 9：nativeEngine=false 时旧通道照常，原生引擎一次都不跑 ==')
   const { repo, calls } = makeRepo('legacy', { mode: 'done' })
   const m = makeCtx()
-  apply(m.ctx, { batchProvider: 'workbuddy', batchModel: 'hy3', planMode: 'dirs', agenticArticles: false, symbolIncremental: false, nativeEngine: false })
+  apply(m.ctx, { batchProvider: 'workbuddy', batchModel: 'hy3', nativeEngine: false })
   try {
     const gen = m.registered.get('codewiki_generate')
     const submitted = await gen.execute({ cwd: repo, scope: 'full' }, { agent: { id: 'sess-legacy' } })

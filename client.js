@@ -62,6 +62,11 @@ window.__ModuleLoader__.load({
       sessTitle: '编译会话（LLM 请求记录 · 保留 24h）',
       sessEmpty: '暂无会话记录（编译请求发起后出现）',
       sessRunning: '进行中',
+      sessActiveTitle: '进行中的任务',
+      sessActiveNoRequest: '尚未发出请求（正在做准备/收尾）',
+      sessActiveRequests: '已发 {n} 个请求',
+      sessActiveStage: '阶段',
+      sessActiveWritten: '已写 {n} 篇',
       sessPrompt: '输入 prompt',
       sessOutput: '模型输出',
       sessBack: '← 返回列表',
@@ -88,19 +93,9 @@ window.__ModuleLoader__.load({
       batchReasoningEffortGeneric: '该模型目录未声明可选思考档位，以下为通用档位供手动指定；若模型不支持所选值，请求会自动回落模型默认档（不会失败）。',
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
       secBig: '大档模型（超长输入）',
-      secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。留空提供商 = 关闭大档，退回会话通道兜底。',
-      secPipeline: '编译流程（吸收自 FSoft CodeWiki）',
-      secPipelineHint: '三档能力来自 FSoft-AI4Code/CodeWiki（MIT，ACL 2026）：符号级 AST 分析、语义聚类分层、agentic 写作。全部在本插件内用 Node + tree-sitter WASM 实现，不需要 Python 运行时；任一项失败都自动降级回旧的目录分组 / 单轮整包装填 / 文件级增量，不会让编译中断。',
-      planMode: '模块划分方式',
-      planModeAuto: '语义聚类（已退役）',
-      planModeDirs: '顶层目录分组',
-      planModeHint: '仅对兼容通道（nativeEngine=false）生效。0.16.0 阶段 7 起语义聚类已退役并删除实现，两条取值都按顶层目录分组；模块划分现由原生引擎在 Python 侧完成。',
-      agenticArticles: 'agentic 写作',
-      agenticArticlesHint: '开启后模型在写文章过程中自己调 read_code / list_files 读源码、用 edit_article 增量改写，不再把源码整包内联进 prompt（省 prompt、允许多轮精修、大文件不必再拆观察批）。关闭则走单轮整包装填的旧通道。',
-      agenticMaxSteps: 'agentic 单篇步数上限',
-      agenticMaxStepsHint: '1–100，默认 30。写一篇文章最多允许几轮「读源码 → 改文章」；越大越细致也越慢。',
-      symbolIncremental: '符号级增量',
-      symbolIncrementalHint: '仅对兼容通道（nativeEngine=false）生效。0.16.0 阶段 7 起符号级增量已退役并删除实现，兼容通道统一按 source_files 归属做文件级判定；符号级增量现由原生引擎在 Python 侧完成。',
+      secBigHint: '当某个模块的源码超过普通档单请求预算（110k）时，改用这里的模型在插件内一次写完——不再把超大内容交给会话模型，也就没有「超 256k 就写不了」这回事。默认火山方舟 glm-5.3-flash（512k 上下文）。关掉上方开关即退回会话通道兜底。',
+      bigEnabled: '启用大档模型（超长输入）',
+      bigEnabledHint: '关闭后超过普通预算的请求不再换大上下文模型，直接按普通档处理；大档的模型、预算与并发配置都保留，重新开启无需重填。',
       bigProvider: '大档提供商',
       bigProviderOff: '（未启用大档）',
       bigProviderHint: '来自模型设置里已注册的提供商。默认火山方舟（volces-ark）。留空则关闭大档通道。',
@@ -122,8 +117,6 @@ window.__ModuleLoader__.load({
       loadingLabel: '加载中…',
       conflict: '保存冲突：设置已被他处修改，请重试。',
       invalidConcurrency: '并发上限须为 1–8 的整数。',
-      invalidAgenticSteps: 'agentic 单篇步数上限须为 1–100 的整数。',
-      invalidPlanMode: '模块划分方式只能是「语义聚类」或「顶层目录分组」。',
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stageQueued: '排队中',
@@ -254,6 +247,11 @@ window.__ModuleLoader__.load({
       sessTitle: 'Compile sessions (LLM request log · kept 24h)',
       sessEmpty: 'No session records yet (they appear once compile requests start).',
       sessRunning: 'in flight',
+      sessActiveTitle: 'Jobs in progress',
+      sessActiveNoRequest: 'No request yet (preparing or wrapping up)',
+      sessActiveRequests: '{n} requests sent',
+      sessActiveStage: 'stage',
+      sessActiveWritten: '{n} articles written',
       sessPrompt: 'Input prompt',
       sessOutput: 'Model output',
       sessBack: '← Back to list',
@@ -280,19 +278,9 @@ window.__ModuleLoader__.load({
       batchReasoningEffortGeneric: 'The model catalog declares no efforts for this model; the generic levels below can be set manually. If the model rejects the chosen level, the request automatically falls back to the model default (it will not fail).',
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
       secBig: 'Large-input model',
-      secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Empty provider = the large tier is off and oversized input falls back to the session channel.',
-      secPipeline: 'Compile pipeline (absorbed from FSoft CodeWiki)',
-      secPipelineHint: 'Three capabilities ported from FSoft-AI4Code/CodeWiki (MIT, ACL 2026): symbol-level AST analysis, semantic clustering, and agentic writing. All implemented inside this plugin with Node + tree-sitter WASM — no Python runtime required. Any of them failing degrades gracefully to the old directory grouping / single-pass packing / file-level increment, so compilation never breaks.',
-      planMode: 'Module partitioning',
-      planModeAuto: 'Semantic clustering (retired)',
-      planModeDirs: 'Top-level directory grouping',
-      planModeHint: 'Only applies to the compatibility channel (nativeEngine=false). Since 0.16.0 phase 7 semantic clustering is retired and its implementation removed — both values now group by top-level directory; module partitioning is done by the native engine on the Python side.',
-      agenticArticles: 'Agentic writing',
-      agenticArticlesHint: 'When on, the model reads sources itself via read_code / list_files and edits articles incrementally with edit_article instead of receiving the whole source in one prompt (smaller prompts, multi-round refinement, no observation-batch splitting for big files). Off = the legacy single-pass packing channel.',
-      agenticMaxSteps: 'Agentic steps per article',
-      agenticMaxStepsHint: '1–100, default 30. How many "read source → edit article" rounds one article may take; higher is more thorough but slower.',
-      symbolIncremental: 'Symbol-level increment',
-      symbolIncrementalHint: 'Only applies to the compatibility channel (nativeEngine=false). Since 0.16.0 phase 7 symbol-level increment is retired and its implementation removed — the compatibility channel uses file-level source_files attribution; symbol-level increment now happens inside the native engine on the Python side.',
+      secBigHint: 'When a module\'s sources exceed the normal single-request budget (110k), this model writes it in the plugin in one pass — oversized content never goes to the session model, so there is no "too big past 256k" ceiling. Default: Volcengine Ark glm-5.3-flash (512k context). Turn the switch above off to fall back to the session channel.',
+      bigEnabled: 'Enable large-tier model (very long input)',
+      bigEnabledHint: 'When off, requests above the normal budget no longer switch to a larger-context model and are handled at the normal tier. The large tier model, budget and concurrency settings are kept, so re-enabling needs no re-entry.',
       bigProvider: 'Large-tier provider',
       bigProviderOff: '(large tier off)',
       bigProviderHint: 'A provider registered in model settings. Default Volcengine Ark (volces-ark). Empty disables the large tier.',
@@ -314,8 +302,6 @@ window.__ModuleLoader__.load({
       loadingLabel: 'Loading…',
       conflict: 'Save conflict: settings changed elsewhere, please retry.',
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
-      invalidAgenticSteps: 'Agentic steps per article must be an integer between 1 and 100.',
-      invalidPlanMode: 'Module partitioning must be either semantic clustering or top-level directory grouping.',
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stageQueued: 'Queued',
@@ -697,7 +683,8 @@ window.__ModuleLoader__.load({
 
           // 一个模型的三个字段（提供商 / 模型 / 思考程度），普通档与大档共用同一套渲染与
           // 目录联动：换提供商清空模型与旧档位、目录里的模型下拉、档位来自 model-efforts 端点。
-          // allowEmptyProvider=true 时多给一个「（未启用）」空选项（大档留空 = 关闭）。
+          // allowEmptyProvider=true 时多给一个「（未启用）」空选项：大档关闭时不必填提供商，
+          // 空值只表示「这条任务不走指定 provider」，开关本身是 bigEnabled。
           const modelTrio = ({ pKey, mKey, eKey, state, allowEmptyProvider, providerPlaceholder }) => {
             const currentProvider = String(draft[pKey] ?? '').trim()
             const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === currentProvider) : null
@@ -817,20 +804,9 @@ window.__ModuleLoader__.load({
               setError(t('invalidConcurrency'))
               return
             }
-            // agentic 步数上限：1–100 整数（开关关闭时值仍要合法，避免下次开启拿到脏值）
-            const steps = Number(draft?.agenticMaxSteps)
-            if (Number.isFinite(steps) && (steps < 1 || steps > 100 || !Number.isInteger(steps))) {
-              setError(t('invalidAgenticSteps'))
-              return
-            }
-            // planMode 只接受白名单，防止手填脏值永久存在配置里
-            if (!['auto', 'dirs'].includes(String(draft?.planMode ?? 'auto'))) {
-              setError(t('invalidPlanMode'))
-              return
-            }
             const base = snapshot.value ?? {}
             const ops = []
-            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'planMode', 'agenticArticles', 'agenticMaxSteps', 'symbolIncremental']) {
+            for (const key of ['enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency', 'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit', 'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'sessionTier', 'excludePaths', 'autoUpdate', 'autoUpdateMin', 'bigEnabled']) {
               if (JSON.stringify(draft?.[key]) !== JSON.stringify(base[key])) {
                 ops.push({ op: 'set', path: [key], value: draft?.[key] })
               }
@@ -916,16 +892,6 @@ window.__ModuleLoader__.load({
                   }),
                   el('div', { 'data-dscw-hint': '' }, t('moduleConcurrencyHint')),
                 ),
-                el('label', null, t('bigConcurrency')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    type: 'number', min: 0, max: 8, step: 1,
-                    value: String(draft.bigConcurrency ?? 0),
-                    onChange: (e) => setPath('bigConcurrency', e.target.value === '' ? 0 : Number(e.target.value)),
-                    placeholder: '0',
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('bigConcurrencyHint')),
-                ),
                 el('label', null, t('serialProjects')),
                 el('div', { 'data-dscw-field': '' },
                   el(Switch, {
@@ -979,71 +945,48 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            // 大档模型（超长输入）：超过普通档单请求预算的模块改用它，仍全部在插件内完成
+            // 大档模型（超长输入）：超过普通档单请求预算的模块改用它，仍全部在插件内完成。
+            // bigEnabled 是唯一开关（0.17.5 前靠 bigProvider 留空隐式关闭）：关掉后整组字段
+            // 收起，但取值保留在配置里，重新开启不用重填。
             el('section', { 'data-dscw-field': '' },
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secBig'))),
               el('div', { 'data-dscw-hint': '' }, t('secBigHint')),
               el('div', { 'data-dscw-grid': '' },
-                ...modelTrio({ pKey: 'bigProvider', mKey: 'bigModel', eKey: 'bigReasoningEffort', state: bigEffortsState, allowEmptyProvider: true, providerPlaceholder: 'volces-ark' }),
-                el('label', null, t('bigTokenBudget')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    value: String(draft.bigTokenBudget ?? ''),
-                    onChange: (e) => setPath('bigTokenBudget', e.target.value),
-                    placeholder: '420000',
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('bigTokenBudgetHint')),
-                ),
-              ),
-            ),
-            // 编译流程（吸收自 FSoft CodeWiki 的三档能力：语义聚类 / agentic 写作 / 符号级增量）
-            el('section', { 'data-dscw-field': '' },
-              el('div', { 'data-dscw-head': '' }, el('h4', null, t('secPipeline'))),
-              el('div', { 'data-dscw-hint': '' }, t('secPipelineHint')),
-              el('div', { 'data-dscw-grid': '' },
-                el('label', null, t('planMode')),
-                el('div', { 'data-dscw-field': '' },
-                  el('select', {
-                    'data-dscw-select': '',
-                    value: String(draft.planMode ?? 'auto'),
-                    onChange: (e) => setPath('planMode', e.target.value),
-                  },
-                    el('option', { key: 'auto', value: 'auto' }, t('planModeAuto')),
-                    el('option', { key: 'dirs', value: 'dirs' }, t('planModeDirs')),
-                  ),
-                  el('div', { 'data-dscw-hint': '' }, t('planModeHint')),
-                ),
-                el('label', null, t('agenticArticles')),
+                el('label', null, t('bigEnabled')),
                 el('div', { 'data-dscw-field': '' },
                   el(Switch, {
-                    checked: draft.agenticArticles !== false,
-                    onChange: (v) => setPath('agenticArticles', v),
-                    label: t('agenticArticles'),
+                    checked: draft.bigEnabled !== false,
+                    onChange: (v) => setPath('bigEnabled', v),
+                    label: t('bigEnabled'),
                   }),
-                  el('div', { 'data-dscw-hint': '' }, t('agenticArticlesHint')),
+                  el('div', { 'data-dscw-hint': '' }, t('bigEnabledHint')),
                 ),
-                el('label', null, t('agenticMaxSteps')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Input, {
-                    type: 'number', min: 1, max: 100, step: 1,
-                    disabled: draft.agenticArticles === false,
-                    value: String(draft.agenticMaxSteps ?? 30),
-                    onChange: (e) => setPath('agenticMaxSteps', Math.max(1, Math.min(100, Number(e.target.value) || 30))),
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('agenticMaxStepsHint')),
-                ),
-                el('label', null, t('symbolIncremental')),
-                el('div', { 'data-dscw-field': '' },
-                  el(Switch, {
-                    checked: draft.symbolIncremental !== false,
-                    onChange: (v) => setPath('symbolIncremental', v),
-                    label: t('symbolIncremental'),
-                  }),
-                  el('div', { 'data-dscw-hint': '' }, t('symbolIncrementalHint')),
-                ),
+                ...(draft.bigEnabled !== false
+                  ? [
+                    ...modelTrio({ pKey: 'bigProvider', mKey: 'bigModel', eKey: 'bigReasoningEffort', state: bigEffortsState, allowEmptyProvider: true, providerPlaceholder: 'volces-ark' }),
+                    el('label', null, t('bigTokenBudget')),
+                    el('div', { 'data-dscw-field': '' },
+                      el(Input, {
+                        value: String(draft.bigTokenBudget ?? ''),
+                        onChange: (e) => setPath('bigTokenBudget', e.target.value),
+                        placeholder: '420000',
+                      }),
+                      el('div', { 'data-dscw-hint': '' }, t('bigTokenBudgetHint')),
+                    ),
+                    el('label', null, t('bigConcurrency')),
+                    el('div', { 'data-dscw-field': '' },
+                      el(Input, {
+                        type: 'number', min: 0, max: 8, step: 1,
+                        value: String(draft.bigConcurrency ?? 0),
+                        onChange: (e) => setPath('bigConcurrency', Number(e.target.value) || 0),
+                      }),
+                      el('div', { 'data-dscw-hint': '' }, t('bigConcurrencyHint')),
+                    ),
+                  ]
+                  : []),
               ),
             ),
-                        // 调度与排除
+            // 调度与排除
             el('section', { 'data-dscw-field': '' },
               el('div', { 'data-dscw-head': '' }, el('h4', null, t('secSchedule'))),
               el('div', { 'data-dscw-grid': '' },
@@ -1423,6 +1366,7 @@ window.__ModuleLoader__.load({
           const t = tBound
           const global = !job
           const [list, setList] = React.useState(null)
+          const [activeJobs, setActiveJobs] = React.useState([])
           const [err, setErr] = React.useState(null)
           const [sel, setSel] = React.useState(null) // 选中的请求 { jobId, n }
           const [item, setItem] = React.useState(null)
@@ -1434,7 +1378,7 @@ window.__ModuleLoader__.load({
               inFlight = true
               try {
                 const d = await apiGet(global ? SESSIONS_PATH : `${SESSIONS_PATH}?jobId=${encodeURIComponent(job.id)}`)
-                if (alive) { setList(Array.isArray(d.sessions) ? d.sessions : []); setErr(null) }
+                if (alive) { setList(Array.isArray(d.sessions) ? d.sessions : []); setActiveJobs(Array.isArray(d.active) ? d.active : []); setErr(null) }
               } catch (e) {
                 if (alive) setErr(String(e?.message ?? e))
               } finally {
@@ -1499,9 +1443,32 @@ window.__ModuleLoader__.load({
                 ? el('div', { 'data-dscw-p-empty': '' }, err)
                 : list === null
                   ? el('div', { 'data-dscw-p-empty': '' }, '…')
-                  : !list.length
-                    ? el('div', { 'data-dscw-p-empty': '' }, t('sessEmpty'))
-                    : el('div', { 'data-dscw-p-sesslist': '' },
+                  : el(React.Fragment, null,
+                    // 进行中任务（0.17.5）：会话记录只在发出过 LLM 请求后才存在，
+                    // 正在跑依赖图/聚类/收尾、或本轮无需写文章的任务原本在会话页完全不可见。
+                    activeJobs.length
+                      ? el('div', { 'data-dscw-p-active': '' },
+                        el('div', { 'data-dscw-p-meta': '' }, `${t('sessActiveTitle')} (${activeJobs.length})`),
+                        activeJobs.map((a) => el('div', {
+                          key: `active-${a.jobId}`, 'data-dscw-p-activerow': '', 'data-stage': a.stage,
+                        },
+                          el('span', { 'data-mark': '' }, '▸'),
+                          el('span', { 'data-name': '', title: a.cwd || a.jobId }, global ? jobTag(a.jobId) : (a.cwd || a.jobId)),
+                          el('span', { 'data-sub': '' }, [
+                            `${t('sessActiveStage')} ${a.stage}`,
+                            nativeStageName(a.nativeStage),
+                            a.nativeStage && Number.isFinite(a.nativePercent) ? `${a.nativePercent}%` : null,
+                            a.batchProgress ? `${a.batchProgress.completed}/${a.batchProgress.total}` : null,
+                            a.writtenCount ? t('sessActiveWritten').replace('{n}', a.writtenCount) : null,
+                            global && a.cwd ? String(a.cwd).split(/[\/]/).filter(Boolean).pop() : null,
+                            a.requests > 0 ? t('sessActiveRequests').replace('{n}', a.requests) : t('sessActiveNoRequest'),
+                          ].filter(Boolean).join(' · ')),
+                        )),
+                      )
+                      : null,
+                    !list.length
+                      ? (activeJobs.length ? null : el('div', { 'data-dscw-p-empty': '' }, t('sessEmpty')))
+                      : el('div', { 'data-dscw-p-sesslist': '' },
                       list.map((s) => el('button', {
                         key: `${s.jobId ?? job?.id}#${s.n}`, 'data-dscw-p-sessrow': '', 'data-status': s.status,
                         onClick: () => setSel({ jobId: s.jobId ?? job?.id, n: s.n }),
@@ -1518,6 +1485,7 @@ window.__ModuleLoader__.load({
                           s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : null,
                         ].filter(Boolean).join(' · ')),
                       ))),
+                  ),
           )
         }
 

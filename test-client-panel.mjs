@@ -40,18 +40,26 @@ const JOB = {
 }
 
 // ── 最小 React / 平台桩 ────────────────────────────────────────────────────
+// 每个组件实例持有自己的 hook 槽位：按「组件 + 调用序号」分桶。共用一份数组会让
+// 父组件与子组件互相覆盖 state（表现是会话页拿到别的组件的 state，报
+// `(list ?? []).find is not a function`），那样测出来的结论是假的。
 const makeReact = () => {
-  const state = []
+  const buckets = new Map()
   const cleanups = []
+  let current = null
   let cursor = 0
   const React = {
     Fragment: Symbol('Fragment'),
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
     useState(init) {
       const i = cursor++
-      if (!(i in state)) state[i] = typeof init === 'function' ? init() : init
-      return [state[i], (v) => { state[i] = typeof v === 'function' ? v(state[i]) : v }]
+      const bucket = buckets.get(current) ?? []
+      buckets.set(current, bucket)
+      if (!(i in bucket)) bucket[i] = typeof init === 'function' ? init() : init
+      return [bucket[i], (v) => { bucket[i] = typeof v === 'function' ? v(bucket[i]) : v }]
     },
+    useMemo(fn) { return fn() },
+    useCallback(fn) { return fn },
     useEffect(fn) {
       cursor++
       const cleanup = fn()
@@ -59,12 +67,32 @@ const makeReact = () => {
     },
     useRef(init) {
       const i = cursor++
-      if (!(i in state)) state[i] = { current: init }
-      return state[i]
+      const bucket = buckets.get(current) ?? []
+      buckets.set(current, bucket)
+      if (!(i in bucket)) bucket[i] = { current: init }
+      return bucket[i]
     },
   }
+  // 渲染一个函数组件：切成它自己的槽位桶，返回时恢复父组件的游标
+  const renderComponent = (comp, props) => {
+    const parent = current
+    const parentCursor = cursor
+    current = comp
+    cursor = 0
+    try {
+      return comp(props)
+    } finally {
+      current = parent
+      cursor = parentCursor
+    }
+  }
+  // render 需要能调回 renderComponent：挂在 React 上，避免每个调用点都多传一个参数
+  React.renderComponent = renderComponent
   return { React, reset: () => { cursor = 0 }, cleanups }
 }
+
+// 会话端点的桩数据；用例可改写它来验证「有进行中任务但还没发请求」这类形态
+let SESSIONS_PAYLOAD = { sessions: [], active: [] }
 
 const platform = () => {
   globalThis.document = {
@@ -73,7 +101,12 @@ const platform = () => {
   }
   globalThis.fetch = async (url) => ({
     ok: true,
-    json: async () => (String(url).endsWith('/api/codewiki/jobs') ? { jobs: [JOB] } : {}),
+    json: async () => {
+      const u = String(url)
+      if (u.endsWith('/api/codewiki/jobs')) return { jobs: [JOB] }
+      if (u.includes('/api/codewiki/sessions')) return SESSIONS_PAYLOAD
+      return {}
+    },
   })
 }
 
@@ -93,13 +126,14 @@ const loadPlugin = (react) => {
   return { plugin: registered.factory(require), require }
 }
 
-// 把元素树摊平成 HTML 串；函数组件就地调用，闭包捕获的渲染异常会直接冒出来
+// 把元素树摊平成 HTML 串；函数组件就地调用，闭包捕获的渲染异常会直接冒出来。
+// 组件调用必须走 renderComponent：它是唯一会切换到该组件自己的 hook 槽位桶的地方。
 const render = (node, react) => {
   if (node == null || node === false || node === true) return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
   if (Array.isArray(node)) return node.map((n) => render(n, react)).join('')
   if (node.type === react.Fragment) return render(node.children, react)
-  if (typeof node.type === 'function') return render(node.type(node.props), react)
+  if (typeof node.type === 'function') return render(react.renderComponent(node.type, node.props), react)
   const attrs = Object.entries(node.props ?? {})
     .filter(([k]) => k.startsWith('data-'))
     .map(([k, v]) => ` ${k}="${String(v)}"`)
@@ -145,27 +179,30 @@ const settle = async (Panel, React, reset) => {
   let html = ''
   for (let i = 0; i < 12; i++) {
     reset()
-    html = render(Panel({}), React)
+    html = render(React.renderComponent(Panel, {}), React)
     if (/job-panel-smoke|data-dscw-p-logline/.test(html)) return html
     await new Promise((r) => setTimeout(r, 5))
   }
   return html
 }
 
-// 点「任务」Tab：面板默认停在总览，任务卡片（jobCard / engineLogBlock）只在任务页渲染。
-// 这里直接调用 Tab 按钮的 onClick，等价于点一下，不模拟事件系统。
-const gotoTaskTab = (Panel, React, reset) => {
+// 点某个 Tab：面板默认停在总览，任务卡片（jobCard / engineLogBlock）只在任务页渲染，
+// 会话列表只在会话页渲染。这里直接调用 Tab 按钮的 onClick，等价于点一下，不模拟事件系统。
+const gotoTab = (Panel, React, reset, key = 'tabTasks') => {
   const findTab = (node) => {
     if (node == null || typeof node !== 'object') return null
     if (Array.isArray(node)) return node.map(findTab).find(Boolean) ?? null
     if (node.type === React.Fragment) return findTab(node.children)
-    if (typeof node.type === 'function') return findTab(node.type(node.props))
-    if (node.type === 'button' && String(render(node.children, React)).includes('«tabTasks»')) return node
+    // 只遍历元素节点：函数组件重入会推进 hook 游标，让 onClick 改到错位的 state 槽。
+    // 面板把 Tab 按钮直接放在顶层元素树里，不需要下钻组件。
+    if (node.type === 'button' && String(render(node.children, React)).includes(`«${key}»`)) return node
     return findTab(node.children)
   }
-  reset() // hook 游标从头开始，否则 onClick 只改到错位的 state 槽
-  const tab = findTab(Panel({}))
-  assert.ok(tab, '未找到「任务」Tab 按钮')
+  reset()
+  const tree = React.renderComponent(Panel, {})   // 唯一一次渲染：hook 游标从这里开始
+  reset()
+  const tab = findTab(tree)   // 遍历复用的是这份树，不再重入组件
+  assert.ok(tab, `未找到「${key}」Tab 按钮`)
   tab.props.onClick()
 }
 
@@ -173,7 +210,7 @@ await check('面板：含引擎日志的已完成任务能渲染，不出现 Pan
   const { Panel, React, reset, cleanups } = mountPanel()
   try {
     await settle(Panel, React, reset)
-    gotoTaskTab(Panel, React, reset)
+    gotoTab(Panel, React, reset)
     const html = await settle(Panel, React, reset)
     assert.ok(!/Panel error:/.test(html), `面板渲染抛错：${html.slice(0, 400)}`)
     assert.ok(/data-dscw-p-engine-log/.test(html), '缺少引擎日志块')
@@ -187,7 +224,7 @@ await check('面板：模块级渲染辅助函数都能解析到文案函数（�
   const { Panel, React, reset, cleanups } = mountPanel()
   try {
     await settle(Panel, React, reset)
-    gotoTaskTab(Panel, React, reset)
+    gotoTab(Panel, React, reset)
     const html = await settle(Panel, React, reset)
     assert.ok(/«panelTitle»/.test(html), '基准文案未经过 t()，桩环境有问题')
     // 未翻译的裸键名（如 engineLogLabel）漏进输出，说明该处没调用 t()
@@ -196,6 +233,53 @@ await check('面板：模块级渲染辅助函数都能解析到文案函数（�
       .filter((key) => /^(engineLog|nativeStage|autoCommit|writtenLabel|panelTitle|tabTasks)/.test(key))
     assert.deepEqual(raw, [], `文案键被原样输出，说明该处没调用 t()：${raw.join(', ')}`)
   } finally {
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+await check('会话页：任务正在跑但还没发出请求时，也要列出这个任务（回归「会话页看不到进行中任务」）', async () => {
+  SESSIONS_PAYLOAD = {
+    sessions: [],
+    active: [{
+      jobId: 'job-running-1', cwd: 'C:/repo/running', stage: 'articles',
+      nativeStage: 'cluster', nativePercent: 36, kind: 'stale', auto: false,
+      startedAt: '2026-11-02T00:00:00.000Z', writtenCount: 3, batchProgress: null, requests: 0,
+    }],
+  }
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSessions')
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `会话页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-activerow/.test(html), '没有渲染进行中任务行')
+    assert.ok(/running-1/.test(html), '进行中任务行缺少任务标识（jobTag 去掉 job- 前缀）')
+    assert.ok(!/«sessEmpty»/.test(html), '有进行中任务时仍显示「暂无会话记录」')
+    assert.ok(/«sessActiveNoRequest»/.test(html), '零请求的进行中任务未标注「尚未发出请求」')
+  } finally {
+    SESSIONS_PAYLOAD = { sessions: [], active: [] }
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+await check('会话页：已有请求记录时进行中任务标注请求数', async () => {
+  SESSIONS_PAYLOAD = {
+    sessions: [{ n: 1, jobId: 'job-running-2', name: 'a.md', status: 'running', startedAt: '2026-11-02T00:00:00.000Z' }],
+    active: [{
+      jobId: 'job-running-2', cwd: 'C:/repo/r2', stage: 'articles', nativeStage: 'articles',
+      nativePercent: 40, kind: 'stale', auto: false, startedAt: '2026-11-02T00:00:00.000Z',
+      writtenCount: 5, batchProgress: null, requests: 1,
+    }],
+  }
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSessions')
+    const html = await settle(Panel, React, reset)
+    assert.ok(/data-dscw-p-activerow/.test(html) && /data-dscw-p-sessrow/.test(html), '进行中任务与请求行应同时出现')
+    assert.ok(/«sessActiveRequests»/.test(html), '有请求时应显示「已发 N 个请求」')
+  } finally {
+    SESSIONS_PAYLOAD = { sessions: [], active: [] }
     cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
   }
 })
