@@ -658,6 +658,37 @@ await check('异常分类：中途崩溃时已写文章降 partial 交付，产�
   rmSync(docs, { recursive: true, force: true })
 })
 
+// 上游 1b4af43 起：`_generate_modules_in_order` 在有模块失败时会 raise
+// RuntimeError("Documentation failed for modules: a/b: boom; c: boom")。
+// 这条分支的语义是「计划内文章没写成」，和「进程崩了」不是一回事：
+// 已写的文章必须照样交付，blockers 还要点名缺哪些模块——否则面板只显示
+// 一句笼统的「编译在 articles 阶段中断」，用户不知道该重跑哪一块。
+await check('异常分类：上游模块失败异常要降 partial 并点名失败模块', async () => {
+  const docs = mkdtempSync(join(tmpdir(), 'cw-modfail-'))
+  const outFile = join(docs, 'modfail.json')
+  mkdirSync(join(docs, 'modules'), { recursive: true })
+  writeFileSync(join(docs, 'modules', 'ok.md'), '# ok', 'utf8')
+
+  const probe = [
+    'import json, pathlib, sys',
+    `sys.path.insert(0, ${JSON.stringify(join(HERE, 'lib', 'engine', 'python'))})`,
+    'import entry',
+    'exc = RuntimeError("Documentation failed for modules: parent/kid: boom:kid; other: boom:other")',
+    `res = entry._classify_exception(exc, "req-modfail", ${JSON.stringify(docs)}, ${JSON.stringify(docs)}, "2026-11-02T00:00:00Z", stage="articles")`,
+    `pathlib.Path(${JSON.stringify(outFile)}).write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")`,
+  ].join('\n')
+  const raw = spawnSync(PY, ['-c', probe], { encoding: 'utf8', timeout: 60000 })
+  assert.equal(raw.status, 0, `模块失败探针失败：${raw.stderr}${raw.stdout}`)
+  const res = JSON.parse(readFileSync(outFile, 'utf8'))
+  assert.equal(res.outcome, 'partial', `已写文章时必须是 partial，实际 ${res.outcome}`)
+  assert.equal(res.writtenCount, 1, `已写篇数要如实上报，实际 ${res.writtenCount}`)
+  const kinds = (res.blockers ?? []).map((b) => b.kind)
+  assert.ok(kinds.includes('article-missing'), `blockers 要标成文章缺失，实际 ${JSON.stringify(kinds)}`)
+  const detail = (res.blockers ?? []).map((b) => String(b.detail ?? '')).join(' ')
+  assert.match(detail, /parent\/kid/, `blockers 要点名失败模块，实际 ${detail}`)
+  assert.match(detail, /other/, `blockers 要点名失败模块，实际 ${detail}`)
+  rmSync(docs, { recursive: true, force: true })
+})
 await check('异常分类：一篇没写出来时仍是 failed，不许用空产物冒充 partial', async () => {
   const docs = mkdtempSync(join(tmpdir(), 'cw-salvage-empty-'))
   const outFile = join(docs, 'salvage-empty.json')

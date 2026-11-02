@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.17.6 — 2026-11-02
+
+### 同步上游 15 个提交：写作失败不再静默、模块边界按文件归属
+
+锁定的上游 commit 一直是错的：`lib/engine/manifest.js` 写的是 `03d0a294…`，
+而那个对象在本机 clone 里根本不存在（`git cat-file` 报 `could not get object
+info`），`compareLock()` 等于一直在比对两棵不同的源码树。这次把锁改成实际运行的
+`1b4af43d…`（2026-11-01），并把中间 15 个提交（56 文件 / +3449 −358）一并同步。
+
+三个直接改善质量的问题：
+
+- **写完不落盘现在会被发现**（上游 `doc_guard.py`）。agent 跑完只回一段话、页面没写
+  的情况过去被当成成功，现在会在**同一对话里**续发提醒（最多 2 次），点名要求
+  `str_replace_editor` 用 `working_dir="docs"`、`command="create"` 建页；仍然没写则抛
+  `DocumentationWriteError`。
+- **总览页失败不再毁掉整棵子树**（上游 `overview_support.py`）。子文档摘录直接进
+  prompt，不再要求 overview 模型自己读文件；失败时 `preserve_incomplete_overviews`
+  把旧页恢复回去，避免半截总览覆盖可用内容。
+- **有模块写失败就显式报错**，不再 `logger.error` 之后 continue 假装成功。
+
+模块划分也按文件归属收敛（上游 `module_scope.py`）：模块大小按文件内全部索引组件
+算而不是只看入口点、一个文件只能有一个 leaf owner、过小模块并入邻近兄弟、委派前先
+校验 `get_module_token_count`。叶子模块阈值 4000 → 8000，新增
+`min_token_per_module = 1000`（`Config.__post_init__` 校验）。另外分析器补了 C/C++
+指针返回值、C# 构造函数、C 宏 `(void)`、Dart/Java/Go 的解析修复。
+
+### 失败语义：模块写失败降 partial，不丢已写内容
+
+上游让「有模块失败就 raise」，而我们的 `_classify_exception` 只按异常类型分类，
+`RuntimeError` 会落进笼统的 `engine-crashed`。这有两个问题：已写文章虽然会被
+`_salvage` 兜成 partial（这条路径 0.17.0 就有），但 blockers 只说「编译中断」，
+用户不知道该重跑哪一块。
+
+现在识别 `RuntimeError` 且消息以 `Documentation failed for modules:` 开头的形态，
+拆出失败模块清单，blockers 逐条给 `article-missing` 并点名模块路径。真正的崩溃/
+模型失败仍走原来的 `_salvage` 路径。
+
+### 并行补丁重导
+
+上游在 `_generate_modules_in_order` 里加了 `failures` 与最终的 raise，与我们的
+「按拓扑层并行」正面相撞。用 `git apply --3way` 解两处冲突：保留上游的
+`failures = []`，保留我们的子树合并逻辑，并把 `asyncio.gather` 结果里的 `err`
+**追加进 `failures`** —— 否则并行化会把上游新增的失败判据悄悄吃掉。
+`patches/README.md` 记了这两步的收口理由与新的应用方式（`--3way` 必需）。
+
+### 验证
+
+全新 venv 上实测：`doc_guard` / `overview_support` / `module_scope` 均可导入，
+`DocumentationGenerator._generate_modules_in_order` 同时含 `asyncio.gather` 与
+`Documentation failed for modules`，叶子阈值 8000、最小模块 1000。
+`test-upstream-parallel.mjs` 8 项通过（新增「失败模块进异常消息」断言，并改为在
+外层捕获上游的 raise）；`test-engine-python-entry.mjs` 22 项通过（新增「上游模块
+失败异常要降 partial 并点名失败模块」）；`test-fsoft-runtime.mjs` 6 项通过，证明
+增量 Step 5 的锚点在升级后仍然命中。其余 33 个测试文件全绿。
+
 ## 0.17.5 — 2026-11-02
 
 ### 会话页看不见「正在进行的任务」

@@ -90,7 +90,7 @@
 
 | 环节 | 本插件负责 | 上游负责 |
 |------|-----------|---------|
-| 环境 | `doctor` 探针：python 版本 + `codewiki` 可导入 + `pip check` 闭合；指纹（含上游锁 commit）落 `.codewiki/engine-lock.json`，drift 直接 `engine-deps` 失败（**不自动 pip install**） | 版本自报（真实验收用 `codewiki.__version__ = 2.0.0`，上游锁 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca` 的源码树） |
+| 环境 | `doctor` 探针：python 版本 + `codewiki` 可导入 + `pip check` 闭合；指纹（含上游锁 commit）落 `.codewiki/engine-lock.json`，drift 直接 `engine-deps` 失败（**不自动 pip install**） | 版本自报（真实验收用 `codewiki.__version__ = 2.0.0`，上游锁 commit `1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d` 的源码树） |
 | 源码面 | 排除清单交给上游 `RepoAnalyzer`：wiki 产物（`.codewiki`/`CodeWiki.md`）+ **孤立 gitlink**（0.16.4 起）。后者是被提交进索引（mode `160000`）却没有 `.gitmodules` 登记的嵌套仓库：它 tracked，所以 `use_gitignore=True` 拦不住；又永远 `checkout` 不出内容。实测一个 18MB 探针克隆因此被整个当源码分析，引擎撞 45 分钟超时被强杀、零产出。正规 submodule 不排除 | 按 `agent_instructions.exclude_patterns` 建依赖树 |
 | 模型 | `lib/engine/llm-bridge.js` 在 `127.0.0.1` 上起一个 OpenAI 兼容端点，把宿主的 `ctx.llm.stream` 转成上游要的 `/v1/chat/completions`；上游只拿到 loopback URL + 占位 key | 用它自己的 prompt 与工具循环调模型 |
 | 质量 | `lib/engine/quality-gate.js` 逐篇体检（source_files 存在性、空证据、死链、frontmatter）+ 基线判定；终态四态 `done`/`partial`/`failed`/`cancelled` | 产出 docs 目录（`module_tree.json` / `metadata.json` / `*.md` / `update_record.json`） |

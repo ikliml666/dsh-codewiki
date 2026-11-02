@@ -99,6 +99,9 @@ async def drive(tree, concurrency, backend):
     gen.backend = backend
     gen.commit_id = 'test'
 
+    global LAST_WORK
+    LAST_WORK = work
+
     async def fake_parent(module_path, working_dir, components=None):
         key = '/'.join(module_path) or 'ROOT'
         backend.events.append(['start', 'PARENT:' + key, time.time()])
@@ -131,6 +134,13 @@ COMPLEX = {
 }
 
 
+LAST_WORK = None
+
+
+def work_dir_after_failure():
+    return LAST_WORK if LAST_WORK is not None else Path(OUT)
+
+
 async def main():
     out = {}
 
@@ -155,9 +165,16 @@ async def main():
         'b_sub': 'complex_b_sub' in final.get('complex_b', {}).get('children', {}),
     }
 
+    # 上游 1b4af43 起：有模块失败就 raise（过去只 logger.error 后继续，
+    # 终态看起来是成功）。探针要同时拿到「抛了什么」与「已写的页面还在不在」。
     b = FakeBackend(delay=0.05, fail=('beta',))
-    _, written = await drive(FLAT, 3, b)
-    out['after_failure'] = sorted(written)
+    failure_error = None
+    try:
+        _, written = await drive(FLAT, 3, b)
+    except RuntimeError as exc:
+        failure_error = str(exc)
+        written = [p.name for p in work_dir_after_failure().glob('*.md')]
+    out['after_failure'] = {'written': sorted(written), 'error': failure_error}
 
     # 空模块树 = 仓库小到能整个塞进上下文，上游必须走 else 分支，
     # 把整仓当一个模块来写（否则一篇文章都不会产出）。
@@ -215,10 +232,15 @@ await check('空模块树时必须走 else 分支写整仓总览（不能被并�
     `空模块树时必须产出 overview.md，实际只写了 ${JSON.stringify(got.empty_tree.written)}`)
 })
 
-await check('单个模块失败不拖垮同批其它模块', () => {
-  assert.ok(got.after_failure.includes('alpha.md'), 'alpha 应正常产出')
-  assert.ok(got.after_failure.includes('gamma.md'), 'gamma 应正常产出')
-  assert.ok(!got.after_failure.includes('beta.md'), 'beta 失败不该有产物')
+await check('单个模块失败：已写页面保留，失败模块进异常消息', () => {
+  assert.ok(got.after_failure.written.includes('alpha.md'), 'alpha 应正常产出')
+  assert.ok(got.after_failure.written.includes('gamma.md'), 'gamma 应正常产出')
+  assert.ok(!got.after_failure.written.includes('beta.md'), 'beta 失败不该有产物')
+  // 上游 1b4af43 起有模块失败就 raise；并行补丁必须把 gather 里的 err 也
+  // 记进 failures，否则并行化会把这条判据悄悄吃掉。
+  assert.match(String(got.after_failure.error), /Documentation failed for modules/,
+    `应抛出上游的失败异常，实际 ${got.after_failure.error}`)
+  assert.match(String(got.after_failure.error), /beta/, '异常消息应点名失败模块')
 })
 
 // 并行度必须有自己的设置项，默认 1。

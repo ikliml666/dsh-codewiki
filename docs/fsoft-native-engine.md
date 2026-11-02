@@ -251,7 +251,8 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
 
 **这次不是探针，是生产链路**：`codewiki_generate` 工具 → JobService →
 `lib/engine/native-run.js`，用真实 venv（Python 3.12.10、`codewiki 2.0.0`、
-`pip check` 零破损、源码锁上游 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`）
+`pip check` 零破损、源码锁上游 commit `03d0a294…`，该 commit 在 0.17.6 升级时已被
+`1b4af43d…` 取代，此处保留的是**当时**的现场）
 与真实 `workbuddy/glm-5.3`（经 `lib/engine/llm-bridge.js` 转发真凭证）。fixture 是
 `tools/fsoft-engine/fixtures/中文 空格 fixture` 的临时 git 副本（路径含中文与空格）。
 
@@ -327,9 +328,14 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
 ## 上游同步
 
 上游仓库 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)，
-**锁定 commit `03d0a294ad58f3c878bd8aeb0ef5e95a2ff8c3ca`**（2026-10-22T13:58:28+07:00，
-`Merge pull request #142 from FSoft-AI4Code/feat/zig-vue-autotools`），该源码树自报
-`codewiki.__version__ = 2.0.0`。
+**锁定 commit `1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d`**（2026-11-01，
+`update tree-sitter version`），该源码树自报 `codewiki.__version__ = 2.0.0`。
+
+0.17.6 之前锁的 `03d0a294…`（2026-10-22，PR #142）是**错锁**：那个对象在本机
+clone 里根本不存在（`git cat-file` 报 `could not get object info`），
+`compareLock()` 因此一直在比对两个不同的源码树。0.17.6 把锁改成实际运行的
+commit，并顺带同步了上游 15 个提交（`364b67a` → `1b4af43`，
+56 文件 / +3449 −358）。
 
 **这个 commit 是机器可读的锁定，不只是一行文档**：`lib/engine/manifest.js` 导出
 `UPSTREAM_COMMIT` 常量，`probeEnvironment()` 把它带进环境 facts，`fingerprintOf()`

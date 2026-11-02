@@ -1200,6 +1200,26 @@ def _classify_exception(exc, request_id, docs_dir, repo_path, started, stage="ar
         result["failedCount"] = max(1, len(missing))
         return result
 
+    # 上游 1b4af43 起：`_generate_modules_in_order` 在**有模块失败时**抛
+    # `RuntimeError("Documentation failed for modules: <path>: <err>; ...")`。
+    # 过去它只 logger.error 后 continue，终态看起来是成功——上游把静默失败改成显式
+    # 失败是好事，但语义上它仍然是「计划内文章没写成」，不是「进程崩了」：
+    # 已写的页面照样要交付（partial），blockers 还要点名缺哪些模块，面板才知道该重跑谁。
+    if name == "RuntimeError" and text.startswith("Documentation failed for modules:"):
+        failed_modules = [
+            part.strip().split(": ", 1)[0]
+            for part in text.split(":", 1)[1].strip().split("; ")
+            if part.strip()
+        ]
+        result = _done_result(request_id, docs_dir, repo_path, started, written=_count_docs(docs_dir), stage=stage)
+        result["outcome"] = "partial"
+        result["blockers"] = [
+            {"kind": "article-missing", "detail": f"模块写作失败：{m}", "target": f"{m}.md"}
+            for m in failed_modules
+        ] or [{"kind": "article-failed", "detail": text}]
+        result["failedCount"] = max(1, len(failed_modules))
+        return result
+
     # 模型/上游失败：APIError 及其子类
     if name.endswith("APIError") or name in ("APIError", "ConfigurationError"):
         return _salvage(request_id, docs_dir, repo_path, started, stage, "engine-model", text)

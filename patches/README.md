@@ -7,11 +7,12 @@ diff，让它们可追踪、可复现。
 
 ## upstream-module-parallel.patch
 
-- **基准 commit**：`364b67a166bc113f69a50382cb277c55e3f79cee`
-  （本机 `.probe-fsoft/src` 的 HEAD；**注意它与 `lib/engine/manifest.js` 的
-  `UPSTREAM_COMMIT`（`03d0a294…`）并不相同** —— 本地 clone 是浅克隆，比锁的
-  commit 新两个 PR。打补丁前先 `git -C .probe-fsoft/src log -1` 核对 HEAD，
-  不一致就按下面的「升级上游」重新导出，别硬套。）
+- **基准 commit**：`1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d`（2026-11-01，
+  上游 `origin/main` 的「update tree-sitter version」）。0.17.6 起它与
+  `lib/engine/manifest.js` 的 `UPSTREAM_COMMIT` 是**同一个 commit**：此前锁写的
+  `03d0a294…` 在本机 clone 里根本不存在，属于「锁了但锁错」，已废止。
+  打补丁前先 `git -C .probe-fsoft/src log -1` 核对 HEAD，不一致就按下面的
+  「升级上游」重新导出，别硬套。
 - **引入版本**：插件 0.16.14
 - **涉及文件**：
   - `codewiki/src/be/documentation_generator.py` — 模块循环改为按拓扑层并行
@@ -30,9 +31,18 @@ diff，让它们可追踪、可复现。
 
 ```bash
 cd .probe-fsoft/src
-git checkout 364b67a166bc113f69a50382cb277c55e3f79cee   # 或其它基准
-git apply ../../patches/upstream-module-parallel.patch
+git checkout 1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d   # 或其它基准
+git apply --3way ../../patches/upstream-module-parallel.patch
 ```
+
+`--3way` 是必需的：上游 `documentation_generator.py` 在本补丁覆盖的区域里
+持续演进（0.17.6 升级时它新增了 `failures` 列表与「有模块失败就 raise」），
+纯 `git apply` 会整块拒绝。三方合并的冲突只有两处，按下面收口：
+
+- 保留上游新增的 `failures = []`，删掉本补丁不再需要的 `processed_modules`；
+- 保留本补丁的「只取分支子树合并回主树」逻辑，并把 `asyncio.gather` 结果里的
+  `err` 追加成 `failures.append(f"{path}: {err}")` —— 并行分支的失败必须进上游
+  的失败清单，否则并行化会把上游「模块失败即报错」的判据悄悄吃掉。
 
 ### 升级上游时
 
