@@ -134,7 +134,7 @@ flowchart TB
 | `applyTaskResult(task, content, notes)` | 统一写盘点：先过契约闸门，再 `fixAnchors`，最后落盘 |
 | `estimateTokens(text)` | 粗算 token（CJK ≈ 1，其余 ≈ 3.5 字符/token） |
 | `collectSources(cwd, files, budget)` | 按 token 预算整文件内联源码（不做半文件截断） |
-| `prepareArticleTasks(tasks, {...})` | 装填决策：普通档 / 大档 / 观察批→合成 / 会话通道兜底 |
+| `collectSources(cwd, files, budget)` | 按 token 预算整文件内联源码（不做半文件截断） |
 
 ### 5. 编排服务（job service）
 

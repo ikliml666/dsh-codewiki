@@ -6,8 +6,8 @@
 
 | 文件 | 职责 |
 |------|------|
-| `lib/agentic.js::edit` | 模型驱动的文章编辑循环 —— 模型自主调用 `read_code` / `edit_article` 等工具，在步数上限内增量完成单篇文章撰写 |
-| `lib/articles-agentic.js::runPool` / `worker` | 文章批量并发执行池 —— 用多 worker 游标推进一批 agentic 写作任务，按默认档/大档分池独立限流 |
+| `lib/agentic.js::runAgenticArticle` | 模型驱动的文章编辑循环 —— 模型自主调用 `read_code` / `edit_article` 等工具，在步数上限内增量完成单篇文章撰写 |
+| `lib/articles-agentic.js::runAgenticArticles` | 文章批量并发执行池 —— 内部 `runPool` / `worker` 用多 worker 游标推进一批 agentic 写作任务，按默认档/大档分池独立限流 |
 
 它与 [agentic_support_governance](agentic_support_governance.md)（文章契约校验、增量更新记录等「判定与治理」能力）共同构成 agentic 支持子系统的全貌：**governance 决定「写成什么样才算合格」，tooling 负责「把它实际跑出来」**。
 
@@ -30,8 +30,8 @@ flowchart TB
     end
 
     subgraph TOOLING["agentic_support_tooling（本模块）"]
-        RUNPOOL["articles-agentic.js<br/>runPool / worker 并发池"]
-        EDIT["agentic.js<br/>edit 单篇工具循环"]
+        RUNPOOL["articles-agentic.js<br/>runAgenticArticles 并发池"]
+        EDIT["agentic.js<br/>runAgenticArticle 单篇工具循环"]
     end
 
     subgraph GOVERNANCE["agentic_support_governance（判定层）"]
@@ -62,23 +62,23 @@ flowchart TB
 
 ### 1. `lib/articles-agentic.js` —— 并发执行池
 
-`runPool(pool)` 与 `worker` 负责把一批 agentic 写作任务调度到多个并发槽位上执行。其设计要点与 [core_entry](../core_entry.md) 中 `runPool` 的实现同源（FSoft CodeWiki 批处理通道）：
+`runAgenticArticles(tasks, opts)` 内部的 `runPool(pool)` 与 `worker` 负责把一批 agentic 写作任务调度到多个并发槽位上执行。其设计要点与 [core_entry](../core_entry.md) 中 `runRealtimeTasks` 的实现同源（FSoft CodeWiki 批处理通道）：
 
 ```mermaid
 flowchart LR
     subgraph POOL["runPool(pool)"]
         CURSOR["游标 cursor++<br/>原子领取任务"]
         subgraph W1["worker #1"]
-            T1["任务 t1"] --> C1["llmChat(prompt=t.batchPrompt)"]
-            C1 --> R1["applyTaskResult 落库 results"]
+            T1["任务 t1"] --> C1["runOneArticle(t1)<br/>streamFn 驱动 edit 循环"]
+            C1 --> R1["results.set(customId) 落库"]
         end
         subgraph W2["worker #2"]
-            T2["任务 t2"] --> C2["llmChat(prompt=t.batchPrompt)"]
-            C2 --> R2["results 落库"]
+            T2["任务 t2"] --> C2["runOneArticle(t2)"]
+            C2 --> R2["results.set 落库"]
         end
         subgraph WN["worker #N（pool.limit）"]
-            TN["任务 tN"] --> CN["llmChat"]
-            CN --> RN["results 落库"]
+            TN["任务 tN"] --> CN["runOneArticle"]
+            CN --> RN["results.set 落库"]
         end
     end
     SIGNAL["signal.aborted?"] --> W1
@@ -93,15 +93,15 @@ flowchart LR
 - **失败隔离**：单个任务抛错只记入 `notes` 并把结果置为 `{ ok: false, stopReason: 'error' }`，不中断整池。
 - **大档分流**：任务自带 `provider` + `model`（超大模块的「大档」标记）时，`reasoningEffort` 完全以任务为准，不回落普通档配置 —— 避免普通档的 effort（如 `off`）不被大档模型支持。
 
-### 2. `lib/agentic.js` —— 单篇编辑循环 `edit`
+### 2. `lib/agentic.js` —— 单篇编辑循环 `runAgenticArticle`
 
-`edit` 是吸收自 FSoft CodeWiki `module agent` 的核心工具循环：
+`runAgenticArticle` 是吸收自 FSoft CodeWiki `module agent` 的核心工具循环：
 
 ```mermaid
 sequenceDiagram
     participant Pool as runPool/worker
-    participant Edit as edit(job, task)
-    participant LLM as llmChat
+    participant Edit as runAgenticArticle(opts)
+    participant LLM as streamFn（llm 通道）
     participant FS as 文件系统
     participant Gate as article-contract 校验
 
@@ -116,9 +116,9 @@ sequenceDiagram
             Edit->>FS: 增量写入 task.articlePath
             FS-->>Edit: 写入确认
         end
-        Edit->>Gate: 每步产出校验（可选契约检查）
+        Edit->>Gate: 每步产出后校验（可选契约检查）
     end
-    Edit-->>Pool: 返回 { content, outputTokens }
+    Edit-->>Pool: 返回 { article, steps, usedTools, stopReason }
     Pool->>Pool: results.set(task.customId, ...)
 ```
 
@@ -136,8 +136,8 @@ tooling 层的行为由 [cordis.patch.yml](../cordis.patch.yml) 中声明的 `co
 |--------|--------|--------|------|
 | ~~`agenticArticles`~~ | ~~`true`~~ | ~~tooling 总开关~~ | 已移除：文章阶段有任务即走 agentic 通道，不再有开关 |
 | ~~`agenticMaxSteps`~~ | ~~`30`~~ | ~~`edit`~~ | 已移除：单篇步数上限固定为内置常量 `DEFAULT_MAX_STEPS`（30 步），不再可配 |
-| `batchProvider` / `batchModel` | workbuddy / hy3 | `runPool` 默认档 | agentic 通道使用的默认模型 |
-| `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget` / `bigEnabled` | 空 / `true` | `runPool` 大档池 | 超大模块（源文本量超限）切换的大上下文模型；`bigEnabled=false` 或大档模型留空时 `markBigAgenticTasks` 原样返回任务 |
+| `batchProvider` / `batchModel` | volces-ark / glm-5.3-flash | `runPool` 默认档 | agentic 通道使用的默认模型 |
+| `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget` / `bigEnabled` | volces-ark / glm-5.3-flash / 空 / 420000 / `true` | `runPool` 大档池 | 超大模块（源文本量超限）切换的大上下文模型；`bigEnabled=false` 或大档模型留空时 `markBigAgenticTasks` 原样返回任务 |
 | `maxConcurrency` / `bigConcurrency` | 2 / 跟随默认档 | `runPool` | 默认档与大档各自独立限流、同时推进 |
 
 ---
@@ -150,8 +150,8 @@ tooling 层的行为由 [cordis.patch.yml](../cordis.patch.yml) 中声明的 `co
 stateDiagram-v2
     [*] --> 任务组装: tickArticles 构建 tasks
     任务组装 --> 大档标记: markBigAgenticTasks
-    大档标记 --> 在池执行: startAgenticRun + runPool
-    在池执行 --> 单步循环: edit（≤ DEFAULT_MAX_STEPS=30 步）
+    大档标记 --> 在池执行: startAgenticRun + runAgenticArticles
+    在池执行 --> 单步循环: runAgenticArticle（≤ DEFAULT_MAX_STEPS=30 步）
     单步循环 --> 成功落账: results.set(ok=true)
     单步循环 --> 单篇失败: 异常/步数耗尽/契约阻塞
     成功落账 --> 推进阶段: 全部收割后 setStage(crosscut/review)
@@ -175,8 +175,8 @@ stateDiagram-v2
 | 协作方 | 关系 | 说明 |
 |--------|------|------|
 | [agentic_support](../agentic_support.md) | 父模块 | tooling 与 governance 的顶层容器 |
-| [agentic_support_governance](agentic_support_governance.md) | 平级子模块 | `edit` 每步产出后调用 `hasBlockingIssue` / `issueSummary` 做契约校验；收尾时 `loadUpdateRecord` / `isTerminalStage` 决定基线是否推进 |
-| [core_entry](../core_entry.md) | 上游编排 | `tickArticles` 是本模块的直接调用方；`isAgentic` 判定任务是否走本通道；`runPool` / `worker` 的批处理语义同源 |
+| [agentic_support_governance](agentic_support_governance.md) | 平级子模块 | `runAgenticArticle` 每步产出后调用 `hasBlockingIssue` / `issueSummary` 做契约校验；收尾时 `loadUpdateRecord` / `isTerminalStage` 决定基线是否推进 |
+| [core_entry](../core_entry.md) | 上游编排 | `tickArticles` 是本模块的直接调用方；任务是否走本通道由其 `agentic` 标记判定；`runPool` / `worker` 的批处理语义同源 |
 | [engine_core](../engine_core.md) | 替代通道 | 0.16.0 起 `nativeEngine: true` 为默认通道，直接驱动上游 FSoft Python 引擎；本模块的 Node 侧 agentic 通道作为兼容通道（`nativeEngine: false`）保留 |
 | [client_ui](../client_ui.md) | 展示消费 | 面板通过 `jobSummary` / `progressView` 展示 `batchProgress`、`stageTimings`、`tps` 等本模块运行时指标 |
 | [Build___Dependency_Configuration_Layer](../Build___Dependency_Configuration_Layer.md) | 构建配置 | 配置命名空间与默认值定义见 [cordis.patch.yml](../cordis.patch.yml) 与 [package_manifest](../Build___Dependency_Configuration_Layer/package_manifest.md) |
@@ -185,6 +185,6 @@ stateDiagram-v2
 
 ## 参考源码
 
-- `lib/agentic.js` —— `edit`（单篇 agentic 工具循环）
-- `lib/articles-agentic.js` —— `runPool`、`worker`（并发执行池）
-- `index.js` —— `tickArticles`（调用方与容错编排）、`runPool` / `worker`（同源批处理语义）、`isAgentic`（通道判定）
+- `lib/agentic.js` —— `runAgenticArticle`（单篇 agentic 工具循环）
+- `lib/articles-agentic.js` —— `runAgenticArticles`、`runOneArticle`（并发执行池与单篇落盘）
+- `index.js` —— `tickArticles`（调用方与容错编排）、`runRealtimeTasks`（同源批处理语义）、任务的 `agentic` 通道标记判定

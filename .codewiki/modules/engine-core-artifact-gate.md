@@ -282,5 +282,5 @@ sequenceDiagram
 - 上游（产物执行与状态）：[engine_core_compilation](engine_core_compilation.md)——`native-run.js` 负责把工作区合成临时 commit、`workspace-snapshot.js` 负责快照、`manifest.js` 的 `doctor`/`writeLock` 负责清单与锁。本模块的 `consumedInputCommit` 参数正是对接「本轮合成的工作区快照 commit」：产物对它即为「对得上」，不再误报 `commit-mismatch`。
 - 契约与终态记账：[engine_core_contract](engine_core_contract.md)——`contract.js` 的 `BLOCKER_KINDS`、`validateEngineResult`、`normalizeBlocker` 是本模块 `toContractBlockers` / `toApplyBlockers` 的出口词表；`client.js` 的 `runEngine` 是上游引擎入口。
 - 引擎全貌：[engine_core](../engine_core.md) 描述本模块在整个引擎中的位置。
-- 上层调用（接线处）：`index.js` 的 `tickCompose` / `tickCrosscut` / `tickReview` 等阶段函数会注入自己的 `runCw` 与 `autoCommitWiki`（分支合并式），替换本模块的默认实现——见 [core_entry](../core_entry.md)。
+- 上层调用（接线处）：`index.js` 的 JobService 阶段状态机（tick 驱动）会注入自己的 `runCw` 与 `autoCommitWiki`（分支合并式），替换本模块的默认实现——见 [core_entry](../core_entry.md)。
 - 底层 wiki 解析：vendor/codewiki 的 `frontmatter.rs` 用 serde_yaml 解析 frontmatter，是本模块 `yamlScalar` 必须保证安全序列化的直接原因——见 [codewiki_vendor](../codewiki_vendor.md)。

@@ -22,8 +22,8 @@ fsoft_page: agentic_support.md
 
 | 文件 | 职责 | 主要导出 |
 | --- | --- | --- |
-| `lib/agentic.js` | 纯逻辑工具循环本体：四个工具的定义与实现、步数循环、参数解析、开场提示词 | `edit`（`makeArticleEditor`）、`runAgenticArticle`、`TOOL_SCHEMAS`、`DEFAULT_MAX_STEPS` |
-| `lib/articles-agentic.js` | 宿主侧执行器：把「模块任务清单」跑成文章，含并发池、子模块递归派发、写集闸门、大档选档 | `runPool`、`worker`（`runAgenticArticles` 内部）、`runOneArticle` |
+| `lib/agentic.js` | 纯逻辑工具循环本体：四个工具的定义与实现、步数循环、参数解析、开场提示词 | `runAgenticArticle`、`TOOL_SCHEMAS`、`DEFAULT_MAX_STEPS`、`buildOpeningPrompt` |
+| `lib/articles-agentic.js` | 宿主侧执行器：把「模块任务清单」跑成文章，含并发池、子模块递归派发、写集闸门、大档选档 | `runAgenticArticles`、`runOneArticle`、`markBigAgenticTasks`、`sourceTokensOf` |
 | `lib/article-contract.js` | 文章契约闸门（纯函数）：判一篇 wiki 文章是否满足最低结构要求，区分 error / warning 两级 | `hasBlockingIssue`、`issueSummary`、`inspectArticle` |
 | `lib/update-record.js` | 更新记录：把一次编译的 ChangeSet / 计划 / 逐篇结果收成版本化 JSON，并判定终态 | `isTerminalStage`、`loadUpdateRecord`、`judgeOutcome` |
 | `lib/job-store.js` | 任务持久化与跨实例归属：jobs.json 的原子写盘、schema 化序列化（拒绝函数值与疑似凭证字段）、按仓库路径归一的去重键、job 所有权分类（本实例 / 存活他例 / 孤儿 / 无执行器空闲 / 旧格式残留） | `normKey`、`classifyOwnership`、`save` |
@@ -36,7 +36,7 @@ fsoft_page: agentic_support.md
 ```mermaid
 flowchart TD
     subgraph 调度层["调度层（core_entry）"]
-        INDEX["index.js<br/>tickArticles / runPool / worker<br/>区分 agentic 任务与单轮任务"]
+        INDEX["index.js<br/>tickArticles / runRealtimeTasks<br/>区分 agentic 任务与单轮任务"]
     end
 
     subgraph 执行器["执行器层"]
@@ -133,6 +133,6 @@ flowchart LR
 
 ## 与其他模块的关系
 
-- [core_entry.md](core_entry.md)：插件入口。`index.js` 的 `isAgentic` / `runPool` / `worker` / `tickArticles` 决定哪些任务走本模块的 agentic 通道、哪些走单轮通道，并在收尾处调用 `update-record.js` 判定终态；其 tick 节拍与跨实例锁直接消费本模块 `lib/job-store.js` 的 `save`（落盘）、`classifyOwnership`（孤儿接管 / 闸门占位判定）与 `normKey`（同仓库跨写法去重）。
+- [core_entry.md](core_entry.md)：插件入口。`index.js` 的 `runRealtimeTasks` / `tickArticles` 决定哪些任务走本模块的 agentic 通道、哪些走单轮通道（任务是否走 agentic 通道由其自身的 `agentic` 标记判定），并在收尾处调用 `update-record.js` 判定终态；其 tick 节拍与跨实例锁直接消费本模块 `lib/job-store.js` 的 `save`（落盘）、`classifyOwnership`（孤儿接管 / 闸门占位判定）与 `normKey`（同仓库跨写法去重）。
 - [engine_core.md](engine_core.md)：原生引擎通道。其 `quality-gate.js::gateNativeOutput` 内部也调用 `article-contract.js` 的契约检查（`checkRendered`）来验证上游 Python 引擎产物——两套通道共享同一个契约判据。
 - [client_ui.md](client_ui.md)：面板展示。`describeOutcome` 产出的 done/partial/failed 三态文案由面板呈现给用户。

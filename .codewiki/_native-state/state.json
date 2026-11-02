@@ -3,53 +3,45 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
-    "headCommit": "754d78c193ac9feb69dbee106573bb8c0c7b9b78"
+    "headCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "89a96aa5e7f585ba16d40ecbe49e4898dc4681c1",
-    "headCommit": "754d78c193ac9feb69dbee106573bb8c0c7b9b78",
-    "committed": [],
-    "staged": [],
-    "unstaged": [
+    "headCommit": "b8252f8a31129feccfce4cc41748e844b54a95b4",
+    "committed": [
+      "CHANGELOG.md",
       "README.md",
       "client.js",
       "index.js",
       "lib/agentic.js",
+      "package.json",
+      "test-agentic-fallback.mjs",
+      "test-batch.mjs",
       "test-client-panel.mjs",
+      "test-config.mjs",
       "test-engine-native-incremental.mjs",
       "test-engine-native-job.mjs",
       "test-orchestration.mjs",
       "test-sessions.mjs"
     ],
-    "untracked": [
-      "test-config.mjs"
-    ],
+    "staged": [],
+    "unstaged": [],
+    "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
   "unconsumed": [
-    "README.md",
-    "client.js",
-    "index.js",
-    "lib/agentic.js",
-    "lib/engine/python/entry.py",
-    "test-client-panel.mjs",
-    "test-config.mjs",
-    "test-engine-native-incremental.mjs",
-    "test-engine-native-job.mjs",
-    "test-orchestration.mjs",
-    "test-sessions.mjs"
+    "lib/engine/python/entry.py"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "工作区未提交改动已合成临时 commit d9ef9ff41d6e（10 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz0o1ap-8-native（25 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvz26th0-9-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T08:53:59.896Z"
+  "updatedAt": "2026-11-02T09:58:51.443Z"
 }

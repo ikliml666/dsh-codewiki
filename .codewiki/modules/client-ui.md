@@ -11,7 +11,7 @@ fsoft_page: client_ui.md
 
 ## 简介
 
-`client_ui` 是插件 `@local/dsh-codewiki`（见 [package_manifest](Build___Dependency_Configuration_Layer/package_manifest.md)）的**浏览器端模块**，全部实现集中在单个文件 `client.js`（v0.4.1）。它在 DeepSeek Harness（dsh）宿主的 web 界面上挂载两个入口：
+`client_ui` 是插件 `@local/dsh-codewiki`（见 [package_manifest](Build___Dependency_Configuration_Layer/package_manifest.md)）的**浏览器端模块**，全部实现集中在单个文件 `client.js`。它在 DeepSeek Harness（dsh）宿主的 web 界面上挂载两个入口：
 
 1. **插件设置页** —— 注入宿主 `plugins.item` 槽位（`id = codewiki`，与 profile patch 条目一致），提供完整的编译运行设置表单；
 2. **侧边栏面板** —— 注入 `main` 槽位（key = `codewiki`）渲染任务面板，同时在 `sidebar.panellist` 注册面板入口（`PanelIcon`），用于实时观察编译任务进度（焦点任务行标注所属仓库目录）、取消任务、查看仓库 wiki 总览、打开 LLM 请求会话视图（全局视图以嵌入形态留在标签页内，0.17.5 起同时在视图顶部列出尚未发出请求的进行中任务）。
