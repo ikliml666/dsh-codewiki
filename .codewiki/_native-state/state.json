@@ -3,13 +3,15 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "7584cf6c213546705ba0632be473c7968da1a48d",
-    "headCommit": "4d58af0acc614eea6ccccfd61838bc65107ad334"
+    "headCommit": "4b03fbea14520e8847b131e8e37f0ef211f9e0cf"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "7584cf6c213546705ba0632be473c7968da1a48d",
-    "headCommit": "4d58af0acc614eea6ccccfd61838bc65107ad334",
-    "committed": [],
+    "headCommit": "4b03fbea14520e8847b131e8e37f0ef211f9e0cf",
+    "committed": [
+      "index.js"
+    ],
     "staged": [],
     "unstaged": [],
     "untracked": [],
@@ -26,8 +28,7 @@
   "updateOutcome": "no_change",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 a19ae79 与本次 cw 基线 7584cf6 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvytyo1f-3-native（25 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvyu80rz-4-native（25 个文件）"
   ],
-  "updatedAt": "2026-11-02T05:44:23.418Z"
+  "updatedAt": "2026-11-02T05:51:50.025Z"
 }
