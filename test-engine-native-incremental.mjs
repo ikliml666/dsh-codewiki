@@ -613,6 +613,49 @@ if (want(13)) { console.log('== 用例 13：没有缺页、只有陈页 → 也�
   check(r.job?.stage === 'done', `清退后终态 done（实际 ${r.job?.stage}；blockers=${JSON.stringify((r.job?.blockers ?? []).slice(0, 3))}）`)
 }
 
+// ============================ 用例 14：同样的缺页不许每轮重跑全量 ============================
+// 真实事故（dsh-git-worktree，job-mw0e3vl8-9 连续 4 轮）：缺页 → 转全量 → 全量仍然写不齐
+// → 下一轮又缺页 → 又转全量。引擎在 resume 语义下对已有页短路，所以浪费只落在缺口上，
+// 但只要缺口补不上（模型空响应 / 模块树与产物不符），这就成了一个永不收敛的循环：
+// 每轮都白跑一次全量，用户等几十分钟却始终 partial。
+// 收敛不等于豁免：本轮仍然如实报 partial（缺页一条不少），只是不再重复那次注定失败的全量。
+if (want(14)) { console.log('== 用例 14：同样的缺页不再每轮重跑全量，且终态仍如实 partial ==')
+  const { base, repo } = makeRepo('missingloop', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const stateDocs = path.join(repo, STATE_DIR, 'docs')
+  check(exists(path.join(stateDocs, 'web.md')), '前置：首轮写出了 web.md')
+  // 制造「补不上的缺口」：删掉页面，并让引擎此后一律不写这一页。
+  fs.rmSync(path.join(stateDocs, 'web.md'))
+  setMode(base, 'missingloop', 'missing-page')
+
+  const before1 = readCalls(base, 'missingloop').length
+  const r1 = await runJob(repo, { scope: 'stale' })
+  const inc1 = r1.job?.nativeResult?.incremental ?? {}
+  const notes1 = [...(r1.job?.notes ?? []), ...(r1.job?.nativeResult?.notes ?? [])].join(' | ')
+  const fresh1 = readCalls(base, 'missingloop').slice(before1)
+  check(inc1.resolution === 'full', `首次发现缺页必须转全量修复（实际 ${inc1.resolution}）`)
+  check(/转全量修复/.test(notes1), `notes 说明转全量（实际 ${notes1.slice(-200)}）`)
+  check(fresh1.some((c) => c.action === 'generate'), `这一轮确实跑了全量（足迹 ${JSON.stringify(fresh1.map((c) => c.action))}）`)
+  check(r1.job?.stage === 'partial', `补不齐时终态必须如实 partial（实际 ${r1.job?.stage}）`)
+  const missing1 = (r1.job?.blockers ?? []).filter((b) => b.kind === 'article-missing')
+  check(missing1.length > 0, `缺页要以 article-missing 出现在 blockers（实际 ${JSON.stringify((r1.job?.blockers ?? []).map((b) => b.kind))}）`)
+  // 第二轮的现场必须和第一轮一致（仍缺同一页），否则「是否重复」无从谈起。
+  check(!exists(path.join(stateDocs, 'web.md')), '前置：全量修复后这一页仍然缺失（模拟补不上）')
+
+  const before2 = readCalls(base, 'missingloop').length
+  const r2 = await runJob(repo, { scope: 'stale' })
+  const inc2 = r2.job?.nativeResult?.incremental ?? {}
+  const notes2 = [...(r2.job?.notes ?? []), ...(r2.job?.nativeResult?.notes ?? [])].join(' | ')
+  const fresh2 = readCalls(base, 'missingloop').slice(before2)
+  check(inc2.resolution !== 'full', `同样的缺口不再重复转全量（实际 ${inc2.resolution}）`)
+  check(!fresh2.some((c) => c.action === 'generate'), `这一轮不再跑全量（足迹 ${JSON.stringify(fresh2.map((c) => c.action))}）`)
+  check(/不再重复全量|上一轮已尝试全量修复/.test(notes2), `notes 解释为什么不重复（实际 ${notes2.slice(-240)}）`)
+  check(r2.job?.stage === 'partial', `收敛不等于豁免：终态仍是 partial（实际 ${r2.job?.stage}）`)
+  const missing2 = (r2.job?.blockers ?? []).filter((b) => b.kind === 'article-missing')
+  check(missing2.length > 0, '缺页仍如实计入 blockers，没有因为不重跑就被放过')
+}
+
 // ============================ 用例 11：宿主重放保留断点现场 ============================
 if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
   const { base, repo } = makeRepo('resume', { mode: 'done' })

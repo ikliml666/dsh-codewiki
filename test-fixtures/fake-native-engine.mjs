@@ -164,7 +164,12 @@ function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {
   }
   keep('overview.md', '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n')
   keep('core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
-  if (MODE !== 'partial') {
+  // missing-page：这一页**怎么都不写**（既不新建也不重写）。用来模拟「全量修复
+  // 也补不齐」的真实形态（provider 空响应 / 模块树与产物不符），从而验证调用方
+  // 不会把同样的缺页一轮又一轮地拿去重跑全量。
+  if (MODE === 'missing-page') {
+    // 故意留空
+  } else if (MODE !== 'partial') {
     if (web) keep('web.md', '# Web 层\n\n## 职责\n\nWeb 层把请求转成任务并回传进度。\n')
   } else if (web) {
     // partial：这一页**有文件但正文被掏空**。这比「整个文件不写」更接近真实的降级路径

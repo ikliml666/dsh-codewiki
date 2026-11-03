@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.17.23 — 2026-11-03
+
+### 同一批缺页不再每轮重跑全量，但仍如实报 partial
+
+0.17.12 让「产物缺页」在本轮直接转全量修复，解决了「增量早退 no_change 永不补页」。
+但它没有收敛机制：如果全量修复本身也补不齐（provider 空响应时常见），下一轮水合后仍会看到同一批缺页，
+于是再转一次全量。真机 `dsh-git-worktree` 连续 4 轮都是这个形态——每轮 `resolution=full`、`fallbackReason` 为空、
+`written` 只有 3 篇，几分钟白跑一次，终态始终 partial。
+
+现在把「上一轮已因同样缺口转过全量」这一事实记进受管状态：`state.json` 新增
+`missingRepair: { baseCommit, modules, attempts, at }`。下一轮发现缺页时，若**编译基线没变**、
+**缺口清单逐项相同**、且**本轮没有源码变化**，就不再重复全量，notes 写明原因并提示「如需强制重试请用 scope=full」。
+
+判据用已提交的基线而不是 HEAD：partial 轮同样会产生一次 wiki 提交，HEAD 每轮都变，拿它比对等于永远不收敛；
+基线只有 done 才推进，所以「基线没变」才真正意味着「还是同一棵树上的同一批缺口」。
+而一旦本轮有源码变化就照旧重试全量——新变化可能正是补齐缺口所需要的内容。缺口补齐后凭据自动清除，
+不会把下一次同样的缺口误判成「已经试过」。
+
+这条只跳过「重复的全量」，**缺页一条都不豁免**：缺页仍由 `mapping.js` 的 `findMissingModuleDocs` 判定、
+仍被 `output.js` 升级成 `article-missing` blocker、终态仍然是 partial、基线仍然不推进。
+
+验证：`test-engine-native-incremental.mjs` 新增用例 14（首轮转 full 且跑 `generate` → 第二轮 `resolution=update`、
+足迹 `["doctor","update"]` 不含 `generate`、notes 解释不重复、终态仍 partial、`article-missing` 仍在），
+红证据为实现前 3 项断言失败；整文件 142/142 通过。
 ## 0.17.22 — 2026-11-03
 
 ### 模型通道的空产出必须在任务里看得见
