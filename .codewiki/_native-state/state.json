@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "e191756faad249d12f6dd5314418d0d86fb5c250",
-    "headCommit": "ee151266709867f2f0c359b0a5cd46e2e7f15b12"
+    "headCommit": "cb83fce1cc49a113a33df6f38a56577065412468"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "e191756faad249d12f6dd5314418d0d86fb5c250",
-    "headCommit": "ee151266709867f2f0c359b0a5cd46e2e7f15b12",
+    "headCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
     "committed": [
       "CHANGELOG.md",
       "README.md",
@@ -20,7 +20,8 @@
       "test-client-panel.mjs",
       "test-engine-proofread-e2e.mjs",
       "test-engine-proofread.mjs",
-      "test-fixtures/fake-native-engine.mjs"
+      "test-fixtures/fake-native-engine.mjs",
+      "test-wiki-entry.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -37,9 +38,7 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 546e225 与本次 cw 基线 e191756 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0vqm0f-4-native（30 个文件）",
-    "native_proofread.md：校对后仍有 1 处失效链接，保留原文"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0xy3fv-4-native（30 个文件）"
   ],
-  "updatedAt": "2026-11-03T16:48:46.190Z"
+  "updatedAt": "2026-11-03T17:22:07.599Z"
 }

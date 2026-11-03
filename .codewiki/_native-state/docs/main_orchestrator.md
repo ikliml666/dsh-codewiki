@@ -67,6 +67,8 @@ flowchart TB
 | `codewiki_update` | 日常维护入口 | 固定 `scope=auto`，复用 `generateDef.execute`，返回文案明确「本步收尾、继续下一项」 |
 | `codewiki_progress` | 只读查询 | 按 `cwd`/`jobId` 过滤任务列表，输出 `jobSummary + progressView`（taskList 换算完成百分比），与面板同源 |
 
+**`parseStatus` 的产物剔除语义**：三态速判（`No wiki found` → `missing`、`has not been compiled yet` → `uncompiled`、`Wiki is up to date` → `clean`）之后，解析出的变更路径按 `.codewiki/` 前缀拆成两份——产物路径进 `wikiChanges` 单列（判据与 [agentic_article_pipeline.md](agentic_article_pipeline.md) 的 `lib/change-set.js::isWikiProduct` 一致），源码路径才留在 `changedFiles`。背景是编译基线提交里写着 `last_compiled_commit`、无法自指，`git diff 基线..HEAD` 因此永远把整批 `.codewiki/` 产物算成变更；不过滤的话，编译刚跑完、工作区明明干净，面板仓库总览上仍挂「有变更」。最终 state 只按源码变更与过期文章重判——只剩产物变更时归为 `clean`，不再留在 `stale`。该清洗同时作用于 `codewiki_generate` 的判态与 `/api/codewiki/repos` 总览的 `changedFiles` 计数。
+
 提交前四道闸门（工具层与 `submit` 双重执行）：`excludePaths` 排除清单、linked worktree 检测（`detectLinkedWorktree`，60s 缓存）、空壳目录检测（`hasCompilableSources`，10min/1min 双 TTL 缓存）、编译模型档位校验（`effortError`：档位不在模型目录时拦下，防止 provider 200+空内容的静默空跑）。
 
 ### 3. 编排服务：`createJobService`
