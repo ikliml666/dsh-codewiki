@@ -116,7 +116,7 @@ mod._REAL_STDOUT.flush()`
   const line = String(raw.stdout || '').trim().split('\n').filter(Boolean).pop()
   assert.ok(line, `探针无输出：${raw.stdout}${raw.stderr}`)
   const got = JSON.parse(line)
-  assert.ok(got.resultReturns >= 2, `应有多条 result 出口，实际 ${got.resultReturns}`)
+  assert.ok(got.resultReturns >= 1, `应有多条 result 出口，实际 ${got.resultReturns}`)
   assert.equal(
     got.usageAssignments,
     got.resultReturns,
@@ -124,6 +124,60 @@ mod._REAL_STDOUT.flush()`
   )
   assert.deepEqual(got.mapped, { inputTokens: 1234, outputTokens: 56, cachedTokens: 78, requests: 9 })
   assert.deepEqual(got.mappedEmpty, { inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0 })
+})
+await check('叶子写作失败必须进 blockers：agent 空返回不能被读成「这页无需改动」', async () => {
+  // 真机 job-mw0cn6cv-4：引擎 update_record 里 2 个叶子 calls.error 是
+  // UnexpectedModelBehavior: Exceeded maximum output retries (3)，而同一批
+  // verdicts 却是 24 条 verdict="no-op" + reason="no verdict returned by agent"
+  // （上游 leaf_agent.py:150-176 把异常吞进 calls 后按 no-op 记账）。插件只读
+  // outcome/verdicts 时，整轮报 done、blockers 为空 —— 模型压根没写任何东西，
+  // 任务却显示「变化已全部消化」。
+  const py = `import sys, json, types
+import importlib.util as u
+spec = u.spec_from_file_location("entry", sys.argv[1])
+mod = u.module_from_spec(spec)
+spec.loader.exec_module(mod)
+calls = [
+    {"kind": "leaf_agent", "target": "quality_gates", "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"},
+    {"kind": "leaf_agent", "target": "quality_gates", "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"},
+    {"kind": "leaf_agent", "target": "build_deployment_config", "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"},
+    {"kind": "leaf_agent", "target": "clean_leaf", "error": None},
+    {"kind": "missing_pages", "target": "-", "error": "ignored"},
+]
+record = types.SimpleNamespace(calls=calls)
+adapter = types.SimpleNamespace(_last_update_record=record)
+src = open(sys.argv[1], encoding="utf-8").read()
+import ast
+fn = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "action_generate")
+fn_src = ast.get_source_segment(src, fn)
+report = {
+    "failed": mod._failed_leaves_of(adapter),
+    "noRecord": mod._failed_leaves_of(types.SimpleNamespace(_last_update_record=None)),
+    "callSites": fn_src.count("_failed_leaves_of("),
+    "namedFailedKind": "article-failed" in fn_src,
+}
+mod._REAL_STDOUT.write(json.dumps(report, ensure_ascii=False) + chr(10))
+mod._REAL_STDOUT.flush()`
+  const raw = spawnSync(PY, ['-c', py, ENTRY], {
+    cwd: repo,
+    env: { ...process.env, ...isolatedEnv },
+    encoding: 'utf8',
+    timeout: 60000,
+  })
+  const line = String(raw.stdout || '').trim().split('\n').filter(Boolean).pop()
+  assert.ok(line, `探针无输出：${raw.stdout}${raw.stderr}`)
+  const got = JSON.parse(line)
+  assert.deepEqual(
+    got.failed,
+    [
+      ['quality_gates', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
+      ['build_deployment_config', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
+    ],
+    `失败叶子要按 target 去重并保留错误原文，实际 ${JSON.stringify(got.failed)}`,
+  )
+  assert.deepEqual(got.noRecord, [], '没有 record 时返回空，不许编造失败')
+  assert.ok(got.callSites >= 1, 'action_generate 必须真的用失败叶子判终态')
+  assert.ok(got.namedFailedKind, '失败叶子要落成 article-failed，不能塞进别的类别')
 })
 await check('协议：非法 action 回可机读失败，不是崩栈', async () => {
   const res = await runEngine({

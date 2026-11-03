@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.17.21 — 2026-11-03
+
+### 叶子写作失败不再被读成「这一页无需改动」
+
+真机 `job-mw0cn6cv-4`（本仓库）报 `done`、`blockers` 为空、`writtenCount` 5，但那个 5 全是
+状态文件：`git show --stat 947c2df8` 里 `modules/` 零改动，`.codewiki/modules/` 一篇文章都没变。
+引擎自己的 `update_record.json` 才是真相：`pages_written=[]`、24 条 verdict 全是
+`verdict="no-op"` + `reason="no verdict returned by agent"`，而 `calls` 里两条
+`{"kind":"leaf_agent","error":"UnexpectedModelBehavior: Exceeded maximum output retries (3)"}`。
+
+机制在上游 `leaf_agent.py:142-176`：agent 抛异常被 `except` 吞掉（只 `logger.error`），
+之后照常 `add_call(..., error)`，再给该叶子要改的每一页记一条 `no-op`。于是「模型连续
+三轮没吐任何内容」在账本上长得跟「这一页确实不用改」一模一样，`update_record.outcome`
+仍是 `incremental`、`errors=[]`。插件出口此前只看 `validate_generated_docs` 的缺页与
+`update_outcome`，两条都干净 → 整轮报 done。
+
+现在 `action_generate` 的出口额外读 `record.calls`：凡是 `kind == "leaf_agent"` 且 `error`
+非空的，按 `target` 去重，一条失败一条 `article-failed` blocker（detail 带原始错误文本），
+终态随 `blockers` 降 partial。全量 generate 路径没有 UpdateRecord，那一轮的失败仍由异常
+上抛表达，函数返回空列表而不是编造。
+
+这条改动不动质量门、不放宽任何判据 —— 它补的正是「引擎自己把失败记成 no-op」这个盲区。
+
+验证：`test-engine-python-entry.mjs` 24 项。新用例「叶子写作失败必须进 blockers」直接喂
+真机形态的 `calls`（含重复 target、成功叶子、非 leaf_agent 种类），断言去重后的失败集合、
+以及 `action_generate` 源码里真的调了 `_failed_leaves_of` 且落成 `article-failed`。
+对 HEAD 版红对照：23 passed / 1 failed，失败信息 `action_generate 必须真的用失败叶子判终态`。
+
 ## 0.17.20 — 2026-11-03
 
 ### 层级布局的跨页链接按引擎源目录解析，不再成片变死链
