@@ -16,6 +16,7 @@ import {
   collectOutput,
   buildWritePlan,
   validateOutput,
+  overviewStaleLinks,
 } from './lib/engine/output.js'
 
 let pass = 0
@@ -368,6 +369,27 @@ await check('staleDocPages：不属于当前模块树的旧页被点名清退，
   // 空树：whole-repository 模式没有权威模块名，不能凭名字删页
   assert.deepEqual(staleDocPages({ pages, moduleTree: {} }), [])
 })
+// overview 的链接集合必须与当前模块树对齐：上游 reusable_overview 只判「空页/preamble」，
+// 聚类改名后 overview 里的旧模块链接会一直留着，永远点不开。
+await check('overviewStaleLinks：指向已消失页面的链接被点名，命中页与别名不算', async () => {
+  const moduleTree = { core: { path: 'src', components: ['a'], children: {} } }
+  const pages = ['overview.md', 'core.md', 'mod.ts.md']
+  const text = [
+    '# 概览',
+    '',
+    '- [core](core.md)',
+    '- [带扩展名的页](mod.md)',
+    '- [已消失](gone-module.md)',
+    '- [外部](https://example.com/x.md)',
+    '- [源码](../src/core.ts)',
+  ].join('\n')
+  assert.deepEqual(overviewStaleLinks({ overviewText: text, pages, moduleTree }), ['gone-module.md'])
+  // 空树：whole-repository 模式没有权威模块名，不能凭猜测判陈
+  assert.deepEqual(overviewStaleLinks({ overviewText: text, pages, moduleTree: {} }), [])
+  // 没有 overview 正文时什么都不报
+  assert.deepEqual(overviewStaleLinks({ overviewText: '', pages, moduleTree }), [])
+})
+
 rmSync(root, { recursive: true, force: true })
 
 console.log(`\n${pass} passed, ${fails.length} failed`)

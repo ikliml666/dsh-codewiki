@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.17.26 — 2026-11-03
+
+### overview 里的陈链不再被永远复用：与当前模块树比对不符就重建
+
+真机 `dsh-git-worktree` 剩下的 10 条死链全部来自 `overview.md`，指向
+`build_and_configuration.md`、`client.md`、`console_control_plane_and_services.md` 等
+**当前 38 节点树里不存在的模块**。这些页在 git 史里真实存在过（`4c61dac`、`3f758ad`
+提交过 `.codewiki/modules/build-and-configuration.md`），是上一版聚类的产物；聚类重构后
+模块改名/合并，页消失了，而 overview 一直被复用、从未重建——它的 mtime 比
+`module_tree.json` 早 18 小时。
+
+根因在上游判据：`reusable_overview()` 只把「空页」和「未完成的 reading preamble」判为
+不可复用，链接正确性完全不在判据里；而 `--update` 只在 `modules_to_invalidate` 非空时
+才把 `overview` 加进去，`no_change` 轮什么都不删，于是永远不重建。
+
+新增 `overviewStaleLinks({overviewText, pages, moduleTree})`（`lib/engine/output.js`）：
+用当前 `module_tree.json` + docs 实际页名（含 `pageAliases` 的别名）逐条核对 overview 正文里的
+相对链接，返回指向不存在页面的目标。空模块树（whole-repository 模式没有权威模块名）返回空——
+判不出对错就不删页。
+
+`lib/engine/native-run.js` 的增量轮完整性检查从「只看缺页」扩成「缺页 **或** overview 陈链」：
+命中时把旧的 `overview.md` 从产物目录删掉再转全量——上游对不存在的文件 `reusable_overview`
+返回 False，于是根总览会真的重建。陈链清单与缺页清单一并写进 `state.json` 的
+`missingRepair.overviewLinks`，收敛判据同时比对两份清单：同样的缺页 + 同样的陈链 + 基线没变 +
+本轮无源码变化才跳过重复全量，且终态仍如实 partial。
+
+验证：`test-engine-output.mjs` 新增 1 项（陈链被点名、命中页与别名不算、空树不判），31 项全绿；
+`test-engine-native-incremental.mjs` 新增用例 15（overview 指向已消失页 → 删页重建、终态 done、
+重建后不含旧链接），148/148 全绿。
+
 ## 0.17.25 — 2026-11-03
 
 ### 引擎页名与正文写法不一致时，链接按唯一别名解析

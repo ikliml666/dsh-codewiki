@@ -656,6 +656,38 @@ if (want(14)) { console.log('== 用例 14：同样的缺页不再每轮重跑全
   check(missing2.length > 0, '缺页仍如实计入 blockers，没有因为不重跑就被放过')
 }
 
+// ============================ 用例 15：overview 陈链必须触发重建 ============================
+// 真实事故（dsh-git-worktree，job-mw0ijla0-2）：overview.md 里的 6 条链接指向当前
+// 38 节点模块树的树外（build_and_configuration.md 等）。Git 史证明那些页在上一版聚类
+// 里真实存在过，聚类重构后模块改名、页消失，而上游 reusable_overview() 只判「空页 /
+// 未完成的 preamble」，链接正确性不在判据里 → 引擎每轮都判它可复用而跳过重建，
+// 这批死链就成了永不消失的 partial 来源。
+// 修法与缺页一致：发现陈链就删掉旧 overview 并转全量，让引擎按当前树重建。
+if (want(15)) { console.log('== 用例 15：overview 链接指向已消失的页 → 删除并重建，而不是永远复用 ==')
+  const { base, repo } = makeRepo('staleoverview', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const stateDocs = path.join(repo, STATE_DIR, 'docs')
+  // 模拟历史遗留：overview 是上一版聚类写的，链接指向现已不存在的模块页。
+  fs.writeFileSync(
+    path.join(stateDocs, 'overview.md'),
+    '# 项目概览\n\n## 组成\n\n见 [已消失的模块](gone-module.md)。\n',
+    'utf8',
+  )
+
+  const before = readCalls(base, 'staleoverview').length
+  const r = await runJob(repo, { scope: 'stale' })
+  const inc = r.job?.nativeResult?.incremental ?? {}
+  const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  const fresh = readCalls(base, 'staleoverview').slice(before)
+  check(inc.resolution === 'full', `overview 有陈链时必须转全量（实际 ${inc.resolution}；fallback=${inc.fallbackReason ?? ''}）`)
+  check(/overview 有 \d+ 条指向已消失页面的链接/.test(notes), `notes 说明陈链（实际 ${notes.slice(-240)}）`)
+  check(fresh.some((c) => c.action === 'generate'), `确实以全量方式重跑引擎（足迹 ${JSON.stringify(fresh.map((c) => c.action))}）`)
+  check(r.job?.stage === 'done', `重建后终态 done（实际 ${r.job?.stage}；blockers=${JSON.stringify((r.job?.blockers ?? []).slice(0, 2))}）`)
+  const rebuilt = fs.readFileSync(path.join(stateDocs, 'overview.md'), 'utf8')
+  check(!/gone-module\.md/.test(rebuilt), `旧 overview 被删掉后由引擎重建（现存内容：${rebuilt.slice(0, 120)}）`)
+}
+
 // ============================ 用例 11：宿主重放保留断点现场 ============================
 if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
   const { base, repo } = makeRepo('resume', { mode: 'done' })
