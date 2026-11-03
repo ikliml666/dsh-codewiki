@@ -31,6 +31,23 @@ from codewiki.src.be.updater.leaf_agent import LeafAgentRunner
 from codewiki.src.be.updater.orchestrator import IncrementalUpdater, _WholeRepoReport
 from codewiki.src.be.updater.record import UpdateRecord
 from codewiki.src.be.updater.reference_index import inverse
+from codewiki.src.config import MODULE_TREE_FILENAME
+from codewiki.src.utils import file_manager
+from tree_coverage import adopt_unowned_files, file_owner
+
+__all__ = [
+    "ADAPTER_VERSION",
+    "CHECKPOINT_FILENAME",
+    "adopt_unowned_files",
+    "adopt_tree_coverage",
+    "checkpoint_path",
+    "clear_checkpoint",
+    "file_owner",
+    "install_incremental_runtime",
+    "run_leaf_agents",
+    "run_leaf_order",
+    "write_checkpoint",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +286,31 @@ async def run_leaf_agents(updater, reports, new_tree, new_graph, leaf_nodes, ref
         updater.record.detector_notes.append(
             f"whole-repository mode: {len(active)} active units collapsed into one overview run"
         )
+    adopt_tree_coverage(updater, new_tree, new_graph)
     await run_leaf_order(updater, order, reports, new_tree, new_graph, leaf_nodes, ref_index)
+
+
+def adopt_tree_coverage(updater, new_tree: dict[str, Any], new_graph: dict[str, Any]) -> None:
+    """把树里从未收录的文件补挂到已有叶子，避免 Step 6.1 的覆盖校验永远失败。
+
+    Step 2 的 repair 只处理本轮 diff.added；历史遗留文件不会自己回到树里，而
+    上游 Step 6.1 每次都要按全量组件校验叶子归属。这里补挂不改变任何已写页面，
+    只把缺失文件里的组件按上游规则挂到最近的叶子。
+    """
+    if updater.whole_repo:
+        return
+    try:
+        adopted = adopt_unowned_files(new_tree, new_graph, updater.opts)
+    except Exception as exc:  # noqa: BLE001 — 补挂失败不能让整轮增量崩掉
+        updater.record.detector_notes.append(f"文件归属补齐失败：{type(exc).__name__}: {exc}")
+        logger.warning("dsh: 文件归属补齐失败：%s", exc)
+        return
+    if adopted:
+        updater.record.detector_notes.append(
+            f"补齐 {len(adopted)} 个未归属文件到已有叶子：{', '.join(adopted[:3])}"
+            + ("…" if len(adopted) > 3 else "")
+        )
+        file_manager.save_json(new_tree, os.path.join(updater.docs_dir, MODULE_TREE_FILENAME))
 
 
 def install_incremental_runtime() -> None:

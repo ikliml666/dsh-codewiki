@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.17.14 — 2026-11-03
+
+### 增量轮：树里未收录的历史文件让 coverage 校验每轮抛错
+
+0.17.13 修好流式转发后，本仓库增量轮只剩一条 stderr ERROR：
+`Generating missing pages failed: Invalid module file coverage: missing=['lib\\engine\\python\\full_parallel_runtime.py'], duplicate_owners={}, outside_scope=[]`。
+
+链条是这样的：Step 2 的 `repair_tree` 只处理**本轮 `diff.added`** 的组件
+（`tree_repair.py` 里 `to_route = sorted(c for c in diff.added if c in tracked_new and c in new_graph)`），
+而 `validate_module_file_coverage` 每轮都拿**全量组件**比对树的叶子归属
+（`expected = component_files(list(components), components)`，取的是所有组件所在文件，不区分叶子类型）。
+于是「历史上某一轮没写进树」的文件永远不会补进来——该文件早就不在 diff 里了——
+校验就每轮都缺这一个文件、每轮都抛，且不会自愈。
+
+`full_parallel_runtime.py` 是 `60b5903e` 新增的，正好跨在新旧基线之间：旧树从未收录它。
+这与「缺页」是同一类问题的另一半——mapping 侧管页面缺失，上游 coverage 侧管文件归属缺失。
+
+### 修法：按上游自己的规则把未归属文件补挂到已有叶子
+
+- 新增 `lib/engine/python/tree_coverage.py` 的 `adopt_unowned_files(tree, components, opts)`：
+  求出 `expected - owned` 的缺失文件，对每个文件取其组件、用上游 `filter_leaf_nodes` 挑合格叶子，
+  再用上游 `route_by_rules`（同文件 → 同目录 → 邻居多数）找到目标叶子；都没有线索时挂到
+  目录最接近的叶子（按共享目录前缀、叶子文件数）。补挂只调用上游 `T.add_component`，
+  **不放宽任何校验**——`validate_module_file_coverage` 仍按原样执行。
+- `lib/engine/python/fsoft_runtime.py` 的 `run_leaf_agents` 在算出 `order`、折叠 whole_repo 之后、
+  派活之前调用 `adopt_tree_coverage(updater, new_tree, new_graph)`：有补挂就写回
+  `module_tree.json`，并把「补齐 N 个未归属文件」记进 `detector_notes`；补挂自身失败只记 note 不中断整轮。
+  空树（上游整仓单页模式）直接放过，与上游 `if not tree: return` 一致。
+
+### 验证
+
+- 新增 `test-fsoft-coverage.mjs`（5 项）：缺失文件被补挂且上游校验通过、没有缺失时不改动树、
+  空树原样放过、无同文件/同目录线索时挂到目录最近的叶子、同目录已有叶子优先。
+- 用本仓真实依赖图（607 组件 / 42 个文件 / 真实 `module_tree.json`）实测：
+  补挂前 `missing=['lib\\engine\\python\\full_parallel_runtime.py']`、上游校验 FAIL；
+  补挂后 `missing=[]`、校验 OK，文件归属落到 `Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime`。
 ## 0.17.13 — 2026-11-03
 
 ### 桥逐帧转发 SSE 时伪造 finish_reason，引擎以为每轮都结束

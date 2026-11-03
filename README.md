@@ -368,7 +368,7 @@ test-engine-llm-bridge.mjs / test-engine-native-job.mjs
 test-engine-native-incremental.mjs / test-engine-process-tree.mjs
 
 # 增量并行与断点续跑（0.17.2）/ 全量并行与缺页修复（0.17.12）
-test-fsoft-runtime.mjs / test-upstream-parallel.mjs（含全量并行与 module_tree 并发合并）
+test-fsoft-runtime.mjs / test-fsoft-coverage.mjs（含全量并行、module_tree 并发合并、未归属文件补挂） / test-upstream-parallel.mjs
 
 # 面板渲染冒烟（0.17.3）：最小 React 桩渲染侧边栏面板，捕获渲染期异常
 test-client-panel.mjs
