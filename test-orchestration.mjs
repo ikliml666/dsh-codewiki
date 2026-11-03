@@ -201,12 +201,13 @@ const llmProxy = {
   },
   listModels: (...a) => (activeLlm ? activeLlm.listModels(...a) : []),
   resolveModel: (...a) => (activeLlm ? activeLlm.resolveModel(...a) : null),
+  resolveModelInfo: (...a) => (activeLlm ? activeLlm.resolveModelInfo(...a) : null),
 }
 const promptOf = (opts) => String(opts?.messages?.[0]?.content?.[0]?.text ?? '')
 
 // mock 宿主 llm 服务：全部环节都是单轮 chat 后台并发池。
 // 按 prompt 首行特征分发应答（与真实 prompt 模板的区分句一一对应）。
-function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false } = {}) {
+function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-written', stall = false, bigArticle = false, efforts = [] } = {}) {
   const llmCalls = []
   const answerFor = (prompt) => {
     if (prompt.includes('你是 CodeWiki 文章观察员')) {
@@ -300,6 +301,8 @@ function makeBatchMock({ modules = ['core', 'util'], articleMarker = 'Batch-writ
       yield { type: 'usage', usage: { outputTokens: 128 } }
       yield { type: 'finish', reason: { kind: 'stop' } }
     },
+    // 模型目录里的思考档位：提交闸门要按它校验 reasoningEffort，空数组 = 未声明（闸门放行）
+    resolveModelInfo: async () => ({ reasoning: { efforts } }),
   }
   const prevLlm = activeLlm
   activeLlm = llm
@@ -1604,6 +1607,42 @@ console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理
   const failedJob = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.cwd === noCfgRepo)
   check(failedJob?.stage === 'failed' && String(failedJob?.error ?? '').includes('编译模型'), `失败留痕在 job（stage=${failedJob?.stage}）`)
   fs.rmSync(noCfgRepo, { recursive: true, force: true })
+}
+
+// ============================ 思考档位不在模型目录 → 提交即拦（0.17.24） ============================
+// 真机事故：编译模型配成 trae/deepseek-v4.1-flash + off，而该模型只有 low/high/xhigh。
+// provider 不报错，回 200 + 空内容，桥只剩一个 finish chunk、引擎记 Tokens used: 0，
+// 40 次调用全部空跑、一篇文章都没写，任务看起来还正常走完。所以档位必须在提交入口校验。
+await cleanupServices()
+console.log('== 思考档位不在模型目录里：提交时拦下并列出真实档位 ==')
+{
+  const repo = makeFixtureRepo()
+  const mock = makeBatchMock({ efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] })
+  const ctx = makeCtx({})
+  apply(ctx.ctx, batchCfg({ batchReasoningEffort: 'off' }))
+  let err = null
+  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  check(err && String(err.message).includes('思考档位'), `档位不在目录 → 提交报错（实际 ${err?.message?.slice(0, 60)}…）`)
+  check(err && String(err.message).includes('low/high'), '报错里列出该模型真实可用的档位')
+  check(mock.llmCalls.length === 0, `拦在提交时，一次模型请求都没发出（实际 ${mock.llmCalls.length}）`)
+  const failed = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.cwd === repo)
+  check(failed?.stage === 'failed', `失败留痕在 job（stage=${failed?.stage}）`)
+  fs.rmSync(repo, { recursive: true, force: true })
+  mock.restore()
+}
+
+await cleanupServices()
+console.log('== 档位在目录里（或模型未声明档位）：照常提交 ==')
+{
+  const repo = makeFixtureRepo()
+  const mock = makeBatchMock({ efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] })
+  const ctx = makeCtx({})
+  apply(ctx.ctx, batchCfg({ batchReasoningEffort: 'low' }))
+  let err = null
+  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  check(err === null, `合法档位不拦（实际 ${err?.message?.slice(0, 40) ?? '无错'}）`)
+  fs.rmSync(repo, { recursive: true, force: true })
+  mock.restore()
 }
 
 // ============================ 严格 cordis 语义 ============================

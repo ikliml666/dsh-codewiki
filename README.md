@@ -378,6 +378,9 @@ test-job-reliability.mjs / test-job-logs.mjs
 
 # 设置项契约（0.17.5）：已退役字段不得回流，bigEnabled 开关两侧行为
 test-config.mjs
+
+# 思考档位合法性（0.17.24）：档位不在模型目录里时提交即拦，不静默空跑
+test-reasoning-effort.mjs
 ```
 
 测试用假引擎（`test-fixtures/fake-native-engine.mjs`）走真实子进程协议，所以能覆盖协议

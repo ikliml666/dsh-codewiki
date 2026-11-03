@@ -3647,6 +3647,13 @@ function createJobService(config, onSettled) {
       if (!c.batchProvider) throw new Error('编译模型提供商为空——在插件设置「编译模型」里选一个模型设置中已注册的提供商')
       if (!c.batchModel) throw new Error('编译模型为空——在插件设置选一个提供商下的模型')
       if (!llmRef || typeof llmRef.stream !== 'function') throw new Error(`编译模型走宿主 llm 服务（provider ${c.batchProvider}），但 llm 服务未注入——请重启宿主后重试`)
+      // 档位不在模型目录里时 provider 会 200 + 空内容静默空跑（见 effortError 注释）。
+      // 读不到档位表（ok:false）说明无从判断，放行，不把探测失败升级成提交失败。
+      const effortsOf = await resolveModelEfforts(llmRef, c.batchProvider, c.batchModel)
+      if (effortsOf.ok) {
+        const bad = effortError(effortsOf.efforts, c.batchReasoningEffort)
+        if (bad) throw new Error(bad)
+      }
     } catch (err) {
       fail(job, String(err?.message ?? err))
       flush()
@@ -4313,6 +4320,21 @@ const resolveModelInfoOf = (llm) => {
   if (typeof llm.resolveModelInfo === 'function') return (p, m, s) => llm.resolveModelInfo(p, m, s)
   if (typeof llm.resolveModel === 'function') return (p, m, s) => llm.resolveModel(p, m, s)
   return null
+}
+
+// 思考档位合法性：模型目录里的档位表是唯一事实来源。档位配错时 provider 不报错——
+// 它回 200 加空内容，桥日志只剩一个 finish chunk、引擎记 "Tokens used: 0"，整轮任务
+// 看起来跑完却一篇文章都没写。这种静默失败必须在提交入口拦住，而不是等每篇文章都
+// 空跑一遍再靠 note 提示。
+// 返回 null = 放行，返回文案 = 拦下。档位表缺失（模型未声明/探测失败）一律放行：
+// 「不知道」不等于「不支持」，否则没暴露档位目录的 provider 会被一刀切拦死。
+export function effortError(efforts, effort) {
+  const want = String(effort ?? '').trim()
+  if (!want) return null
+  const ids = (Array.isArray(efforts) ? efforts : []).map((e) => String(e?.id ?? '').trim()).filter(Boolean)
+  if (!ids.length) return null
+  if (ids.includes(want)) return null
+  return `思考档位「${want}」不在该模型支持的档位里（可用：${ids.join('/')}）——请在插件设置里改选一个，或留空用模型默认档`
 }
 
 // 单个 provider/model 的「思考程度」档位（设置页下拉的数据源）：走宿主 llm 的

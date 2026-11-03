@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.24 — 2026-11-03
+
+### 思考档位不在模型目录里时，提交就拦下
+
+真机事故的根因终于定位：编译模型配成 `trae/deepseek-v4.1-flash` + `batchReasoningEffort: off`，
+而该模型目录声明的档位只有 `low/high/xhigh`——**没有 off**。provider 不报错，回 200 加空内容，
+桥日志只剩一个 `finish` chunk、`chunkTotal:1`、耗时 8–18ms、没有 usage；引擎侧记
+`Tokens used: 0 (in 0 / out 0)`，40 次调用全部空跑。任务看起来正常走完，实际一篇文章都没写。
+
+档位表是唯一事实来源，所以合法性在提交入口校验一次（系统边界：用户配置 × 外部 provider 能力），
+不再等每篇文章都空跑一遍再靠 note 提示。新增 `effortError(efforts, effort)`：返回 null 放行、
+返回文案拦下，报错里点名配错的档位并列出该模型真实可用的档位。
+`submit` 在原有 provider/model/llm 校验之后读 `resolveModelEfforts`，`ok:false`（读不到档位表）
+一律放行——「不知道」不等于「不支持」，否则没暴露档位目录的 provider 会被一刀切拦死。
+
+验证：新增 `test-reasoning-effort.mjs`（12 项，覆盖在表里/不在表里/留空/null/空白/清单缺失/
+空 id/大小写区分）；`test-orchestration.mjs` 新增两段——档位不在目录时提交报错、一次模型请求都不发出、
+失败留痕在 job；合法档位照常提交。全套回归 37 个文件全绿。
+
 ## 0.17.23 — 2026-11-03
 
 ### 同一批缺页不再每轮重跑全量，但仍如实报 partial
