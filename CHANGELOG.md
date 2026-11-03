@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.17.15 — 2026-11-03
+
+### 并行合并把父模块的组件并集当成归属矛盾，整轮增量被中断
+
+0.17.14 修好未归属文件补挂后，本仓库真机增量（job-mw07tzcb-0）又只剩一个失败：
+`RuntimeError: module_tree 冲突：Code_Engine_Processing_Pipeline 在两个并行分支里组件归属不一致`，
+32 篇已写页面因此被判 `article-failed`。
+
+`_merge_tree` 原先对任何节点的 `components` 不一致都直接抛错。但父模块的 `components`
+是它整棵子树的组件并集：两个并行分支各自新增了不同子模块时，两边写回的并集本来就不同，
+这是信息互补而不是归属矛盾。真正矛盾只有一种——同一个**叶子**被两个分支分给不同组件。
+
+### 修法：父节点取并集，叶子节点仍显式报冲突
+
+- `lib/engine/python/full_parallel_runtime.py` 的 `_merge_tree` 先判定节点是不是父节点
+  （新旧任一有 `children`）；父节点 components 不一致时取并集继续合并，
+  叶子节点不一致仍 `raise RuntimeError("module_tree 冲突：…")`。
+- 冲突消息与叶子判据保持不变：静默丢弃叶子归属会丢内容且无法回溯，这条不能放宽。
+
+### 验证
+
+- `test-upstream-parallel.mjs` 新增两项：父模块 components 不同不构成冲突且两分支子模块都保留；
+  同一个叶子被分到不同组件仍然显式报冲突。对修复前的实现为红
+  （实测 `父模块 components 不一致时合并不该抛错，实际抛了：module_tree 冲突：parent 在两个并行分支里组件归属不一致`），
+  修复后 10 项全绿。
+- 相关回归同步复跑：`test-fsoft-coverage.mjs` 5 项、`test-fsoft-runtime.mjs` 6 项、
+  `test-engine-native-incremental.mjs` 全部通过、`test-engine-native-job.mjs` 全部通过。
 ## 0.17.14 — 2026-11-03
 
 ### 增量轮：树里未收录的历史文件让 coverage 校验每轮抛错

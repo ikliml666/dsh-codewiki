@@ -61,10 +61,13 @@ def current_concurrency() -> int:
 
 
 def _merge_tree(base: dict[str, Any], incoming: dict[str, Any], path: str = "") -> dict[str, Any]:
-    """把 incoming 合并进 base：只补缺，冲突显式报错。
+    """把 incoming 合并进 base：只补缺，真冲突显式报错。
 
-    模块路径是全局唯一的；同一个路径出现两份不同的组件归属，说明两个分支
-    对同一模块给出了不一致的定义，静默取一个会丢内容且无法回溯。
+    两类节点要分开看：
+    · 父模块的 ``components`` 是它整棵子树的组件并集。两个并行分支各自新增了
+      不同子模块时，两边写回的并集本来就不同——这是信息互补，取并集即可。
+    · 叶子模块的 ``components`` 就是它的组件归属。同一个叶子被两个分支分给不同
+      组件是真矛盾，静默取一个会丢内容且无法回溯，必须报错。
     """
     for name, node in (incoming or {}).items():
         here = f"{path}/{name}" if path else name
@@ -74,16 +77,23 @@ def _merge_tree(base: dict[str, Any], incoming: dict[str, Any], path: str = "") 
         old = base[name]
         if not isinstance(old, dict) or not isinstance(node, dict):
             raise RuntimeError(f"module_tree 冲突：{here} 不是对象")
-        old_components = old.get("components") or []
-        new_components = node.get("components") or []
-        if old_components and new_components and list(old_components) != list(new_components):
-            raise RuntimeError(
-                f"module_tree 冲突：{here} 在两个并行分支里组件归属不一致"
-            )
-        if new_components and not old_components:
-            old["components"] = list(new_components)
         old_children = old.get("children") or {}
         new_children = node.get("children") or {}
+        is_parent = bool(old_children) or bool(new_children)
+        old_components = list(old.get("components") or [])
+        new_components = list(node.get("components") or [])
+        if old_components and new_components and old_components != new_components:
+            if not is_parent:
+                raise RuntimeError(
+                    f"module_tree 冲突：{here} 在两个并行分支里组件归属不一致"
+                )
+            for cid in new_components:
+                if cid not in old_components:
+                    old_components.append(cid)
+        elif new_components and not old_components:
+            old_components = new_components
+        if old_components:
+            old["components"] = old_components
         if new_children:
             merged_children = _merge_tree(
                 copy.deepcopy(old_children) if not isinstance(old_children, dict) else old_children,

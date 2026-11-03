@@ -205,6 +205,29 @@ async def main():
     _, empty_written = await drive({}, 2, b)
     out['empty_tree'] = {'events': len(b.events), 'written': sorted(empty_written)}
 
+    # 两个并行分支各自写回整棵树时，父模块的 components 是「该分支视角下的
+    # 子树并集」——两边看到的新增子模块不同，写入就不同。这不是归属矛盾，
+    # 合并必须继续；真正的矛盾只有「同一个叶子被分到不同组件」。
+    out['merge'] = {}
+    try:
+        merged = PAR._merge_tree(
+            {'parent': {'components': ['a'], 'children': {'kid': {'components': ['x'], 'children': {}}}}},
+            {'parent': {'components': ['b'], 'children': {'other': {'components': ['y'], 'children': {}}}}})
+        out['merge']['parent_ok'] = True
+        out['merge']['parent_components'] = sorted(merged['parent']['components'])
+        out['merge']['kids'] = sorted(merged['parent']['children'].keys())
+    except Exception as exc:
+        out['merge']['parent_ok'] = False
+        out['merge']['parent_error'] = str(exc)
+
+    try:
+        PAR._merge_tree(
+            {'leaf': {'components': ['c1'], 'children': {}}},
+            {'leaf': {'components': ['c2'], 'children': {}}})
+        out['merge']['leaf_conflict'] = None
+    except RuntimeError as exc:
+        out['merge']['leaf_conflict'] = str(exc)
+
     Path(OUT, 'result.json').write_text(
         json.dumps(out, ensure_ascii=False), encoding='utf-8')
 
@@ -252,6 +275,20 @@ await check('空模块树时必须走 else 分支写整仓总览（不能被并�
     '空模块树时 backend 一次都没被调用 —— else 分支丢了，这类仓库将一篇文章都写不出来')
   assert.ok(got.empty_tree.written.includes('overview.md'),
     `空模块树时必须产出 overview.md，实际只写了 ${JSON.stringify(got.empty_tree.written)}`)
+})
+
+await check('父模块 components 不同不构成合并冲突（并行分支各写子树并集）', () => {
+  assert.equal(got.merge.parent_ok, true,
+    `父模块 components 不一致时合并不该抛错，实际抛了：${got.merge.parent_error}`)
+  assert.deepEqual(got.merge.parent_components.slice().sort(), ['a', 'b'],
+    `父模块组件必须取并集，实际 ${JSON.stringify(got.merge.parent_components)}`)
+  assert.deepEqual(got.merge.kids.slice().sort(), ['kid', 'other'],
+    `两个分支新增的子模块都要保留，实际 ${JSON.stringify(got.merge.kids)}`)
+})
+
+await check('同一个叶子被分到不同组件仍然显式报冲突（不静默取一个）', () => {
+  assert.ok(got.merge.leaf_conflict, '叶子级归属矛盾必须抛错，不能静默合并')
+  assert.match(got.merge.leaf_conflict, /module_tree 冲突/)
 })
 
 await check('单个模块失败：已写页面保留，失败模块进异常消息', () => {
