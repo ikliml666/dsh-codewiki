@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.17.25 — 2026-11-03
+
+### 引擎页名与正文写法不一致时，链接按唯一别名解析
+
+真机 `dsh-git-worktree` 一轮 29 条 `[dead-link/product]`，逐条核对后发现 19 条是同一个页的两种写法：
+引擎按模块名把页命名成 `src_session-checkout-module.ts.md`，兄弟页正文写 `src_session-checkout-module.md`；
+子模块页被加父模块前缀，`client_review_console/` 下实际落成 `client_review_console_review_surfaces.md`，
+而父页正文写的是短名 `review_surfaces.md`。两类都是固定命名约定，目标页确实存在，不算死链。
+
+新增 `pageAliases(pages)`（`lib/engine/output.js`）产出「别名 → 真实页」表，只认这两类可证伪的约定，
+且**候选必须唯一**——同目录同时有 `mod.ts.md` 与 `mod.js.md` 时 `mod.md` 不猜，仍按死链报。
+同一张表在两处生效：`validateOutput` 的死链判定（别名命中后仍要过计划页/落地页判一次，避免把
+「别名指向一篇没进落地方案的页」放过），以及 `gateNativeOutput` 构造 `pageMap` 时合入，
+让 `rewritePageLinks` 真的把这批链接改写成落地页名——只认别名而不改写，等于消掉告警但留下 404。
+
+剩 10 条**不豁免**：`overview.md` 指向 `build_and_configuration.md`、`shared_contracts_and_domain_ports.md`
+等模块在 `module_tree.json` 里根本不存在（38 节点逐一比对，cands=0），是模型凭空编造；
+`overview.md` 的 mtime 比 `module_tree.json` 早一天，说明它是旧轮次遗留且从不重建
+（上游 `reusable_overview` 只把「空页 / 未完成的 preamble」判为不可复用，链接正确性不在判据里）。
+这类仍判 `dead-link`、终态仍 partial——缺陷如实可见，不靠放宽质量门消掉。
+
+验证：`test-engine-output.mjs` 新增 4 项（扩展名约定命中、父前缀约定命中、候选不唯一仍判死链、
+只是名字相近仍判死链），30 项全绿；`test-engine-quality-gate.mjs` 新增 1 项端到端（判命中 + 渲染后
+链接确实被改写），36 项全绿。真实产物对比：`dsh-git-worktree` 死链 29 → 10、`CampusLogin` 保持 1、
+`hindsight` 保持 1、`auto-router` 保持 8（该仓 `module_tree.json` 为 `{}`，目标页压根不存在）。
+
 ## 0.17.24 — 2026-11-03
 
 ### 思考档位不在模型目录里时，提交就拦下

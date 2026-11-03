@@ -627,6 +627,26 @@ if (!existsSync(REAL)) {
   })
 }
 
+// ── 9. 引擎命名分歧：别名要同时作用在「死链判定」与「链接改写」两处 ────────
+await check('别名：模块名带扩展名的页，mod.md 被判命中且改写成落地页', async () => {
+  // 引擎按模块名（mod.ts）把页命名成 mod.ts.md，兄弟页正文写 mod.md。
+  // 两处都要认这个别名：output 判死链、quality-gate 构造 pageMap 改写链接。
+  const docs = join(root, 'alias-render')
+  mkdirSync(docs, { recursive: true })
+  writeFileSync(join(docs, 'overview.md'), '# 概览\n\n根页。\n', 'utf8')
+  writeFileSync(join(docs, 'other.md'), '# other\n\n见 [mod](mod.md)。\n', 'utf8')
+  writeFileSync(join(docs, 'mod.ts.md'), '# mod\n\n## 职责\n\n模块页正文。\n', 'utf8')
+  writeFileSync(join(docs, 'module_tree.json'), JSON.stringify({
+    other: { path: 'src/other.ts', components: [], children: {} },
+    'mod.ts': { path: 'src/mod.ts', components: [], children: {} },
+  }), 'utf8')
+  const r = gateNativeOutput({ docsDir: docs, requireCommittedInput: false, includeContent: true })
+  assert.equal(r.defects.some((d) => d.kind === 'dead-link'), false, JSON.stringify(r.defects))
+  const page = r.rendered.find((p) => p.wikiPath.endsWith('/other.md'))
+  assert.ok(page, JSON.stringify(r.rendered.map((p) => p.wikiPath)))
+  assert.match(page.content, /\]\(mod-ts\.md\)/, page.content)
+})
+
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) {

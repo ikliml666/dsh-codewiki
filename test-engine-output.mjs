@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   OUTPUT_PROBLEM_KINDS,
   bodyLength,
@@ -50,6 +50,7 @@ function makeDocs(name, overrides = {}) {
   }
   for (const [rel, body] of Object.entries(files)) {
     if (body === null) continue
+    mkdirSync(dirname(join(dir, rel)), { recursive: true })
     writeFileSync(join(dir, rel), body, 'utf8')
   }
   return dir
@@ -216,6 +217,70 @@ await check('validateOutput：链接到仓库源文件（../src/...）不算死�
   const dir = makeDocs('srclink', { 'Core.md': '# Core\n\n见 [engine](../src/core/engine.py)。\n' })
   const v = validateOutput({ docsDir: dir, repoRoot })
   assert.equal(v.problems.some((p) => p.kind === 'dead-link'), false, JSON.stringify(v.problems))
+})
+
+// 引擎把自己的命名约定用在页文件名上，正文里的链接却还按「模块名」写：
+//   · 模块名带扩展名（src_session-checkout-module.ts）→ 页名 src_session-checkout-module.ts.md，
+//     但兄弟页里写的是去掉扩展名的 src_session-checkout-module.md；
+//   · 子模块页会被加上父模块前缀（client_review_console_review_surfaces.md），
+//     父页里写的却是短名 review_surfaces.md。
+// 这两类不是死链，是同一页的两种写法。真机 dsh-git-worktree 19 条死链全属此类。
+await check('validateOutput：同目录 X.md 指向唯一 X.<ext>.md 不算死链（引擎页名带扩展名）', async () => {
+  // 树里模块名是 mod.ts，引擎据此把页命名成 mod.ts.md；兄弟页的正文写 mod.md。
+  const dir = makeDocs('alias-ext', {
+    'Core.md': '# Core\n\n见 [mod](mod.md)。\n',
+    'mod.ts.md': '# mod\n\n模块页。\n',
+    'module_tree.json': JSON.stringify({
+      Core: { path: 'src/core', components: ['src/core/engine.py::Engine'], children: {} },
+      Web: { path: 'src/web', components: ['src/web/handler.py::Handler'], children: {} },
+      'mod.ts': { path: 'src/mod.ts', components: [], children: {} },
+    }),
+  })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.equal(v.problems.some((p) => p.kind === 'dead-link'), false, JSON.stringify(v.problems))
+})
+
+await check('validateOutput：同目录 sub/Y.md 指向唯一 sub/sub_Y.md 不算死链（子模块页带父前缀）', async () => {
+  // 子模块页被引擎命名成 sub_sub_surfaces.md，父页正文写的是子模块的短名。
+  const dir = makeDocs('alias-prefix', {
+    'Core.md': '# Core\n\n见 [surfaces](sub/surfaces.md)。\n',
+    'sub.md': '# sub\n\n见 [surfaces](sub/sub_surfaces.md)。\n',
+    'sub/sub_surfaces.md': '# surfaces\n\n子模块页。\n',
+    'module_tree.json': JSON.stringify({
+      Core: { path: 'src/core', components: ['src/core/engine.py::Engine'], children: {} },
+      Web: { path: 'src/web', components: ['src/web/handler.py::Handler'], children: {} },
+      sub: {
+        path: 'src/sub',
+        components: [],
+        children: { sub_surfaces: { path: 'src/sub/surfaces.ts', components: [], children: {} } },
+      },
+    }),
+  })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.equal(v.problems.some((p) => p.kind === 'dead-link'), false, JSON.stringify(v.problems))
+})
+
+// 别名只在**唯一**命中时成立：同目录同时有 X.ts.md 与 X.js.md 时无法判定指的是哪一篇，
+// 猜一个就是把「链接断了」静默变成「链接指向另一篇」，比报死链更糟。
+await check('validateOutput：候选不唯一时仍判死链（不猜）', async () => {
+  const dir = makeDocs('alias-ambiguous', {
+    'Core.md': '# Core\n\n见 [mod](mod.md)。\n',
+    'mod.ts.md': '# mod ts\n\nts 模块页。\n',
+    'mod.js.md': '# mod js\n\njs 模块页。\n',
+  })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.ok(v.problems.some((p) => p.kind === 'dead-link'), JSON.stringify(v.problems))
+})
+
+// 别名不能吃成「模糊匹配」：目标只是与某页名字相近，仍是死链（真机 overview.md
+// 写 build_and_configuration.md，而树里根本没有这个模块）。
+await check('validateOutput：只是名字相近（非命名约定）仍判死链', async () => {
+  const dir = makeDocs('alias-fuzzy', {
+    'Core.md': '# Core\n\n见 [x](client_interface_layer.md)。\n',
+    'worktree_client_interface_layer.md': '# layer\n\n客户端层。\n',
+  })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.ok(v.problems.some((p) => p.kind === 'dead-link'), JSON.stringify(v.problems))
 })
 
 await check('validateOutput：同一输入两次调用结果稳定（无隐藏状态）', async () => {
