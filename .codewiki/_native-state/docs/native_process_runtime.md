@@ -34,7 +34,7 @@ flowchart TD
     G --> H{"增量可信?"}
     H -- "否" --> I["resolution=full<br/>记录 fallbackReason"]
     H -- "是" --> J["resolution=update<br/>水合上一轮图/树/文章"]
-    J --> K{"水合为空 / 模块树缺页?"}
+    J --> K{"水合为空 / 模块树缺页 / overview 陈链?"}
     K -- "是" --> I
     K -- "否" --> L["阶段1.9 工作区快照<br/>未提交改动合成临时 commit"]
     I --> L
@@ -69,6 +69,7 @@ flowchart LR
     NR --> WS["workspace-snapshot.js<br/>createWorkspaceSnapshot"]
     NR --> NS["native-state.js<br/>受管状态读写"]
     NR --> MP["mapping.js<br/>findMissingModuleDocs / staleDocPages"]
+    NR --> OP["output.js<br/>overviewStaleLinks"]
 
     CL -->|"abort / timeout / silence / result-grace"| PT
     PT -.->|"Windows: taskkill /T /F<br/>POSIX: SIGTERM 进程组 → SIGKILL"| OS["操作系统进程树"]
@@ -108,7 +109,7 @@ flowchart LR
    - **能不能增量**：受管状态齐全、版本兼容、基线（`_meta.yaml` 里的已提交 commit）可达、且调用方要 `stale`/`auto`；
    - **消费成立吗**：只有引擎真报 `update_record.outcome=incremental` 且 gate/apply 全 `done` 才推进基线。
    
-   决议结论写在 `resolution`（`full`/`update`）与 `fallbackReason` 里。注意「变化集为空」**不是跳过引擎的理由**——变没变由引擎的图 diff 说了算，change-set 只决定增量可不可信。水合后还会清理不属于当前模块树的旧页（`staleDocPages`），并检查缺页：同一基线 + 同一批缺口 + 无有效变化时**收敛**——跳过重复全量，但缺页仍由质量门如实判成 partial（不豁免）。
+   决议结论写在 `resolution`（`full`/`update`）与 `fallbackReason` 里。注意「变化集为空」**不是跳过引擎的理由**——变没变由引擎的图 diff 说了算，change-set 只决定增量可不可信。水合后还会清理不属于当前模块树的旧页（`staleDocPages`），并检查缺页；同时判 `overview.md` 的**陈链**（`overviewStaleLinks`）：上游 `reusable_overview()` 只认「空页 / 未完成的 preamble」，聚类重构后模块改名、旧 overview 指向已消失的页仍会被判可复用而每轮跳过重建。缺页或陈链任一成立即转全量；陈链的处置是先把陈 overview 删掉（留着它，全量与增量都会因「可复用」而跳过重建）再转全量重建。同一基线 + 同一批缺口（缺页与陈链两份排序清单都相同）+ 无有效变化时**收敛**——跳过重复全量，但缺页与陈链仍由质量门如实判成 partial（不豁免）；修复凭据 `missingRepair` 经 `buildStatePayload` 落进 state.json，因此同时记录 `modules` 与 `overviewLinks` 两份清单。
 3. **工作区快照（1.9）**：FSoft 只从 `<old>..<new>` 取 diff，但读的是工作区文件。此处把未提交改动合成一个不挂 ref 的临时 commit（`createWorkspaceSnapshot`），本轮 `commitId` 指向它，让「文章反映的内容」与「账本记的 commit」对齐；造不出快照不算失败，退回 HEAD 记账并记 note。
 4. **模型桥（2）**：`startLlmBridge` 建立本地桥接，占位 key 每次随机、只经进程环境传递、不进日志；失败 → `failed`（stage=cluster，code=`engine-model`）。
 5. **引擎执行（2）**：`resolution=update` 用 `update` 动作（读水合旧图做图 diff），否则 `generate`（从零建图）。两者不能互换：增量动作在空 docsDir 上会走更慢的 missing_page 全量重建；全量动作带旧状态跑会让「可比性」变假象。增量参数 `DEFAULT_UPDATE_OPTIONS = { rung: '3' }` 显式下发——3 = 组件级方法（图 diff 决定重写范围），显式给出可避免上游默认值变化导致增量语义静默漂移。桥在 `finally` 中关闭（先关桥会让读流中的引擎拿到 502），关闭前取走 `bridge.stats()`（含 `emptyResponses`：上游 200 但无正文的次数，是假 done 的来源之一，只进 notes 不参与裁决）。
