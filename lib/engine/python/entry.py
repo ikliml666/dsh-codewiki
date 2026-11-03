@@ -1060,22 +1060,32 @@ def action_generate(request_id, payload, is_update=False):
             for name in missing
         ]
         result["failedCount"] = len(missing)
+        result["usage"] = _usage_of(job)
         return result
 
     result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome, counts=_counts_of(adapter))
-    # 用量：FSoft 自己记在 job.statistics 上（doc_generator.py:559-580）
+    result["usage"] = _usage_of(job)
+    return result
+
+
+def _usage_of(job):
+    """本轮用量（FSoft 记在 job.statistics 上，doc_generator.py:559-580）。
+
+    必须是独立函数并被**每条出口**调用：partial 分支曾直接 return，
+    于是写了一半的任务用量恒为 0——面板与成本核算看到的都是「没花钱」，
+    而实际上这一轮可能已经跑了上百次请求。
+    """
     try:
         stats = getattr(job, "statistics", None)
         totals = getattr(stats, "usage_totals", None) or {}
-        result["usage"] = {
+        return {
             "inputTokens": int(totals.get("input_tokens", 0) or 0),
             "outputTokens": int(totals.get("output_tokens", 0) or 0),
             "cachedTokens": int(totals.get("cache_read_tokens", 0) or 0),
             "requests": int(totals.get("requests", 0) or 0),
         }
     except Exception:
-        pass
-    return result
+        return {"inputTokens": 0, "outputTokens": 0, "cachedTokens": 0, "requests": 0}
 
 
 def _update_outcome_of(adapter):

@@ -76,6 +76,55 @@ const line = (obj) => JSON.stringify(obj) + '\n'
 
 // ── 协议面 ────────────────────────────────────────────────────────────────
 
+await check('用量：partial 终态也必须回带本轮 usage，不能恒为 0', async () => {
+  // 真机 job-mw0aep74-7：40 次桥请求、16 个模块失败，任务 usage 四字段全 0。
+  // 根因是 partial 分支提前 return，跳过了后面的采集段。用量是成本核算与
+  // 「这一轮到底花了多少」的唯一来源，任何出口都不能丢——所以断言的是
+  // action_generate 里「每个 return result 前面都配了 usage 赋值」，而非只测函数本身。
+  const py = `import sys, json
+import ast
+src = open(sys.argv[1], encoding="utf-8").read()
+tree = ast.parse(src)
+fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "action_generate")
+body = list(ast.walk(fn))
+uses = [n for n in body if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
+                and t.value.id == "result" for t in n.targets)
+        and any(isinstance(v, ast.Call) and getattr(v.func, "id", "") == "_usage_of"
+                for v in [n.value])]
+returns = [n for n in body if isinstance(n, ast.Return)
+           and isinstance(n.value, ast.Name) and n.value.id == "result"]
+report = {"usageAssignments": len(uses), "resultReturns": len(returns)}
+out = None
+import importlib.util as u
+spec = u.spec_from_file_location("entry", sys.argv[1])
+mod = u.module_from_spec(spec)
+spec.loader.exec_module(mod)
+totals = {"input_tokens": 1234, "output_tokens": 56, "cache_read_tokens": 78, "requests": 9}
+import types
+job = types.SimpleNamespace(statistics=types.SimpleNamespace(usage_totals=totals))
+report["mapped"] = mod._usage_of(job)
+report["mappedEmpty"] = mod._usage_of(types.SimpleNamespace(statistics=None))
+mod._REAL_STDOUT.write(json.dumps(report) + chr(10))
+mod._REAL_STDOUT.flush()`
+  const raw = spawnSync(PY, ['-c', py, ENTRY], {
+    cwd: repo,
+    env: { ...process.env, ...isolatedEnv },
+    encoding: 'utf8',
+    timeout: 60000,
+  })
+  const line = String(raw.stdout || '').trim().split('\n').filter(Boolean).pop()
+  assert.ok(line, `探针无输出：${raw.stdout}${raw.stderr}`)
+  const got = JSON.parse(line)
+  assert.ok(got.resultReturns >= 2, `应有多条 result 出口，实际 ${got.resultReturns}`)
+  assert.equal(
+    got.usageAssignments,
+    got.resultReturns,
+    `每条 result 出口都要带 usage（出口 ${got.resultReturns} 条，usage 赋值只有 ${got.usageAssignments} 条）`,
+  )
+  assert.deepEqual(got.mapped, { inputTokens: 1234, outputTokens: 56, cachedTokens: 78, requests: 9 })
+  assert.deepEqual(got.mappedEmpty, { inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0 })
+})
 await check('协议：非法 action 回可机读失败，不是崩栈', async () => {
   const res = await runEngine({
     engine: engineOf(),

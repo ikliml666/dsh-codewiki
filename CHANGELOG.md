@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.19 — 2026-11-03
+
+### partial 终态丢掉本轮用量：写了一半的任务，成本永远是 0
+
+真机 `job-mw0aep74-7`（dsh-git-worktree）发了 46 次请求、写了 8 篇页，任务 `usage`
+四个字段却全是 0。原因是 `action_generate` 的出口顺序：`if missing:` 的 partial
+分支在 `return result` 之后才轮到后面的 usage 采集段，于是只有 done 那条出口会带用量。
+
+用量不是装饰：它是判断「这一轮到底花了多少」和「值不值得重跑」的唯一依据，写了一半的
+任务恰恰是最需要看到成本的。改为独立函数 `_usage_of(job)`，两条出口各调一次，
+不再有「先 return、后采集」这种顺序依赖。
+
+验证：`test-engine-python-entry.mjs` 23 项。新用例不用「只测函数本身」这种会漏抓的写法——
+它用 Python AST 统计 `action_generate` 里「`return result` 的条数」与
+「`result[...] = _usage_of(...)` 的条数」，断言两者相等，所以少调一处就红。
+红对照：删掉两条采集行 → 22 passed / 1 failed；恢复后 23 passed / 0 failed。
+全套 36 个测试文件（跳过 test-wiki-anchors）FAILED_FILES=0；
+`test-engine-native-job.mjs` 连跑两次均 138/138（首轮曾 136/138，属既有时序 flake）。
+
 ## 0.17.18 — 2026-11-03
 
 ### 桥日志记录 chunk 类型计数：这才分得清「模型返回空」和「桥丢包」
