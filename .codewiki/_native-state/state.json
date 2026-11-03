@@ -2,22 +2,21 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "7328cc6c57f90e74c50094d1230c5e6f1478d57f",
-    "headCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52"
+    "baseCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
+    "headCommit": "4537199b1f6b584818642719a731374597112c1f"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "7328cc6c57f90e74c50094d1230c5e6f1478d57f",
-    "headCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
+    "baseCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
+    "headCommit": "4537199b1f6b584818642719a731374597112c1f",
     "committed": [
       "CHANGELOG.md",
-      "lib/engine/native-run.js",
-      "lib/engine/output.js",
+      "client.js",
+      "index.js",
       "lib/engine/quality-gate.js",
       "package.json",
-      "test-engine-native-incremental.mjs",
-      "test-engine-output.mjs",
-      "test-engine-quality-gate.mjs"
+      "test-engine-quality-gate.mjs",
+      "test-orchestration.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -30,11 +29,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0mnpie-0-native（29 个文件）"
+    "持久化基线 7328cc6 与本次 cw 基线 4f7e86f 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0pqnpy-b-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-03T11:57:17.226Z"
+  "updatedAt": "2026-11-03T13:29:49.993Z"
 }
