@@ -2,20 +2,19 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "4537199b1f6b584818642719a731374597112c1f",
-    "headCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0"
+    "baseCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+    "headCommit": "546e22574de303ec9aef43b9146e7b627b265384"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "4537199b1f6b584818642719a731374597112c1f",
-    "headCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+    "baseCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+    "headCommit": "546e22574de303ec9aef43b9146e7b627b265384",
     "committed": [
       "CHANGELOG.md",
-      "lib/engine/apply-plan.js",
-      "lib/engine/native-run.js",
+      "lib/engine/python/full_parallel_runtime.py",
       "package.json",
-      "test-engine-apply-plan.mjs",
-      "test-engine-native-incremental.mjs"
+      "test-fsoft-coverage.mjs",
+      "test-upstream-parallel.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -26,13 +25,14 @@
   },
   "unconsumed": [],
   "engineVersion": "2.0.0",
-  "scope": "stale",
+  "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0rr655-5-native（29 个文件）"
+    "持久化基线 4537199 与本次 cw 基线 08d66ca 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0sfw2x-6-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-03T14:17:22.675Z"
+  "updatedAt": "2026-11-03T14:49:25.749Z"
 }

@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-03T22:17:21+0800",
-  "finished_at": "2026-11-03T22:17:22+0800",
-  "outcome": "no_change",
+  "started_at": "2026-11-03T22:44:19+0800",
+  "finished_at": "2026-11-03T22:49:25+0800",
+  "outcome": "incremental",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -20,12 +20,13 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 2,
-      "resume": false
+      "resume": true,
+      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
     }
   },
   "revision": {
-    "old_commit": "4537199b1f6b584818642719a731374597112c1f",
-    "new_commit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+    "old_commit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+    "new_commit": "546e22574de303ec9aef43b9146e7b627b265384",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,48 +34,712 @@
       "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 0,
+      "body": 2,
       "edge": 0,
       "renamed": 0
     },
     "added": [],
     "deleted": [],
     "interface": [],
-    "body": [],
+    "body": [
+      "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+      "package.json::package.json"
+    ],
     "edge": [],
     "renamed": {}
   },
-  "repair": {},
+  "repair": {
+    "renamed": {},
+    "removed": [],
+    "routing": [],
+    "orphans": [],
+    "deleted_nodes": [],
+    "created_leaves": [],
+    "growth": {},
+    "growth_flagged": []
+  },
   "reclustered": [],
-  "reports": {},
-  "ownership": [],
-  "active": [],
-  "write_sets": {},
-  "fallback": {},
-  "verdicts": [],
-  "pages_written": [],
+  "reports": {
+    "fsoft_engine_runtime/fsoft_engine_python_runtime": {
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_python_runtime"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree"
+      ],
+      "adopted": {
+        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree": "1:same_file"
+      },
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "fsoft_engine_python_runtime"
+    },
+    "platform_infrastructure_and_developer_tooling/build_packaging_configuration": {
+      "leaf_path": [
+        "platform_infrastructure_and_developer_tooling",
+        "build_packaging_configuration"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "build_packaging_configuration"
+    }
+  },
+  "ownership": [
+    {
+      "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_python_runtime"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    }
+  ],
+  "active": [
+    {
+      "leaf": "fsoft_engine_runtime/fsoft_engine_python_runtime",
+      "page": "fsoft_engine_python_runtime",
+      "mode": "edit",
+      "order": 0
+    },
+    {
+      "leaf": "platform_infrastructure_and_developer_tooling/build_packaging_configuration",
+      "page": "build_packaging_configuration",
+      "mode": "edit",
+      "order": 1
+    }
+  ],
+  "write_sets": {
+    "fsoft_engine_python_runtime": [
+      "codewiki_rust_vendor",
+      "engine_client",
+      "fsoft_engine_python_runtime",
+      "fsoft_engine_runtime",
+      "llm_provider_bridges",
+      "main_orchestrator",
+      "native_process_runtime",
+      "overview",
+      "test_fixtures_and_probes"
+    ],
+    "build_packaging_configuration": [
+      "build_packaging_configuration",
+      "codewiki_rust_vendor",
+      "llm_provider_bridges",
+      "main_orchestrator",
+      "overview",
+      "platform_infrastructure_and_developer_tooling",
+      "test_fixtures_and_probes",
+      "workspace_state_and_integrity"
+    ]
+  },
+  "fallback": {
+    "r_leaf": 0.14285714285714285,
+    "r_tree": 0.0,
+    "n_active": 2,
+    "n_leaves": 14,
+    "n_structural": 0,
+    "tau_full": 0.5,
+    "tau_tree": 0.3,
+    "fired": false
+  },
+  "verdicts": [
+    {
+      "page": "fsoft_engine_python_runtime",
+      "verdict": "patch",
+      "reason": "Updated the _merge_tree bullet to document the new subset-vs-conflict rule (subset = union, only mutual exclusivity raises)",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": true
+    },
+    {
+      "page": "fsoft_engine_runtime",
+      "verdict": "no-op",
+      "reason": "Only summarizes the Python layer at a high level; no merge-conflict detail",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "High-level architecture label only; no merge detail",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_client",
+      "verdict": "no-op",
+      "reason": "Describes protocol contract; no tree-merge content",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "llm_provider_bridges",
+      "verdict": "no-op",
+      "reason": "Only names entry.py::_model_config; no merge content",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "codewiki_rust_vendor",
+      "verdict": "no-op",
+      "reason": "Referral only; no merge detail",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "main_orchestrator",
+      "verdict": "no-op",
+      "reason": "High-level references to Python subprocess; no merge detail",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "native_process_runtime",
+      "verdict": "no-op",
+      "reason": "Driven-subprocess listing; no merge detail",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "test_fixtures_and_probes",
+      "verdict": "no-op",
+      "reason": "No merge content",
+      "by_leaf": "fsoft_engine_python_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "build_packaging_configuration",
+      "verdict": "patch",
+      "reason": "字段速览 JSON 片段中的 version 由 0.17.26 更新为 0.17.29，与新版 package.json 一致",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": true
+    },
+    {
+      "page": "platform_infrastructure_and_developer_tooling",
+      "verdict": "no-op",
+      "reason": "祖先页仅抽象列示 package.json/cordis.patch.yml/setup-env.sh，无版本号，版本 bump 不影响其描述",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "概览页无任何版本号引用，内容仍正确",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "codewiki_rust_vendor",
+      "verdict": "no-op",
+      "reason": "仅引用 leaf 的 binaryPath/bin/cw.exe 打包约定，与版本号无关",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "llm_provider_bridges",
+      "verdict": "no-op",
+      "reason": "仅引用 setup-env.sh 铸造 venv，版本 bump 不影响其契约描述",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "main_orchestrator",
+      "verdict": "no-op",
+      "reason": "引用 leaf 的插件身份/装载条目/环境脚本，无硬编码版本号",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "test_fixtures_and_probes",
+      "verdict": "patch",
+      "reason": "对拍链条目据 package.json（v0.17.26）记载的引用更新为 v0.17.29",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": true
+    },
+    {
+      "page": "workspace_state_and_integrity",
+      "verdict": "no-op",
+      "reason": "仅引用 setup-env.sh 作为环境修复路径，版本无关",
+      "by_leaf": "build_packaging_configuration",
+      "changed_on_disk": false
+    }
+  ],
+  "pages_written": [
+    "fsoft_engine_python_runtime",
+    "build_packaging_configuration",
+    "test_fixtures_and_probes"
+  ],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {},
-  "calls": [],
-  "detector_notes": [],
+  "stale_scan": {
+    "scanned": 18,
+    "pages_with_hits": {},
+    "fixed": []
+  },
+  "calls": [
+    {
+      "kind": "leaf_agent",
+      "target": "fsoft_engine_python_runtime",
+      "seconds": 304.84258008003235,
+      "usage": {
+        "input_tokens": 511607,
+        "output_tokens": 16674,
+        "cache_read_tokens": 129504,
+        "cache_write_tokens": 0,
+        "total_tokens": 528281,
+        "requests": 13
+      },
+      "error": null
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "build_packaging_configuration",
+      "seconds": 142.88026809692383,
+      "usage": {
+        "input_tokens": 209256,
+        "output_tokens": 6369,
+        "cache_read_tokens": 37800,
+        "cache_write_tokens": 0,
+        "total_tokens": 215625,
+        "requests": 8
+      },
+      "error": null
+    },
+    {
+      "kind": "missing_pages",
+      "target": "-",
+      "seconds": 0.02368760108947754,
+      "usage": null,
+      "error": null
+    }
+  ],
+  "detector_notes": [
+    "[fsoft_engine_python_runtime] agent notes: _merge_tree now treats leaf component-list subset relations as non-conflicting (union), fixing a false conflict seen in 0.17.17 on real job-mw0rkcel-0. The leaf page's adopt_tree_coverage bullet already correctly notes it uses write_tree_exclusive to skip merge; no further change needed there.",
+    "[build_packaging_configuration] agent notes: 本次变更仅为 package.json 单行版本号 0.17.28→0.17.29；description 文案未变，版本演进要点小节的历史里程碑（0.16.0/0.16.13）无需改动。"
+  ],
   "errors": [],
-  "wall_seconds": 0.06,
+  "wall_seconds": 305.23,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "complete",
+    "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 0,
+    "n_calls": 21,
     "totals": {
-      "cost_usd": 0.0
+      "input_tokens": 720863,
+      "output_tokens": 23043,
+      "cache_read_tokens": 167304,
+      "cache_write_tokens": 0,
+      "requests": 21,
+      "total_tokens": 743906
     },
-    "by_phase": {},
-    "by_model": {},
-    "unpriced_models": [],
-    "calls": []
+    "by_phase": {
+      "update": {
+        "calls": 21,
+        "input_tokens": 720863,
+        "output_tokens": 23043,
+        "cache_read_tokens": 167304,
+        "cache_write_tokens": 0,
+        "requests": 21,
+        "total_tokens": 743906,
+        "unpriced_calls": 21
+      }
+    },
+    "by_model": {
+      "doubao-seed-2.1-lite": {
+        "calls": 21,
+        "input_tokens": 720863,
+        "output_tokens": 23043,
+        "cache_read_tokens": 167304,
+        "cache_write_tokens": 0,
+        "requests": 21,
+        "total_tokens": 743906,
+        "unpriced_calls": 21
+      }
+    },
+    "unpriced_models": [
+      "doubao-seed-2.1-lite"
+    ],
+    "calls": [
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 14.03,
+        "input_tokens": 8331,
+        "output_tokens": 1010,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 9341,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 21.89,
+        "input_tokens": 8438,
+        "output_tokens": 1764,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 10202,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 8.31,
+        "input_tokens": 11078,
+        "output_tokens": 571,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 11649,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.81,
+        "input_tokens": 12639,
+        "output_tokens": 187,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 12826,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.64,
+        "input_tokens": 13899,
+        "output_tokens": 177,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 14076,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.75,
+        "input_tokens": 23762,
+        "output_tokens": 122,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 23884,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.55,
+        "input_tokens": 34278,
+        "output_tokens": 123,
+        "cache_read_tokens": 23608,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 34401,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 18.83,
+        "input_tokens": 45013,
+        "output_tokens": 1382,
+        "cache_read_tokens": 12600,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 46395,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.11,
+        "input_tokens": 18716,
+        "output_tokens": 238,
+        "cache_read_tokens": 8248,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 18954,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.16,
+        "input_tokens": 30799,
+        "output_tokens": 195,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 30994,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 15.39,
+        "input_tokens": 45446,
+        "output_tokens": 766,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 46212,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 14.22,
+        "input_tokens": 46318,
+        "output_tokens": 878,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 47196,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 26.89,
+        "input_tokens": 41506,
+        "output_tokens": 1976,
+        "cache_read_tokens": 18488,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 43482,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 6.28,
+        "input_tokens": 48006,
+        "output_tokens": 186,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 48192,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 16.05,
+        "input_tokens": 42250,
+        "output_tokens": 904,
+        "cache_read_tokens": 11064,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 43154,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_packaging_configuration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 22.97,
+        "input_tokens": 42677,
+        "output_tokens": 1298,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 43975,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 41.31,
+        "input_tokens": 48570,
+        "output_tokens": 2083,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 50653,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.5,
+        "input_tokens": 48674,
+        "output_tokens": 89,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 48763,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 78.02,
+        "input_tokens": 49588,
+        "output_tokens": 4435,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 54023,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 64.98,
+        "input_tokens": 50136,
+        "output_tokens": 3926,
+        "cache_read_tokens": 48440,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 54062,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "fsoft_engine_python_runtime",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 9.11,
+        "input_tokens": 50739,
+        "output_tokens": 733,
+        "cache_read_tokens": 44856,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 51472,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      }
+    ]
   },
-  "run_id": "ffd42581-3898-4b30-a319-fc488bc88175"
+  "run_id": "7e6a5480-aa4b-449c-a634-bc4430c3275c"
 }

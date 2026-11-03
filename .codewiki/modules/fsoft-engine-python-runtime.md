@@ -158,7 +158,7 @@ flowchart LR
 ### `full_parallel_runtime.py` — 全量生成拓扑并行
 
 - `_SharedTreeIO`（`full_parallel_runtime.py::_SharedTreeIO`）：包在 `file_manager` 的 `save_json`/`load_json` 外面，对 `module_tree.json` 的每次读写都在 `_TREE_LOCK`（RLock）内串行化。
-- `_merge_tree`：并行分支各自写回的树做 read-merge-write 合并——父模块 `components` 取并集（信息互补）；**同一叶子被两个分支分给不同组件是真矛盾，显式抛错**（静默取一个会丢内容且无法回溯）。
+- `_merge_tree`：并行分支各自写回的树做 read-merge-write 合并——父模块 `components` 取并集（信息互补）；叶子模块的 `components` 就是它的组件归属，**两边各有对方没有的组件才是真矛盾，显式抛错**（静默取一个会丢内容且无法回溯）。但「一边是另一边的真子集」不是矛盾：树里记着 3 个组件、某个分支看到 4 个，说明另一分支还没见到本轮新出现的符号（0.17.17 的补挂写盘撞过同一形态，真机 job-mw0rkcel-0 因此整轮 articles 中断），子集关系下照样取并集、不报错。
 - `install_full_runtime(concurrency)`：幂等地把 `DocumentationGenerator._generate_modules_in_order` 换成 `_run_parallel`——按初始树递归 `_walk`：兄弟模块受信号量（上限 8）限流并发，父模块必须等所有子模块结束后再生成父页（拓扑顺序不被破坏）；每个模块进信号量后**从磁盘重读 module_tree**（兄弟分支可能刚写入新子节点）。收尾三件事保留上游原语义：`validate_module_file_coverage` 覆盖校验、`organize_docs` 页面归位、有模块失败时 `raise RuntimeError`（显式失败不能被并行化吃掉）。
 - 安装前检查原方法未被其它适配器替换，否则抛错拒绝重复安装。
 
