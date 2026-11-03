@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.17.30 — 2026-11-03
+
+### 无变化轮也要清残留页：残骸不再只能等「源码刚好有改动」才被清理
+
+0.17.28 的残留页清理只在真的写文章那轮生效。真机五仓验证（2026-11-03）暴露了后果：
+`dsh-git-worktree`、`dsh-hindsight-on-demand`、`Wxxy-CampusLogin`、`dsh-subagent-auto-router`
+四个仓库本轮全是 `updateOutcome=no_change`，残留页一个都没被清掉——`idleRound` 让落地器以
+`noChanges: true` 直接短路，连 `deleteFiles` 都不看一眼。而「绝大多数轮次都是 no_change」
+正是日常状态，等于这条清理规则实际上常年不执行。
+
+两处修改：
+
+1. `lib/engine/native-run.js`：孤儿页/残留页扫描不再包在 `if (!idleRound)` 里——源码没变
+   不代表库里没有残骸，扫一遍的开销远小于留着一堆指向不存在页面的死链。
+2. `lib/engine/apply-plan.js`：`noChanges` 短路增加 `deleteOnly` 例外——只当本轮确实有
+   待删页时才继续走到删除与索引，且该分支**一件都不写**（不写文章、不写受管状态、不推进基线），
+   只做「删除 → `cw index` → 提交」。提交失败照旧进 `problems`，终态不会因此变 done。
+
+验证：`test-engine-native-incremental.mjs` 新增用例 17「无变化轮也要清残留页」，先红
+（2/5，残留页仍在、HEAD 未变、提交里没有该页）后绿（5/5）。用例里残骸必须**先提交进
+git** 再删——写成未跟踪文件后直接删除，对 git 而言净变化为零（"无内容可提交"），会把用例
+测成假命题。整文件 **157/157**。
+
 ## 0.17.29 — 2026-11-03
 
 ### 叶子组件是「旧值真子集」时不再判冲突：并行全量不再整轮中断

@@ -715,6 +715,38 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   check(fs.existsSync(path.join(mods, 'handwritten.md')), '没有 fsoft_page 的人工页不得被删')
 }
 
+// ============================ 用例 17：无变化轮也要清残留页 ============================
+// 真机事故（2026-11-03 五仓验证）：dsh-git-worktree / hindsight / CampusLogin /
+// auto-router 四仓的残留页一个都没被清，因为它们本轮全都是 updateOutcome=no_change。
+// idleRound 让落地器以 noChanges=true 短路，连 deleteFiles 都不看——于是「源文件没变
+// 但库里有残骸」这种状态永远等不到清理。清理残骸与「写文章」是两件事：前者必须能在
+// 无变化轮执行，后者不能。
+if (want(17)) { console.log('== 用例 17：无变化轮也要清残留页（否则残骸永远等不到清理） ==')
+  const { base, repo, git } = makeRepo('stalenoop', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const mods = path.join(repo, '.codewiki', 'modules')
+  fs.mkdirSync(mods, { recursive: true })
+  fs.writeFileSync(path.join(mods, 'agent-runtime.md'),
+    '---\ntitle: agent-runtime\ntype: module\nsource_files:\n  - core/core.py\ntags: []\nfsoft_page: agent_runtime.md\n---\n\n# agent-runtime\n\n旧聚类的残骸。\n', 'utf8')
+  // 残骸必须是**已入库**的：真实场景里它是历史某轮编译提交进 git 的页。写成未跟踪
+  // 文件再删掉，对 git 而言净变化为零（"无内容可提交"），就把用例测成了假命题。
+  execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' })
+  execFileSync('git', ['commit', '-q', '-m', '旧聚类残骸'], { cwd: repo, stdio: 'pipe' })
+  const headBefore = gitOut(repo, 'rev-parse', 'HEAD')
+
+  // 源码一个字都不改：这一轮引擎必然报 no_change。
+  setMode(base, 'stalenoop', 'update-nochange')
+  const r = await runJob(repo, { scope: 'stale' })
+  const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  check(r.job?.nativeResult?.incremental?.updateOutcome === 'no_change',
+    `本轮确实是无变化轮（实际 ${r.job?.nativeResult?.incremental?.updateOutcome}）`)
+  check(!fs.existsSync(path.join(mods, 'agent-runtime.md')), `无变化轮也要清掉残留页（notes: ${notes.slice(-200)}）`)
+  check(gitOut(repo, 'rev-parse', 'HEAD') !== headBefore, '清理必须产生一次真实提交（不是只改工作区）')
+  const files = gitShowFiles(repo, gitOut(repo, 'rev-parse', 'HEAD'))
+  check(files.includes('.codewiki/modules/agent-runtime.md'), `删除进同一个 commit（实际 ${JSON.stringify(files)}）`)
+}
+
 // ============================ 用例 11：宿主重放保留断点现场 ============================
 if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
   const { base, repo } = makeRepo('resume', { mode: 'done' })
