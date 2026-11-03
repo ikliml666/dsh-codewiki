@@ -2,31 +2,20 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "a5b26e641327a215edf2309f2028d8110c4a172b",
-    "headCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f"
+    "baseCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
+    "headCommit": "d1a5f529f7639d06512ed392ca05cda1fdbbbb92"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "a5b26e641327a215edf2309f2028d8110c4a172b",
-    "headCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
+    "baseCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
+    "headCommit": "d1a5f529f7639d06512ed392ca05cda1fdbbbb92",
     "committed": [
       "CHANGELOG.md",
       "README.md",
-      "lib/engine/llm-bridge.js",
-      "lib/engine/mapping.js",
-      "lib/engine/native-run.js",
-      "lib/engine/openai-bridge.js",
-      "lib/engine/python/entry.py",
-      "lib/engine/python/full_parallel_runtime.py",
+      "lib/engine/python/fsoft_runtime.py",
+      "lib/engine/python/tree_coverage.py",
       "package.json",
-      "patches/README.md",
-      "test-engine-bridge.mjs",
-      "test-engine-llm-bridge.mjs",
-      "test-engine-native-incremental.mjs",
-      "test-engine-output.mjs",
-      "test-fixtures/fake-native-engine.mjs",
-      "test-fsoft-runtime.mjs",
-      "test-upstream-parallel.mjs"
+      "test-fsoft-coverage.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -42,7 +31,8 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw06291k-4-native（40 个文件）"
+    "持久化基线 a5b26e6 与本次 cw 基线 2351ac7 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw07tzcb-0-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-03T04:21:06.096Z"
+  "updatedAt": "2026-11-03T05:01:17.996Z"
 }

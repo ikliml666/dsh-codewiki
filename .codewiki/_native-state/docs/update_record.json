@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T12:15:19+0800",
-  "finished_at": "2026-11-03T12:21:05+0800",
+  "started_at": "2026-11-03T13:01:16+0800",
+  "finished_at": "2026-11-03T13:01:16+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -20,34 +20,36 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 2,
-      "resume": true,
-      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
+      "resume": false
     }
   },
   "revision": {
-    "old_commit": "a5b26e641327a215edf2309f2028d8110c4a172b",
-    "new_commit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
+    "old_commit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
+    "new_commit": "d1a5f529f7639d06512ed392ca05cda1fdbbbb92",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 2,
-      "deleted": 1,
+      "added": 7,
+      "deleted": 0,
       "interface": 0,
       "body": 2,
       "edge": 0,
       "renamed": 0
     },
     "added": [
-      "lib\\engine\\openai-bridge.js::streamChunkToSse",
-      "lib\\engine\\openai-bridge.js::withRole"
+      "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
+      "lib\\engine\\python\\tree_coverage.py::_dirname",
+      "lib\\engine\\python\\tree_coverage.py::_leaf_files",
+      "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
+      "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
+      "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files",
+      "lib\\engine\\python\\tree_coverage.py::file_owner"
     ],
-    "deleted": [
-      "lib\\engine\\openai-bridge.js::chunksToSse"
-    ],
+    "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\llm-bridge.js::startLlmBridge",
+      "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
       "package.json::package.json"
     ],
     "edge": [],
@@ -58,14 +60,53 @@
     "removed": [],
     "routing": [
       {
-        "component_id": "lib\\engine\\openai-bridge.js::streamChunkToSse",
+        "component_id": "lib\\engine\\python\\tree_coverage.py::file_owner",
+        "rule": "2:same_dir",
+        "leaf_path": [
+          "Code_Engine_Processing_Pipeline",
+          "code_engine_module",
+          "python_native_runtime"
+        ],
+        "new_leaf": false,
+        "detail": "dir 'lib/engine/python'"
+      },
+      {
+        "component_id": "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
         "rule": "untracked",
         "leaf_path": null,
         "new_leaf": false,
         "detail": "not a selected leaf node"
       },
       {
-        "component_id": "lib\\engine\\openai-bridge.js::withRole",
+        "component_id": "lib\\engine\\python\\tree_coverage.py::_dirname",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\tree_coverage.py::_leaf_files",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files",
         "rule": "untracked",
         "leaf_path": null,
         "new_leaf": false,
@@ -75,38 +116,38 @@
     "orphans": [],
     "deleted_nodes": [],
     "created_leaves": [],
-    "growth": {},
+    "growth": {
+      "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": 0.1667
+    },
     "growth_flagged": []
   },
   "reclustered": [],
   "reports": {
-    "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "llm_integration_bridges"
+        "python_native_runtime"
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\openai-bridge.js::chunksToSse",
-        "lib\\engine\\llm-bridge.js::startLlmBridge"
+        "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
+        "lib\\engine\\python\\tree_coverage.py::file_owner"
       ],
-      "adopted": {
-        "lib\\engine\\openai-bridge.js::chunksToSse": "1:same_file"
-      },
+      "adopted": {},
       "up": [],
       "context": [
-        "lib\\engine\\openai-bridge.js::streamChunkToSse"
+        "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage"
       ],
-      "refch": [
-        "chunksToSse"
+      "refch": [],
+      "entered": [
+        "lib\\engine\\python\\tree_coverage.py::file_owner"
       ],
-      "entered": [],
       "left": [],
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
-      "page": "llm_integration_bridges"
+      "page": "python_native_runtime"
     },
     "build_deployment_config": {
       "leaf_path": [
@@ -128,55 +169,9 @@
       "page": "build_deployment_config"
     }
   },
-  "ownership": [
-    {
-      "component_id": "lib\\engine\\openai-bridge.js::chunksToSse",
-      "rule": "1:same_file",
-      "leaf_path": [
-        "Code_Engine_Processing_Pipeline",
-        "code_engine_module",
-        "llm_integration_bridges"
-      ],
-      "detail": "1 tracked components in file",
-      "deleted": true
-    }
-  ],
-  "active": [
-    {
-      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges",
-      "page": "llm_integration_bridges",
-      "mode": "edit",
-      "order": 0
-    },
-    {
-      "leaf": "build_deployment_config",
-      "page": "build_deployment_config",
-      "mode": "edit",
-      "order": 1
-    }
-  ],
-  "write_sets": {
-    "llm_integration_bridges": [
-      "Code_Engine_Processing_Pipeline",
-      "code_engine_module",
-      "engine_client",
-      "llm_integration_bridges",
-      "native_runtime_support",
-      "overview",
-      "python_native_runtime"
-    ],
-    "build_deployment_config": [
-      "Testing___Probing_Tooling",
-      "build_deployment_config",
-      "codewiki_vendor_binary",
-      "engine_manifest_management",
-      "llm_integration_bridges",
-      "overview",
-      "probe_tools",
-      "testing_fixtures",
-      "vscode_extension_client"
-    ]
-  },
+  "ownership": [],
+  "active": [],
+  "write_sets": {},
   "fallback": {
     "r_leaf": 0.07692307692307693,
     "r_tree": 0.0,
@@ -187,1019 +182,30 @@
     "tau_tree": 0.3,
     "fired": false
   },
-  "verdicts": [
-    {
-      "page": "llm_integration_bridges",
-      "verdict": "patch",
-      "reason": "chunksToSse 已删除、startLlmBridge 改用新增的 streamChunkToSse：修正架构图节点与边、替换被推翻的「共用折叠逻辑」结论、补写单 chunk 翻译器语义、更新时序图",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": true
-    },
-    {
-      "page": "code_engine_module",
-      "verdict": "no-op",
-      "reason": "只以「凭证隔离层 / 桥看不见真实凭证」的模块级粒度引用本页，结论未变",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Code_Engine_Processing_Pipeline",
-      "verdict": "no-op",
-      "reason": "仅泛提「模型桥」，不涉及本次改动的组件",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "未点名本模块的任何组件",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_client",
-      "verdict": "no-op",
-      "reason": "只描述桥的 loopback 与占位 key 通道，未涉及 SSE 帧转换",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "native_runtime_support",
-      "verdict": "no-op",
-      "reason": "引用的 startLlmBridge 签名与返回句柄未变",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "python_native_runtime",
-      "verdict": "no-op",
-      "reason": "对桥的描述（环境变量注入 base_url/占位 key）仍然成立",
-      "by_leaf": "llm_integration_bridges",
-      "changed_on_disk": false
-    },
-    {
-      "page": "build_deployment_config",
-      "verdict": "patch",
-      "reason": "no verdict returned by agent (page changed on disk)",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": true
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Testing___Probing_Tooling",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "codewiki_vendor_binary",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_manifest_management",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "llm_integration_bridges",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "probe_tools",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "testing_fixtures",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "vscode_extension_client",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    }
-  ],
-  "pages_written": [
-    "llm_integration_bridges",
-    "build_deployment_config"
-  ],
+  "verdicts": [],
+  "pages_written": [],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {
-    "scanned": 30,
-    "pages_with_hits": {},
-    "fixed": []
-  },
-  "calls": [
-    {
-      "kind": "leaf_agent",
-      "target": "llm_integration_bridges",
-      "seconds": 345.05870962142944,
-      "usage": {
-        "input_tokens": 1242641,
-        "output_tokens": 14762,
-        "cache_read_tokens": 1191412,
-        "cache_write_tokens": 0,
-        "total_tokens": 1257403,
-        "requests": 32
-      },
-      "error": null
-    },
-    {
-      "kind": "leaf_agent",
-      "target": "build_deployment_config",
-      "seconds": 96.20588612556458,
-      "usage": {
-        "input_tokens": 353526,
-        "output_tokens": 3858,
-        "cache_read_tokens": 306805,
-        "cache_write_tokens": 0,
-        "total_tokens": 357384,
-        "requests": 15
-      },
-      "error": null
-    },
-    {
-      "kind": "missing_pages",
-      "target": "-",
-      "seconds": 0.020418882369995117,
-      "usage": null,
-      "error": "ValueError: Invalid module file coverage: missing=['lib\\\\engine\\\\python\\\\full_parallel_runtime.py'], duplicate_owners={}, outside_scope=[]"
-    }
-  ],
-  "detector_notes": [
-    "[llm_integration_bridges] agent notes: 本次改动的实质是行为修复：旧 chunksToSse 把入参当成「一整条已结束的流」，被服务层逐帧调用时每个分片后面都会多出一个假 finish_reason，导致引擎误判本轮结束（pydantic-ai 报 \"Please return text or call a tool\" 并重试到上限）；新 streamChunkToSse 无状态、缺 finish 时不补终止帧，reasoning-delta 等类型返回空数组。若后续 openai-bridge.js 的其他导出（foldChunks/chunksToCompletion）也并入模块跟踪，本页架构图的边口径需要同步复核。"
-  ],
-  "errors": [
-    "missing pages: ValueError: Invalid module file coverage: missing=['lib\\\\engine\\\\python\\\\full_parallel_runtime.py'], duplicate_owners={}, outside_scope=[]"
-  ],
-  "wall_seconds": 345.61,
+  "stale_scan": {},
+  "calls": [],
+  "detector_notes": [],
+  "errors": [],
+  "wall_seconds": 0.12,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "unknown",
-    "incomplete": false,
+    "cost_status": "complete",
+    "incomplete": true,
     "unknown_usage_calls": 0,
-    "n_calls": 47,
+    "n_calls": 0,
     "totals": {
-      "input_tokens": 1596167,
-      "output_tokens": 18620,
-      "cache_read_tokens": 1498217,
-      "cache_write_tokens": 0,
-      "requests": 47,
-      "total_tokens": 1614787
+      "cost_usd": 0.0
     },
-    "by_phase": {
-      "update": {
-        "calls": 47,
-        "input_tokens": 1596167,
-        "output_tokens": 18620,
-        "cache_read_tokens": 1498217,
-        "cache_write_tokens": 0,
-        "requests": 47,
-        "total_tokens": 1614787,
-        "unpriced_calls": 47
-      }
-    },
-    "by_model": {
-      "qfmodel": {
-        "calls": 47,
-        "input_tokens": 1596167,
-        "output_tokens": 18620,
-        "cache_read_tokens": 1498217,
-        "cache_write_tokens": 0,
-        "requests": 47,
-        "total_tokens": 1614787,
-        "unpriced_calls": 47
-      }
-    },
-    "unpriced_models": [
-      "qfmodel"
-    ],
-    "calls": [
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 4.41,
-        "input_tokens": 7030,
-        "output_tokens": 204,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 7234,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 3.17,
-        "input_tokens": 9439,
-        "output_tokens": 157,
-        "cache_read_tokens": 7024,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 9596,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.03,
-        "input_tokens": 9520,
-        "output_tokens": 76,
-        "cache_read_tokens": 9433,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 9596,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.34,
-        "input_tokens": 9591,
-        "output_tokens": 73,
-        "cache_read_tokens": 9514,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 9664,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 17.83,
-        "input_tokens": 9915,
-        "output_tokens": 1211,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 11126,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 6.39,
-        "input_tokens": 14231,
-        "output_tokens": 432,
-        "cache_read_tokens": 9585,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 14663,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 8.36,
-        "input_tokens": 11812,
-        "output_tokens": 427,
-        "cache_read_tokens": 9909,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 12239,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 1.47,
-        "input_tokens": 11883,
-        "output_tokens": 69,
-        "cache_read_tokens": 11806,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 11952,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.31,
-        "input_tokens": 16367,
-        "output_tokens": 191,
-        "cache_read_tokens": 11877,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 16558,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.22,
-        "input_tokens": 23616,
-        "output_tokens": 180,
-        "cache_read_tokens": 16361,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 23796,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 4.59,
-        "input_tokens": 14786,
-        "output_tokens": 201,
-        "cache_read_tokens": 14225,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 14987,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.94,
-        "input_tokens": 16896,
-        "output_tokens": 135,
-        "cache_read_tokens": 14780,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 17031,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.3,
-        "input_tokens": 18859,
-        "output_tokens": 99,
-        "cache_read_tokens": 16890,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 18958,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 16.78,
-        "input_tokens": 30362,
-        "output_tokens": 967,
-        "cache_read_tokens": 23610,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 31329,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.97,
-        "input_tokens": 23332,
-        "output_tokens": 150,
-        "cache_read_tokens": 18853,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 23482,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.03,
-        "input_tokens": 35807,
-        "output_tokens": 78,
-        "cache_read_tokens": 30356,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 35885,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 3.44,
-        "input_tokens": 27816,
-        "output_tokens": 96,
-        "cache_read_tokens": 23326,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 27912,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 4.09,
-        "input_tokens": 32691,
-        "output_tokens": 126,
-        "cache_read_tokens": 27810,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 32817,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 3.58,
-        "input_tokens": 36778,
-        "output_tokens": 163,
-        "cache_read_tokens": 32685,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 36941,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 2.47,
-        "input_tokens": 39875,
-        "output_tokens": 75,
-        "cache_read_tokens": 36772,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 39950,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 9.95,
-        "input_tokens": 46045,
-        "output_tokens": 534,
-        "cache_read_tokens": 39869,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 46579,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 37.56,
-        "input_tokens": 37917,
-        "output_tokens": 2628,
-        "cache_read_tokens": 35801,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 40545,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 19.33,
-        "input_tokens": 46637,
-        "output_tokens": 1337,
-        "cache_read_tokens": 46039,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 47974,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 14.08,
-        "input_tokens": 38316,
-        "output_tokens": 938,
-        "cache_read_tokens": 37911,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 39254,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.59,
-        "input_tokens": 38880,
-        "output_tokens": 93,
-        "cache_read_tokens": 38310,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 38973,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 5.12,
-        "input_tokens": 39564,
-        "output_tokens": 279,
-        "cache_read_tokens": 38874,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 39843,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.47,
-        "input_tokens": 39829,
-        "output_tokens": 136,
-        "cache_read_tokens": 39558,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 39965,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 15.28,
-        "input_tokens": 40176,
-        "output_tokens": 376,
-        "cache_read_tokens": 39823,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 40552,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 5.78,
-        "input_tokens": 40900,
-        "output_tokens": 448,
-        "cache_read_tokens": 40170,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 41348,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.77,
-        "input_tokens": 41339,
-        "output_tokens": 107,
-        "cache_read_tokens": 40894,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 41446,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 7.94,
-        "input_tokens": 42171,
-        "output_tokens": 530,
-        "cache_read_tokens": 41333,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 42701,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 6.41,
-        "input_tokens": 43185,
-        "output_tokens": 471,
-        "cache_read_tokens": 42165,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 43656,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 1.74,
-        "input_tokens": 43675,
-        "output_tokens": 94,
-        "cache_read_tokens": 43179,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 43769,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.12,
-        "input_tokens": 44218,
-        "output_tokens": 133,
-        "cache_read_tokens": 43669,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 44351,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.72,
-        "input_tokens": 44563,
-        "output_tokens": 243,
-        "cache_read_tokens": 44212,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 44806,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.44,
-        "input_tokens": 44876,
-        "output_tokens": 111,
-        "cache_read_tokens": 44557,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 44987,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.0,
-        "input_tokens": 45177,
-        "output_tokens": 134,
-        "cache_read_tokens": 44870,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 45311,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 8.72,
-        "input_tokens": 45531,
-        "output_tokens": 483,
-        "cache_read_tokens": 45171,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 46014,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.74,
-        "input_tokens": 45755,
-        "output_tokens": 169,
-        "cache_read_tokens": 45525,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 45924,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 4.27,
-        "input_tokens": 46155,
-        "output_tokens": 186,
-        "cache_read_tokens": 45749,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 46341,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 3.51,
-        "input_tokens": 47270,
-        "output_tokens": 179,
-        "cache_read_tokens": 46149,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 47449,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 8.8,
-        "input_tokens": 47402,
-        "output_tokens": 605,
-        "cache_read_tokens": 47264,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 48007,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 8.25,
-        "input_tokens": 47537,
-        "output_tokens": 490,
-        "cache_read_tokens": 47396,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 48027,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 8.76,
-        "input_tokens": 48757,
-        "output_tokens": 494,
-        "cache_read_tokens": 47531,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 49251,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 2.83,
-        "input_tokens": 48927,
-        "output_tokens": 113,
-        "cache_read_tokens": 48751,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 49040,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 16.3,
-        "input_tokens": 49716,
-        "output_tokens": 942,
-        "cache_read_tokens": 48921,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 50658,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "llm_integration_bridges",
-        "model": "qfmodel",
-        "seconds": 17.61,
-        "input_tokens": 51043,
-        "output_tokens": 1257,
-        "cache_read_tokens": 49710,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 52300,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      }
-    ]
+    "by_phase": {},
+    "by_model": {},
+    "unpriced_models": [],
+    "calls": []
   },
-  "run_id": "8cc8143b-9615-4ebd-9192-9bfc1edc6152"
+  "run_id": "c4888d56-2272-40f1-8651-7e69a012ffa0"
 }
