@@ -339,6 +339,7 @@ flowchart LR
 | 配置键 | 默认 | 收口逻辑 |
 | --- | --- | --- |
 | `batchProvider` / `batchModel` | `volces-ark` / `glm-5.3-flash` | 编译唯一模型通道；空则提交报错 |
+| `batchReasoningEffort` | `''`（留空） | 编译思考档位；留空=模型默认档。提交时经 `resolveModelEfforts` 读模型目录校验：非空档位不在该模型支持列表里则提交报错（否则 provider 对不支持档位会 200 + 空内容静默空跑）；读不到档位表（`ok:false`）时放行，不把探测失败升级成提交失败 |
 | `bigEnabled` | `true` | 关闭时 `liveConfig` 直接清空 `bigProvider`（下游五六处换模型判定不再逐处判断），模型 id 与预算保留以便重开 |
 | `maxConcurrency` / `bigConcurrency` / `moduleConcurrency` | 2 / 0 / 0 | 硬顶 8；`bigConcurrency=0` 跟随默认档；`moduleConcurrency` 控制引擎同层模块并行度（0 跟随默认档） |
 | `requestLimit` | 100 | 单模块写作请求上限，透传给原生引擎（`runNativeJob` → 请求行 `requestLimit`）；原生入口非正值/未下发时退回引擎侧默认 300 而非上游的 100，硬顶 1000；大模块撞满会抛错把整轮判成 `partial` |
@@ -377,6 +378,8 @@ sequenceDiagram
     CW-->>T: "三态 + 变更清单"
     T->>T: "闸门：排除清单 / worktree /<br/>空壳目录 / findActiveJob 幂等"
     T->>S: "submit(kind, scope)"
+    S->>S: "凭证闸门：batchProvider/batchModel 非空、<br/>宿主 llm 服务已注入（未过则占位 job 置 failed、<br/>错误随工具调用同步抛出）"
+    S->>S: "resolveModelEfforts 读模型档位表：<br/>batchReasoningEffort 非空且不在支持列表 → 提交报错<br/>（读不到表 ok:false 则放行，不升级探测失败）"
     S-->>T: "jobId + stage（立即返回）"
     T-->>U: "提交回执：本步收尾，不要等待"
 

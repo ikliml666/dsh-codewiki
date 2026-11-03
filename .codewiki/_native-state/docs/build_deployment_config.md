@@ -50,7 +50,7 @@ flowchart LR
 
 `package.json`（仓库根）是插件对外的身份与打包声明。关键字段：
 
-- **身份**：`name` 为 `@local/dsh-codewiki`，当前版本 `version: 0.17.23`，`private: true`，不在公共 npm 发布；`type: module` 使用 ESM。
+- **身份**：`name` 为 `@local/dsh-codewiki`，当前版本 `version: 0.17.24`，`private: true`，不在公共 npm 发布；`type: module` 使用 ESM。
 - **入口导出**：`main: index.js`，`exports` 暴露 `.`（宿主端逻辑）与 `./client`（Web 端 [vscode_extension_client](vscode_extension_client.md) 面板）两个子路径。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——低于该版本的 DSH 无法装载本插件。
 - **运行依赖**：仅 `@deepseek-ai/schemastery`（用于把 `Config` schema 注册进 DSH 模型设置体系）。
@@ -95,7 +95,7 @@ flowchart TD
 | 二进制 | `binaryPath` | `cw` 可执行文件路径；留空依次尝试 PATH 中的 `cw`、插件自带 `bin/cw.exe` |
 | 模型 | `batchProvider` | 编译模型提供商（须已在模型设置注册；默认 `volces-ark`，留空=提交失败） |
 | 模型 | `batchModel` | 编译模型 id（默认 `glm-5.3-flash`，512k） |
-| 模型 | `batchReasoningEffort` | 思考程度档位（留空=模型默认档） |
+| 模型 | `batchReasoningEffort` | 思考程度档位（留空=模型默认档）；非空时提交会经模型目录校验——不在该模型支持的档位列表里则提交即报错（provider 对不支持档位会 200 + 空内容静默空跑）；读不到档位表时放行不拦 |
 | 并发 | `maxConcurrency` | 默认档并发上限（1–8，默认 2） |
 | 并发 | `bigConcurrency` | 大档并发上限（1–8，默认 0=跟随默认档） |
 | 原生通道 | `requestLimit` | 单模块写作请求上限（透传给上游写作 agent 的硬预算，1–1000，默认 100=引擎默认值；大模块撞满会抛错把整轮判成 partial） |
