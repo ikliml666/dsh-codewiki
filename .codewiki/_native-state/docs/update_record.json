@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T13:01:16+0800",
-  "finished_at": "2026-11-03T13:01:16+0800",
+  "started_at": "2026-11-03T13:13:45+0800",
+  "finished_at": "2026-11-03T13:13:45+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -25,31 +25,23 @@
   },
   "revision": {
     "old_commit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
-    "new_commit": "d1a5f529f7639d06512ed392ca05cda1fdbbbb92",
+    "new_commit": "565aad9763699e637e90be5718e88a2fb3be871d",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 7,
+      "added": 0,
       "deleted": 0,
       "interface": 0,
       "body": 2,
       "edge": 0,
       "renamed": 0
     },
-    "added": [
-      "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
-      "lib\\engine\\python\\tree_coverage.py::_dirname",
-      "lib\\engine\\python\\tree_coverage.py::_leaf_files",
-      "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
-      "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
-      "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files",
-      "lib\\engine\\python\\tree_coverage.py::file_owner"
-    ],
+    "added": [],
     "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
+      "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
       "package.json::package.json"
     ],
     "edge": [],
@@ -58,67 +50,11 @@
   "repair": {
     "renamed": {},
     "removed": [],
-    "routing": [
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::file_owner",
-        "rule": "2:same_dir",
-        "leaf_path": [
-          "Code_Engine_Processing_Pipeline",
-          "code_engine_module",
-          "python_native_runtime"
-        ],
-        "new_leaf": false,
-        "detail": "dir 'lib/engine/python'"
-      },
-      {
-        "component_id": "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::_dirname",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::_leaf_files",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      }
-    ],
+    "routing": [],
     "orphans": [],
     "deleted_nodes": [],
     "created_leaves": [],
-    "growth": {
-      "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": 0.1667
-    },
+    "growth": {},
     "growth_flagged": []
   },
   "reclustered": [],
@@ -131,18 +67,15 @@
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
-        "lib\\engine\\python\\tree_coverage.py::file_owner"
+        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree"
       ],
-      "adopted": {},
+      "adopted": {
+        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree": "2:same_dir"
+      },
       "up": [],
-      "context": [
-        "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage"
-      ],
+      "context": [],
       "refch": [],
-      "entered": [
-        "lib\\engine\\python\\tree_coverage.py::file_owner"
-      ],
+      "entered": [],
       "left": [],
       "children_added": [],
       "children_removed": [],
@@ -169,7 +102,19 @@
       "page": "build_deployment_config"
     }
   },
-  "ownership": [],
+  "ownership": [
+    {
+      "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+      "rule": "2:same_dir",
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "python_native_runtime"
+      ],
+      "detail": "dir 'lib/engine/python'",
+      "deleted": false
+    }
+  ],
   "active": [],
   "write_sets": {},
   "fallback": {
@@ -188,7 +133,9 @@
   "write_set_violations": [],
   "stale_scan": {},
   "calls": [],
-  "detector_notes": [],
+  "detector_notes": [
+    "补齐 2 个未归属文件到已有叶子：lib\\engine\\python\\full_parallel_runtime.py, lib\\engine\\python\\tree_coverage.py"
+  ],
   "errors": [],
   "wall_seconds": 0.12,
   "usage_report": {
@@ -207,5 +154,5 @@
     "unpriced_models": [],
     "calls": []
   },
-  "run_id": "c4888d56-2272-40f1-8651-7e69a012ffa0"
+  "run_id": "069d3467-a51b-4c62-ac98-72491309d3ae"
 }
