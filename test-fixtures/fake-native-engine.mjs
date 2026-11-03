@@ -131,7 +131,7 @@ function realSourceFiles(repoPath, limit = 4) {
 }
 
 function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {}) {
-  fs.mkdirSync(path.join(docsDir, 'modules'), { recursive: true })
+
   const sha = String(commitId || '') || head(repoPath)
   // 依赖图：真实 FSoft 每轮都会重写 `<docs>/temp/dependency_graphs/<repo>_dependency_graph.json`
   // （graph_store.build_dependency_graph）。**必须写**：下一轮组件级增量读的就是它，
@@ -162,23 +162,25 @@ function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {
     if (action === 'update' && fs.existsSync(abs)) return
     fs.writeFileSync(abs, body, 'utf8')
   }
-  keep('overview.md', '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](modules/core.md)。\n')
-  keep('modules/core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
+  keep('overview.md', '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n')
+  keep('core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
   if (MODE !== 'partial') {
-    if (web) keep('modules/web.md', '# Web 层\n\n## 职责\n\nWeb 层把请求转成任务并回传进度。\n')
+    if (web) keep('web.md', '# Web 层\n\n## 职责\n\nWeb 层把请求转成任务并回传进度。\n')
   } else if (web) {
     // partial：这一页**有文件但正文被掏空**。这比「整个文件不写」更接近真实的降级路径
     // （引擎写完标题就被截断），也正好落在质量门已有的 empty-body 判据上：
     // 该页 skip、其余照写、终态 partial、基线不许推进。
-    fs.writeFileSync(path.join(docsDir, 'modules', 'web.md'), '# Web 层\n\n', 'utf8')
+    fs.writeFileSync(path.join(docsDir, 'web.md'), '# Web 层\n\n', 'utf8')
   }
   fs.writeFileSync(path.join(docsDir, 'metadata.json'), JSON.stringify({
     // generation_info.commit_id 就是**下一轮** updater 眼里的 old_commit：
     // 真实引擎由 adapter 的 commit_id 参数写入（doc_generator.py:141-165），
     // 夹具必须照此把调用方给的 commitId 原样记下，否则「记账」这条链路无法被断言。
-    generation_info: { commit_id: MODE === 'bad-commit' ? 'b'.repeat(40) : sha, layout: 'hierarchical' },
+    // 本夹具的页写在 docs 根部（<模块名>.md），对应上游的 flat 布局；metadata 必须
+    // 与页的实际位置一致，否则下一轮 updater 会按 hierarchical 去找子目录页。
+    generation_info: { commit_id: MODE === 'bad-commit' ? 'b'.repeat(40) : sha, layout: 'flat' },
     statistics: { total_components: 2, leaf_nodes: 2 },
-    files_generated: ['overview.md', 'modules/core.md'],
+    files_generated: ['overview.md', 'core.md'],
   }), 'utf8')
   // module_tree 的 components 必须指向**仓库里真的存在**的文件：映射层把
   // `path::Symbol` 的 `::` 前一段当成 source_files（mapping.js sourceFilesOf），
@@ -197,7 +199,7 @@ function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {
     : 'full'
   fs.writeFileSync(path.join(docsDir, 'update_record.json'), JSON.stringify({
     outcome: recordOutcome,
-    pages_written: action === 'update' ? ['modules/web.md'] : ['modules/core.md'],
+    pages_written: action === 'update' ? ['web.md'] : ['core.md'],
     pages_removed: [],
   }), 'utf8')
 }

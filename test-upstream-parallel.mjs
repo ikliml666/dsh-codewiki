@@ -14,14 +14,28 @@
 //   · 单个模块失败不能拖垮同批其它模块
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PY = join(HERE, '.probe-fsoft', 'venv', 'Scripts', 'python.exe')
-const DOC_GEN = join(HERE, '.probe-fsoft', 'src', 'codewiki', 'src', 'be', 'documentation_generator.py')
+// worktree 里没有 gitignored 的 .probe-fsoft：向上找主仓库的 vendor
+function vendorRoot() {
+  const candidates = [process.env.DSH_CODEWIKI_VENDOR_ROOT, join(HERE, '.probe-fsoft')]
+  let dir = HERE
+  for (let i = 0; i < 5; i++) {
+    dir = resolve(dir, '..')
+    candidates.push(join(dir, '.probe-fsoft'))
+  }
+  return candidates.find((d) => d && existsSync(join(d, 'venv', 'Scripts', 'python.exe'))) || ''
+}
+const VENDOR = vendorRoot()
+const PY = process.env.DSH_CODEWIKI_ENGINE_PYTHON || join(VENDOR, 'venv', 'Scripts', 'python.exe')
+if (!existsSync(PY)) {
+  console.error(`FAIL 找不到原生引擎解释器；请设置 DSH_CODEWIKI_ENGINE_PYTHON 或 DSH_CODEWIKI_VENDOR_ROOT`)
+  process.exit(1)
+}
 
 let pass = 0
 const fails = []
@@ -43,7 +57,10 @@ from pathlib import Path
 
 REPO = sys.argv[1]
 OUT = sys.argv[2]
-sys.path.insert(0, os.path.join(REPO, '.probe-fsoft', 'src'))
+sys.path.insert(0, os.path.join(os.environ["DSH_CODEWIKI_VENDOR_ROOT"], 'src'))
+sys.path.insert(0, os.path.join(REPO, 'lib', 'engine', 'python'))
+import full_parallel_runtime as PAR
+PAR.install_full_runtime(2)
 
 from codewiki.src.be.documentation_generator import DocumentationGenerator
 from codewiki.src.utils import file_manager
@@ -76,12 +93,15 @@ class FakeBackend:
                 node = node[part]
                 if part != module_path[-1]:
                     node = node.get('children', {})
-            # 模拟复杂叶子的子模块递归：往自己的树副本里加 children
+            # 真实 agent 的读与写在 LLM 调用两侧，中间有 await：两个并行分支
+            # 会双双读到同一份旧树，再各自写回，后写者覆盖先写者。这里必须
+            # 复现这个间隔，否则「共享树合并」根本没被测到。
+            await asyncio.sleep(self.delay / 2)
             if module_name.startswith('complex'):
                 node.setdefault('children', {})[module_name + '_sub'] = {
                     'components': [], 'children': {}}
             file_manager.save_json(tree, tree_path)
-            await asyncio.sleep(self.delay)
+            await asyncio.sleep(self.delay / 2)
             Path(working_dir, module_name + '.md').write_text('# ' + key, encoding='utf-8')
             self.events.append(['end', key, time.time()])
             return tree
@@ -146,13 +166,16 @@ async def main():
 
     b = FakeBackend(delay=0.3)
     t0 = time.time()
+    PAR.configure_full_runtime(3)
     await drive(FLAT, 3, b)
     out['parallel'] = {'elapsed': time.time() - t0, 'max_inflight': b.max_inflight}
 
     b = FakeBackend(delay=0.2)
     t0 = time.time()
+    PAR.configure_full_runtime(1)
     await drive(FLAT, 1, b)
     out['serial'] = {'elapsed': time.time() - t0, 'max_inflight': b.max_inflight}
+    PAR.configure_full_runtime(2)
 
     b = FakeBackend(delay=0.15)
     await drive(NESTED, 4, b)
@@ -190,26 +213,22 @@ asyncio.run(main())
 `, 'utf-8')
 
 await check('并行探针能在真 venv 上跑完', () => {
-  const r = spawnSync(PY, [probe, HERE, sandbox], { encoding: 'utf-8', timeout: 120000 })
+  const r = spawnSync(PY, [probe, HERE, sandbox], { encoding: 'utf-8', timeout: 120000, env: { ...process.env, DSH_CODEWIKI_VENDOR_ROOT: VENDOR } })
+  if (r.status !== 0) console.error(r.stderr?.slice(-2000) || r.error)
   assert.equal(r.status, 0, `探针失败：${r.stderr?.slice(-1500)}`)
 })
+if (!existsSync(outFile)) { console.error('探针没有写出结果，终止'); process.exit(1) }
 
 const got = JSON.parse(readFileSync(outFile, 'utf-8'))
 
-await check('回退上游后同层模块串行（0.17.12：验证本地并行补丁已回退）', () => {
-  // 0.17.12 起停用并行补丁（patches/upstream-module-parallel.patch），
-  // 回到上游原始的严格串行。这个用例从「验证并行生效」改成「验证回退生效」：
-  // 峰值并发必须是 1，墙钟必须 >= 0.85s（3 个 0.3s 模块串行）。
-  assert.equal(got.parallel.max_inflight, 1,
-    `回退后峰值并发必须是 1（上游串行），实际 ${got.parallel.max_inflight}`)
-  assert.ok(got.parallel.elapsed >= 0.85,
-    `3 个 0.3s 模块串行应 >=0.85s，实际 ${got.parallel.elapsed.toFixed(2)}s`)
+await check('同层叶子模块真的并行（max_inflight > 1）', () => {
+  // 只断言峰值并发，不用墙钟：CI 机器慢时墙钟断言会变成假失败。
+  assert.ok(got.parallel.max_inflight >= 2,
+    `并发度 3 时峰值并发至少 2，实际 ${got.parallel.max_inflight}`)
 })
 
-await check('module_concurrency=1 退化为串行（向后兼容）', () => {
+await check('module_concurrency=1 仍是严格串行（向后兼容）', () => {
   assert.equal(got.serial.max_inflight, 1, '并发度 1 时峰值并发必须是 1')
-  assert.ok(got.serial.elapsed >= 0.6,
-    `3 个 0.2s 模块串行应 >=0.6s，实际 ${got.serial.elapsed.toFixed(2)}s`)
 })
 
 await check('父模块必须等全部子模块完成（拓扑序不被并行破坏）', () => {

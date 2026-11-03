@@ -205,7 +205,7 @@ if (want(1)) { console.log('== 用例 1：生产链两轮（full → stale updat
   check(exists(path.join(repo, STATE_DIR, 'docs', 'update_record.json')), 'update_record 被持久化')
   const graphDir = path.join(repo, STATE_DIR, 'docs', 'temp', 'dependency_graphs')
   check(exists(graphDir) && fs.readdirSync(graphDir).some((f) => f.endsWith('_dependency_graph.json')), '依赖图被持久化（temp/dependency_graphs/*_dependency_graph.json）')
-  check(fs.readdirSync(path.join(repo, STATE_DIR, 'docs', 'modules')).some((f) => f.endsWith('.md')), '上一轮文章副本被持久化（增量要原地 patch）')
+  check(fs.readdirSync(path.join(repo, STATE_DIR, 'docs')).some((f) => f.endsWith('.md')), '上一轮文章副本被持久化（增量要原地 patch）')
 
   // 状态必须与文章进同一个提交（同事务），且提交只含 wiki 路径
   const sha1 = String(first.job?.nativeResult?.apply?.commit?.sha ?? '')
@@ -231,10 +231,10 @@ if (want(1)) { console.log('== 用例 1：生产链两轮（full → stale updat
   check(rawFiles > 0, `留档文件数 > 0（实际 ${rawFiles}）`)
   check(rawDir !== '' && exists(path.join(rawDir, 'module_tree.json')), '留档里有 module_tree.json（引擎原始产物）')
   check(rawDir !== '' && exists(path.join(rawDir, 'metadata.json')), '留档里有 metadata.json')
-  check(rawDir !== '' && fs.readdirSync(path.join(rawDir, 'modules')).some((f) => f.endsWith('.md')),
+  check(rawDir !== '' && fs.readdirSync(rawDir).some((f) => f.endsWith('.md')),
     '留档里有引擎写的模块页正文（不是只有一份清单）')
   // 留档是「消费之前」的快照：它必须与落地后的 .codewiki/modules 分开两份，不是同一个目录。
-  check(norm(path.join(rawDir, 'modules')) !== norm(path.join(repo, '.codewiki', 'modules')), '留档与落地产物是两个目录')
+  check(norm(rawDir) !== norm(path.join(repo, '.codewiki', 'modules')), '留档与落地产物是两个目录')
 
   // 第二轮：提交一次源码改动，然后 stale
   fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
@@ -547,6 +547,41 @@ if (want(10)) { console.log('== 用例 10：本轮缺依赖图（受管状态不
   check((r.incremental?.stateMissing ?? []).length > 0, `现场证据里能看出缺了什么（${JSON.stringify(r.incremental?.stateMissing)}）`)
   const graphsAfter = exists(graphDir) ? fs.readdirSync(graphDir).filter((f) => f.endsWith('.json')) : []
   check(graphsAfter.length === graphsBefore.length, `旧依赖图没被裁掉（${graphsBefore.length} → ${graphsAfter.length}）`)
+}
+
+// ============================ 用例 12：no_change + 历史缺页必须自动补写 ============================
+// 真实事故：早期某轮全量没写全模块页，之后源码长期无变化 → 增量轮 diff 为空，
+// 上游直接 `OUTCOME_NO_CHANGE` 返回（不执行 Step 5/6.1），而质量门每轮仍按整棵
+// module_tree 判 article-missing，形成永久 partial。修法不是豁免缺页，而是在
+// 水合后发现产物不完整时转全量修复（复用已有页面，只补缺的那几页）。
+if (want(12)) { console.log('== 用例 12：源码无变化但产物缺页 → 自动转全量补写，而不是永久 partial ==')
+  const { base, repo } = makeRepo('missingpage', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const stateDocs = path.join(repo, STATE_DIR, 'docs')
+  const missingRel = 'web.md'
+  check(exists(path.join(stateDocs, missingRel)), '前置：首轮确实写出了 web.md')
+  // 模拟历史缺口：受管状态里少一页（module_tree 仍声明 web 模块），源码不动。
+  fs.rmSync(path.join(stateDocs, missingRel))
+  check(!exists(path.join(stateDocs, missingRel)), '前置：受管状态已缺 web.md')
+
+  // 同时放一个「不属于当前模块树」的旧页：模块重聚类后留下的旧页名必须被清退，
+  // 否则引擎补齐新页后，旧页仍被映射成 unmapped-page → 质量门照样 partial。
+  fs.writeFileSync(path.join(stateDocs, 'legacy-ancient.md'), '# legacy page', 'utf8')
+
+  const before = readCalls(base, 'missingpage').length
+  const r = await runJob(repo, { scope: 'stale' })
+  const inc = r.job?.nativeResult?.incremental ?? {}
+  // 修复理由记在 nativeResult.notes（引擎轮次证据），不是 service 的阶段日志
+  const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  const fresh = readCalls(base, 'missingpage').slice(before)
+  check(inc.resolution === 'full', `缺页时决议必须转 full（实际 ${inc.resolution}；fallback=${inc.fallbackReason ?? ''}）`)
+  check(/产物缺页/.test(notes) && /转全量修复/.test(notes), `notes 说明为什么转全量（实际 ${notes.slice(-200)}）`)
+  check(fresh.some((c) => c.action === 'generate'), `确实以全量方式重跑引擎（足迹 ${JSON.stringify(fresh.map((c) => c.action))}）`)
+  check(r.job?.stage === 'done', `补齐后终态 done（实际 ${r.job?.stage}；blockers=${JSON.stringify((r.job?.blockers ?? []).slice(0, 3))}）`)
+  check(exists(path.join(repo, '.codewiki', 'modules', 'web.md')), '缺失的模块页被补写并落地')
+  check(!exists(path.join(stateDocs, 'legacy-ancient.md')), '不属于当前模块树的旧页在修复前被清退（否则仍是 unmapped-page）')
+  check(/清理 \d+ 个不属于当前模块树的旧页/.test(notes), `notes 记录旧页清退（实际 ${notes.slice(-200)}）`)
 }
 
 // ============================ 用例 11：宿主重放保留断点现场 ============================

@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.17.12 — 2026-11-03
+
+### 四个仓库恒定 partial：质量门没错，产物真的缺页
+
+用户报「过夜后 4 个仓库每轮都 partial、written 恒为 5」。先怀疑质量门误判，实测后否掉了：
+用上游自带的 `be.module_naming.find_missing_module_docs` 跑真机 docs，`dsh-git-worktree`
+的 26 个模块里有 24 个没有对应页——产物真的缺。本地判据当时报 23 条，比上游少 1 条，
+差的正是「模块搬家」那个：`workspace_provider_lifecycle` 在树里已挪到
+`…/session_checkout_runtime/` 下，而磁盘上只有旧路径 `worktree_lifecycle_management_core/`
+里的同名页。本地的扁平比对按 basename 兜底，把旧位置的同名页当成已存在。
+
+缺页的成因链（每一步都有现场物证）：
+
+1. 增量轮图 diff 非空但 `r_leaf=0.71 > tau=0.50`，触发 `full_fallback`
+   （`orchestrator.py`）。上游把旧 docs 整体移到 `<docsDir>.prev-<commit>` 后重建，
+   只记 `previous_docs` 路径、**不搬回**。
+2. 该轮重建期间宿主进程消失（静默 5 分 13 秒，未达 10 分钟静默阈值），26 个模块只写出 2 篇。
+   上游 `cli/adapters/doc_generator.py` 只在 `outcome in ("incremental","no_change")` 时校验
+   缺页，`full_fallback` 不在其中，于是「26 树 + 2 页」落盘不报错。
+3. 宿主重放同一 docsDir：旧图已被上一段写成新图 → 下一轮 `diff.is_empty` →
+   `OUTCOME_NO_CHANGE` 早退（`LLM calls: 0`），Step 5 与 Step 6.1 都不执行，缺页永远不补。
+4. 质量门每轮照跑、按整棵树判 `article-missing` → 恒 partial。
+
+上游语义不是「缺页免责」：`documentation_generator` 明确「遍历完整树是安全的，已有页会短路」
+（缺的要补），`no_change` 轮也校验缺页。所以修法不是豁免，而是把缺口补上。
+
+### 判据对齐上游的层级口径
+
+`lib/engine/mapping.js` 过去把所有模块塞进一张扁平的 `byName` 表，丢弃层级路径，
+于是「同一模块换到更深一层」看起来仍是「页已存在」。上游 `doc_layout.module_doc_relpath()`
+是 `hierarchical` 取 `path[:-1]` 作目录、`path[-1]` 作文件名，`flat` 落在根部，
+`find_doc()` 先试层级路径再退根部同名、**不认其它目录的同名页**。现在：
+
+- `indexModuleTree` 的节点新增 `modulePath`（完整层级，含自己），`parent` 改为父名。
+- 新增 `moduleDocRelPath(modulePath, layout)`，与上游同一口径。
+- `findMissingModuleDocs` / `staleDocPages` 都改用层级口径；空树（whole-repository 模式
+  没有权威模块名）不点任何页。
+
+改用层级口径后，真机 `dsh-git-worktree` 报 **24 缺页 / 17 陈页**，缺页数与上游校验器完全一致。
+
+### 缺页即转修复性全量，并先清退不属于当前模块树的旧页
+
+`lib/engine/native-run.js` 在增量水合之后、决议冻结之前检查产物完整性：模块树里有模块
+没有对应页时，把 `resolution` 改成 `FULL`（不是豁免缺页），并记一条可查的 note。
+只补写不清退不够——模块重聚类后旧页名还在 docsDir 里，引擎写完全部新页后旧页仍会被
+映射成 `unmapped-page`，质量门照样 partial。因此修复前先用 `staleDocPages` 把
+`<模块名>.md` 之外、也不在当前模块树里的 `.md` 从 **docsDir（仓库外的临时产物目录）**
+删掉，并记下清退数量。已提交的 wiki 页仍由落地器按写集与孤儿判定处理，这里不碰仓库。
+
+质量门判据一个字都没放宽：`article-missing` 仍然是阻塞项，`partial` 仍然不推进基线。
+改的是「发现缺口之后做什么」，不是「缺口算不算问题」。
+
+### 全量模块代理并行（`moduleConcurrency` 真正生效）
+
+新增 `lib/engine/python/full_parallel_runtime.py`，只替换 `DocumentationGenerator`
+的 `_generate_modules_in_order`，吸收社区 fork 中可用的部分：
+
+- 模块级 `asyncio.Semaphore` 限流（不用 fork 的请求级 `AgentSlots` 借还机制：那套为
+  「父代理等子代理时让出槽位」设计，模块级闸门没有这种等待，不会死锁）。
+- 父节点等全部子节点完成后再写自己的 overview，兄弟分支互不阻塞。
+- `FileManager.save_json`/`load_json` 在**类方法层面**替换：`module_tree.json` 的写入走
+  锁内 read-merge-write，只补缺节点；同路径 components 不一致直接抛错而不是静默取一个。
+  只在 `documentation_generator` 模块里替换 `file_manager` 名字是不够的——真实后端
+  （`pydantic_ai_backend` / `caw_backend`）用的是各自 import 的那份，并行分支仍会互相覆盖
+  （这一点由读-睡-写竞态夹具红过再绿的用例钉住）。
+- 收尾保留上游三件事：`validate_module_file_coverage` → `organize_docs` → 有失败就
+  `raise RuntimeError("Documentation failed for modules: …")`。fork 里被删掉的失败清单
+  与覆盖校验一概不吸收。
+- 空模块树走与上游一致的整仓分支（`preserve_incomplete_overviews` + `complete_file_candidates`）。
+
+### 测试夹具改到 flat 布局
+
+假引擎过去把页写在 `modules/core.md`，那不是任何 layout 的落地位置。本地判据与上游对齐后，
+这些页被正确判成缺页，增量用例批量红。夹具改为 `core.md` / `web.md` 并把 metadata 的
+`layout` 记为 `flat`——这才与真实产物一致（本仓库真机产物也是 `layout: flat`）。
+
+### 验证
+
+- `test-engine-output.mjs` 26 项：新增 `moduleDocRelPath`、层级口径缺页、搬家场景、陈页清退
+  （含「空树不点页」与「旧路径同名页算陈页」）。
+- `test-engine-native-incremental.mjs` 123 项：新增用例 12「源码无变化但产物缺页 → 自动转
+  全量补写」，断言决议 `full`、notes 说明理由、确实以全量重跑、终态 `done`、缺的页被补写、
+  旧页被清退。
+- `test-upstream-parallel.mjs` 8 项：同层并行用 `max_inflight` 断言（并发 1 时必须为 1），
+  并含真实读-睡-写竞态下的树合并用例。
+- `test-fsoft-runtime.mjs` 6 项：增量叶子并行、写冲突串行重跑、断点续跑、签名漂移拒复用。
+- 全套 36 个测试文件：35 个全绿（含 `test-engine-output-real.mjs` 11 项真实产物断言）；
+  `test-wiki-anchors.mjs` 的失败项为本次改动后的文档符号滞后，随本轮 `codewiki_generate` 重编译消除。
 ## 0.17.11 — 2026-11-02
 
 ### 仓库总览把「正在跑」显示成「失败」

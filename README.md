@@ -14,6 +14,8 @@
 
 **0.17.2 起原生编译支持隔离并行与跨重启断点续跑**：增量轮中互不写同一篇文章的叶子模块并行执行，真实写冲突按原顺序重跑，不把猜测的依赖关系当冲突。宿主异常退出后，新实例保留引擎现场；增量轮按叶子检查点只跑未完成项，全量轮复用已生成文章。代码变化导致签名漂移时检查点作废，依赖图、质量闸、状态采集与落地事务仍完整重跑。
 
+**0.17.12 起全量轮也并行，并且缺页会被补上**：全量阶段按模块树并行跑代理（父页等子页、兄弟分支互不阻塞，`module_tree.json` 的写入走锁内合并，同路径 components 不一致直接报错），`moduleConcurrency` 现在是真正生效的旋钮。同时对齐上游的层级页路径口径：模块树里没有对应页的模块会触发**修复性全量**（复用已有页、只补缺的），而不是每轮照判 `article-missing` 恒 partial；质量门判据没有任何放宽。
+
 **0.15.0 引入、0.16.0 转正的原生引擎通道**（`nativeEngine`，**0.16.0 起默认开启**）：装法见「原生引擎通道」。`nativeEngine:false` 仍然可用，是一条**兼容通道**（插件内 Node 流水线），只服务「本机装不了 Python 依赖」这一种场景，**不再接收新能力**；两条通道互不回退。
 
 ## 提供
@@ -365,8 +367,8 @@ test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.m
 test-engine-llm-bridge.mjs / test-engine-native-job.mjs
 test-engine-native-incremental.mjs / test-engine-process-tree.mjs
 
-# 增量并行与断点续跑（0.17.2）
-test-fsoft-runtime.mjs / test-upstream-parallel.mjs
+# 增量并行与断点续跑（0.17.2）/ 全量并行与缺页修复（0.17.12）
+test-fsoft-runtime.mjs / test-upstream-parallel.mjs（含全量并行与 module_tree 并发合并）
 
 # 面板渲染冒烟（0.17.3）：最小 React 桩渲染侧边栏面板，捕获渲染期异常
 test-client-panel.mjs

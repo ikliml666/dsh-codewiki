@@ -241,6 +241,68 @@ await check('buildWritePlan：componentFiles 作为 source_files 证据被采用
   assert.deepEqual(core.sourceFiles, ['src/core/engine.py'])
 })
 
+
+// ===== 缺页/旧页判定：修复性全量的依据（native-run 决议用）=====
+//
+// 判据必须与上游 doc_layout.module_doc_relpath() 同一口径：hierarchical 布局的页
+// 落在 <父模块路径>/<模块名>.md，flat 布局落在根部。真机 dsh-git-worktree 就栽在
+// 「只按名字比」——workspace_provider_lifecycle 从 worktree_lifecycle_management_core/
+// 搬到了 …/session_checkout_runtime/ 下，旧路径还留着同名页，按名字比就认为「页在」，
+// 结果真实缺页被漏掉，每轮都判 partial。
+const layoutMod = await import('./lib/engine/mapping.js')
+const { findMissingModuleDocs, staleDocPages, moduleDocRelPath } = layoutMod
+
+await check('moduleDocRelPath：层级布局取父路径作目录，flat 布局落在根部', async () => {
+  assert.equal(moduleDocRelPath(['a', 'b', 'c']), 'a/b/c.md')
+  assert.equal(moduleDocRelPath(['a', 'b', 'c'], 'flat'), 'c.md')
+  assert.equal(moduleDocRelPath([]), 'overview.md')
+})
+
+await check('findMissingModuleDocs：按层级路径判定，缺的模块被点名', async () => {
+  const moduleTree = {
+    core: { path: 'src/core', components: ['a'], children: {} },
+    api: { path: 'src/api', components: ['b'], children: {
+      v2: { path: 'src/api/v2', components: ['c'], children: {} },
+    } },
+  }
+  // 层级布局：core 在根部、api.v2 在 api/ 下；父模块 api 自己也要有 api.md
+  const pages = ['overview.md', 'core.md', 'api.md', 'api/v2.md']
+  assert.deepEqual(findMissingModuleDocs({ pages, moduleTree }), [])
+  // api 父模块的页缺了（api/v2.md 不能顶替 api.md）
+  assert.deepEqual(findMissingModuleDocs({ pages: ['overview.md', 'core.md'], moduleTree }), ['api', 'v2'])
+  // 空树：没有权威模块名，不点任何页
+  assert.deepEqual(findMissingModuleDocs({ pages: [], moduleTree: {} }), [])
+})
+
+await check('findMissingModuleDocs：模块搬家后旧路径的同名页不算已存在（真机场景）', async () => {
+  // 新树把该模块挂到了更深一层，而 docs 里只有旧位置的同名页。
+  const moduleTree = {
+    core: { path: 'src', components: ['a'], children: {
+      runtime: { path: 'src/runtime', components: ['b'], children: {
+        workspace_provider_lifecycle: { path: 'src/runtime/wpl', components: ['c'], children: {} },
+      } },
+    } },
+  }
+  // 旧页在 core/workspace_provider_lifecycle.md，新位置是 core/runtime/workspace_provider_lifecycle.md
+  const pages = ['overview.md', 'core.md', 'core/runtime.md', 'core/workspace_provider_lifecycle.md']
+  assert.deepEqual(findMissingModuleDocs({ pages, moduleTree }), ['workspace_provider_lifecycle'])
+  // 但落到新位置后就齐了
+  const fixed = [...pages, 'core/runtime/workspace_provider_lifecycle.md']
+  assert.deepEqual(findMissingModuleDocs({ pages: fixed, moduleTree }), [])
+})
+
+await check('staleDocPages：不属于当前模块树的旧页被点名清退，overview 与非 md 不受影响', async () => {
+  const moduleTree = { core: { path: 'src', components: ['a'], children: {
+    runtime: { path: 'src/runtime', components: ['b'], children: {} },
+  } } }
+  const pages = ['overview.md', 'core.md', 'core/runtime.md', 'modules/renamed-old.md', 'module_tree.json']
+  assert.deepEqual(staleDocPages({ pages, moduleTree }), ['modules/renamed-old.md'])
+  // 旧路径同名页属于陈页：它指向的位置已经不是该模块的落地位置
+  const moved = ['overview.md', 'core.md', 'core/runtime.md', 'core/workspace_provider_lifecycle.md']
+  assert.deepEqual(staleDocPages({ pages: moved, moduleTree }), ['core/workspace_provider_lifecycle.md'])
+  // 空树：whole-repository 模式没有权威模块名，不能凭名字删页
+  assert.deepEqual(staleDocPages({ pages, moduleTree: {} }), [])
+})
 rmSync(root, { recursive: true, force: true })
 
 console.log(`\n${pass} passed, ${fails.length} failed`)

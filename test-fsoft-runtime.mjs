@@ -8,9 +8,23 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PY = process.env.DSH_CODEWIKI_ENGINE_PYTHON || join(HERE, '.probe-fsoft', 'venv', 'Scripts', 'python.exe')
-if (!existsSync(PY)) {
-  console.error(`FAIL 找不到原生引擎解释器：${PY}；请设置 DSH_CODEWIKI_ENGINE_PYTHON`)
+// worktree 里没有 gitignored 的 .probe-fsoft；解析主仓库的 vendor 路径
+function findVendorRoot() {
+  const candidates = [
+    process.env.DSH_CODEWIKI_VENDOR_ROOT,
+    join(HERE, '.probe-fsoft'),
+    resolve(HERE, '..', '..', '..', '..', '.probe-fsoft'),
+  ].filter(Boolean)
+  for (const dir of candidates) {
+    const py = join(dir, 'venv', 'Scripts', 'python.exe')
+    if (existsSync(py)) return dir
+  }
+  return null
+}
+const VENDOR = findVendorRoot()
+const PY = process.env.DSH_CODEWIKI_ENGINE_PYTHON || (VENDOR ? join(VENDOR, 'venv', 'Scripts', 'python.exe') : null)
+if (!PY || !existsSync(PY)) {
+  console.error(`FAIL 找不到原生引擎解释器；请设置 DSH_CODEWIKI_ENGINE_PYTHON 或 DSH_CODEWIKI_VENDOR_ROOT`)
   process.exit(1)
 }
 const sandbox = mkdtempSync(join(tmpdir(), 'cw-fsoft-runtime-'))
