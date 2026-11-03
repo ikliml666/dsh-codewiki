@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.17.28 — 2026-11-03
+
+### 残留页随本轮编译一并清理：聚类重构留下的旧页不再永久堆积
+
+真机 `dsh-codewiki` 落地 92 页，而当前模块树只有 20 个模块——其余 72 页是历次聚类重构的
+残骸，仍挂在 `_index.md` 上，正文里 128 条链接指向已不存在的页。`dsh-git-worktree` 残骸
+22 页、`dsh-hindsight-on-demand` 16 页，同样情形。
+
+既有清理逻辑 `findOrphanPages` 命中不了它们：判据是「`source_files` 里每个文件都已不存在」
+（`lib/engine/apply-plan.js:449-452`），而这些旧页指向的 `lib/agentic.js`、
+`lib/article-contract.js` **都还在**，只是不再归属任何模块。于是页永久留在库里，读者看到的
+是一份描述已不存在模块的文档，且没有任何一处报错。
+
+新增 `findStaleModulePages({ repoRoot, moduleTree, keepPages })`（`lib/engine/apply-plan.js`）：
+拿**本轮产物的** `module_tree.json` 当权威名单，扫 `.codewiki/modules/` 下的原生页，页名 slug
+对不上树里任何模块就进删除集。三条边界都写进判据：只有带 `fsoft_page` 的引擎页才可能被删
+（人工页与更早版本生成器的页一律不动）；`module_tree={}` 的整仓模式直接返回空（没有权威
+模块名，凭名字猜会删掉全部正文）；本轮写集里的页不算残留（写优先）。
+
+删除统一走落地器 `deleteFiles`，与写盘同事务：索引/基线失败一起回滚，删除进同一个 commit。
+判据每轮重跑，所以下次聚类重构产生的残骸同样会被清掉，不需要人工干预。
+
+验证：`test-engine-apply-plan.mjs` 新增单测（命中旧页、保留无 `fsoft_page` 的人工页、
+写集优先、整仓模式返回空），42 passed；`test-engine-native-incremental.mjs` 新增用例 16
+（建库 → 塞入旧页 → 改源码触发出增量 → 旧页被删、人工页保留、notes 点名数量），152/152。
+
+真机实测命中：`dsh-codewiki` 46 页、`dsh-git-worktree` 16 页、`dsh-hindsight-on-demand` 13 页、
+`Wxxy-CampusLogin` 0 页、`dsh-subagent-auto-router` 0 页（整仓模式）。
+
 ## 0.17.27 — 2026-11-03
 
 ### 首次编译必须先问用户：自动调度只登记，不替用户决定

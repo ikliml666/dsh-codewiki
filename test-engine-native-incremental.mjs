@@ -688,6 +688,33 @@ if (want(15)) { console.log('== 用例 15：overview 链接指向已消失的页
   check(!/gone-module\.md/.test(rebuilt), `旧 overview 被删掉后由引擎重建（现存内容：${rebuilt.slice(0, 120)}）`)
 }
 
+// ============================ 用例 16：残留页随本轮编译一并清理 ============================
+// 真实事故（dsh-codewiki，2026-11-03）：落地 92 页而当前树只有 20 个模块，其余 72 页
+// 是历次聚类重构的残骸——它们的 source_files 指向的源码都还在（只是不再归属任何模块），
+// 所以 findOrphanPages 一个都命中不了，永久挂在 _index.md 上、正文链接大量 404。
+// 修法：拿本轮产物的 module_tree.json 当权威名单，页名对不上的原生页进本轮删除集。
+if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残留页，随本轮编译一并删除 ==')
+  const { base, repo } = makeRepo('staleleaf', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const mods = path.join(repo, '.codewiki', 'modules')
+  // 模拟历史遗留：上一版聚类写下的页，页名在当前树里已经不存在了。
+  fs.mkdirSync(mods, { recursive: true })
+  fs.writeFileSync(path.join(mods, 'agent-runtime.md'),
+    '---\ntitle: agent-runtime\ntype: module\nsource_files:\n  - core/core.py\ntags: []\nfsoft_page: agent_runtime.md\n---\n\n# agent-runtime\n\n旧聚类的残骸。\n', 'utf8')
+  // 人工页没有 fsoft_page，不在删除范围
+  fs.writeFileSync(path.join(mods, 'handwritten.md'),
+    '---\ntitle: handwritten\ntype: module\nsource_files: []\ntags: []\n---\n\n# handwritten\n\n人工维护。\n', 'utf8')
+  // 源码真变了，这一轮才会真正落地（no_change 轮不清理存量页）
+  fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
+
+  const r = await runJob(repo, { scope: 'stale' })
+  const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  check(/发现 1 个残留页/.test(notes), `notes 点名残留页数量（实际 ${notes.slice(-240)}）`)
+  check(!fs.existsSync(path.join(mods, 'agent-runtime.md')), '残留页被删除')
+  check(fs.existsSync(path.join(mods, 'handwritten.md')), '没有 fsoft_page 的人工页不得被删')
+}
+
 // ============================ 用例 11：宿主重放保留断点现场 ============================
 if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
   const { base, repo } = makeRepo('resume', { mode: 'done' })

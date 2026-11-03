@@ -19,6 +19,7 @@ import {
   applyNativeOutput,
   checkWriteTargets,
   findOrphanPages,
+  findStaleModulePages,
   toApplyBlockers,
   verifyCommitScope,
 } from './lib/engine/apply-plan.js'
@@ -607,6 +608,47 @@ await checkAsync('孤儿页：source_files 全部失效的存量模块页被识�
   // 本轮产物里的页即使 source_files 失效也不能被当孤儿删掉（那是本轮要重写的内容来源）
   const kept = findOrphanPages({ repoRoot, keepPages: ['.codewiki/modules/gone.md'] })
   assert.deepEqual(kept.map((o) => o.rel), ['.codewiki/modules/nested/gone2.md'])
+})
+
+await check('残留页：页名已不属于当前模块树的引擎页被识别（聚类重构后必须清）', () => {
+  // 与孤儿页互补的另一类残骸：模块被改名/合并后，旧页的 source_files 指向的文件全都还在
+  // （只是不再归属任何模块），所以 findOrphanPages 一个都命中不了。真机 dsh-codewiki
+  // 落地 92 页而树里只有 20 个模块，剩下 72 页永远挂在 _index.md 上。
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(join(mods, 'nested'), { recursive: true })
+  writeFile(repoRoot, 'lib/agentic.js', 'x\n')
+  const page = (source, extra = []) => ['---', 'title: t', 'type: module',
+    'source_files:', '  - lib/agentic.js', 'tags: []', ...extra, '---', '', '# t', ''].join('\n')
+
+  // 当前树（递归）：namespaced_mod 与它的子模块 leaf_mod
+  const moduleTree = {
+    namespaced_mod: { path: 'lib', components: [], children: { leaf_mod: { path: 'lib/leaf.js', components: [], children: {} } } },
+  }
+  writeFileSync(join(mods, 'namespaced-mod.md'), page('namespaced_mod', ['fsoft_page: namespaced_mod.md']), 'utf8')
+  writeFileSync(join(mods, 'leaf-mod.md'), page('leaf_mod', ['fsoft_page: leaf_mod.md']), 'utf8')
+  writeFileSync(join(mods, 'agent-runtime.md'), page('agent_runtime', ['fsoft_page: agent_runtime.md']), 'utf8')
+  writeFileSync(join(mods, 'nested', 'old-thing.md'), page('old_thing', ['fsoft_page: nested/old_thing.md']), 'utf8')
+  // 人工页 / 旧版本生成器的页：没有 fsoft_page，不能凭页名删
+  writeFileSync(join(mods, 'handwritten.md'), page('handwritten'), 'utf8')
+  // 非 .md 文件不该进删除集
+  writeFileSync(join(mods, 'notes.txt'), 'ignore me\n', 'utf8')
+
+  const stale = findStaleModulePages({ repoRoot, moduleTree })
+  assert.deepEqual(stale.map((o) => o.rel).sort(), [
+    '.codewiki/modules/agent-runtime.md',
+    '.codewiki/modules/nested/old-thing.md',
+  ], JSON.stringify(stale))
+  // 删除是不可逆动作，理由必须可审计：要能说出这篇原本属于哪个模块
+  for (const o of stale) assert.equal(typeof o.moduleName, 'string')
+
+  // 本轮写集里的页不算残留（写优先）
+  assert.deepEqual(
+    findStaleModulePages({ repoRoot, moduleTree, keepPages: ['.codewiki/modules/agent-runtime.md'] }).map((o) => o.rel),
+    ['.codewiki/modules/nested/old-thing.md'],
+  )
+  // 整仓模式（module_tree={}）没有权威模块名：凭页名猜会删掉全部正文
+  assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree: {} }), [])
 })
 
 await checkAsync('孤儿页：删除走写集（进 pre-image，能回滚，可审计）', async () => {
