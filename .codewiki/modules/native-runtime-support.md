@@ -89,7 +89,9 @@ flowchart TD
     G -->|"满足"| I["resolution = UPDATE<br/>hydrateDocsDir"]
     I --> J{"水合出文件?"}
     J -->|"空"| H
-    J -->|"有"| K["工作区快照<br/>createWorkspaceSnapshot"]
+    J -->|"有"| J2{"缺页检查<br/>findMissingModuleDocs"}
+    J2 -->|"新缺页（或有源码变化）"| H
+    J2 -->|"收敛：缺页与上轮相同<br/>或页面齐全"| K["工作区快照<br/>createWorkspaceSnapshot"]
     H --> K
     K --> L["建立模型桥<br/>startLlmBridge"]
     L --> M{"桥建立成功?"}
@@ -166,6 +168,18 @@ graph LR
 - `UPDATE` — 组件级增量（引擎会读上一轮的图/树/文章做图 diff）
 
 **注意**：「变化集为空」**不是**跳过引擎的理由——FSoft 的「有没有变」是图 diff 说的，不是 git 路径集合说的。
+
+### 缺页修复凭据（missingRepair）：增量轮不重复全量
+
+水合之后会清退旧页并扫描模块树里从未写过页面的模块（`findMissingModuleDocs`）。发现缺页时不再无条件转全量，而是把一份「缺页修复凭据」写进 `state.json`，让同一批缺口有机会收敛：
+
+| 状态 | 触发条件 | 动作 |
+|------|----------|------|
+| 新缺页 | 与上一轮凭据对不上（换了基线、缺口清单不同） | 转全量修复（`resolution = FULL`，复用已有页面），凭据 `attempts = 1` |
+| 收敛 | 已提交的编译基线（`baseCommit`，不是 HEAD）未变 + 缺口清单完全相同 + 本轮无源码变化（`effectiveChanges` 为空） | 保持 `UPDATE`、不再重复全量，凭据 `attempts += 1`；缺页一条不豁免，质量门照旧判 `article-missing`，终态照旧 `partial`，强制重试请用 `scope=full` |
+| 补齐 | 缺口清零 | 凭据置 `null` 清除，避免下次出现同样缺口时被误判成「已经试过」 |
+
+判据用「已提交的编译基线」而不是 HEAD：partial 轮仍可能产生一次 wiki 提交，HEAD 每轮都变，拿它比对等于永远不收敛；基线只有 `done` 才推进，所以基线没变 + 缺口清单没变 = 同一棵树上的同一批缺口。真有源码变化时再给一次机会——新变化可能正是补齐缺口所需的内容。凭据本身（`{baseCommit, modules, attempts, at}`）由 `buildStatePayload` 随 state.json 与文章同事务落盘：`undefined` = 沿用上一轮，`null` = 清除。
 
 ### 引擎增量参数
 

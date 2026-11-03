@@ -184,10 +184,13 @@ flowchart LR
   "effectiveScope": "incremental",
   "updateOutcome": "done",
   "fallbackReason": "",
+  "missingRepair": null,
   "notes": [],
   "updatedAt": "2025-..."
 }
 ```
+
+`missingRepair` 是「因产物缺页而转过全量」的凭据：没有它，缺口补不上时会一轮又一轮地重跑全量（每轮几十分钟、结果还是 partial）。有了它，同一棵树上的同一批缺口只尝试一次全量修复，之后如实报 partial 并把原因写进 `notes`。取值语义：调用时不传（`undefined`）= 沿用上一轮；`null` = 明确清除（缺口已补齐）；对象 = 记录本次全量修复凭据。它属于实质内容（不是时间戳/备注），因此参与 `stateFingerprint` 指纹计算。
 
 关键设计：`state.json` **不记录本轮结局**，只记录「本轮开始时的已消费范围」与「本轮看见了哪些变化」。原因是本轮结局（基线是否推进）的权威在 `.codewiki/_meta.yaml`，而 `state.json` 要在 apply 之前就落盘（与文章同一份 pre-image）。写成「本轮结局」就必须在 apply 之后再改一次文件，会造出第二个提交且回滚语义分叉。
 
