@@ -1,17 +1,17 @@
 {
   "generation_info": {
-    "timestamp": "2026-11-03T13:29:49.341246+00:00",
+    "timestamp": "2026-11-03T14:17:22.013194+00:00",
     "provider": "openai-compatible",
     "main_model": "doubao-seed-2.1-lite",
     "generator_version": "2.0.0",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
-    "commit_id": "4537199b1f6b584818642719a731374597112c1f",
+    "commit_id": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
     "language": "中文",
     "layout": "flat"
   },
   "statistics": {
-    "total_components": 625,
-    "leaf_nodes": 81,
+    "total_components": 626,
+    "leaf_nodes": 82,
     "max_depth": 2
   },
   "files_generated": [
@@ -44,7 +44,7 @@
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
     "cost_status": "complete",
-    "incomplete": true,
+    "incomplete": false,
     "unknown_usage_calls": 0,
     "n_calls": 0,
     "totals": {
@@ -56,37 +56,28 @@
     "calls": []
   },
   "last_update": {
-    "run_id": "ac50305c-1a01-40a7-b7d7-b1a3604cfd6b",
-    "started_at": "2026-11-03T22:12:07+0800",
-    "outcome": "incremental",
-    "finished_at": "2026-11-03T22:12:07+0800",
+    "run_id": "ffd42581-3898-4b30-a319-fc488bc88175",
+    "started_at": "2026-11-03T22:17:21+0800",
+    "outcome": "no_change",
+    "finished_at": "2026-11-03T22:17:22+0800",
     "rung": "3",
     "revision": {
       "old_commit": "4537199b1f6b584818642719a731374597112c1f",
-      "new_commit": "aec34a6c319d061c678a7c11dded252200935e77",
+      "new_commit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
       "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
     },
     "diff_counts": {
-      "added": 1,
+      "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 2,
-      "edge": 1,
+      "body": 0,
+      "edge": 0,
       "renamed": 0
     },
     "n_active": 0,
-    "n_adopted": 2,
+    "n_adopted": 0,
     "n_adopted_by_agent": 0,
-    "fallback": {
-      "r_leaf": 0.21428571428571427,
-      "r_tree": 0.0,
-      "n_active": 3,
-      "n_leaves": 14,
-      "n_structural": 0,
-      "tau_full": 0.5,
-      "tau_tree": 0.3,
-      "fired": false
-    },
+    "fallback": {},
     "n_calls": 0,
     "usage_total": {
       "cost_usd": 0.0
@@ -96,7 +87,7 @@
       "scope": "this run only (modules resumed from disk cost nothing)",
       "currency": "USD",
       "cost_status": "complete",
-      "incomplete": true,
+      "incomplete": false,
       "unknown_usage_calls": 0,
       "n_calls": 0,
       "totals": {
@@ -11637,6 +11628,53 @@
         "currency": "USD",
         "cost_status": "complete",
         "incomplete": true,
+        "unknown_usage_calls": 0,
+        "n_calls": 0,
+        "totals": {
+          "cost_usd": 0.0
+        },
+        "by_phase": {},
+        "by_model": {},
+        "unpriced_models": [],
+        "calls": []
+      },
+      "pages_written": [],
+      "pages_removed": [],
+      "wall_seconds": 0.06
+    },
+    {
+      "run_id": "ffd42581-3898-4b30-a319-fc488bc88175",
+      "started_at": "2026-11-03T22:17:21+0800",
+      "outcome": "no_change",
+      "finished_at": "2026-11-03T22:17:22+0800",
+      "rung": "3",
+      "revision": {
+        "old_commit": "4537199b1f6b584818642719a731374597112c1f",
+        "new_commit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
+        "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
+      },
+      "diff_counts": {
+        "added": 0,
+        "deleted": 0,
+        "interface": 0,
+        "body": 0,
+        "edge": 0,
+        "renamed": 0
+      },
+      "n_active": 0,
+      "n_adopted": 0,
+      "n_adopted_by_agent": 0,
+      "fallback": {},
+      "n_calls": 0,
+      "usage_total": {
+        "cost_usd": 0.0
+      },
+      "usage": {
+        "schema_version": 2,
+        "scope": "this run only (modules resumed from disk cost nothing)",
+        "currency": "USD",
+        "cost_status": "complete",
+        "incomplete": false,
         "unknown_usage_calls": 0,
         "n_calls": 0,
         "totals": {
