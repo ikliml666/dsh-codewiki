@@ -196,11 +196,14 @@ await check('并行探针能在真 venv 上跑完', () => {
 
 const got = JSON.parse(readFileSync(outFile, 'utf-8'))
 
-await check('同层模块真的并行（不是串行换皮）', () => {
-  assert.ok(got.parallel.max_inflight >= 2,
-    `峰值并发必须 >=2，实际 ${got.parallel.max_inflight}`)
-  assert.ok(got.parallel.elapsed < 0.85,
-    `3 个 0.3s 模块并行应 <0.85s，实际 ${got.parallel.elapsed.toFixed(2)}s`)
+await check('回退上游后同层模块串行（0.17.12：验证本地并行补丁已回退）', () => {
+  // 0.17.12 起停用并行补丁（patches/upstream-module-parallel.patch），
+  // 回到上游原始的严格串行。这个用例从「验证并行生效」改成「验证回退生效」：
+  // 峰值并发必须是 1，墙钟必须 >= 0.85s（3 个 0.3s 模块串行）。
+  assert.equal(got.parallel.max_inflight, 1,
+    `回退后峰值并发必须是 1（上游串行），实际 ${got.parallel.max_inflight}`)
+  assert.ok(got.parallel.elapsed >= 0.85,
+    `3 个 0.3s 模块串行应 >=0.85s，实际 ${got.parallel.elapsed.toFixed(2)}s`)
 })
 
 await check('module_concurrency=1 退化为串行（向后兼容）', () => {

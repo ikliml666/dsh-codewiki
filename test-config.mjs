@@ -35,12 +35,12 @@ for (const key of ['planMode', 'symbolIncremental', 'agenticArticles', 'agenticM
 // agent.run(usage_limits=UsageLimits(request_limit=N))。原先硬编码 100，大模块
 // 在真机上撞上限抛 DocumentationWriteError，整轮从 done 掉成 partial——语义对，
 // 但预算明显不够。这里钉住默认值与夹取规则，别让它再悄悄回到偏小值。
-check(liveConfig(defaults).requestLimit === 300, '单模块请求上限默认 300（原先硬编码 100 不够大模块用）')
+check(liveConfig(defaults).requestLimit === 100, '单模块请求上限默认 100（0.17.12 回退到上游默认值，验证本地修改是否是 partial 根因）')
 {
   check(liveConfig(Config({ requestLimit: 500 })).requestLimit === 500, '显式配置的请求上限原样透出')
   check(liveConfig(Config({ requestLimit: 1 })).requestLimit === 1, '下限 1 允许（等价于不写文章的极端预算）')
   check(liveConfig(Config({ requestLimit: 5000 })).requestLimit === 1000, '超过硬顶 1000 时夹到 1000')
-  check(liveConfig(Config({ requestLimit: 0 })).requestLimit === 300, '0 / 非正值退回默认 300，不把 agent 循环卡死在 0')
+  check(liveConfig(Config({ requestLimit: 0 })).requestLimit === 100, '0 / 非正值退回默认 100，不把 agent 循环卡死在 0')
 }
 // ── 大档开关 ────────────────────────────────────────────────────────────────
 // schemastery 返回带 get() 的包装对象，取值一律走 liveConfig（运行期也是它）

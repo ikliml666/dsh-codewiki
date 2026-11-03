@@ -55,7 +55,7 @@ const DEFAULT_BIG_TOKEN_BUDGET = 420000
 // 写作校验会为写不出页面的模块续发最多 2 次补写提醒，每次提醒各自吃一份预算；
 // 真机上 change_set_management 模块撞满 100 次请求后抛错，已写好的 31 篇被记成 partial。
 // 300 是「大模块一轮能写完」的经验上限，同时保留硬顶 1000 防止配置失误拖成一小时。
-const DEFAULT_REQUEST_LIMIT = 300
+const DEFAULT_REQUEST_LIMIT = 100  // 0.17.12 回退到上游默认值（用户要求先全部改为上游逻辑验证）
 // 编译产物路径：自动提交、忽略检测、待提交提醒共用的唯一定义。永远只认这两个 pathspec，
 // 不扩成 -A / 整个工作树（否则会把用户手上的其它改动卷进自动提交）。
 const WIKI_PATHS = ['.codewiki', 'CodeWiki.md']

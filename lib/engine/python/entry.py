@@ -935,7 +935,7 @@ def action_generate(request_id, payload, is_update=False):
         request_limit = int(payload.get("requestLimit") or 0)
     except (TypeError, ValueError):
         request_limit = 0
-    config["request_limit"] = max(1, min(request_limit, 1000)) if request_limit > 0 else 300
+    config["request_limit"] = max(1, min(request_limit, 1000)) if request_limit > 0 else 100
     config["agent_retries"] = 3
     # 同层模块并行度（0.16.14）。默认 1 = 上游原始的严格串行。
     #
@@ -998,9 +998,13 @@ def action_generate(request_id, payload, is_update=False):
     try:
         from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
 
-        if is_update:
-            from fsoft_runtime import install_incremental_runtime
-            install_incremental_runtime()
+        # 0.17.12 起停用 fsoft_runtime 适配器（Step 5 隔离并行 + 断点续跑）：
+        # 用户要求「先全部改为上游逻辑」验证 4 个仓库恒定 partial 是否由本地修改导致。
+        # 这里不再安装适配器，增量轮回到上游原始的严格串行。
+        # 若要恢复，取消下面三行的注释即可（适配器文件仍在 lib/engine/python/fsoft_runtime.py）。
+        # if is_update:
+        #     from fsoft_runtime import install_incremental_runtime
+        #     install_incremental_runtime()
 
         adapter = CLIDocumentationGenerator(
             repo_path=repo_path,

@@ -307,7 +307,7 @@ console.log('== 用例 1：原生通道完整成功（done 只由 gate+apply 共
   // 单模块请求上限必须真的到引擎侧：插件设置写了却传不到，就是「设置看起来生效、
   // 实际用上游默认 100」的静默失效——真机上表现为大模块撞满预算整轮判 partial。
   const genCall = calls().find((c) => c.action === 'generate')
-  check(genCall?.requestLimit === 300, `引擎收到 requestLimit（实际 ${JSON.stringify(genCall?.requestLimit)}）`)
+  check(genCall?.requestLimit === 100, `引擎收到 requestLimit（实际 ${JSON.stringify(genCall?.requestLimit)}；0.17.12 回退上游默认 100）`)
 
   // 自动提交只落 wiki 路径
   const sha = String(job?.nativeResult?.apply?.commit?.sha ?? '')
