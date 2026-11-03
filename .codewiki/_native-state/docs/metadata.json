@@ -1,16 +1,16 @@
 {
   "generation_info": {
-    "timestamp": "2026-11-03T07:31:23.004030+00:00",
+    "timestamp": "2026-11-03T07:40:32.288309+00:00",
     "provider": "openai-compatible",
     "main_model": "qfmodel",
     "generator_version": "2.0.0",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
-    "commit_id": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+    "commit_id": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
     "language": "中文",
     "layout": "flat"
   },
   "statistics": {
-    "total_components": 617,
+    "total_components": 618,
     "leaf_nodes": 81,
     "max_depth": 2
   },
@@ -57,37 +57,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 8,
+    "n_calls": 4,
     "totals": {
       "input_tokens": 0,
       "output_tokens": 0,
       "cache_read_tokens": 0,
       "cache_write_tokens": 0,
-      "requests": 8,
+      "requests": 4,
       "total_tokens": 0
     },
     "by_phase": {
       "update": {
-        "calls": 8,
+        "calls": 4,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 4,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 4
       }
     },
     "by_model": {
       "qfmodel": {
-        "calls": 8,
+        "calls": 4,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 4,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 4
       }
     },
     "unpriced_models": [
@@ -99,75 +99,7 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 7.49,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 0.16,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 7.77,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 0.12,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.02,
+        "seconds": 3.0,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -199,7 +131,7 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "python_native_runtime",
         "model": "qfmodel",
         "seconds": 0.01,
         "input_tokens": 0,
@@ -216,7 +148,7 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "python_native_runtime",
         "model": "qfmodel",
         "seconds": 0.02,
         "input_tokens": 0,
@@ -233,44 +165,44 @@
     ]
   },
   "last_update": {
-    "run_id": "02c147a1-9b82-4546-b673-af43ef1cd107",
-    "started_at": "2026-11-03T15:31:14+0800",
+    "run_id": "cbdefcf5-bbd1-4383-bd87-218de99cd455",
+    "started_at": "2026-11-03T15:40:28+0800",
     "outcome": "incremental",
-    "finished_at": "2026-11-03T15:31:23+0800",
+    "finished_at": "2026-11-03T15:40:32+0800",
     "rung": "3",
     "revision": {
-      "old_commit": "36fde179d3471f690ba01940ab6f197c62555c64",
-      "new_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+      "old_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+      "new_commit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
       "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
     },
     "diff_counts": {
-      "added": 1,
-      "deleted": 0,
+      "added": 2,
+      "deleted": 1,
       "interface": 0,
-      "body": 2,
+      "body": 1,
       "edge": 0,
       "renamed": 0
     },
-    "n_active": 2,
-    "n_adopted": 1,
+    "n_active": 1,
+    "n_adopted": 2,
     "n_adopted_by_agent": 0,
     "fallback": {
-      "r_leaf": 0.07692307692307693,
+      "r_leaf": 0.038461538461538464,
       "r_tree": 0.0,
-      "n_active": 2,
+      "n_active": 1,
       "n_leaves": 26,
       "n_structural": 0,
       "tau_full": 0.5,
       "tau_tree": 0.3,
       "fired": false
     },
-    "n_calls": 8,
+    "n_calls": 4,
     "usage_total": {
       "input_tokens": 0,
       "output_tokens": 0,
       "cache_read_tokens": 0,
       "cache_write_tokens": 0,
-      "requests": 8,
+      "requests": 4,
       "total_tokens": 0
     },
     "usage": {
@@ -280,37 +212,37 @@
       "cost_status": "unknown",
       "incomplete": false,
       "unknown_usage_calls": 0,
-      "n_calls": 8,
+      "n_calls": 4,
       "totals": {
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 4,
         "total_tokens": 0
       },
       "by_phase": {
         "update": {
-          "calls": 8,
+          "calls": 4,
           "input_tokens": 0,
           "output_tokens": 0,
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
-          "requests": 8,
+          "requests": 4,
           "total_tokens": 0,
-          "unpriced_calls": 8
+          "unpriced_calls": 4
         }
       },
       "by_model": {
         "qfmodel": {
-          "calls": 8,
+          "calls": 4,
           "input_tokens": 0,
           "output_tokens": 0,
           "cache_read_tokens": 0,
           "cache_write_tokens": 0,
-          "requests": 8,
+          "requests": 4,
           "total_tokens": 0,
-          "unpriced_calls": 8
+          "unpriced_calls": 4
         }
       },
       "unpriced_models": [
@@ -322,75 +254,7 @@
           "kind": "update_agent",
           "target": "python_native_runtime",
           "model": "qfmodel",
-          "seconds": 7.49,
-          "input_tokens": 0,
-          "output_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "requests": 1,
-          "total_tokens": 0,
-          "usage_reported": true,
-          "provider": "openai-compatible",
-          "requested_model": "qfmodel",
-          "cost_source": "unknown"
-        },
-        {
-          "phase": "update",
-          "kind": "update_agent",
-          "target": "python_native_runtime",
-          "model": "qfmodel",
-          "seconds": 0.16,
-          "input_tokens": 0,
-          "output_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "requests": 1,
-          "total_tokens": 0,
-          "usage_reported": true,
-          "provider": "openai-compatible",
-          "requested_model": "qfmodel",
-          "cost_source": "unknown"
-        },
-        {
-          "phase": "update",
-          "kind": "update_agent",
-          "target": "build_deployment_config",
-          "model": "qfmodel",
-          "seconds": 7.77,
-          "input_tokens": 0,
-          "output_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "requests": 1,
-          "total_tokens": 0,
-          "usage_reported": true,
-          "provider": "openai-compatible",
-          "requested_model": "qfmodel",
-          "cost_source": "unknown"
-        },
-        {
-          "phase": "update",
-          "kind": "update_agent",
-          "target": "python_native_runtime",
-          "model": "qfmodel",
-          "seconds": 0.12,
-          "input_tokens": 0,
-          "output_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0,
-          "requests": 1,
-          "total_tokens": 0,
-          "usage_reported": true,
-          "provider": "openai-compatible",
-          "requested_model": "qfmodel",
-          "cost_source": "unknown"
-        },
-        {
-          "phase": "update",
-          "kind": "update_agent",
-          "target": "build_deployment_config",
-          "model": "qfmodel",
-          "seconds": 0.02,
+          "seconds": 3.0,
           "input_tokens": 0,
           "output_tokens": 0,
           "cache_read_tokens": 0,
@@ -422,7 +286,7 @@
         {
           "phase": "update",
           "kind": "update_agent",
-          "target": "build_deployment_config",
+          "target": "python_native_runtime",
           "model": "qfmodel",
           "seconds": 0.01,
           "input_tokens": 0,
@@ -439,7 +303,7 @@
         {
           "phase": "update",
           "kind": "update_agent",
-          "target": "build_deployment_config",
+          "target": "python_native_runtime",
           "model": "qfmodel",
           "seconds": 0.02,
           "input_tokens": 0,
@@ -457,7 +321,7 @@
     },
     "pages_written": [],
     "pages_removed": [],
-    "wall_seconds": 8.52
+    "wall_seconds": 3.55
   },
   "update_history": [
     {
@@ -7550,6 +7414,165 @@
       "pages_written": [],
       "pages_removed": [],
       "wall_seconds": 8.52
+    },
+    {
+      "run_id": "cbdefcf5-bbd1-4383-bd87-218de99cd455",
+      "started_at": "2026-11-03T15:40:28+0800",
+      "outcome": "incremental",
+      "finished_at": "2026-11-03T15:40:32+0800",
+      "rung": "3",
+      "revision": {
+        "old_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+        "new_commit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+        "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
+      },
+      "diff_counts": {
+        "added": 2,
+        "deleted": 1,
+        "interface": 0,
+        "body": 1,
+        "edge": 0,
+        "renamed": 0
+      },
+      "n_active": 1,
+      "n_adopted": 2,
+      "n_adopted_by_agent": 0,
+      "fallback": {
+        "r_leaf": 0.038461538461538464,
+        "r_tree": 0.0,
+        "n_active": 1,
+        "n_leaves": 26,
+        "n_structural": 0,
+        "tau_full": 0.5,
+        "tau_tree": 0.3,
+        "fired": false
+      },
+      "n_calls": 4,
+      "usage_total": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 4,
+        "total_tokens": 0
+      },
+      "usage": {
+        "schema_version": 2,
+        "scope": "this run only (modules resumed from disk cost nothing)",
+        "currency": "USD",
+        "cost_status": "unknown",
+        "incomplete": false,
+        "unknown_usage_calls": 0,
+        "n_calls": 4,
+        "totals": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "requests": 4,
+          "total_tokens": 0
+        },
+        "by_phase": {
+          "update": {
+            "calls": 4,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 4,
+            "total_tokens": 0,
+            "unpriced_calls": 4
+          }
+        },
+        "by_model": {
+          "qfmodel": {
+            "calls": 4,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 4,
+            "total_tokens": 0,
+            "unpriced_calls": 4
+          }
+        },
+        "unpriced_models": [
+          "qfmodel"
+        ],
+        "calls": [
+          {
+            "phase": "update",
+            "kind": "update_agent",
+            "target": "python_native_runtime",
+            "model": "qfmodel",
+            "seconds": 3.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 1,
+            "total_tokens": 0,
+            "usage_reported": true,
+            "provider": "openai-compatible",
+            "requested_model": "qfmodel",
+            "cost_source": "unknown"
+          },
+          {
+            "phase": "update",
+            "kind": "update_agent",
+            "target": "python_native_runtime",
+            "model": "qfmodel",
+            "seconds": 0.02,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 1,
+            "total_tokens": 0,
+            "usage_reported": true,
+            "provider": "openai-compatible",
+            "requested_model": "qfmodel",
+            "cost_source": "unknown"
+          },
+          {
+            "phase": "update",
+            "kind": "update_agent",
+            "target": "python_native_runtime",
+            "model": "qfmodel",
+            "seconds": 0.01,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 1,
+            "total_tokens": 0,
+            "usage_reported": true,
+            "provider": "openai-compatible",
+            "requested_model": "qfmodel",
+            "cost_source": "unknown"
+          },
+          {
+            "phase": "update",
+            "kind": "update_agent",
+            "target": "python_native_runtime",
+            "model": "qfmodel",
+            "seconds": 0.02,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "requests": 1,
+            "total_tokens": 0,
+            "usage_reported": true,
+            "provider": "openai-compatible",
+            "requested_model": "qfmodel",
+            "cost_source": "unknown"
+          }
+        ]
+      },
+      "pages_written": [],
+      "pages_removed": [],
+      "wall_seconds": 3.55
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T15:31:14+0800",
-  "finished_at": "2026-11-03T15:31:23+0800",
+  "started_at": "2026-11-03T15:40:28+0800",
+  "finished_at": "2026-11-03T15:40:32+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -24,27 +24,29 @@
     }
   },
   "revision": {
-    "old_commit": "36fde179d3471f690ba01940ab6f197c62555c64",
-    "new_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+    "old_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
+    "new_commit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 1,
-      "deleted": 0,
+      "added": 2,
+      "deleted": 1,
       "interface": 0,
-      "body": 2,
+      "body": 1,
       "edge": 0,
       "renamed": 0
     },
     "added": [
+      "lib\\engine\\python\\entry.py::_failed_blockers",
+      "lib\\engine\\python\\entry.py::_failed_calls_of"
+    ],
+    "deleted": [
       "lib\\engine\\python\\entry.py::_failed_leaves_of"
     ],
-    "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\python\\entry.py::action_generate",
-      "package.json::package.json"
+      "lib\\engine\\python\\entry.py::action_generate"
     ],
     "edge": [],
     "renamed": {}
@@ -54,7 +56,14 @@
     "removed": [],
     "routing": [
       {
-        "component_id": "lib\\engine\\python\\entry.py::_failed_leaves_of",
+        "component_id": "lib\\engine\\python\\entry.py::_failed_blockers",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\entry.py::_failed_calls_of",
         "rule": "untracked",
         "leaf_path": null,
         "new_leaf": false,
@@ -77,10 +86,12 @@
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\entry.py::action_generate"
+        "lib\\engine\\python\\entry.py::action_generate",
+        "lib\\engine\\python\\entry.py::_failed_leaves_of"
       ],
       "adopted": {
-        "lib\\engine\\python\\entry.py::action_generate": "1:same_file"
+        "lib\\engine\\python\\entry.py::action_generate": "1:same_file",
+        "lib\\engine\\python\\entry.py::_failed_leaves_of": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -91,28 +102,20 @@
       "children_removed": [],
       "reclustered": false,
       "page": "python_native_runtime"
-    },
-    "build_deployment_config": {
-      "leaf_path": [
-        "build_deployment_config"
-      ],
-      "mode": "edit",
-      "own": [
-        "package.json::package.json"
-      ],
-      "adopted": {},
-      "up": [],
-      "context": [],
-      "refch": [],
-      "entered": [],
-      "left": [],
-      "children_added": [],
-      "children_removed": [],
-      "reclustered": false,
-      "page": "build_deployment_config"
     }
   },
   "ownership": [
+    {
+      "component_id": "lib\\engine\\python\\entry.py::_failed_leaves_of",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "python_native_runtime"
+      ],
+      "detail": "3 tracked components in file",
+      "deleted": true
+    },
     {
       "component_id": "lib\\engine\\python\\entry.py::action_generate",
       "rule": "1:same_file",
@@ -131,12 +134,6 @@
       "page": "python_native_runtime",
       "mode": "edit",
       "order": 0
-    },
-    {
-      "leaf": "build_deployment_config",
-      "page": "build_deployment_config",
-      "mode": "edit",
-      "order": 1
     }
   ],
   "write_sets": {
@@ -156,23 +153,12 @@
       "probe_tools",
       "python_native_runtime",
       "testing_fixtures"
-    ],
-    "build_deployment_config": [
-      "Testing___Probing_Tooling",
-      "build_deployment_config",
-      "codewiki_vendor_binary",
-      "engine_manifest_management",
-      "llm_integration_bridges",
-      "overview",
-      "probe_tools",
-      "testing_fixtures",
-      "vscode_extension_client"
     ]
   },
   "fallback": {
-    "r_leaf": 0.07692307692307693,
+    "r_leaf": 0.038461538461538464,
     "r_tree": 0.0,
-    "n_active": 2,
+    "n_active": 1,
     "n_leaves": 26,
     "n_structural": 0,
     "tau_full": 0.5,
@@ -284,69 +270,6 @@
       "reason": "no verdict returned by agent",
       "by_leaf": "python_native_runtime",
       "changed_on_disk": false
-    },
-    {
-      "page": "build_deployment_config",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Testing___Probing_Tooling",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "codewiki_vendor_binary",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_manifest_management",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "llm_integration_bridges",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "probe_tools",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "testing_fixtures",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
-    },
-    {
-      "page": "vscode_extension_client",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "build_deployment_config",
-      "changed_on_disk": false
     }
   ],
   "pages_written": [],
@@ -361,28 +284,21 @@
     {
       "kind": "leaf_agent",
       "target": "python_native_runtime",
-      "seconds": 8.03718614578247,
-      "usage": null,
-      "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
-    },
-    {
-      "kind": "leaf_agent",
-      "target": "build_deployment_config",
-      "seconds": 7.827519416809082,
+      "seconds": 3.070763349533081,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.030597925186157227,
+      "seconds": 0.03132200241088867,
       "usage": null,
       "error": null
     }
   ],
   "detector_notes": [],
   "errors": [],
-  "wall_seconds": 8.52,
+  "wall_seconds": 3.55,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -390,37 +306,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 8,
+    "n_calls": 4,
     "totals": {
       "input_tokens": 0,
       "output_tokens": 0,
       "cache_read_tokens": 0,
       "cache_write_tokens": 0,
-      "requests": 8,
+      "requests": 4,
       "total_tokens": 0
     },
     "by_phase": {
       "update": {
-        "calls": 8,
+        "calls": 4,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 4,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 4
       }
     },
     "by_model": {
       "qfmodel": {
-        "calls": 8,
+        "calls": 4,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 4,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 4
       }
     },
     "unpriced_models": [
@@ -432,75 +348,7 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 7.49,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 0.16,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 7.77,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 0.12,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.02,
+        "seconds": 3.0,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -532,7 +380,7 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "python_native_runtime",
         "model": "qfmodel",
         "seconds": 0.01,
         "input_tokens": 0,
@@ -549,7 +397,7 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "python_native_runtime",
         "model": "qfmodel",
         "seconds": 0.02,
         "input_tokens": 0,
@@ -565,5 +413,5 @@
       }
     ]
   },
-  "run_id": "02c147a1-9b82-4546-b673-af43ef1cd107"
+  "run_id": "cbdefcf5-bbd1-4383-bd87-218de99cd455"
 }
