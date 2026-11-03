@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T13:13:45+0800",
-  "finished_at": "2026-11-03T13:13:45+0800",
+  "started_at": "2026-11-03T13:49:16+0800",
+  "finished_at": "2026-11-03T13:49:16+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -25,7 +25,7 @@
   },
   "revision": {
     "old_commit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
-    "new_commit": "565aad9763699e637e90be5718e88a2fb3be871d",
+    "new_commit": "b22deee6beb5e71cd71609471cbde0d44a6a9f3f",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -41,7 +41,7 @@
     "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+      "lib\\engine\\native-run.js::runNativeJob",
       "package.json::package.json"
     ],
     "edge": [],
@@ -59,18 +59,18 @@
   },
   "reclustered": [],
   "reports": {
-    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/native_runtime_support": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "python_native_runtime"
+        "native_runtime_support"
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree"
+        "lib\\engine\\native-run.js::runNativeJob"
       ],
       "adopted": {
-        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree": "2:same_dir"
+        "lib\\engine\\native-run.js::runNativeJob": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -80,7 +80,7 @@
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
-      "page": "python_native_runtime"
+      "page": "native_runtime_support"
     },
     "build_deployment_config": {
       "leaf_path": [
@@ -104,14 +104,14 @@
   },
   "ownership": [
     {
-      "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
-      "rule": "2:same_dir",
+      "component_id": "lib\\engine\\native-run.js::runNativeJob",
+      "rule": "1:same_file",
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "python_native_runtime"
+        "native_runtime_support"
       ],
-      "detail": "dir 'lib/engine/python'",
+      "detail": "1 tracked components in file",
       "deleted": false
     }
   ],
@@ -137,7 +137,7 @@
     "补齐 2 个未归属文件到已有叶子：lib\\engine\\python\\full_parallel_runtime.py, lib\\engine\\python\\tree_coverage.py"
   ],
   "errors": [],
-  "wall_seconds": 0.12,
+  "wall_seconds": 0.13,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -154,5 +154,5 @@
     "unpriced_models": [],
     "calls": []
   },
-  "run_id": "069d3467-a51b-4c62-ac98-72491309d3ae"
+  "run_id": "e3db2da9-2ec7-46be-8e9b-35e5dc9800c2"
 }
