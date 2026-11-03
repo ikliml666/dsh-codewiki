@@ -1,5 +1,5 @@
 {
-    "vscode_extension_client": {
+    "codewiki_user_facing_surfaces": {
         "path": "client.js",
         "components": [
             "client.js::CodewikiCard",
@@ -14,12 +14,52 @@
             "client.js::line",
             "client.js::mount",
             "client.js::save",
-            "client.js::zh"
+            "client.js::zh",
+            "vendor\\codewiki\\src\\config.rs::project_name",
+            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+            "vendor\\codewiki\\src\\main.rs::Cli",
+            "vendor\\codewiki\\src\\main.rs::capitalize",
+            "vendor\\codewiki\\src\\main.rs::main",
+            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+            "vendor\\codewiki\\src\\setup.rs::claude_home"
         ],
-        "children": {}
+        "children": {
+            "browser_ui_panel": {
+                "path": "client.js",
+                "components": [
+                    "client.js::CodewikiCard",
+                    "client.js::CodewikiPanel",
+                    "client.js::PanelIcon",
+                    "client.js::ReposTab",
+                    "client.js::SessionView",
+                    "client.js::Spark",
+                    "client.js::byUpdated",
+                    "client.js::discard",
+                    "client.js::en",
+                    "client.js::line",
+                    "client.js::mount",
+                    "client.js::save",
+                    "client.js::zh"
+                ],
+                "children": {}
+            },
+            "codewiki_rust_vendor": {
+                "path": "",
+                "components": [
+                    "vendor\\codewiki\\src\\config.rs::project_name",
+                    "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+                    "vendor\\codewiki\\src\\main.rs::Cli",
+                    "vendor\\codewiki\\src\\main.rs::capitalize",
+                    "vendor\\codewiki\\src\\main.rs::main",
+                    "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+                    "vendor\\codewiki\\src\\setup.rs::claude_home"
+                ],
+                "children": {}
+            }
+        }
     },
-    "Extension_Host_Execution_Orchestration": {
-        "path": "",
+    "agentic_orchestration_and_article_pipeline": {
+        "path": "index.js",
         "components": [
             "index.js::allowedLinkTargets",
             "index.js::apply",
@@ -42,10 +82,14 @@
             "index.js::worker",
             "lib\\agentic-host.js::absOf",
             "lib\\agentic.js::edit",
+            "lib\\article-contract.js::hasBlockingIssue",
+            "lib\\article-contract.js::issueSummary",
+            "lib\\articles-agentic.js::runPool",
+            "lib\\articles-agentic.js::worker",
             "lib\\change-set.js::collect"
         ],
         "children": {
-            "extension_host_core": {
+            "main_orchestrator": {
                 "path": "index.js",
                 "components": [
                     "index.js::allowedLinkTargets",
@@ -70,30 +114,22 @@
                 ],
                 "children": {}
             },
-            "agent_runtime": {
-                "path": "lib\\agentic-host.js",
+            "agentic_article_pipeline": {
+                "path": "",
                 "components": [
-                    "lib\\agentic-host.js::absOf"
-                ],
-                "children": {}
-            },
-            "agentic_edit_capability": {
-                "path": "lib\\agentic.js",
-                "components": [
-                    "lib\\agentic.js::edit"
-                ],
-                "children": {}
-            },
-            "change_set_management": {
-                "path": "lib\\change-set.js",
-                "components": [
+                    "lib\\agentic-host.js::absOf",
+                    "lib\\agentic.js::edit",
+                    "lib\\article-contract.js::hasBlockingIssue",
+                    "lib\\article-contract.js::issueSummary",
+                    "lib\\articles-agentic.js::runPool",
+                    "lib\\articles-agentic.js::worker",
                     "lib\\change-set.js::collect"
                 ],
                 "children": {}
             }
         }
     },
-    "Code_Engine_Processing_Pipeline": {
+    "fsoft_engine_runtime": {
         "path": "",
         "components": [
             "lib\\engine\\apply-plan.js::applyNativeOutput",
@@ -106,50 +142,27 @@
             "lib\\engine\\llm-bridge.js::startLlmBridge",
             "lib\\engine\\manifest.js::doctor",
             "lib\\engine\\manifest.js::writeLock",
-            "lib\\engine\\mapping.js::indexModuleTree",
+            "lib\\engine\\mapping.js::findMissingModuleDocs",
             "lib\\engine\\native-run.js::noop",
             "lib\\engine\\native-state.js::stateDocFiles",
             "lib\\engine\\openai-bridge.js::isPlaceholderKey",
-            "lib\\engine\\output.js::bodyLength",
+            "lib\\engine\\output.js::add",
             "lib\\engine\\process-tree.js::isAlive",
-            "lib\\engine\\python\\entry.py::_ProtocolOnly",
-            "lib\\engine\\python\\entry.py::_popen_init_utf8",
-            "lib\\engine\\python\\entry.py::main",
-            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
-            "lib\\engine\\python\\stage_map.py::articles_ceiling",
             "lib\\engine\\quality-gate.js::gateNativeOutput",
             "lib\\engine\\quality-gate.js::toQualityIssues",
             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
             "lib\\engine\\workspace-snapshot.js::shortSha",
             "lib\\engine\\workspace-snapshot.js::snapshotExists",
-            "lib\\articles-agentic.js::runPool",
-            "lib\\articles-agentic.js::worker",
-            "lib\\article-contract.js::hasBlockingIssue",
-            "lib\\article-contract.js::issueSummary",
-            "lib\\engine\\python\\full_parallel_runtime.py::configure_full_runtime",
-            "lib\\engine\\python\\full_parallel_runtime.py::current_concurrency",
-            "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
-            "lib\\engine\\python\\full_parallel_runtime.py::write_tree_exclusive",
+            "lib\\engine\\python\\entry.py::_ProtocolOnly",
+            "lib\\engine\\python\\entry.py::_popen_init_utf8",
+            "lib\\engine\\python\\entry.py::main",
+            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
             "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
-            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
-            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
-            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
-            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__",
-            "lib\\engine\\python\\full_parallel_runtime.py::_node_at",
-            "lib\\engine\\python\\full_parallel_runtime.py::_run_module",
-            "lib\\engine\\python\\full_parallel_runtime.py::_walk",
-            "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
-            "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
-            "lib\\engine\\python\\full_parallel_runtime.py::install_full_runtime",
-            "lib\\engine\\python\\tree_coverage.py::_dirname",
-            "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
-            "lib\\engine\\python\\tree_coverage.py::_leaf_files",
-            "lib\\engine\\python\\tree_coverage.py::file_owner",
-            "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
-            "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files"
+            "lib\\engine\\python\\stage_map.py::articles_ceiling",
+            "lib\\engine\\python\\tree_coverage.py::file_owner"
         ],
         "children": {
-            "code_engine_module": {
+            "fsoft_engine_js_core": {
                 "path": "",
                 "components": [
                     "lib\\engine\\apply-plan.js::applyNativeOutput",
@@ -162,146 +175,76 @@
                     "lib\\engine\\llm-bridge.js::startLlmBridge",
                     "lib\\engine\\manifest.js::doctor",
                     "lib\\engine\\manifest.js::writeLock",
-                    "lib\\engine\\mapping.js::indexModuleTree",
+                    "lib\\engine\\mapping.js::findMissingModuleDocs",
                     "lib\\engine\\native-run.js::noop",
                     "lib\\engine\\native-state.js::stateDocFiles",
                     "lib\\engine\\openai-bridge.js::isPlaceholderKey",
-                    "lib\\engine\\output.js::bodyLength",
+                    "lib\\engine\\output.js::add",
                     "lib\\engine\\process-tree.js::isAlive",
-                    "lib\\engine\\python\\entry.py::_ProtocolOnly",
-                    "lib\\engine\\python\\entry.py::_popen_init_utf8",
-                    "lib\\engine\\python\\entry.py::main",
-                    "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
-                    "lib\\engine\\python\\stage_map.py::articles_ceiling",
                     "lib\\engine\\quality-gate.js::gateNativeOutput",
                     "lib\\engine\\quality-gate.js::toQualityIssues",
                     "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                     "lib\\engine\\workspace-snapshot.js::shortSha",
-                    "lib\\engine\\workspace-snapshot.js::snapshotExists",
-                    "lib\\engine\\python\\full_parallel_runtime.py::configure_full_runtime",
-                    "lib\\engine\\python\\full_parallel_runtime.py::current_concurrency",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
-                    "lib\\engine\\python\\full_parallel_runtime.py::write_tree_exclusive",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_node_at",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_run_module",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_walk",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
-                    "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
-                    "lib\\engine\\python\\full_parallel_runtime.py::install_full_runtime",
-                    "lib\\engine\\python\\tree_coverage.py::_dirname",
-                    "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
-                    "lib\\engine\\python\\tree_coverage.py::_leaf_files",
-                    "lib\\engine\\python\\tree_coverage.py::file_owner",
-                    "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
-                    "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files"
+                    "lib\\engine\\workspace-snapshot.js::snapshotExists"
                 ],
                 "children": {
-                    "plan_application": {
+                    "engine_runtime_orchestration": {
                         "components": [
                             "lib\\engine\\apply-plan.js::applyNativeOutput",
                             "lib\\engine\\apply-plan.js::defaultRunCw",
-                            "lib\\engine\\apply-plan.js::findOrphanPages"
+                            "lib\\engine\\apply-plan.js::findOrphanPages",
+                            "lib\\engine\\client.js::runEngine",
+                            "lib\\engine\\native-run.js::noop",
+                            "lib\\engine\\process-tree.js::isAlive"
                         ],
-                        "children": {}
+                        "children": {
+                            "native_apply_plan": {
+                                "components": [
+                                    "lib\\engine\\apply-plan.js::applyNativeOutput",
+                                    "lib\\engine\\apply-plan.js::defaultRunCw",
+                                    "lib\\engine\\apply-plan.js::findOrphanPages"
+                                ],
+                                "children": {}
+                            },
+                            "engine_client": {
+                                "components": [
+                                    "lib\\engine\\client.js::runEngine"
+                                ],
+                                "children": {}
+                            },
+                            "native_process_runtime": {
+                                "components": [
+                                    "lib\\engine\\native-run.js::noop",
+                                    "lib\\engine\\process-tree.js::isAlive"
+                                ],
+                                "children": {}
+                            }
+                        }
                     },
-                    "engine_client": {
-                        "components": [
-                            "lib\\engine\\client.js::runEngine"
-                        ],
-                        "children": {}
-                    },
-                    "engine_contracts": {
+                    "result_contract_and_quality_gates": {
                         "components": [
                             "lib\\engine\\contract.js::describeEngineResult",
                             "lib\\engine\\contract.js::normalizeBlocker",
-                            "lib\\engine\\contract.js::validateEngineResult"
+                            "lib\\engine\\contract.js::validateEngineResult",
+                            "lib\\engine\\output.js::add",
+                            "lib\\engine\\quality-gate.js::gateNativeOutput",
+                            "lib\\engine\\quality-gate.js::toQualityIssues"
                         ],
                         "children": {}
                     },
-                    "llm_integration_bridges": {
+                    "llm_provider_bridges": {
                         "components": [
                             "lib\\engine\\llm-bridge.js::startLlmBridge",
                             "lib\\engine\\openai-bridge.js::isPlaceholderKey"
                         ],
                         "children": {}
                     },
-                    "engine_manifest_management": {
+                    "workspace_state_and_integrity": {
                         "components": [
                             "lib\\engine\\manifest.js::doctor",
-                            "lib\\engine\\manifest.js::writeLock"
-                        ],
-                        "children": {}
-                    },
-                    "module_indexing": {
-                        "components": [
-                            "lib\\engine\\mapping.js::indexModuleTree"
-                        ],
-                        "children": {}
-                    },
-                    "native_runtime_support": {
-                        "components": [
-                            "lib\\engine\\native-run.js::noop",
-                            "lib\\engine\\process-tree.js::isAlive"
-                        ],
-                        "children": {}
-                    },
-                    "native_state_management": {
-                        "components": [
-                            "lib\\engine\\native-state.js::stateDocFiles"
-                        ],
-                        "children": {}
-                    },
-                    "engine_output_processing": {
-                        "components": [
-                            "lib\\engine\\output.js::bodyLength"
-                        ],
-                        "children": {}
-                    },
-                    "python_native_runtime": {
-                        "components": [
-                            "lib\\engine\\python\\entry.py::_ProtocolOnly",
-                            "lib\\engine\\python\\entry.py::_popen_init_utf8",
-                            "lib\\engine\\python\\entry.py::main",
-                            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
-                            "lib\\engine\\python\\stage_map.py::articles_ceiling",
-                            "lib\\engine\\python\\full_parallel_runtime.py::configure_full_runtime",
-                            "lib\\engine\\python\\full_parallel_runtime.py::current_concurrency",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
-                            "lib\\engine\\python\\full_parallel_runtime.py::write_tree_exclusive",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_node_at",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_run_module",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_walk",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
-                            "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
-                            "lib\\engine\\python\\full_parallel_runtime.py::install_full_runtime",
-                            "lib\\engine\\python\\tree_coverage.py::_dirname",
-                            "lib\\engine\\python\\tree_coverage.py::_shared_prefix",
-                            "lib\\engine\\python\\tree_coverage.py::_leaf_files",
-                            "lib\\engine\\python\\tree_coverage.py::file_owner",
-                            "lib\\engine\\python\\tree_coverage.py::_nearest_leaf",
-                            "lib\\engine\\python\\tree_coverage.py::adopt_unowned_files"
-                        ],
-                        "children": {}
-                    },
-                    "quality_gates": {
-                        "components": [
-                            "lib\\engine\\quality-gate.js::gateNativeOutput",
-                            "lib\\engine\\quality-gate.js::toQualityIssues"
-                        ],
-                        "children": {}
-                    },
-                    "workspace_snapshots": {
-                        "components": [
+                            "lib\\engine\\manifest.js::writeLock",
+                            "lib\\engine\\mapping.js::findMissingModuleDocs",
+                            "lib\\engine\\native-state.js::stateDocFiles",
                             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                             "lib\\engine\\workspace-snapshot.js::shortSha",
                             "lib\\engine\\workspace-snapshot.js::snapshotExists"
@@ -310,25 +253,22 @@
                     }
                 }
             },
-            "article_generation_worker": {
-                "path": "lib\\articles-agentic.js",
+            "fsoft_engine_python_runtime": {
+                "path": "",
                 "components": [
-                    "lib\\articles-agentic.js::runPool",
-                    "lib\\articles-agentic.js::worker"
-                ],
-                "children": {}
-            },
-            "article_validation": {
-                "path": "lib\\article-contract.js",
-                "components": [
-                    "lib\\article-contract.js::hasBlockingIssue",
-                    "lib\\article-contract.js::issueSummary"
+                    "lib\\engine\\python\\entry.py::_ProtocolOnly",
+                    "lib\\engine\\python\\entry.py::_popen_init_utf8",
+                    "lib\\engine\\python\\entry.py::main",
+                    "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
+                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+                    "lib\\engine\\python\\stage_map.py::articles_ceiling",
+                    "lib\\engine\\python\\tree_coverage.py::file_owner"
                 ],
                 "children": {}
             }
         }
     },
-    "State___Observability_Management": {
+    "platform_infrastructure_and_developer_tooling": {
         "path": "",
         "components": [
             "lib\\git-paths.js::decodeGitPath",
@@ -336,60 +276,10 @@
             "lib\\job-store.js::normKey",
             "lib\\job-store.js::save",
             "lib\\update-record.js::isTerminalStage",
-            "lib\\update-record.js::loadUpdateRecord"
-        ],
-        "children": {
-            "job_log_management": {
-                "path": "",
-                "components": [
-                    "lib\\git-paths.js::decodeGitPath",
-                    "lib\\job-logs.js::removeLog"
-                ],
-                "children": {}
-            },
-            "job_state_storage": {
-                "path": "lib\\job-store.js",
-                "components": [
-                    "lib\\job-store.js::normKey",
-                    "lib\\job-store.js::save"
-                ],
-                "children": {}
-            },
-            "update_status_tracking": {
-                "path": "lib\\update-record.js",
-                "components": [
-                    "lib\\update-record.js::isTerminalStage",
-                    "lib\\update-record.js::loadUpdateRecord"
-                ],
-                "children": {}
-            }
-        }
-    },
-    "build_deployment_config": {
-        "path": "",
-        "components": [
+            "lib\\update-record.js::loadUpdateRecord",
             "cordis.patch.yml::cordis.patch.yml",
             "package.json::package.json",
-            "tools/fsoft-engine/setup-env.sh::setup-env.sh"
-        ],
-        "children": {}
-    },
-    "codewiki_vendor_binary": {
-        "path": "",
-        "components": [
-            "vendor\\codewiki\\src\\config.rs::project_name",
-            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
-            "vendor\\codewiki\\src\\main.rs::Cli",
-            "vendor\\codewiki\\src\\main.rs::capitalize",
-            "vendor\\codewiki\\src\\main.rs::main",
-            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
-            "vendor\\codewiki\\src\\setup.rs::claude_home"
-        ],
-        "children": {}
-    },
-    "Testing___Probing_Tooling": {
-        "path": "tools\\fsoft-engine\\probe-no-llm-graph.py",
-        "components": [
+            "tools/fsoft-engine/setup-env.sh::setup-env.sh",
             "test-fixtures\\gen-graphdiff-golden.py::main",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\scripts\\run.py::main",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
@@ -399,7 +289,28 @@
             "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
         ],
         "children": {
-            "testing_fixtures": {
+            "job_repository_infrastructure": {
+                "path": "",
+                "components": [
+                    "lib\\git-paths.js::decodeGitPath",
+                    "lib\\job-logs.js::removeLog",
+                    "lib\\job-store.js::normKey",
+                    "lib\\job-store.js::save",
+                    "lib\\update-record.js::isTerminalStage",
+                    "lib\\update-record.js::loadUpdateRecord"
+                ],
+                "children": {}
+            },
+            "build_packaging_configuration": {
+                "path": "",
+                "components": [
+                    "cordis.patch.yml::cordis.patch.yml",
+                    "package.json::package.json",
+                    "tools/fsoft-engine/setup-env.sh::setup-env.sh"
+                ],
+                "children": {}
+            },
+            "test_fixtures_and_probes": {
                 "path": "",
                 "components": [
                     "test-fixtures\\gen-graphdiff-golden.py::main",
@@ -407,13 +318,7 @@
                     "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
                     "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\handler.py::Handler",
                     "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue",
-                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push"
-                ],
-                "children": {}
-            },
-            "probe_tools": {
-                "path": "tools\\fsoft-engine\\probe-no-llm-graph.py",
-                "components": [
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push",
                     "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
                 ],
                 "children": {}
