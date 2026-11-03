@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T14:09:04+0800",
-  "finished_at": "2026-11-03T14:09:07+0800",
+  "started_at": "2026-11-03T14:58:29+0800",
+  "finished_at": "2026-11-03T14:58:46+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -20,12 +20,13 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 2,
-      "resume": false
+      "resume": true,
+      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
     }
   },
   "revision": {
-    "old_commit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
-    "new_commit": "39c8253544bdddd6ce026a333cad16f73113d81a",
+    "old_commit": "39c8253544bdddd6ce026a333cad16f73113d81a",
+    "new_commit": "f25d7405670b178974c897fde78857e174f84d9f",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,18 +34,19 @@
       "added": 1,
       "deleted": 0,
       "interface": 0,
-      "body": 3,
+      "body": 4,
       "edge": 0,
       "renamed": 0
     },
     "added": [
-      "lib\\engine\\python\\full_parallel_runtime.py::write_tree_exclusive"
+      "lib\\engine\\python\\entry.py::_usage_of"
     ],
     "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
-      "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
+      "lib\\engine\\llm-bridge.js::finish",
+      "lib\\engine\\llm-bridge.js::startLlmBridge",
+      "lib\\engine\\python\\entry.py::action_generate",
       "package.json::package.json"
     ],
     "edge": [],
@@ -55,7 +57,7 @@
     "removed": [],
     "routing": [
       {
-        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::write_tree_exclusive",
+        "component_id": "lib\\engine\\python\\entry.py::_usage_of",
         "rule": "untracked",
         "leaf_path": null,
         "new_leaf": false,
@@ -70,6 +72,30 @@
   },
   "reclustered": [],
   "reports": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges": {
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "llm_integration_bridges"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\llm-bridge.js::finish",
+        "lib\\engine\\llm-bridge.js::startLlmBridge"
+      ],
+      "adopted": {
+        "lib\\engine\\llm-bridge.js::finish": "1:same_file"
+      },
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "llm_integration_bridges"
+    },
     "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
@@ -78,12 +104,10 @@
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
-        "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage"
+        "lib\\engine\\python\\entry.py::action_generate"
       ],
       "adopted": {
-        "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io": "2:same_dir",
-        "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage": "1:same_file"
+        "lib\\engine\\python\\entry.py::action_generate": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -117,25 +141,25 @@
   },
   "ownership": [
     {
-      "component_id": "lib\\engine\\python\\fsoft_runtime.py::adopt_tree_coverage",
+      "component_id": "lib\\engine\\llm-bridge.js::finish",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "llm_integration_bridges"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\python\\entry.py::action_generate",
       "rule": "1:same_file",
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
         "python_native_runtime"
       ],
-      "detail": "1 tracked components in file",
-      "deleted": false
-    },
-    {
-      "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
-      "rule": "2:same_dir",
-      "leaf_path": [
-        "Code_Engine_Processing_Pipeline",
-        "code_engine_module",
-        "python_native_runtime"
-      ],
-      "detail": "dir 'lib/engine/python'",
+      "detail": "3 tracked components in file",
       "deleted": false
     }
   ],
@@ -147,10 +171,16 @@
       "order": 0
     },
     {
+      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges",
+      "page": "llm_integration_bridges",
+      "mode": "edit",
+      "order": 1
+    },
+    {
       "leaf": "build_deployment_config",
       "page": "build_deployment_config",
       "mode": "edit",
-      "order": 1
+      "order": 2
     }
   ],
   "write_sets": {
@@ -171,6 +201,15 @@
       "python_native_runtime",
       "testing_fixtures"
     ],
+    "llm_integration_bridges": [
+      "Code_Engine_Processing_Pipeline",
+      "code_engine_module",
+      "engine_client",
+      "llm_integration_bridges",
+      "native_runtime_support",
+      "overview",
+      "python_native_runtime"
+    ],
     "build_deployment_config": [
       "Testing___Probing_Tooling",
       "build_deployment_config",
@@ -184,9 +223,9 @@
     ]
   },
   "fallback": {
-    "r_leaf": 0.07692307692307693,
+    "r_leaf": 0.11538461538461539,
     "r_tree": 0.0,
-    "n_active": 2,
+    "n_active": 3,
     "n_leaves": 26,
     "n_structural": 0,
     "tau_full": 0.5,
@@ -300,6 +339,55 @@
       "changed_on_disk": false
     },
     {
+      "page": "llm_integration_bridges",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "code_engine_module",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Code_Engine_Processing_Pipeline",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_client",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "native_runtime_support",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "python_native_runtime",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
       "page": "build_deployment_config",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
@@ -375,30 +463,35 @@
     {
       "kind": "leaf_agent",
       "target": "python_native_runtime",
-      "seconds": 1.6566426753997803,
+      "seconds": 5.3943798542022705,
+      "usage": null,
+      "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "llm_integration_bridges",
+      "seconds": 2.5292632579803467,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "leaf_agent",
       "target": "build_deployment_config",
-      "seconds": 1.1135835647583008,
+      "seconds": 10.842236518859863,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.0786738395690918,
+      "seconds": 0.03168153762817383,
       "usage": null,
       "error": null
     }
   ],
-  "detector_notes": [
-    "补齐 2 个未归属文件到已有叶子：lib\\engine\\python\\full_parallel_runtime.py, lib\\engine\\python\\tree_coverage.py"
-  ],
+  "detector_notes": [],
   "errors": [],
-  "wall_seconds": 2.52,
+  "wall_seconds": 16.92,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -406,37 +499,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 8,
+    "n_calls": 12,
     "totals": {
       "input_tokens": 0,
       "output_tokens": 0,
       "cache_read_tokens": 0,
       "cache_write_tokens": 0,
-      "requests": 8,
+      "requests": 12,
       "total_tokens": 0
     },
     "by_phase": {
       "update": {
-        "calls": 8,
+        "calls": 12,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 12,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 12
       }
     },
     "by_model": {
       "qfmodel": {
-        "calls": 8,
+        "calls": 12,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 8,
+        "requests": 12,
         "total_tokens": 0,
-        "unpriced_calls": 8
+        "unpriced_calls": 12
       }
     },
     "unpriced_models": [
@@ -446,60 +539,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "llm_integration_bridges",
         "model": "qfmodel",
-        "seconds": 0.97,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.05,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.03,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.05,
+        "seconds": 0.56,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -516,7 +558,24 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 1.17,
+        "seconds": 1.76,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 1.28,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -533,7 +592,41 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 0.03,
+        "seconds": 0.2,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 0.5,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 0.19,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -550,7 +643,7 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 0.03,
+        "seconds": 1.52,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -567,7 +660,75 @@
         "kind": "update_agent",
         "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 0.03,
+        "seconds": 1.7,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 8.91,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.27,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 1.34,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.31,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -581,5 +742,5 @@
       }
     ]
   },
-  "run_id": "4443a435-ab30-4645-8447-15b043e92025"
+  "run_id": "55c8138f-0127-4f32-93cf-cec91a85f8ce"
 }
