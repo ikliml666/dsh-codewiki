@@ -324,9 +324,9 @@ export function normalizeIndexLinks(cwd) {
 
 export function parseStatus(stdout) {
   const s = stdout ?? ''
-  if (s.includes('No wiki found')) return { state: 'missing', changedFiles: [], staleArticles: [] }
-  if (s.includes('has not been compiled yet')) return { state: 'uncompiled', changedFiles: [], staleArticles: [] }
-  if (s.includes('Wiki is up to date')) return { state: 'clean', changedFiles: [], staleArticles: [] }
+  if (s.includes('No wiki found')) return { state: 'missing', changedFiles: [], staleArticles: [], wikiChanges: [] }
+  if (s.includes('has not been compiled yet')) return { state: 'uncompiled', changedFiles: [], staleArticles: [], wikiChanges: [] }
+  if (s.includes('Wiki is up to date')) return { state: 'clean', changedFiles: [], staleArticles: [], wikiChanges: [] }
   const changedFiles = []
   const staleArticles = []
   for (const m of s.matchAll(/^\s+[M!]\s+(.+)$/gm)) {
@@ -334,7 +334,16 @@ export function parseStatus(stdout) {
     if (m[0].trimStart().startsWith('M')) changedFiles.push(normalizeArticlePath(line))
     else staleArticles.push(normalizeArticlePath(line))
   }
-  return { state: 'stale', changedFiles, staleArticles }
+  // wiki 产物目录要从变更清单里摘出去：编译基线落在产物提交**之前**（提交内容里写着
+  // last_compiled_commit，无法自指），于是 `git diff 基线..HEAD` 永远会把整批 .codewiki/
+  // 算成变更。不过滤的话，编译刚跑完工作区明明是干净的，面板上还是「有变更」。
+  // 判据与 lib/change-set.js 的 isWikiProduct 一致：只看 .codewiki/。
+  const isWiki = (p) => p === '.codewiki' || p.startsWith('.codewiki/')
+  const wikiChanges = changedFiles.filter(isWiki)
+  const sourceChanges = changedFiles.filter((p) => !isWiki(p))
+  // 剩下的只有产物时，对「源码有没有变」而言就是最新——不留在 stale 状态里。
+  const state = sourceChanges.length || staleArticles.length ? 'stale' : 'clean'
+  return { state, changedFiles: sourceChanges, staleArticles, wikiChanges }
 }
 
 // wiki 篇数：递归统计 <repo>/.codewiki/ 下的 .md 文章（含 _index），总览卡展示用

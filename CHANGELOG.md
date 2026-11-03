@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.17.32 — 2026-11-04
+
+### 面板「有变更」不再被自己的产物顶住；校对阶段能显示出来
+
+两个用户反馈合成一条修复链：
+
+**1）「已经完成的工作区为什么还显示有变更」**——`cw status` 比的是
+`git diff last_compiled_commit..HEAD`，而编译基线**必然落在产物提交之前**：提交内容里写着
+`last_compiled_commit`，无法自指，所以基线只能是父提交。于是每轮编译刚结束、工作区明明
+干净，`.codewiki/` 那一整批产物仍然出现在差异清单里，面板永远显示「有变更」。
+
+修法：`parseStatus` 把 `.codewiki/` 下的条目从 `changedFiles` 里摘出来单列 `wikiChanges`，
+判据与 `lib/change-set.js` 的 `isWikiProduct` 一致；摘完只剩产物时判 `clean`。验收：真机
+`dsh-git-worktree` 的 `cw status` 过滤后一行不剩 → clean；本仓过滤后仍有 11 个真实源码
+改动 → stale（正确）。
+
+**2）「根本没触发校对」**——`native-run.js` 里校对段写的是 `progress('review', …)`，而
+`NATIVE_STAGE_TO_PANEL` 的键是 `proofread`，映射不到任何面板阶段，校对这一格永远不显示。
+已改为 `progress('proofread', …)`。
+
+校对仍**只在质量门报出 `dead-link` 时执行**（门没报错就是这轮产物没问题，不烧模型预算
+逐页复查——这条按用户 2026-11-04 口径确定）。
+
+验证：`test-wiki-entry.mjs` 新增两条断言（产物被摘出 `changedFiles`、只剩产物判 clean），
+全套回归 **39 个文件全绿**。
+
 ## 0.17.31 — 2026-11-04
 
 ### 步骤条对齐真实流程 + 新增语义校对（模型编造的页名当场改对）

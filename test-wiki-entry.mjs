@@ -58,8 +58,14 @@ check(normalizeArticlePath('learnings\\update-gap.md') === 'learnings/update-gap
 check(normalizeArticlePath('modules/core.md') === 'modules/core.md', 'normalizeArticlePath：正斜杠路径原样保留')
 check(normalizeArticlePath(undefined) === '', 'normalizeArticlePath：undefined 安全返回空串')
 const st = parseStatus('Changed since last compile (abc1234):\n  M index.js\n  M .codewiki/_index.md\nStale articles:\n  ! modules\\core.md\n  ! concepts\\cfg.md\n')
-check(st.state === 'stale' && st.changedFiles.join(',') === 'index.js,.codewiki/_index.md', 'parseStatus：changedFiles 保留并规范化')
+check(st.state === 'stale' && st.changedFiles.join(',') === 'index.js', 'parseStatus：changedFiles 只留源码改动，wiki 产物摘出去')
+check(st.wikiChanges.join(',') === '.codewiki/_index.md', 'parseStatus：被摘掉的产物单独记在 wikiChanges')
 check(st.staleArticles.join(',') === 'modules/core.md,concepts/cfg.md', 'parseStatus：staleArticles 的 \\ 已规范化为 /')
+// 编译基线落在产物提交之前，所以产物永远出现在 diff 里。只剩产物时不能算「有变更」，
+// 否则编译刚跑完工作区明明干净，面板上还是「有变更」。
+const stOnlyWiki = parseStatus('Changed since last compile (abc1234):\n  M .codewiki/_index.md\n  M .codewiki/modules/core.md\n')
+check(stOnlyWiki.state === 'clean' && stOnlyWiki.changedFiles.length === 0, 'parseStatus：只有 wiki 产物时判 clean（面板不再残留有变更）')
+check(stOnlyWiki.wikiChanges.length === 2, 'parseStatus：只有产物时物料仍可在 wikiChanges 里查到')
 const repo6 = repo('repo6')
 fs.mkdirSync(path.join(repo6, '.codewiki'), { recursive: true })
 const idxText = '# Wiki Index\n\n## Module\n\n- [[modules\\core|core]]\n- [[concepts\\cfg|cfg]]\n\n正文里 `E:\\ik\\repo` 的反斜杠不该被改。\n'
