@@ -568,7 +568,6 @@
       "bearerOf",
       "callSession",
       "chunksToCompletion",
-      "chunksToSse",
       "close",
       "finish",
       "foldChunks",
@@ -578,6 +577,7 @@
       "start",
       "startLlmBridge",
       "stop",
+      "streamChunkToSse",
       "toLlmRequest"
     ]
   },

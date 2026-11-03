@@ -3,21 +3,25 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "a5b26e641327a215edf2309f2028d8110c4a172b",
-    "headCommit": "60b5903e8b39ebc80054c96996ef96e325f7c0bf"
+    "headCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "a5b26e641327a215edf2309f2028d8110c4a172b",
-    "headCommit": "60b5903e8b39ebc80054c96996ef96e325f7c0bf",
+    "headCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
     "committed": [
       "CHANGELOG.md",
       "README.md",
+      "lib/engine/llm-bridge.js",
       "lib/engine/mapping.js",
       "lib/engine/native-run.js",
+      "lib/engine/openai-bridge.js",
       "lib/engine/python/entry.py",
       "lib/engine/python/full_parallel_runtime.py",
       "package.json",
       "patches/README.md",
+      "test-engine-bridge.mjs",
+      "test-engine-llm-bridge.mjs",
       "test-engine-native-incremental.mjs",
       "test-engine-output.mjs",
       "test-fixtures/fake-native-engine.mjs",
@@ -38,8 +42,7 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 d5f240b 与本次 cw 基线 a5b26e6 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw03t15u-g-native（40 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw06291k-4-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-03T03:13:19.261Z"
+  "updatedAt": "2026-11-03T04:21:06.096Z"
 }

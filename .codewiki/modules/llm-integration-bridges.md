@@ -68,7 +68,7 @@ flowchart TB
         C2["messageToDsh<br/>消息逐条互译<br/>system/user/assistant/tool"]
         C3["foldChunks<br/>chunk 流折叠成中间态"]
         C4["chunksToCompletion<br/>非流式响应体"]
-        C5["chunksToSse<br/>流式 SSE 帧数组"]
+        C5["streamChunkToSse<br/>单个 chunk → SSE 帧"]
         C6["usageToOpenAI<br/>token 用量字段映射"]
     end
 
@@ -77,11 +77,11 @@ flowchart TB
     C5 --> S1
     C4 --> S1
     C3 --> C4
-    C3 --> C5
+    C5 --> C6
     C3 --> C6
 ```
 
-关键设计：**流式与非流式共用同一套 chunk 折叠逻辑**（`chunksToCompletion` 与 `chunksToSse` 都从同一份 chunk 流出发），避免两条路径行为分叉。
+关键设计：两条响应路径**刻意采用不同的折叠粒度**。非流式走 `foldChunks` + `chunksToCompletion`，把整条 chunk 流折成一个完整响应体；流式走 `streamChunkToSse`，**一次只翻译一个 chunk、无状态、绝不自行补结束帧**。原因藏在服务层的「边收边发」里：若把每个分片当成「一整条已结束的流」去转换（已删除的旧 `chunksToSse` 的做法），入参缺 `finish` 时它自己就会补一个结束帧，于是每个 reasoning / tool-call 分片后面都紧跟一个假的 `finish_reason`，引擎以为这一轮已经结束（既不执行工具也没拿到正文），最终报 pydantic-ai 的 "Please return text or call a tool" 并重试到上限。现在 `finish_reason` 只在上游真的发来 `finish` chunk 时才产出，流的终止由服务层统一发 `data: [DONE]`。
 
 ## 凭证安全边界
 
@@ -132,6 +132,15 @@ flowchart LR
 - `usage` / `finish` → 分别记录用量与结束原因；
 - `reasoning-delta` / `block-start` / `block-end` → **不进正文**（思考不该出现在文章里）。
 
+流式方向由 `streamChunkToSse(c, {id, model, created})` 承担——**无状态的单 chunk 翻译器**，每个入参 chunk 最多产出一帧：
+
+- `text-delta` / `tool-call-delta` → 一帧 `chat.completion.chunk`，`delta` 缺 `role` 时补 `role: 'assistant'`，`finish_reason` 恒为 `null`；
+- `usage` → 一帧 `choices: []` 且带 `usage` 的用量帧（OpenAI 的流式 usage 约定）；
+- `finish` → 一帧只带 `finish_reason` 的终止帧；
+- 其它类型（`reasoning-delta` / `block-start` / `block-end`）→ **返回空数组，一帧都不发**：引擎侧只认正文与工具调用，思考内容不该进文章正文，更不该被伪造成结束帧。
+
+它与非流式的分工是不可交换的：`streamChunkToSse` 永远不替上游补「流已结束」，`[DONE]` 由服务层在流收尾时统一发一次。
+
 用量映射有一个容易踩的坑：DSH 的 `TokenUsage` 是**互斥计数**（`inputTokens` 不含缓存），而 OpenAI 的 `prompt_tokens` 含缓存，因此 `prompt_tokens = inputTokens + cacheRead + cacheWrite`，缓存部分单列在 `prompt_tokens_details.cached_tokens`。
 
 结束原因映射：`tool-calls → tool_calls`、`max-tokens → length`、`error/aborted → error`、其余 → `stop`。
@@ -150,11 +159,12 @@ sequenceDiagram
     Bridge->>LLM: stream(options, signal)
     alt stream=true
         LLM-->>Bridge: text-delta chunk
-        Bridge->>Conv: chunksToSse(单帧)
-        Conv-->>Bridge: SSE 帧
+        Bridge->>Conv: streamChunkToSse(单个 chunk)
+        Conv-->>Bridge: 0~1 个 SSE 帧（finish_reason=null）
         Bridge-->>Engine: 逐帧 data: ...
     end
     LLM-->>Bridge: usage / finish
+    Bridge->>Conv: streamChunkToSse(finish chunk) 发终止帧
     Bridge->>Bridge: chunksToCompletion 折叠全量
     Bridge-->>Engine: data: [DONE]（流式）或完整 completion JSON（非流式）
 ```
