@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.17.20 — 2026-11-03
+
+### 层级布局的跨页链接按引擎源目录解析，不再成片变死链
+
+真机 `job-mw0byomb-1`（Wxxy-CampusLogin）25 条 blockers 全是链接类。它的 layout 是
+`hierarchical`：引擎把子模块页放在 `android_frontend_hooks/` 子目录里，正文里同目录兄弟写
+`x_sibling.md`、父级写 `../parent.md`，这些相对链接都相对**引擎页所在目录**。
+
+但落地时 `mapping.js` 的 `moduleSlug` 把所有页拍平到 `.codewiki/modules/` 单层。
+`rewritePageLinks` 当时按**落地目录**去解析链接，于是正文里每一条 `x_sibling.md`
+都被当成模块根下还有一层目录的写法，pageMap 一条也命不中 —— 整篇的跨页链接原样留在
+扁平目录里，全部 404。
+
+改为按 `article.source`（引擎源页相对路径）的目录解析，再落到目标页的落地目录重算相对
+路径；解析不到的仍退回「原样名字」，扁平布局（`LAYOUT_FLAT`）因此不受影响。
+
+真实产物实测（campus 的 58 页、756 条内部链接）：修复前命中 470 / 未命中 286，
+修复后命中 754 / 未命中 2。剩下 2 条是产物本身的坏链接（模型写了一段把模块名叠了
+三遍的路径、以及一条指向从未产出的 `android_backend_update.md`），属于该报的真问题。
+
+验证：`test-engine-quality-gate.mjs` 35 项。新用例直接给层级布局的源页路径，断言同目录
+兄弟链接与 `../` 父级链接都命中落地名、下划线原名不残留；对 HEAD 版实现为红
+（`同目录兄弟链接应按引擎源目录解析后写成落地名`）。相关 `test-engine-output` 26、
+`test-article-contract` 31、`test-engine-apply-plan` 41、`test-engine-output-real` 11 全绿。
+
+---
+
 ## 0.17.19 — 2026-11-03
 
 ### partial 终态丢掉本轮用量：写了一半的任务，成本永远是 0

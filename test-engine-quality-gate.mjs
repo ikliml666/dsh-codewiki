@@ -380,6 +380,39 @@ await check('renderArticle：跨页链接按落地路径重写（原始页名 �
   assert.equal(parseFrontmatter(out2).body, body2, '非 .md 链接必须原样保留')
 })
 
+// 真机 partial（job-mw0byomb-1，Wxxy-CampusLogin）暴露的缺陷：hierarchical 布局下引擎
+// 页名是层级路径 `android_frontend_hooks/x.md`，正文里同目录兄弟写 `x_sibling.md`、
+// 父级写 `../parent.md` —— 都相对**引擎页所在目录**。落地时页被拍平到 .codewiki/modules/
+// 单层，若仍按落地目录解析这些相对链接，pageMap 一条都命不中，25 条链接全成死链。
+// 解析基准必须是引擎源页目录，落地后按目标页的落地目录重算相对路径。
+await check('renderArticle：层级布局下的相对链接按引擎源目录解析，再写成落地路径', async () => {
+  const body = '# Stores\n\n见 [启动编排](android_frontend_hooks_startup_orchestration.md) 与 [认证](../android_frontend_auth.md)。\n'
+  const pageMap = new Map([
+    ['android_frontend_hooks/android_frontend_hooks_startup_orchestration.md', '.codewiki/modules/android-frontend-hooks-startup-orchestration.md'],
+    ['android_frontend_auth.md', '.codewiki/modules/android-frontend-auth.md'],
+  ])
+  const out = renderArticle({
+    article: {
+      wikiPath: '.codewiki/modules/android-frontend-hooks-state-stores.md',
+      type: 'module',
+      sourceFiles: ['android/frontend/src/hooks/state.ts'],
+      source: 'android_frontend_hooks/android_frontend_hooks_state_stores.md',
+    },
+    body,
+    pageMap,
+  })
+  const fm = parseFrontmatter(out)
+  assert.ok(
+    fm.body.includes('](android-frontend-hooks-startup-orchestration.md)'),
+    `同目录兄弟链接应按引擎源目录解析后写成落地名：${fm.body.slice(0, 300)}`,
+  )
+  assert.ok(
+    fm.body.includes('](android-frontend-auth.md)'),
+    `父目录链接（../）同样应命中：${fm.body.slice(0, 300)}`,
+  )
+  assert.ok(!fm.body.includes('android_frontend_hooks_startup_orchestration.md'), '下划线原名不应残留')
+})
+
 await check('renderArticle：空 source_files 显式写成 []（省略会被误读为「没声明」）', async () => {
   const out = renderArticle({
     article: { wikiPath: '.codewiki/modules/x.md', type: 'module', sourceFiles: [], source: 'X.md' },
