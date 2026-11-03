@@ -427,6 +427,29 @@ await check('流式：同一 index 的参数分片拼到同一个 tool_calls 条
   })
 })
 
+await check('日志记录每个请求的 chunk 类型计数，用于区分「模型返回空」与「桥丢包」', async () => {
+  const logs = []
+  const llm = fakeLlm(async function* () {
+    yield { type: 'block-start', index: 0 }
+    yield { type: 'reasoning-delta', index: 0, text: '想一下' }
+    yield { type: 'reasoning-delta', index: 0, text: '再想一下' }
+    yield { type: 'text-delta', index: 0, text: '好的' }
+    yield { type: 'tool-call-delta', index: 0, id: 'call_1', name: 'str_replace_editor', argumentsDelta: '{}' }
+    yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 2 } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm', onLog: (e) => logs.push(e) }, async (bridge) => {
+    await (await post(bridge, { ...simpleBody, stream: true })).text()
+    const entry = logs.at(-1)
+    assert.ok(entry?.chunks, '日志条目缺少 chunks 计数')
+    assert.equal(entry.chunks['text-delta'], 1)
+    assert.equal(entry.chunks['reasoning-delta'], 2)
+    assert.equal(entry.chunks['tool-call-delta'], 1)
+    assert.equal(entry.chunks.finish, 1)
+    assert.equal(entry.chunkTotal, 7, 'chunk 总数要能对上')
+    assert.ok(!JSON.stringify(entry).includes('想一下'), '计数里不能夹带 chunk 正文')
+  })
+})
 await check('启动参数缺失 → 抛错（不让桥以半配置状态监听端口）', async () => {
   assert.throws(() => startLlmBridge({}), /llm/)
   assert.throws(() => startLlmBridge({ llm: { stream() {} } }), /provider/)

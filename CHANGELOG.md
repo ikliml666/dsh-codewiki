@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.18 — 2026-11-03
+
+### 桥日志记录 chunk 类型计数：这才分得清「模型返回空」和「桥丢包」
+
+真机 `job-mw0aep74-7`（dsh-git-worktree）40 次桥请求全部 200、单次 200–1300ms，
+引擎却报 16 个模块 `Exceeded maximum output retries (3)`、父页 `empty page`，
+任务 `usage` 四个字段全 0。此前只能靠会话记录的 `outputChars` 猜，而那个值对
+agentic 通道天然是 0（正文在 tool-call 的 arguments 里，会话记录只累计文本 delta），
+据此下的「模型退化」判断是错的。
+
+现在每条桥日志带 `chunks`（按类型计数）、`chunkTotal` 与 `usage`（若上游给了）：
+若 `reasoning-delta` 有、`text-delta` / `tool-call-delta` 为 0，是上游没给可用输出；
+若有 `tool-call-delta` 而引擎仍说没工具调用，才是桥的转换问题。计数里不含正文，
+日志不会夹带源码或文章内容。
+
+验证：`test-engine-llm-bridge.mjs` 26 项（新增一条断言 `chunks` 计数与 `chunkTotal`，
+并断言日志不夹带 chunk 正文）；全套 36 个测试文件全绿。
+
 ## 0.17.17 — 2026-11-03
 
 ### 补挂写回走了合并语义，把「超集」误判成叶子归属冲突
