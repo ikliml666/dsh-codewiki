@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.17.16 — 2026-11-03
+
+### 有陈页但没缺页的仓库永远 partial
+
+`Wxxy-CampusLogin` 的增量轮（job-mw089jcq-2）终态 partial，20 条 blockers 里 10 条是
+`unmapped-page [文件名冲突：与 android_frontend_hooks/android_frontend_hooks_state_stores.md 都规范化为 android-frontend-hooks-state-stores.md]`。
+真实现场：该仓 docs 下同时存在正常页与一份 `docs/` 前缀的嵌套副本（`docs/docs/...`），
+是本仓历史上某轮把页写进了嵌套目录留下的。
+
+`staleDocPages` 一直把它们判得对——但清退逻辑写在
+`if (missing.length > 0)` 里面，只在「产物缺页」时才顺带执行。
+于是模块树一页不缺的仓库永远带着这批副本，每轮都被映射成同名冲突，形成永久 partial。
+
+### 修法：陈页清退独立于缺页判定
+
+- `lib/engine/native-run.js` 的水合后完整性检查把清退提到缺页判定之前：只要走增量
+  （`resolution === RESOLUTION.UPDATE`）且模块树非空，就先清退不属于当前模块树的陈页。
+- 清退后重新收集页面再判缺页，否则刚删掉的副本会被算作「已有页面」而漏补。
+- 只动仓库外的临时产物目录；已提交的 wiki 页仍由落地器按写集与孤儿判定处理。
+
+### 验证
+
+- `test-engine-native-incremental.mjs` 新增用例 13「没有缺页、只有陈页 → 也要清退」：
+  先在 docs 里造 `docs/modules/core.md` 与 `docs/overview.md` 两份嵌套副本，再跑 `scope: 'stale'`。
+  断言副本被清退、notes 记录清退条数、决议仍是 `update`（不该被迫转全量）、终态 `done` 且 blockers 为空。
+  对修复前的实现为红（实测 4 项失败，终态 partial、blockers 含 `文件名冲突` 与 `empty-body`），
+  修复后 6 项全绿。
+- 全套 36 个测试文件复跑，除既有的 `test-engine-native-job.mjs` 时序 flake 外全绿。
+
 ## 0.17.15 — 2026-11-03
 
 ### 并行合并把父模块的组件并集当成归属矛盾，整轮增量被中断

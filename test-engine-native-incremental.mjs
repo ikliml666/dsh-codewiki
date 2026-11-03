@@ -584,6 +584,35 @@ if (want(12)) { console.log('== 用例 12：源码无变化但产物缺页 → �
   check(/清理 \d+ 个不属于当前模块树的旧页/.test(notes), `notes 记录旧页清退（实际 ${notes.slice(-200)}）`)
 }
 
+// ============================ 用例 13：陈页必须在没有缺页时也被清退 ============================
+// 真实事故（Wxxy-CampusLogin，job-mw089jcq-2）：某轮引擎把页写进了 `docs/docs/`
+// 这层嵌套目录，留下与正常页同名的 5 份副本，而模块树本身并不缺页。
+// 原先只有「产物缺页」时才顺带清退陈页，于是没有缺页的仓库永远带着这批副本，
+// 每轮都被映射成 unmapped-page「文件名冲突」→ 永久 partial。
+if (want(13)) { console.log('== 用例 13：没有缺页、只有陈页 → 也要清退，不再被同名副本拖成 unmapped-page ==')
+  const { base, repo } = makeRepo('staleDocs', { mode: 'done' })
+  const first = await runJob(repo, { scope: 'full' })
+  check(first.job?.stage === 'done', `建库轮 done（实际 ${first.job?.stage}）`)
+  const stateDocs = path.join(repo, STATE_DIR, 'docs')
+  // 嵌套目录里的同名副本：不在模块树的预期路径上，但 basename 与正常页相同
+  fs.mkdirSync(path.join(stateDocs, 'docs', 'modules'), { recursive: true })
+  fs.writeFileSync(path.join(stateDocs, 'docs', 'modules', 'core.md'), '# 核心（历史遗留副本）\n', 'utf8')
+  fs.writeFileSync(path.join(stateDocs, 'docs', 'overview.md'), '# 概览（历史遗留副本）\n', 'utf8')
+
+  const before = readCalls(base, 'staleDocs').length
+  const r = await runJob(repo, { scope: 'stale' })
+  const inc = r.job?.nativeResult?.incremental ?? {}
+  const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  const fresh = readCalls(base, 'staleDocs').slice(before)
+  check(!exists(path.join(stateDocs, 'docs', 'modules', 'core.md')),
+    '嵌套目录里的同名副本被清退（否则每轮都判 unmapped-page 文件名冲突）')
+  check(!exists(path.join(stateDocs, 'docs', 'overview.md')), '嵌套目录里的 overview 副本同样被清退')
+  check(/清理 \d+ 个不属于当前模块树的旧页/.test(notes), `notes 记录旧页清退（实际 ${notes.slice(-200)}）`)
+  check(inc.resolution === 'update',
+    `只有陈页、不缺页时不该被迫转全量（实际 ${inc.resolution}；足迹 ${JSON.stringify(fresh.map((c) => c.action))}）`)
+  check(r.job?.stage === 'done', `清退后终态 done（实际 ${r.job?.stage}；blockers=${JSON.stringify((r.job?.blockers ?? []).slice(0, 3))}）`)
+}
+
 // ============================ 用例 11：宿主重放保留断点现场 ============================
 if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场，并显式下发续跑参数 ==')
   const { base, repo } = makeRepo('resume', { mode: 'done' })
