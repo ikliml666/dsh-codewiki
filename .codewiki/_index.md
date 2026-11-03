@@ -41,6 +41,7 @@
 - [[modules/graph_diff|graph_diff]]
 - [[modules/incremental_update|incremental_update]]
 - [[modules/native-apply-plan|native_apply_plan：原生编译产物落地器]]
+- [[modules/native-proofread|native_proofread：原生引擎产物的语义校对层]]
 - [[modules/probes_root|probes_root]]
 - [[modules/result-contract-and-quality-gates|result_contract_and_quality_gates（引擎结果契约与质量门）]]
 - [[modules/symbol_extraction|symbol_extraction]]

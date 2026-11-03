@@ -15,6 +15,7 @@ source_files:
   - lib/engine/process-tree.js
   - lib/engine/quality-gate.js
   - lib/engine/workspace-snapshot.js
+  - lib/engine/proofread.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: fsoft_engine_js_core.md
@@ -39,7 +40,7 @@ flowchart TD
     UP["上游调用方：main_orchestrator / JobService"] --> CORE
 
     subgraph CORE ["fsoft_engine_js_core（Node 侧原生引擎核心）"]
-        ORCH["engine_runtime_orchestration<br/>线性作业裁决链编排层<br/>（含进程管理/协议适配/原子落地三个子组件）"]
+        ORCH["engine_runtime_orchestration<br/>线性作业裁决链编排层<br/>（含进程管理/协议适配/原子落地/失效链接校对四个子组件）"]
         WS["workspace_state_and_integrity<br/>工作区状态与完整性底座"]
         CONTRACT["result_contract_and_quality_gates<br/>结果契约与质量门"]
         LLM["llm_provider_bridges<br/>LLM 提供方隔离桥"]
@@ -63,7 +64,7 @@ flowchart TD
 
 ## 核心组件文档
 模块由四个可独立测试的核心子层组成，各层的详细设计、执行流程与不变量见对应文档：
-- [engine_runtime_orchestration](engine-runtime-orchestration.md)：原生引擎运行时的执行主干，固定单条编译作业的线性裁决链，负责跨语言 Python 子进程的全生命周期管理（超时/静默/崩溃/取消的结构化回收）、跨语言协议适配、以及质量门通过后的产物原子落地，将上层调度逻辑与编译实现细节完全解耦。
+- [engine_runtime_orchestration](engine-runtime-orchestration.md)：原生引擎运行时的执行主干，固定单条编译作业的线性裁决链，负责跨语言 Python 子进程的全生命周期管理（超时/静默/崩溃/取消的结构化回收）、跨语言协议适配、质量门检出失效跨页链接后的语义校对（以真实页面清单为判据、只改链接不动正文）、以及质量门通过后的产物原子落地，将上层调度逻辑与编译实现细节完全解耦。
 - [workspace_state_and_integrity](workspace-state-and-integrity.md)：编译过程的状态与完整性底座，提供环境版本指纹锁定、FSoft 产物到 CodeWiki 写集的归属映射、跨轮增量状态的持久化与水合、工作区未提交改动的临时 commit 快照能力，确保增量编译过程中无产物归属混乱、无变化静默丢失。
 - [result_contract_and_quality_gates](result-contract-and-quality-gates.md)：引擎与 Node 消费方之间的结果边界，将编译终态、产物自洽性、基线可推进性固化为可机读的硬校验规则，从根本上杜绝「1 篇成功 +19 篇失败也报完整 done」的历史缺陷，将产品缺陷、能力降级、wiki 陈旧状态三类问题分类处置。
 - [llm_provider_bridges](llm-provider-bridges.md)：模型凭证安全隔离桥，作为本地 loopback HTTP 服务，将 Python 引擎发出的 OpenAI 兼容请求翻译为宿主 llm 服务调用，全程不接触、不存储、不记录真实模型密钥，通过三层安全防护实现引擎模型调用与插件安全约束的兼容。

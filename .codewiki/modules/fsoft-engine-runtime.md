@@ -20,6 +20,7 @@ source_files:
   - lib/engine/python/full_parallel_runtime.py
   - lib/engine/python/stage_map.py
   - lib/engine/python/tree_coverage.py
+  - lib/engine/proofread.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: fsoft_engine_runtime.md

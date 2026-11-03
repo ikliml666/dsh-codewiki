@@ -96,7 +96,8 @@
       "main",
       "modelTrio",
       "mount",
-      "save"
+      "save",
+      "timingsOf"
     ]
   },
   "build_packaging_configuration": {
@@ -194,7 +195,8 @@
     "links": [
       "engine_client",
       "native_apply_plan",
-      "native_process_runtime"
+      "native_process_runtime",
+      "native_proofread"
     ],
     "names": []
   },
@@ -399,6 +401,7 @@
       "runNativeJob",
       "runStaleUpdate",
       "snapshotNativeRun",
+      "startNativeRun",
       "submit",
       "tally",
       "tickNative",
@@ -463,6 +466,7 @@
       "buildStatePayload",
       "collectChangeSet",
       "createWorkspaceSnapshot",
+      "deadLinkSources",
       "doctor",
       "done",
       "engineResult",
@@ -472,14 +476,42 @@
       "isAlive",
       "noop",
       "overviewStaleLinks",
+      "proofreadPages",
       "run",
       "runEngine",
+      "runGate",
       "runNativeJob",
       "settle",
       "staleDocPages",
       "startLlmBridge",
       "terminateProcessTree",
       "toContractBlockers"
+    ]
+  },
+  "native_proofread": {
+    "ids": [],
+    "links": [
+      "job_repository_infrastructure",
+      "llm_provider_bridges",
+      "native_apply_plan",
+      "native_process_runtime",
+      "result_contract_and_quality_gates",
+      "xxx"
+    ],
+    "names": [
+      "applyNativeOutput",
+      "buildProofreadPrompt",
+      "deadLinkSources",
+      "gateNativeOutput",
+      "git",
+      "listPageNames",
+      "missingLinksOf",
+      "parseProofreadReply",
+      "proofreadPages",
+      "run",
+      "runNativeJob",
+      "toPosix",
+      "validateOutput"
     ]
   },
   "overview": {

@@ -159,7 +159,8 @@
             "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
             "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
             "lib\\engine\\python\\stage_map.py::articles_ceiling",
-            "lib\\engine\\python\\tree_coverage.py::file_owner"
+            "lib\\engine\\python\\tree_coverage.py::file_owner",
+            "lib\\engine\\proofread.js::proofreadPages"
         ],
         "children": {
             "fsoft_engine_js_core": {
@@ -185,7 +186,8 @@
                     "lib\\engine\\quality-gate.js::toQualityIssues",
                     "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                     "lib\\engine\\workspace-snapshot.js::shortSha",
-                    "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                    "lib\\engine\\workspace-snapshot.js::snapshotExists",
+                    "lib\\engine\\proofread.js::proofreadPages"
                 ],
                 "children": {
                     "engine_runtime_orchestration": {
@@ -195,7 +197,8 @@
                             "lib\\engine\\apply-plan.js::findOrphanPages",
                             "lib\\engine\\client.js::runEngine",
                             "lib\\engine\\native-run.js::noop",
-                            "lib\\engine\\process-tree.js::isAlive"
+                            "lib\\engine\\process-tree.js::isAlive",
+                            "lib\\engine\\proofread.js::proofreadPages"
                         ],
                         "children": {
                             "native_apply_plan": {
@@ -218,6 +221,13 @@
                                     "lib\\engine\\process-tree.js::isAlive"
                                 ],
                                 "children": {}
+                            },
+                            "native_proofread": {
+                                "components": [
+                                    "lib\\engine\\proofread.js::proofreadPages"
+                                ],
+                                "children": {},
+                                "path": "lib/engine"
                             }
                         }
                     },

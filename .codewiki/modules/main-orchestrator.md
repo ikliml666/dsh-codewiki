@@ -105,7 +105,7 @@ stateDiagram-v2
     index --> partial: judgeOutcome 未通过
 ```
 
-**原生通道（`job.channel === 'native'`）**：通道一旦在 articles 阶段锁定就**只走 `tickNative`**，不再经过 `STAGE_HANDLER`——防止同一批产物被新旧两套实现各写一遍。引擎自报的八段契约（`env/graph/cluster/articles/validate/index/baseline/commit`）经 `NATIVE_STAGE_TO_PANEL` 映射到面板粗粒度 stage，终态完全由 `runNativeJob` 返回的 `EngineResult` 裁决（详见 [fsoft_engine_js_core.md](fsoft-engine-js-core.md) 的 `engine_runtime_orchestration` 子模块）。
+**原生通道（`job.channel === 'native'`）**：通道一旦在 articles 阶段锁定就**只走 `tickNative`**，不再经过 `STAGE_HANDLER`——防止同一批产物被新旧两套实现各写一遍。引擎自报的九段契约（`env/graph/cluster/articles/proofread/validate/index/baseline/commit`）经 `NATIVE_STAGE_TO_PANEL` 映射到面板粗粒度 stage：写作前三段（探测环境、解析代码图、聚类模块）合成步骤条的「准备」，`proofread` 落 review 格（校对真正发生的位置），`validate` 有独立的「校验」格、不再借用 review。终态完全由 `runNativeJob` 返回的 `EngineResult` 裁决（详见 [fsoft_engine_js_core.md](fsoft-engine-js-core.md) 的 `engine_runtime_orchestration` 子模块）。
 
 **多实例与崩溃恢复**：
 
@@ -129,6 +129,7 @@ flowchart LR
 ```
 
 - **唯一模型通道**：所有 LLM 请求走宿主 `llm.stream`（`llmChat`），插件不持有任何密钥；档位不支持时剥掉 effort 重试一次。会话记录钩子 `onRequestStart`（`beginSessionRecord`）把每个请求的 prompt/流式输出落盘到 `SESSIONS_DIR`（24h TTL），供面板「会话」视图实时回看。
+- **原生通道的语义校对通道**：`startNativeRun` 经 `deps.chat` 给 `runNativeJob` 注入一条单轮 `llmChat` 通道（用与写作同一个编译模型 `batchProvider/batchModel/batchReasoningEffort`，不再单独配一套模型）——校对发生在质量门之前，只改「链到不存在页面」的链接，改完重新判门；其余引擎模型请求仍只走 llm-bridge 占位 key 桥。
 - **会话兜底通道**：单文件大到连大档预算（默认 420k token）都装不下时，`dispatchSessionTasks` 把完整写作指令写成任务文件、`steer` 给发起会话派子智能体；`classifySessionTask` 三态（wait/harvest/timeout）逐 tick 收割，超时 30 分钟按失败处理，**不降级回插件内通道**（避免半成品覆盖）。
 - 文章 agentic 通道与变更集采集的细节分别见 [agentic_article_pipeline.md](agentic-article-pipeline.md)（`articles-agentic.js`、`agentic.js`、`change-set.js`、`article-contract.js`）。
 
@@ -168,7 +169,7 @@ flowchart TB
 
     IDX -->|"runAgenticArticles / markBigAgenticTasks<br/>inspectArticle / collectChangeSet"| AAP["agentic_article_pipeline<br/>articles-agentic / agentic /<br/>article-contract / change-set"]
     IDX -->|"runNativeJob / DEFAULT_ENGINE_ENTRY<br/>runEngine / llm-bridge / process-tree"| ENG["fsoft_engine_js_core<br/>engine 适配层"]
-    IDX -->|"Python 入口与八段流水线"| PY["fsoft_engine_python_runtime"]
+    IDX -->|"Python 入口与九段流水线"| PY["fsoft_engine_python_runtime"]
     IDX -->|"createJobsStore / mergeJobLists /<br/>heartbeat / adoptOrphan / planForeignJob"| JOB["job_repository_infrastructure<br/>job-store / job-logs /<br/>update-record / git-paths"]
     IDX -->|"cw status/init/index/meta"| CW["codewiki_rust_vendor<br/>Rust CLI 源码"]
     IDX -->|"面板前端轮询"| UI["browser_ui_panel<br/>client.js"]
@@ -211,7 +212,7 @@ sequenceDiagram
     Note over SV: tick 每 10s 推进一步
     alt channel=native（默认）
         SV->>EX: startNativeRun（Python 子进程长任务）
-        EX->>LLM: 经 llm-bridge 占位 key 转发
+        EX->>LLM: 写作/聚类经 llm-bridge 占位 key 转发；语义校对经 deps.chat 单轮 llmChat
         EX-->>SV: EngineResult（gate/apply/commit 已内置）
         SV->>SV: finishJob(outcome)，不重复 commit
     else channel=legacy（兼容通道）

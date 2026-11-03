@@ -43,7 +43,14 @@ flowchart TD
     N --> O{"引擎结局"}
     O -- "cancelled / failed" --> P["settle 透传引擎结局"]
     O -- "done / partial" --> Q["阶段2.9 原始树留档<br/>被消费前的事实快照"]
-    Q --> R["阶段3 质量门<br/>gateNativeOutput"]
+    Q --> RG["阶段2.6 质量门初判<br/>拿到 dead-link 清单"]
+    RG --> PD{"有失效跨页链接<br/>且调用方给了 chat?"}
+    PD -- "是" --> PR["语义校对 proofreadPages<br/>只改正文链接，maxPages 默认 6"]
+    PD -- "否" --> R
+    PR --> CD{"校对改写了正文?"}
+    CD -- "是" --> R2["改后重新判门<br/>report 更新为新门结果"]
+    CD -- "否" --> R
+    R2 --> R["阶段3 质量门<br/>取最终 report"]
     R --> S["阶段3.5-3.7 受管状态采集<br/>首次落锁 / 孤儿页清理"]
     S --> T["阶段4 落地器<br/>applyNativeOutput 写盘→索引→基线→提交"]
     T --> U["阶段5 最弱一环合成终态"]
@@ -70,6 +77,7 @@ flowchart LR
     NR --> NS["native-state.js<br/>受管状态读写"]
     NR --> MP["mapping.js<br/>findMissingModuleDocs / staleDocPages"]
     NR --> OP["output.js<br/>overviewStaleLinks"]
+    NR --> PR2["proofread.js<br/>deadLinkSources / proofreadPages"]
 
     CL -->|"abort / timeout / silence / result-grace"| PT
     PT -.->|"Windows: taskkill /T /F<br/>POSIX: SIGTERM 进程组 → SIGKILL"| OS["操作系统进程树"]
@@ -90,7 +98,7 @@ flowchart LR
 
 ### 3.1 `runNativeJob(options)` —— 一次原生编译的严格裁决链
 
-全部依赖经 `deps` 注入（`deps.doctor / deps.runEngine / deps.gate / deps.apply / deps.bridge / deps.collectChangeSet / deps.snapshot` 等），真实实现直接从同层模块取，测试可替换假 `runEngine` + 真实 gate/apply，同时覆盖接线与裁决。
+全部依赖经 `deps` 注入（`deps.doctor / deps.runEngine / deps.gate / deps.apply / deps.bridge / deps.collectChangeSet / deps.snapshot / deps.chat / deps.proofreadPages / deps.proofreadMaxPages` 等），真实实现直接从同层模块取，测试可替换假 `runEngine` + 真实 gate/apply，同时覆盖接线与裁决。
 
 **入口参数要点：**
 
@@ -114,12 +122,13 @@ flowchart LR
 4. **模型桥（2）**：`startLlmBridge` 建立本地桥接，占位 key 每次随机、只经进程环境传递、不进日志；失败 → `failed`（stage=cluster，code=`engine-model`）。
 5. **引擎执行（2）**：`resolution=update` 用 `update` 动作（读水合旧图做图 diff），否则 `generate`（从零建图）。两者不能互换：增量动作在空 docsDir 上会走更慢的 missing_page 全量重建；全量动作带旧状态跑会让「可比性」变假象。增量参数 `DEFAULT_UPDATE_OPTIONS = { rung: '3' }` 显式下发——3 = 组件级方法（图 diff 决定重写范围），显式给出可避免上游默认值变化导致增量语义静默漂移。桥在 `finally` 中关闭（先关桥会让读流中的引擎拿到 502），关闭前取走 `bridge.stats()`（含 `emptyResponses`：上游 200 但无正文的次数，是假 done 的来源之一，只进 notes 不参与裁决）。
 6. **原始树留档（2.9）**：把引擎输出的整棵 docs 树在被消费前复制到调用方给的 `rawTreeRoot` 下（按 requestId 分目录）。留档失败只记 note——它是证据不是产物。
-7. **质量门（3）**：`gateNativeOutput` 体检产物；`stateIncomplete`（受管状态缺图/树/metadata）时即使 gate 报 `done` 也翻成 `partial`。
-8. **受管状态采集（3.5）**：采集点固定在 gate 之后、apply 之前，产出进 `apply` 的 `extraFiles`，与文章**同批写、同批回滚、同批提交**。「无变化轮」（引擎 `no_change` + 变化集空 + 无未携带账）沿用上一轮状态不重写，避免每次状态查询都制造一次纯记账提交。状态不完整时：不裁旧状态、不推进基线，并追加 blocker。
-9. **首次落锁（3.6）**：`absent` 且本轮要落地时，把 `buildLockBody` 结果作为 `ENGINE_LOCK_REL` 一项塞进写集——修掉旧实现「锁留在工作区当未跟踪脏文件、变化集永远不干净」的缺陷。
-10. **孤儿页与残留页（3.7）**：两类判据都在本轮跑，覆盖不同原因下消失的页——`findOrphanPages` 找出 `source_files` 全部失效的存量页（模块被删），`findStaleModulePages` 找出页名已对不上当前模块树的旧模块页（聚类重构改名/合并；判据要求页带 `fsoft_page` 字段、slug 不在当前树里，人工页一律不动）。两类结果都经落地器 `deleteFiles` 删除（走删除集才能随事务回滚/提交）；本轮产物页一律不算孤儿。扫描不再被无变化轮（`idleRound`）跳过：即使整轮是 `no_change`，只要有残留页待删，落地器也会走 deleteOnly 例外分支照常清理——否则「源码没变化 ≠ 库里没残骸」，无变化轮会把残骸永久留在库里。
-11. **落地器（4）**：`applyNativeOutput` 完成写盘 → index → 基线 → 提交，自带失败回滚。`advanceBaseline` 由裁决决定（状态不完整时强制 `false`），不接受调用方硬开。
-12. **合成终态（5）**：见 3.2。
+7. **语义校对（2.6，gate 与正文之间的修正层）**：先把质量门包成可重跑的 `runGate()` 并跑一次，只为用 `deadLinkSources(report.defects ?? report.problems)` 拿到「哪几篇正文里有跨页死链」的清单。模型写作时常编造页面名（真机案例：`client_review_console/status_readouts.md`、漏 `_ui` 后缀的 `settings_and_logs.md`），门判 dead-link 没有错，但仓库会因此每轮都停在 partial。这一层的立场是**只修正文、绝不放宽判据**：调用方给了 `deps.chat` 且未取消时，对清单页跑 `proofreadPages`（默认 `maxPages = 6` 篇，每篇一次模型请求），把指向不存在页面的链接改成真实页名或降级为纯文字；校对异常、缺 frontmatter、改后死链不减都只记 note 或保留原文，不让一次校对失败把编译带偏。只有校对真改写了正文（`proof.changed` 非空）才重跑一次 `runGate()` 取新 report——门是纯读 docsDir 的，跑两次没有副作用；改不掉就照旧判 partial。
+8. **质量门（3）**：`gateNativeOutput` 体检产物（report 可能已经是校对后重跑的那一次）；`stateIncomplete`（受管状态缺图/树/metadata）时即使 gate 报 `done` 也翻成 `partial`。
+9. **受管状态采集（3.5）**：采集点固定在 gate 之后、apply 之前，产出进 `apply` 的 `extraFiles`，与文章**同批写、同批回滚、同批提交**。「无变化轮」（引擎 `no_change` + 变化集空 + 无未携带账）沿用上一轮状态不重写，避免每次状态查询都制造一次纯记账提交。状态不完整时：不裁旧状态、不推进基线，并追加 blocker。
+10. **首次落锁（3.6）**：`absent` 且本轮要落地时，把 `buildLockBody` 结果作为 `ENGINE_LOCK_REL` 一项塞进写集——修掉旧实现「锁留在工作区当未跟踪脏文件、变化集永远不干净」的缺陷。
+11. **孤儿页与残留页（3.7）**：两类判据都在本轮跑，覆盖不同原因下消失的页——`findOrphanPages` 找出 `source_files` 全部失效的存量页（模块被删），`findStaleModulePages` 找出页名已对不上当前模块树的旧模块页（聚类重构改名/合并；判据要求页带 `fsoft_page` 字段、slug 不在当前树里，人工页一律不动）。两类结果都经落地器 `deleteFiles` 删除（走删除集才能随事务回滚/提交）；本轮产物页一律不算孤儿。扫描不再被无变化轮（`idleRound`）跳过：即使整轮是 `no_change`，只要有残留页待删，落地器也会走 deleteOnly 例外分支照常清理——否则「源码没变化 ≠ 库里没残骸」，无变化轮会把残骸永久留在库里。
+12. **落地器（4）**：`applyNativeOutput` 完成写盘 → index → 基线 → 提交，自带失败回滚。`advanceBaseline` 由裁决决定（状态不完整时强制 `false`），不接受调用方硬开。
+13. **合成终态（5）**：见 3.2。
 
 **返回值**：`engineResult()` 归一化的 EngineResult，外加 `requestId`、三类事实分开记的 `baselineEligible`（质量门许可）/ `baselineAdvanced`（落地事实）/ 兼容老调用方的 `canAdvanceBaseline`、`artifacts`（docsDir / rawTreeDir / updateRecord / rawTree 留档 / rawTreeFiles）、`incremental`（决议现场）、`gate`、`apply`、`engineLock`、`notes`。所有早退分支（取消、环境失败）也经同一个 `settle()` 出口，保证终态合法且带现场证据。
 

@@ -70,7 +70,7 @@ flowchart LR
 ```json
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.17.30",
+  "version": "0.17.31",
   "private": true,
   "type": "module",
   "main": "index.js",

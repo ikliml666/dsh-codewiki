@@ -95,7 +95,7 @@ flowchart TB
     TC --> FOCUS["焦点任务卡 jobCard<br/>最新活动任务"]
     TC --> HIST["历史任务 details<br/>按 cwd 分组折叠"]
     FOCUS --> JOBROW["任务行：kind · cwd · stage · 吞吐徽标 · 会话按钮 · 取消"]
-    JOBROW --> SB["stageBar 六阶段步骤条<br/>queued→articles→crosscut→review→index→commit"]
+    JOBROW --> SB["stageBar 七阶段步骤条<br/>queued→prepare→articles→review→validate→index→commit"]
     JOBROW --> META["meta 行：已写/失败篇数 · 引擎阶段 · 排队/执行用时 · 自动提交结果"]
     FOCUS --> LOG["engineLogBlock<br/>最近 40 条 nativeLogs + logFile 路径"]
     FOCUS --> TLIST["taskList 勾选清单"]
@@ -184,9 +184,9 @@ flowchart LR
 
 ## 进度呈现约定
 
-- **六阶段步骤条**：`ACTIVE_STAGES = ['queued','articles','crosscut','review','index','commit']`。终态任务（done/partial）全绿；只有 failed/cancelled 才在最后计时的阶段标红/黄（`lastTimedStage` 过滤掉旧任务残留的已删阶段键，避免 `indexOf` 得 -1）。
-- **总进度百分比**：`STAGE_WEIGHTS` 定权（articles 0.66 / crosscut 0.11 / review 0.16 / index 0.05 / commit 0.02），阶段内按 taskList 完成数折算，封顶 99，done/partial 才 100。
-- **原生引擎阶段双轨**：面板步骤条是粗粒度六步；原生引擎自报的八段契约阶段（env/graph/cluster/articles/validate/index/baseline/commit，经 `NATIVE_STAGE_KEYS` 映射）另起一行显示，**不混进步骤条**——两者粒度不同，混着会让人误以为步骤条错了。相关后端实现见 [result_contract_and_quality_gates](result-contract-and-quality-gates.md) 与 [fsoft_engine_js_core](fsoft-engine-js-core.md)。
+- **七阶段步骤条**：`ACTIVE_STAGES = ['queued','prepare','articles','review','validate','index','commit']`（排队单列最前 + 六个真实阶段）。旧值 `crosscut`（横切）随单轮写作通道退役，原生通道从不经过它；历史任务残留的已退役阶段名（`plan` / `crosscut`）经 `LEGACY_STAGE` 映射（plan→prepare、crosscut→articles）后再取阶段，不会因 `indexOf` 得 -1 让步骤条整条熄灭。终态任务（done/partial）全绿；只有 failed/cancelled 才在最后计时的阶段标红/黄（`lastTimedStage` 与 `timingsOf` 对 `stageTimings` 的旧键做同样的映射）。
+- **总进度百分比**：`STAGE_WEIGHTS` 定权（queued 0 / prepare 0.24 / articles 0.46 / review 0.14 / validate 0.07 / index 0.05 / commit 0.04——除排队外六步权重总和为 1），阶段内按 taskList 完成数折算，封顶 99，done/partial 才 100。
+- **原生引擎阶段双轨**：面板步骤条是粗粒度七步；原生引擎自报的八段契约阶段（env/graph/cluster/articles/proofread/validate/index/baseline/commit，经 `NATIVE_STAGE_KEYS` 映射；与面板同名的 articles/index/commit 直接复用步骤条标签）另起一行显示，**不混进步骤条**——两者粒度不同，混着会让人误以为步骤条错了。相关后端实现见 [result_contract_and_quality_gates](result-contract-and-quality-gates.md) 与 [fsoft_engine_js_core](fsoft-engine-js-core.md)。
 - **排队可见性**：queued 任务显示「在谁后面排队」（`job.queueAhead`）；用时拆成「排队 / 执行」两段（`stageTimings.queued`），不让 2 小时排队被看成「编译跑了 2 小时」。
 - **焦点任务选择**：活动任务按 `byUpdated` 取最新一个自报 cwd；其余按 cwd 分组收进「历史任务」折叠区。
 
