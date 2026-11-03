@@ -450,6 +450,33 @@ await check('日志记录每个请求的 chunk 类型计数，用于区分「模
     assert.ok(!JSON.stringify(entry).includes('想一下'), '计数里不能夹带 chunk 正文')
   })
 })
+// 上游 provider 返回空响应（只有 usage + finish，没有正文也没有 tool-call）时，
+// 引擎会把它记成「这一页无需改动」，整轮看起来 done 却一篇文章都没写。桥必须把
+// 「本次调用到底有没有产出」变成可读的计数，而不是让人靠翻 chunk 日志去数。
+await check('桥统计空响应次数：只有 usage+finish 的调用要被记成空产出', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm' }, async (bridge) => {
+    await (await post(bridge, { ...simpleBody, stream: true })).text()
+    const st = bridge.stats()
+    assert.equal(st.requests, 1)
+    assert.equal(st.emptyResponses, 1, '没有正文也没有工具调用的调用必须计为空产出')
+  })
+})
+
+await check('桥统计空响应次数：有正文或工具调用的调用不计为空产出', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'tool-call-delta', index: 0, id: 'c1', name: 'edit', argumentsDelta: '{}' }
+    yield { type: 'usage', usage: { inputTokens: 5, outputTokens: 1 } }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm' }, async (bridge) => {
+    await (await post(bridge, { ...simpleBody, stream: true })).text()
+    assert.equal(bridge.stats().emptyResponses, 0)
+  })
+})
 await check('启动参数缺失 → 抛错（不让桥以半配置状态监听端口）', async () => {
   assert.throws(() => startLlmBridge({}), /llm/)
   assert.throws(() => startLlmBridge({ llm: { stream() {} } }), /provider/)

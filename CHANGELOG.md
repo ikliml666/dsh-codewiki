@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.17.22 — 2026-11-03
+
+### 模型通道的空产出必须在任务里看得见
+
+真机四仓（`job-mw0byob0-0`、`job-mw0e3vl8-9`、`job-mw0cn6cv-4`、`job-mw0dkvg4-6`）的桥日志里，
+**每一次**请求都是 `{"chunks":{"usage":1,"finish":1},"chunkTotal":2}`、`usage={"input":0,"output":0}`、
+HTTP 200：上游 provider 只回了 usage 和 finish，既没有正文 chunk，也没有 tool-call chunk。
+连终态本仓库 done 的 `job-mw0bvl9n-b` 也是 12/12 全空。引擎把这轮调用记成「这一页无需改动」
+（0.17.21 已能靠账本把失败叶子翻成 partial），但任务侧此前**完全看不到「多少个请求是空的」**这个事实，
+只能从 stderr 里的 `Exceeded maximum output retries` 反推。
+
+现在桥把这件事直接统计出来：`llm-bridge.js` 在每个请求内跟踪有没有产生过产出型 chunk
+（`text-delta` 或 `tool-call-delta`），正常结束时没有就 `stats.emptyResponses++`；
+`native-run.js` 关桥前取一次 `bridge.stats()`，空产出非零就往任务 notes 里写
+「模型通道空产出 N/M 次（上游 200 但无正文、无工具调用）；引擎会把这类调用记成「无需改动」，
+请检查编译模型是否可用」。
+
+这条只做可见性：不改终态、不动质量门、不放宽任何判据。空响应本身是 provider 侧的问题
+（本 profile 的编译模型是 `qoder/qfmodel`），插件能做的是让它在任务页上第一眼就能看见，
+而不是让人从 20 多个模块的失败日志里猜。
+
+验证：`test-engine-llm-bridge.mjs` 28 项（新增两条：只有 usage+finish 记为空产出；有正文或
+工具调用不记）+ `test-engine-native-job.mjs` 141 项（新增用例 26/27：空产出 8/8 时 notes 点名并给
+出下一步、无空产出时不写这条 note）。红证据：未修时 `stats.emptyResponses` 为 `undefined`。
 ## 0.17.21 — 2026-11-03
 
 ### 引擎记账的写作失败不再被读成「这一页无需改动」

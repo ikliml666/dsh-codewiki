@@ -956,6 +956,82 @@ console.log('== 用例 25：引擎事件日志落盘，且进度帧按去重入�
   }
 }
 
+// ============ 用例 26：模型通道空产出必须在任务里可见 ============
+//
+// 上游 provider 返回 200 却只给 usage+finish（没有正文、没有工具调用）时，引擎会把
+// 这次调用记成「这一页无需改动」，于是整轮看起来 done 却一篇文章没写。桥的
+// emptyResponses 计数必须一路带到任务的 notes，否则这个事实在任务侧完全不可见。
+console.log('== 用例 26：桥空产出次数必须进原生任务 notes ==')
+{
+  const { repo } = makeRepo('empty-bridge', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-empty-'))
+  madeDirs.push(docs)
+  const shrunk = await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: {
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+      bridge: async () => ({
+        url: 'http://127.0.0.1:1/v1',
+        placeholderKey: 'dsh-bridge-unused',
+        port: 1,
+        stats: () => ({ requests: 8, emptyResponses: 8 }),
+        close: async () => {},
+      }),
+      runEngine: async ({ action }) => (action === 'doctor'
+        ? { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        : {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 0,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }),
+    },
+  })
+  const notes = shrunk?.notes ?? []
+  check(notes.some((n) => /模型通道空产出\s*8\/8/.test(n)),
+    `空产出必须在 notes 里点名次数（实际 ${JSON.stringify(notes.filter((n) => n.includes('空产出')))}）`)
+  check(notes.some((n) => /请检查编译模型/.test(n)),
+    '空产出提示必须给出可执行的下一步（换/查编译模型）')
+}
+
+// 没有空产出时不写这条 note：正常任务的 notes 不该出现误导性的告警。
+console.log('== 用例 27：无空产出时不产生噪音 note ==')
+{
+  const { repo } = makeRepo('empty-bridge-none', { mode: 'done', preInit: true })
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-native-none-'))
+  madeDirs.push(docs)
+  const shrunk = await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: {
+      config: { batchProvider: 'workbuddy', batchModel: 'hy3' },
+      llm: fakeLlm,
+      bridge: async () => ({
+        url: 'http://127.0.0.1:1/v1',
+        placeholderKey: 'dsh-bridge-unused',
+        port: 1,
+        stats: () => ({ requests: 5, emptyResponses: 0 }),
+        close: async () => {},
+      }),
+      runEngine: async ({ action }) => (action === 'doctor'
+        ? { outcome: 'done', stage: 'env', engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } } }
+        : {
+          outcome: 'done',
+          stage: 'articles',
+          writtenCount: 0,
+          engine: { version: '9.9.9', python: '3.13.0', deps: { ok: true, summary: 'ok' } },
+          artifacts: { docsDir: docs, rawTreeDir: '', updateRecord: '' },
+        }),
+    },
+  })
+  const notes = shrunk?.notes ?? []
+  check(!notes.some((n) => n.includes('空产出')), '无空产出时不得写空产出 note')
+}
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 上被占用的临时目录留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }
