@@ -228,6 +228,18 @@ async def main():
     except RuntimeError as exc:
         out['merge']['leaf_conflict'] = str(exc)
 
+    # 真机事故（job-mw0rkcel-0，本仓）：树里记着某叶子的 3 个组件，而某个并行分支
+    # 看到的是「这 3 个 + 本轮新出现的符号」共 4 个。旧值是**真子集**，这表示另一分支
+    # 还没见到新符号，不是归属矛盾；报冲突会让整轮 articles 中断。
+    try:
+        m = PAR._merge_tree(
+            {'leaf': {'components': ['a', 'b', 'c'], 'children': {}}},
+            {'leaf': {'components': ['a', 'b', 'c', 'd'], 'children': {}}})
+        out['merge']['leaf_superset'] = sorted(m['leaf']['components'])
+    except Exception as exc:
+        out['merge']['leaf_superset'] = None
+        out['merge']['leaf_superset_error'] = str(exc)
+
     Path(OUT, 'result.json').write_text(
         json.dumps(out, ensure_ascii=False), encoding='utf-8')
 
@@ -289,6 +301,13 @@ await check('父模块 components 不同不构成合并冲突（并行分支各�
 await check('同一个叶子被分到不同组件仍然显式报冲突（不静默取一个）', () => {
   assert.ok(got.merge.leaf_conflict, '叶子级归属矛盾必须抛错，不能静默合并')
   assert.match(got.merge.leaf_conflict, /module_tree 冲突/)
+})
+
+await check('叶子组件是「旧值真子集」时不报冲突，取并集（真机 job-mw0rkcel-0）', () => {
+  // 树里记着 3 个组件，某个并行分支看到 4 个（其中 3 个是子集）。这表示另一分支
+  // 还没见到本轮新出现的符号，不是归属矛盾——报错会让整轮 articles 中断。
+  assert.deepEqual(got.merge.leaf_superset, ['a', 'b', 'c', 'd'],
+    `真子集时应取并集，实际 ${JSON.stringify(got.merge.leaf_superset)}；错误：${got.merge.leaf_superset_error ?? '（无）'}`)
 })
 
 await check('单个模块失败：已写页面保留，失败模块进异常消息', () => {

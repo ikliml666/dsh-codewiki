@@ -135,7 +135,9 @@ def case_same_directory_preferred():
     assert R.file_owner(tree, g, 'p/two.py') == 'mod_one', R.file_owner(tree, g, 'p/two.py')
     validate_module_file_coverage(tree, g)
 def case_exclusive_write_supersedes_subset():
-    # 补挂算出的目标树是磁盘树的超集：直接合并会被叶子判据当成归属冲突。
+    # 补挂算出的目标树是磁盘树的超集。0.17.29 起这种形态的合并写入不再报冲突
+    # （旧值是新值真子集 = 另一分支还没见到新符号，取并集即可），但补挂仍必须走
+    # 独占写：它要基于磁盘最新树做增量，走合并会让「另一分支已删的节点」复活。
     import tempfile
     from codewiki.src.utils import file_manager
     from full_parallel_runtime import install_full_runtime, write_tree_exclusive
@@ -143,12 +145,22 @@ def case_exclusive_write_supersedes_subset():
     docs = tempfile.mkdtemp(prefix='cw-tree-lock-')
     tree_path = os.path.join(docs, 'module_tree.json')
     file_manager.save_json({'leaf': {'components': ['a/x.py::X'], 'children': {}}}, tree_path)
+    # 超集形态的合并写入：不再抛错，取并集
+    file_manager.save_json({'leaf': {'components': ['a/x.py::X', 'b/y.py::Y'], 'children': {}}}, tree_path)
+    merged = json.load(open(tree_path, encoding='utf-8'))
+    assert merged['leaf']['components'] == ['a/x.py::X', 'b/y.py::Y'], merged
+    # 真矛盾（两边各有对方没有的组件）仍然必须报错
+    open(tree_path, 'w', encoding='utf-8').write(
+        json.dumps({'leaf': {'components': ['a/x.py::X'], 'children': {}}}))
     try:
-        file_manager.save_json({'leaf': {'components': ['a/x.py::X', 'b/y.py::Y'], 'children': {}}}, tree_path)
+        file_manager.save_json({'leaf': {'components': ['c/z.py::Z'], 'children': {}}}, tree_path)
     except Exception as exc:
         assert 'module_tree' in str(exc), exc
     else:
-        raise AssertionError('合并写入本应判定叶子归属不一致')
+        raise AssertionError('互斥的叶子归属必须判定为冲突')
+    open(tree_path, 'w', encoding='utf-8').write(
+        json.dumps({'leaf': {'components': ['a/x.py::X'], 'children': {}}}))
+    # 独占写：基于磁盘最新树做增量，且不经过合并
     seen = {}
     def mutate(tree):
         seen['components'] = list(tree['leaf']['components'])
@@ -167,7 +179,7 @@ for name, fn in [
     ('空树（整仓单页模式）原样放过', case_empty_tree_left_alone),
     ('无同文件/同目录线索时挂到目录最近的叶子', case_unrelated_leaf_fallback),
     ('同目录已有叶子优先', case_same_directory_preferred),
-    ('目标树是磁盘树的超集时独占写不被误判成冲突', case_exclusive_write_supersedes_subset),
+    ('超集合并取并集、互斥仍报冲突，独占写绕开合并', case_exclusive_write_supersedes_subset),
 ]:
     check(name, fn)
 

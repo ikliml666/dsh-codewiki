@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.29 — 2026-11-03
+
+### 叶子组件是「旧值真子集」时不再判冲突：并行全量不再整轮中断
+
+真机 `dsh-codewiki`（`job-mw0rkcel-0`）articles 阶段整轮中断：
+
+```
+RuntimeError: module_tree 冲突：fsoft_engine_runtime/fsoft_engine_js_core/
+engine_runtime_orchestration/native_apply_plan 在两个并行分支里组件归属不一致
+```
+
+树里该叶子记着 3 个组件（`applyNativeOutput` / `defaultRunCw` / `findOrphanPages`），
+而某个并行分支看到的是「这 3 个 + 本轮新出现的 `findStaleModulePages`」共 4 个。这是
+**旧值是新值真子集**——另一分支还没见到本轮新符号，不是「同一个叶子被分给不同组件」的
+归属矛盾。旧实现只要两边 `components` 不相等就报错，于是整轮 articles 停在这一个模块上。
+
+`_merge_tree`（`lib/engine/python/full_parallel_runtime.py`）改为先判包含关系：任一方向是
+子集就取并集继续，只有两边各有对方没有的组件才抛冲突。0.17.17 的补挂写盘撞过同一形态
+（当时用 `write_tree_exclusive` 绕过合并），这次把判据修在合并函数本身。
+
+验证：`test-upstream-parallel.mjs` 新增「叶子组件是旧值真子集时不报冲突，取并集」，
+先红（10 passed / 1 failed，实际返回 `['c']` 而非 `['a','b','c','d']`）后绿（11 passed / 0
+failed）。既有「同一个叶子被分到不同组件仍然显式报冲突」用例继续通过，证明真矛盾没被
+静默吞掉。
+
 ## 0.17.28 — 2026-11-03
 
 ### 残留页随本轮编译一并清理：聚类重构留下的旧页不再永久堆积

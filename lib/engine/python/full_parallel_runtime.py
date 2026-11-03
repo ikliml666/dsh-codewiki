@@ -68,6 +68,10 @@ def _merge_tree(base: dict[str, Any], incoming: dict[str, Any], path: str = "") 
       不同子模块时，两边写回的并集本来就不同——这是信息互补，取并集即可。
     · 叶子模块的 ``components`` 就是它的组件归属。同一个叶子被两个分支分给不同
       组件是真矛盾，静默取一个会丢内容且无法回溯，必须报错。
+    · 但「一边是另一边的真子集」不是矛盾：树里记着 3 个组件、某个分支看到 4 个，
+      说明另一分支还没见到本轮新出现的符号（0.17.17 的补挂写盘撞过同一形态，
+      真机 job-mw0rkcel-0 因此整轮 articles 中断）。子集关系下取并集，只有两边
+      都有对方没有的组件才是真冲突。
     """
     for name, node in (incoming or {}).items():
         here = f"{path}/{name}" if path else name
@@ -83,7 +87,10 @@ def _merge_tree(base: dict[str, Any], incoming: dict[str, Any], path: str = "") 
         old_components = list(old.get("components") or [])
         new_components = list(node.get("components") or [])
         if old_components and new_components and old_components != new_components:
-            if not is_parent:
+            old_set = set(old_components)
+            new_set = set(new_components)
+            subset = old_set <= new_set or new_set <= old_set
+            if not is_parent and not subset:
                 raise RuntimeError(
                     f"module_tree 冲突：{here} 在两个并行分支里组件归属不一致"
                 )
