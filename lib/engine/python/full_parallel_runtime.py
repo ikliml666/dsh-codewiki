@@ -109,6 +109,23 @@ def _merge_tree(base: dict[str, Any], incoming: dict[str, Any], path: str = "") 
     return base
 
 
+def write_tree_exclusive(filepath: str, mutate) -> Any:
+    """在 module_tree 锁内对磁盘树做一次「读 → 改 → 覆盖写」。
+
+    `save_json` 的合并语义只适用于「并行分支各自带着自己那部分增量去写」。
+    当调用方**已经**基于磁盘最新状态算出完整目标树（例如补齐未归属文件）时，
+    再走一次合并会被误判成叶子组件冲突（旧值是新值的真子集），整轮增量中断。
+    这里跳过合并、直接覆盖，调用方负责在 `mutate` 里做正确的增量。
+    """
+    if _ORIG_LOAD is None or _ORIG_SAVE is None:
+        raise RuntimeError("write_tree_exclusive 需要在 install_full_runtime() 之后调用")
+    with _TREE_LOCK:
+        current = _ORIG_LOAD(filepath)
+        updated = mutate(current if isinstance(current, dict) else {})
+        _ORIG_SAVE(updated, filepath)
+        return updated
+
+
 class _SharedTreeIO:
     """串行化 module_tree.json 的读改写，并把并行分支的增量合并回主树。"""
 
@@ -279,15 +296,19 @@ async def _run_parallel(
 
 
 _IO_INSTALLED = False
+_ORIG_SAVE = None
+_ORIG_LOAD = None
 
 
 def _install_shared_tree_io() -> None:
     """在 FileManager 类上串行化 module_tree.json 的读改写（全进程一次）。"""
-    global _IO_INSTALLED
+    global _IO_INSTALLED, _ORIG_SAVE, _ORIG_LOAD
     if _IO_INSTALLED:
         return
     original_save = file_manager.__class__.save_json
     original_load = file_manager.__class__.load_json
+    _ORIG_SAVE = original_save
+    _ORIG_LOAD = original_load
 
     def save_json(data, filepath):
         if os.path.basename(str(filepath)) != "module_tree.json":

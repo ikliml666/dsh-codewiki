@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.17.17 — 2026-11-03
+
+### 补挂写回走了合并语义，把「超集」误判成叶子归属冲突
+
+0.17.16 之后本仓库增量轮（job-mw09j6e4-5）又中断在 articles：已写 32 篇，
+唯一失败是
+
+```
+RuntimeError: module_tree 冲突：Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime
+在两个并行分支里组件归属不一致
+```
+
+栈顶落在 `fsoft_runtime.py:289` 的 `adopt_tree_coverage(updater, new_tree, new_graph)`。
+
+链条：补挂函数 `adopt_unowned_files` 把未归属文件挂到已有叶子，叶子的 `components`
+从 5 个变成 6 个；随后 `file_manager.save_json` 走的是 **0.17.12 引入的合并语义**
+（`_merge_tree`）——磁盘旧值 `[5 个]` 与待写新值 `[6 个]` 不等，而该叶子没有
+`children`，于是被判定成「同一个叶子被两个并行分支分给不同组件」直接抛错。
+
+判据本身没错：合并语义只适用于「并行分支各自带着自己那部分增量去写」。而补挂
+已经基于磁盘最新树算出了完整目标树（旧值是新值的真子集），再合并属于误用。
+
+### 修法：为覆盖写单开一条路径
+
+- `lib/engine/python/full_parallel_runtime.py` 新增 `write_tree_exclusive(filepath, mutate)`：
+  在同一把 `_TREE_LOCK` 内做「读磁盘 → 调 `mutate(tree)` → 覆盖写」，跳过合并。
+  安装时把原始 `save_json`/`load_json` 记进 `_ORIG_SAVE`/`_ORIG_LOAD` 供它使用。
+- `lib/engine/python/fsoft_runtime.py` 的 `adopt_tree_coverage` 改为走这条路径，
+  并且**基于磁盘最新树**补挂而不是 Step 4 的 `new_tree` 快照——盘上可能已有本仓库
+  历史轮次写下的更多节点，用快照会丢掉它们。`_merge_tree` 的叶子冲突判据保持不变。
+
+### 验证
+
+- `test-fsoft-coverage.mjs` 新增「目标树是磁盘树的超集时独占写不被误判成冲突」：
+  先断言把超集交给合并写入确实抛「module_tree 冲突」，再断言 `write_tree_exclusive`
+  能正常覆盖、且 `mutate` 拿到的是磁盘当前值。6 项全绿。
+- `test-fsoft-runtime.mjs` 6 项、`test-upstream-parallel.mjs` 10 项、
+  `test-engine-native-incremental.mjs` 129 项全绿。
+
 ## 0.17.16 — 2026-11-03
 
 ### 有陈页但没缺页的仓库永远 partial

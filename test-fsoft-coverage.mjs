@@ -134,6 +134,32 @@ def case_same_directory_preferred():
     assert 'p/two.py' in adopted, adopted
     assert R.file_owner(tree, g, 'p/two.py') == 'mod_one', R.file_owner(tree, g, 'p/two.py')
     validate_module_file_coverage(tree, g)
+def case_exclusive_write_supersedes_subset():
+    # 补挂算出的目标树是磁盘树的超集：直接合并会被叶子判据当成归属冲突。
+    import tempfile
+    from codewiki.src.utils import file_manager
+    from full_parallel_runtime import install_full_runtime, write_tree_exclusive
+    install_full_runtime(1)
+    docs = tempfile.mkdtemp(prefix='cw-tree-lock-')
+    tree_path = os.path.join(docs, 'module_tree.json')
+    file_manager.save_json({'leaf': {'components': ['a/x.py::X'], 'children': {}}}, tree_path)
+    try:
+        file_manager.save_json({'leaf': {'components': ['a/x.py::X', 'b/y.py::Y'], 'children': {}}}, tree_path)
+    except Exception as exc:
+        assert 'module_tree' in str(exc), exc
+    else:
+        raise AssertionError('合并写入本应判定叶子归属不一致')
+    seen = {}
+    def mutate(tree):
+        seen['components'] = list(tree['leaf']['components'])
+        tree['leaf']['components'].append('b/y.py::Y')
+        return tree
+    out = write_tree_exclusive(tree_path, mutate)
+    assert seen['components'] == ['a/x.py::X'], seen
+    assert out['leaf']['components'] == ['a/x.py::X', 'b/y.py::Y'], out
+    on_disk = json.load(open(tree_path, encoding='utf-8'))
+    assert on_disk['leaf']['components'] == ['a/x.py::X', 'b/y.py::Y'], on_disk
+
 
 for name, fn in [
     ('缺失文件被补挂到已有叶子，上游校验通过', case_adopts_missing_file),
@@ -141,6 +167,7 @@ for name, fn in [
     ('空树（整仓单页模式）原样放过', case_empty_tree_left_alone),
     ('无同文件/同目录线索时挂到目录最近的叶子', case_unrelated_leaf_fallback),
     ('同目录已有叶子优先', case_same_directory_preferred),
+    ('目标树是磁盘树的超集时独占写不被误判成冲突', case_exclusive_write_supersedes_subset),
 ]:
     check(name, fn)
 

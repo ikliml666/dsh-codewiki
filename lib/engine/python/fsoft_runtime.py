@@ -33,6 +33,7 @@ from codewiki.src.be.updater.record import UpdateRecord
 from codewiki.src.be.updater.reference_index import inverse
 from codewiki.src.config import MODULE_TREE_FILENAME
 from codewiki.src.utils import file_manager
+from full_parallel_runtime import write_tree_exclusive
 from tree_coverage import adopt_unowned_files, file_owner
 
 __all__ = [
@@ -299,8 +300,19 @@ def adopt_tree_coverage(updater, new_tree: dict[str, Any], new_graph: dict[str, 
     """
     if updater.whole_repo:
         return
+    path = os.path.join(updater.docs_dir, MODULE_TREE_FILENAME)
     try:
-        adopted = adopt_unowned_files(new_tree, new_graph, updater.opts)
+        # 必须基于磁盘最新树（而不是 Step 4 的 new_tree 快照）做补挂：
+        # ①盘上可能已被本仓库历史轮次写下更多节点，用快照会丢掉它们；
+        # ②补挂结果要覆盖写，不能走 _merge_tree——旧值是新值的真子集，
+        #   合并会被叶子判据当成「两个分支分给不同组件」而抛错。
+        adopted: list[str] = []
+
+        def mutate(tree: dict[str, Any]) -> dict[str, Any]:
+            adopted.extend(adopt_unowned_files(tree, new_graph, updater.opts))
+            return tree
+
+        write_tree_exclusive(path, mutate)
     except Exception as exc:  # noqa: BLE001 — 补挂失败不能让整轮增量崩掉
         updater.record.detector_notes.append(f"文件归属补齐失败：{type(exc).__name__}: {exc}")
         logger.warning("dsh: 文件归属补齐失败：%s", exc)
@@ -310,7 +322,6 @@ def adopt_tree_coverage(updater, new_tree: dict[str, Any], new_graph: dict[str, 
             f"补齐 {len(adopted)} 个未归属文件到已有叶子：{', '.join(adopted[:3])}"
             + ("…" if len(adopted) > 3 else "")
         )
-        file_manager.save_json(new_tree, os.path.join(updater.docs_dir, MODULE_TREE_FILENAME))
 
 
 def install_incremental_runtime() -> None:
