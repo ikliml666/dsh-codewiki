@@ -2,17 +2,20 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
-    "headCommit": "bce1edb50b66442bf78ecb30dae3abf7846676cc"
+    "baseCommit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+    "headCommit": "2de266b51725b7985d5fb3616ce6b055d5a3e659"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
-    "headCommit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+    "baseCommit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+    "headCommit": "2de266b51725b7985d5fb3616ce6b055d5a3e659",
     "committed": [
       "CHANGELOG.md",
-      "lib/engine/python/entry.py",
-      "test-engine-python-entry.mjs"
+      "lib/engine/llm-bridge.js",
+      "lib/engine/native-run.js",
+      "package.json",
+      "test-engine-llm-bridge.mjs",
+      "test-engine-native-job.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -28,8 +31,8 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "持久化基线 36fde17 与本次 cw 基线 1c24304 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0dkvg4-6-native（40 个文件）"
+    "持久化基线 1c24304 与本次 cw 基线 bce1edb 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0fk2wb-d-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-03T07:40:33.006Z"
+  "updatedAt": "2026-11-03T08:36:08.270Z"
 }

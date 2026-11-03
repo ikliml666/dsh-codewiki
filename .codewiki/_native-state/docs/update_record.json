@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T15:40:28+0800",
-  "finished_at": "2026-11-03T15:40:32+0800",
+  "started_at": "2026-11-03T16:35:59+0800",
+  "finished_at": "2026-11-03T16:36:07+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -24,29 +24,28 @@
     }
   },
   "revision": {
-    "old_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
-    "new_commit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+    "old_commit": "bce1edb50b66442bf78ecb30dae3abf7846676cc",
+    "new_commit": "2de266b51725b7985d5fb3616ce6b055d5a3e659",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 2,
-      "deleted": 1,
+      "added": 1,
+      "deleted": 0,
       "interface": 0,
-      "body": 1,
+      "body": 3,
       "edge": 0,
       "renamed": 0
     },
     "added": [
-      "lib\\engine\\python\\entry.py::_failed_blockers",
-      "lib\\engine\\python\\entry.py::_failed_calls_of"
+      "lib\\engine\\llm-bridge.js::markProduced"
     ],
-    "deleted": [
-      "lib\\engine\\python\\entry.py::_failed_leaves_of"
-    ],
+    "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\python\\entry.py::action_generate"
+      "lib\\engine\\llm-bridge.js::startLlmBridge",
+      "lib\\engine\\native-run.js::runNativeJob",
+      "package.json::package.json"
     ],
     "edge": [],
     "renamed": {}
@@ -56,14 +55,7 @@
     "removed": [],
     "routing": [
       {
-        "component_id": "lib\\engine\\python\\entry.py::_failed_blockers",
-        "rule": "untracked",
-        "leaf_path": null,
-        "new_leaf": false,
-        "detail": "not a selected leaf node"
-      },
-      {
-        "component_id": "lib\\engine\\python\\entry.py::_failed_calls_of",
+        "component_id": "lib\\engine\\llm-bridge.js::markProduced",
         "rule": "untracked",
         "leaf_path": null,
         "new_leaf": false,
@@ -78,20 +70,41 @@
   },
   "reclustered": [],
   "reports": {
-    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "python_native_runtime"
+        "llm_integration_bridges"
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\entry.py::action_generate",
-        "lib\\engine\\python\\entry.py::_failed_leaves_of"
+        "lib\\engine\\llm-bridge.js::startLlmBridge"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [
+        "lib\\engine\\llm-bridge.js::markProduced"
+      ],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "llm_integration_bridges"
+    },
+    "Code_Engine_Processing_Pipeline/code_engine_module/native_runtime_support": {
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "native_runtime_support"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\native-run.js::runNativeJob"
       ],
       "adopted": {
-        "lib\\engine\\python\\entry.py::action_generate": "1:same_file",
-        "lib\\engine\\python\\entry.py::_failed_leaves_of": "1:same_file"
+        "lib\\engine\\native-run.js::runNativeJob": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -101,64 +114,97 @@
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
-      "page": "python_native_runtime"
+      "page": "native_runtime_support"
+    },
+    "build_deployment_config": {
+      "leaf_path": [
+        "build_deployment_config"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "build_deployment_config"
     }
   },
   "ownership": [
     {
-      "component_id": "lib\\engine\\python\\entry.py::_failed_leaves_of",
+      "component_id": "lib\\engine\\native-run.js::runNativeJob",
       "rule": "1:same_file",
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "python_native_runtime"
+        "native_runtime_support"
       ],
-      "detail": "3 tracked components in file",
-      "deleted": true
-    },
-    {
-      "component_id": "lib\\engine\\python\\entry.py::action_generate",
-      "rule": "1:same_file",
-      "leaf_path": [
-        "Code_Engine_Processing_Pipeline",
-        "code_engine_module",
-        "python_native_runtime"
-      ],
-      "detail": "3 tracked components in file",
+      "detail": "1 tracked components in file",
       "deleted": false
     }
   ],
   "active": [
     {
-      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime",
-      "page": "python_native_runtime",
+      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/llm_integration_bridges",
+      "page": "llm_integration_bridges",
       "mode": "edit",
       "order": 0
+    },
+    {
+      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/native_runtime_support",
+      "page": "native_runtime_support",
+      "mode": "edit",
+      "order": 1
+    },
+    {
+      "leaf": "build_deployment_config",
+      "page": "build_deployment_config",
+      "mode": "edit",
+      "order": 2
     }
   ],
   "write_sets": {
-    "python_native_runtime": [
+    "llm_integration_bridges": [
       "Code_Engine_Processing_Pipeline",
-      "Testing___Probing_Tooling",
       "code_engine_module",
       "engine_client",
-      "engine_contracts",
-      "extension_host_core",
-      "job_log_management",
       "llm_integration_bridges",
-      "module_indexing",
       "native_runtime_support",
-      "native_state_management",
+      "overview",
+      "python_native_runtime"
+    ],
+    "native_runtime_support": [
+      "Code_Engine_Processing_Pipeline",
+      "code_engine_module",
+      "engine_client",
+      "engine_manifest_management",
+      "extension_host_core",
+      "native_runtime_support",
+      "overview",
+      "python_native_runtime"
+    ],
+    "build_deployment_config": [
+      "Testing___Probing_Tooling",
+      "build_deployment_config",
+      "codewiki_vendor_binary",
+      "engine_manifest_management",
+      "llm_integration_bridges",
       "overview",
       "probe_tools",
-      "python_native_runtime",
-      "testing_fixtures"
+      "testing_fixtures",
+      "vscode_extension_client"
     ]
   },
   "fallback": {
-    "r_leaf": 0.038461538461538464,
+    "r_leaf": 0.11538461538461539,
     "r_tree": 0.0,
-    "n_active": 1,
+    "n_active": 3,
     "n_leaves": 26,
     "n_structural": 0,
     "tau_full": 0.5,
@@ -167,108 +213,171 @@
   },
   "verdicts": [
     {
-      "page": "python_native_runtime",
+      "page": "llm_integration_bridges",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
       "page": "code_engine_module",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
       "page": "Code_Engine_Processing_Pipeline",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
       "page": "overview",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
       "page": "engine_client",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "llm_integration_bridges",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Testing___Probing_Tooling",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_contracts",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "extension_host_core",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "job_log_management",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "module_indexing",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
       "page": "native_runtime_support",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
       "changed_on_disk": false
     },
     {
-      "page": "native_state_management",
+      "page": "python_native_runtime",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "llm_integration_bridges",
+      "changed_on_disk": false
+    },
+    {
+      "page": "native_runtime_support",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "code_engine_module",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Code_Engine_Processing_Pipeline",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_client",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_manifest_management",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "extension_host_core",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "python_native_runtime",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "native_runtime_support",
+      "changed_on_disk": false
+    },
+    {
+      "page": "build_deployment_config",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Testing___Probing_Tooling",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "codewiki_vendor_binary",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_manifest_management",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "llm_integration_bridges",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
       "changed_on_disk": false
     },
     {
       "page": "probe_tools",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "build_deployment_config",
       "changed_on_disk": false
     },
     {
       "page": "testing_fixtures",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
+      "by_leaf": "build_deployment_config",
+      "changed_on_disk": false
+    },
+    {
+      "page": "vscode_extension_client",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "build_deployment_config",
       "changed_on_disk": false
     }
   ],
@@ -283,22 +392,36 @@
   "calls": [
     {
       "kind": "leaf_agent",
-      "target": "python_native_runtime",
-      "seconds": 3.070763349533081,
+      "target": "llm_integration_bridges",
+      "seconds": 7.680334568023682,
+      "usage": null,
+      "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "native_runtime_support",
+      "seconds": 0.2598750591278076,
+      "usage": null,
+      "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "build_deployment_config",
+      "seconds": 0.06959080696105957,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.03132200241088867,
+      "seconds": 0.03515625,
       "usage": null,
       "error": null
     }
   ],
   "detector_notes": [],
   "errors": [],
-  "wall_seconds": 3.55,
+  "wall_seconds": 8.48,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -306,37 +429,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 4,
+    "n_calls": 12,
     "totals": {
       "input_tokens": 0,
       "output_tokens": 0,
       "cache_read_tokens": 0,
       "cache_write_tokens": 0,
-      "requests": 4,
+      "requests": 12,
       "total_tokens": 0
     },
     "by_phase": {
       "update": {
-        "calls": 4,
+        "calls": 12,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 4,
+        "requests": 12,
         "total_tokens": 0,
-        "unpriced_calls": 4
+        "unpriced_calls": 12
       }
     },
     "by_model": {
       "qfmodel": {
-        "calls": 4,
+        "calls": 12,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "requests": 4,
+        "requests": 12,
         "total_tokens": 0,
-        "unpriced_calls": 4
+        "unpriced_calls": 12
       }
     },
     "unpriced_models": [
@@ -346,9 +469,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "python_native_runtime",
+        "target": "native_runtime_support",
         "model": "qfmodel",
-        "seconds": 3.0,
+        "seconds": 0.19,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -363,24 +486,7 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 0.02,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
+        "target": "native_runtime_support",
         "model": "qfmodel",
         "seconds": 0.01,
         "input_tokens": 0,
@@ -397,9 +503,162 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "python_native_runtime",
+        "target": "native_runtime_support",
+        "model": "qfmodel",
+        "seconds": 0.03,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "native_runtime_support",
+        "model": "qfmodel",
+        "seconds": 0.01,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 7.33,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 0.05,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 0.03,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "llm_integration_bridges",
+        "model": "qfmodel",
+        "seconds": 0.03,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.01,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
         "model": "qfmodel",
         "seconds": 0.02,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.02,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.01,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -413,5 +672,5 @@
       }
     ]
   },
-  "run_id": "cbdefcf5-bbd1-4383-bd87-218de99cd455"
+  "run_id": "7ce1bc75-91cf-4b70-9d3a-a5dda1796bca"
 }
