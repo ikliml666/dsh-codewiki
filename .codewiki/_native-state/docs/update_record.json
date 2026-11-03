@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-03T21:29:49+0800",
-  "finished_at": "2026-11-03T21:29:49+0800",
-  "outcome": "no_change",
+  "started_at": "2026-11-03T22:12:07+0800",
+  "finished_at": "2026-11-03T22:12:07+0800",
+  "outcome": "incremental",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -20,38 +20,174 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 2,
-      "resume": true,
-      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
+      "resume": false
     }
   },
   "revision": {
-    "old_commit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
-    "new_commit": "4537199b1f6b584818642719a731374597112c1f",
+    "old_commit": "4537199b1f6b584818642719a731374597112c1f",
+    "new_commit": "aec34a6c319d061c678a7c11dded252200935e77",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 0,
+      "added": 1,
       "deleted": 0,
       "interface": 0,
-      "body": 0,
-      "edge": 0,
+      "body": 2,
+      "edge": 1,
       "renamed": 0
     },
-    "added": [],
+    "added": [
+      "lib\\engine\\apply-plan.js::findStaleModulePages"
+    ],
     "deleted": [],
     "interface": [],
-    "body": [],
-    "edge": [],
+    "body": [
+      "lib\\engine\\native-run.js::runNativeJob",
+      "package.json::package.json"
+    ],
+    "edge": [
+      "lib\\engine\\apply-plan.js::walk"
+    ],
     "renamed": {}
   },
-  "repair": {},
+  "repair": {
+    "renamed": {},
+    "removed": [],
+    "routing": [
+      {
+        "component_id": "lib\\engine\\apply-plan.js::findStaleModulePages",
+        "rule": "1:same_file",
+        "leaf_path": [
+          "fsoft_engine_runtime",
+          "fsoft_engine_js_core",
+          "engine_runtime_orchestration",
+          "native_apply_plan"
+        ],
+        "new_leaf": false,
+        "detail": "3 tracked components in file"
+      }
+    ],
+    "orphans": [],
+    "deleted_nodes": [],
+    "created_leaves": [],
+    "growth": {
+      "fsoft_engine_runtime/fsoft_engine_js_core/engine_runtime_orchestration/native_apply_plan": 0.25
+    },
+    "growth_flagged": []
+  },
   "reclustered": [],
-  "reports": {},
-  "ownership": [],
+  "reports": {
+    "fsoft_engine_runtime/fsoft_engine_js_core/engine_runtime_orchestration/native_apply_plan": {
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_js_core",
+        "engine_runtime_orchestration",
+        "native_apply_plan"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\apply-plan.js::findStaleModulePages",
+        "lib\\engine\\apply-plan.js::walk"
+      ],
+      "adopted": {
+        "lib\\engine\\apply-plan.js::walk": "1:same_file"
+      },
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [
+        "lib\\engine\\apply-plan.js::findStaleModulePages"
+      ],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "native_apply_plan"
+    },
+    "fsoft_engine_runtime/fsoft_engine_js_core/engine_runtime_orchestration/native_process_runtime": {
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_js_core",
+        "engine_runtime_orchestration",
+        "native_process_runtime"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\native-run.js::runNativeJob"
+      ],
+      "adopted": {
+        "lib\\engine\\native-run.js::runNativeJob": "1:same_file"
+      },
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "native_process_runtime"
+    },
+    "platform_infrastructure_and_developer_tooling/build_packaging_configuration": {
+      "leaf_path": [
+        "platform_infrastructure_and_developer_tooling",
+        "build_packaging_configuration"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "build_packaging_configuration"
+    }
+  },
+  "ownership": [
+    {
+      "component_id": "lib\\engine\\apply-plan.js::walk",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_js_core",
+        "engine_runtime_orchestration",
+        "native_apply_plan"
+      ],
+      "detail": "4 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\native-run.js::runNativeJob",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "fsoft_engine_runtime",
+        "fsoft_engine_js_core",
+        "engine_runtime_orchestration",
+        "native_process_runtime"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    }
+  ],
   "active": [],
   "write_sets": {},
-  "fallback": {},
+  "fallback": {
+    "r_leaf": 0.21428571428571427,
+    "r_tree": 0.0,
+    "n_active": 3,
+    "n_leaves": 14,
+    "n_structural": 0,
+    "tau_full": 0.5,
+    "tau_tree": 0.3,
+    "fired": false
+  },
   "verdicts": [],
   "pages_written": [],
   "pages_removed": [],
@@ -66,7 +202,7 @@
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
     "cost_status": "complete",
-    "incomplete": false,
+    "incomplete": true,
     "unknown_usage_calls": 0,
     "n_calls": 0,
     "totals": {
@@ -77,5 +213,5 @@
     "unpriced_models": [],
     "calls": []
   },
-  "run_id": "d211d32c-4e7f-4ba1-a361-9d17660d97aa"
+  "run_id": "ac50305c-1a01-40a7-b7d7-b1a3604cfd6b"
 }

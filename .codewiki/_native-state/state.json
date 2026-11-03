@@ -2,21 +2,20 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
-    "headCommit": "4537199b1f6b584818642719a731374597112c1f"
+    "baseCommit": "4537199b1f6b584818642719a731374597112c1f",
+    "headCommit": "aec34a6c319d061c678a7c11dded252200935e77"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "4f7e86f58b8b6bdf130673ee2da7042d4a763b52",
-    "headCommit": "4537199b1f6b584818642719a731374597112c1f",
+    "baseCommit": "4537199b1f6b584818642719a731374597112c1f",
+    "headCommit": "aec34a6c319d061c678a7c11dded252200935e77",
     "committed": [
       "CHANGELOG.md",
-      "client.js",
-      "index.js",
-      "lib/engine/quality-gate.js",
+      "lib/engine/apply-plan.js",
+      "lib/engine/native-run.js",
       "package.json",
-      "test-engine-quality-gate.mjs",
-      "test-orchestration.mjs"
+      "test-engine-apply-plan.mjs",
+      "test-engine-native-incremental.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -33,8 +32,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 7328cc6 与本次 cw 基线 4f7e86f 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0pqnpy-b-native（29 个文件）"
+    "持久化基线 4f7e86f 与本次 cw 基线 4537199 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0rkcel-0-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-03T13:29:49.993Z"
+  "updatedAt": "2026-11-03T14:12:07.844Z"
 }
