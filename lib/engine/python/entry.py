@@ -1052,20 +1052,18 @@ def action_generate(request_id, payload, is_update=False):
     # 这个字段是「基线能不能推进」与「增量是否真的生效」的唯一证据。
     update_outcome = _update_outcome_of(adapter)
 
-    failed = _failed_leaves_of(adapter)
+    failed = _failed_calls_of(adapter)
     blockers = [
         {"kind": "article-missing", "detail": f"计划内文章缺失：{name}.md", "target": f"{name}.md"}
         for name in missing
     ]
-    # 叶子写作失败的可见性：上游 leaf_agent.py:150-176 把 agent 异常吞进 record.calls，
+    # 引擎记账失败的可见性：上游 leaf_agent.py:142-176 把 agent 异常吞进 record.calls，
     # 然后给该叶子要改的每一页记一条 verdict="no-op" + reason "no verdict returned by
-    # agent"。只看 outcome/verdicts 就会把「模型连续三轮没吐任何内容」读成「这一页
-    # 无需改动」——真机 job-mw0cn6cv-4 的 24 条 no-op 里有 2 条正是这样来的，整轮
-    # 还报 done、blockers 为空。按 calls 的 error 反查失败叶子，一条失败一条 blocker。
-    blockers.extend(
-        {"kind": "article-failed", "detail": f"叶子写作失败：{target}（{error}）", "target": f"{target}.md"}
-        for target, error in failed
-    )
+    # agent"——账本上跟「这页确实不用改」一模一样；orchestrator.py:432-438 的 Step 6.1
+    # 也同样只把缺页生成异常写进 rec.errors 与 calls。两处都不改 outcome，插件只读
+    # outcome 就会把「模型连续三轮没吐任何内容」读成「整轮无需改动」：真机
+    # job-mw0cn6cv-4 的 24 条 no-op 里有 2 条正是这样来的，整轮报 done、blockers 为空。
+    blockers.extend(_failed_blockers(failed))
 
     result = _done_result(request_id, docs_dir, repo_path, started, written=written, stage=reached["stage"], update_outcome=update_outcome, counts=_counts_of(adapter))
     result["usage"] = _usage_of(job)
@@ -1076,11 +1074,11 @@ def action_generate(request_id, payload, is_update=False):
     return result
 
 
-def _failed_leaves_of(adapter):
-    """本轮写作失败的叶子：引擎 calls 里 error 非空的 leaf_agent 记录。
+def _failed_calls_of(adapter):
+    """本轮引擎记账的失败调用：``calls`` 里 error 非空的 leaf_agent / missing_pages。
 
-    返回 ``[(leaf_target, error_text)]``，按出现顺序去重。取不到 record 时返回空列表：
-    全量 generate 路径没有 UpdateRecord，那轮的失败由异常上抛而非记账表达。
+    返回 ``[(kind, target, error_text)]``，按 (kind, target) 去重。取不到 record 时返回
+    空列表：全量 generate 路径没有 UpdateRecord，那轮的失败由异常上抛表达。
     """
     out = []
     seen = set()
@@ -1091,17 +1089,35 @@ def _failed_leaves_of(adapter):
         for call in getattr(record, "calls", None) or []:
             if not isinstance(call, dict):
                 continue
-            if str(call.get("kind") or "") != "leaf_agent":
+            kind = str(call.get("kind") or "")
+            if kind not in ("leaf_agent", "missing_pages"):
                 continue
             error = str(call.get("error") or "").strip()
-            target = str(call.get("target") or "").strip()
-            if not error or not target or target in seen:
+            target = str(call.get("target") or "").strip() or "-"
+            key = (kind, target)
+            if not error or key in seen:
                 continue
-            seen.add(target)
-            out.append((target, error))
+            seen.add(key)
+            out.append((kind, target, error))
     except Exception:
         return out
     return out
+
+
+def _failed_blockers(failed):
+    """把失败调用翻成 blockers：叶子写作失败与缺页生成失败都算「该写的页没写成」。"""
+    return [
+        {
+            "kind": "article-failed",
+            "detail": (
+                f"叶子写作失败：{target}（{error}）"
+                if kind == "leaf_agent"
+                else f"缺页生成失败：{target}（{error}）"
+            ),
+            "target": "" if target == "-" else f"{target}.md",
+        }
+        for kind, target, error in failed
+    ]
 
 
 def _usage_of(job):

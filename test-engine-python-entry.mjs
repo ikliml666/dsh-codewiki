@@ -125,13 +125,17 @@ mod._REAL_STDOUT.flush()`
   assert.deepEqual(got.mapped, { inputTokens: 1234, outputTokens: 56, cachedTokens: 78, requests: 9 })
   assert.deepEqual(got.mappedEmpty, { inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0 })
 })
-await check('叶子写作失败必须进 blockers：agent 空返回不能被读成「这页无需改动」', async () => {
+await check('引擎记账的失败必须进 blockers：agent 空返回不能被读成「这页无需改动」', async () => {
   // 真机 job-mw0cn6cv-4：引擎 update_record 里 2 个叶子 calls.error 是
   // UnexpectedModelBehavior: Exceeded maximum output retries (3)，而同一批
   // verdicts 却是 24 条 verdict="no-op" + reason="no verdict returned by agent"
-  // （上游 leaf_agent.py:150-176 把异常吞进 calls 后按 no-op 记账）。插件只读
+  // （上游 leaf_agent.py:142-176 把异常吞进 calls 后按 no-op 记账）。插件只读
   // outcome/verdicts 时，整轮报 done、blockers 为空 —— 模型压根没写任何东西，
   // 任务却显示「变化已全部消化」。
+  //
+  // 同一类账本还有 Step 6.1：orchestrator.py:432-438 把缺页生成异常只写进
+  // rec.errors 与 calls（kind=missing_pages），outcome 同样不变。两处都要读，
+  // 否则「缺页补写失败」照样能报 done。
   const py = `import sys, json, types
 import importlib.util as u
 spec = u.spec_from_file_location("entry", sys.argv[1])
@@ -142,19 +146,23 @@ calls = [
     {"kind": "leaf_agent", "target": "quality_gates", "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"},
     {"kind": "leaf_agent", "target": "build_deployment_config", "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"},
     {"kind": "leaf_agent", "target": "clean_leaf", "error": None},
-    {"kind": "missing_pages", "target": "-", "error": "ignored"},
+    {"kind": "missing_pages", "target": "-", "error": "RuntimeError: Invalid module file coverage"},
+    {"kind": "routing", "target": "ignored", "error": "not a write failure"},
 ]
-record = types.SimpleNamespace(calls=calls)
+record = types.SimpleNamespace(calls=calls, errors=["missing pages: RuntimeError: Invalid module file coverage"])
 adapter = types.SimpleNamespace(_last_update_record=record)
 src = open(sys.argv[1], encoding="utf-8").read()
 import ast
 fn = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "action_generate")
 fn_src = ast.get_source_segment(src, fn)
+blockers = mod._failed_blockers(mod._failed_calls_of(adapter))
 report = {
-    "failed": mod._failed_leaves_of(adapter),
-    "noRecord": mod._failed_leaves_of(types.SimpleNamespace(_last_update_record=None)),
-    "callSites": fn_src.count("_failed_leaves_of("),
-    "namedFailedKind": "article-failed" in fn_src,
+    "failed": mod._failed_calls_of(adapter),
+    "noRecord": mod._failed_calls_of(types.SimpleNamespace(_last_update_record=None)),
+    "blockers": blockers,
+    "callSites": fn_src.count("_failed_calls_of("),
+    "blockerCallSites": fn_src.count("_failed_blockers("),
+    "namedFailedKind": "article-failed" in src,
 }
 mod._REAL_STDOUT.write(json.dumps(report, ensure_ascii=False) + chr(10))
 mod._REAL_STDOUT.flush()`
@@ -170,14 +178,24 @@ mod._REAL_STDOUT.flush()`
   assert.deepEqual(
     got.failed,
     [
-      ['quality_gates', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
-      ['build_deployment_config', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
+      ['leaf_agent', 'quality_gates', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
+      ['leaf_agent', 'build_deployment_config', 'UnexpectedModelBehavior: Exceeded maximum output retries (3)'],
+      ['missing_pages', '-', 'RuntimeError: Invalid module file coverage'],
     ],
-    `失败叶子要按 target 去重并保留错误原文，实际 ${JSON.stringify(got.failed)}`,
+    `失败调用要按 (kind,target) 去重并保留错误原文，实际 ${JSON.stringify(got.failed)}`,
   )
   assert.deepEqual(got.noRecord, [], '没有 record 时返回空，不许编造失败')
-  assert.ok(got.callSites >= 1, 'action_generate 必须真的用失败叶子判终态')
-  assert.ok(got.namedFailedKind, '失败叶子要落成 article-failed，不能塞进别的类别')
+  assert.equal(got.blockers.length, 3, `每条失败调用都要有 blocker，实际 ${got.blockers.length}`)
+  assert.ok(
+    got.blockers.every((b) => b.kind === 'article-failed'),
+    `失败调用都落成 article-failed，实际 ${JSON.stringify(got.blockers.map((b) => b.kind))}`,
+  )
+  const details = got.blockers.map((b) => b.detail).join(' | ')
+  assert.match(details, /叶子写作失败：quality_gates/, `叶子失败要点名，实际 ${details}`)
+  assert.match(details, /缺页生成失败：-/, `缺页生成失败也要出现，实际 ${details}`)
+  assert.ok(got.callSites >= 1, 'action_generate 必须真的用失败调用判终态')
+  assert.ok(got.namedFailedKind, '失败调用要落成 article-failed，不能塞进别的类别')
+  assert.ok(got.blockerCallSites >= 1, 'action_generate 必须调 _failed_blockers 造 blocker', )
 })
 await check('协议：非法 action 回可机读失败，不是崩栈', async () => {
   const res = await runEngine({
