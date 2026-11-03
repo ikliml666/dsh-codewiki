@@ -214,6 +214,10 @@ window.__ModuleLoader__.load({
       scannedLabel: '扫描',
       submittedLabel: '提交',
       skippedLabel: '工作区外跳过',
+      pendingLabel: '待确认',
+      needConfirmTag: '待确认',
+      confirmCompile: '确认编译',
+      confirmHint: '这个仓库还没有 wiki。自动调度不会替你做这个决定——确认后才会开始首次编译；不想要就点排除，之后不再扫到它。',
       totalTimeLabel: '总耗时',
       copyPath: '复制路径',
       copiedLabel: '已复制',
@@ -400,6 +404,10 @@ window.__ModuleLoader__.load({
       scannedLabel: 'scanned',
       submittedLabel: 'submitted',
       skippedLabel: 'skipped (outside workspace)',
+      pendingLabel: 'awaiting confirmation',
+      needConfirmTag: 'needs OK',
+      confirmCompile: 'Compile',
+      confirmHint: 'This repo has no wiki yet. The scheduler will not decide that for you — the first compile starts only after you confirm. Not interested? Exclude it and it will no longer be scanned.',
       totalTimeLabel: 'total',
       copyPath: 'Copy path',
       copiedLabel: 'Copied',
@@ -1281,6 +1289,19 @@ window.__ModuleLoader__.load({
             if (mountedRef.current) setExclBusy(null)
           }
 
+          // 首次编译确认：只在仓库从没有过任何编译任务时出现（后端按 job 历史判），
+          // 用户点下按钮才算同意为它生成 wiki；manual 编译按钮本来就是用户主动动作，
+          // 所以第一次点确认之后就走普通编译路径，不会再来一次。
+          const confirmCompile = async (cwd) => {
+            setBusyCwd(cwd)
+            try {
+              await apiPost(CONTROL_PATH, { action: 'confirm', cwd })
+            } catch (e) {
+              if (mountedRef.current) setErr(String(e?.message ?? e))
+            }
+            if (mountedRef.current) setBusyCwd(null)
+          }
+
           const compile = async (cwd) => {
             setBusyCwd(cwd)
             try {
@@ -1315,6 +1336,7 @@ window.__ModuleLoader__.load({
                     const stats = sched.lastScanRepos != null
                       ? ` · ${t('scannedLabel')} ${sched.lastScanRepos} · ${t('submittedLabel')} ${sched.lastScanSubmitted ?? 0}`
                         + (sched.lastScanSkipped ? ` · ${t('skippedLabel')} ${sched.lastScanSkipped}` : '')
+                        + (sched.lastScanPending ? ` · ${t('pendingLabel')} ${sched.lastScanPending}` : '')
                       : ''
                     return el('div', { 'data-dscw-p-meta': '' },
                       `${t('nextScan')}: ${sched.scanning
@@ -1334,8 +1356,15 @@ window.__ModuleLoader__.load({
                     el('div', { 'data-dscw-p-row': '' },
                       el('span', { style: { fontWeight: 500 }, title: r.cwd }, repoName(r.cwd)),
                       r.excluded ? el(Tag, null, t('excludedTag')) : null,
+                      r.needsConfirm && !r.excluded ? el(Tag, null, t('needConfirmTag')) : null,
                       el('span', { 'data-dscw-p-stage': '', 'data-state': stState }, stateLabel(st)),
-                      st === 'stale'
+                      r.needsConfirm && !r.excluded
+                        ? el(Button, {
+                          variant: 'ghost', size: 'sm',
+                          onClick: () => confirmCompile(r.cwd), disabled: busyCwd === r.cwd,
+                        }, t('confirmCompile'))
+                        : null,
+                      st === 'stale' && !r.needsConfirm
                         ? el(Button, {
                           variant: 'ghost', size: 'sm',
                           onClick: () => compile(r.cwd), disabled: busyCwd === r.cwd,
@@ -1365,6 +1394,9 @@ window.__ModuleLoader__.load({
                       if (ljActive && lj.batchProgress) parts.push(`${t('batchLabel')} ${lj.batchProgress.completed}/${lj.batchProgress.total}`)
                       if (ljActive && lj.tps) parts.push(`tps ${lj.tps}`)
                       return el(React.Fragment, null,
+                        r.needsConfirm && !r.excluded
+                          ? el('div', { 'data-dscw-p-meta': '' }, t('confirmHint'))
+                          : null,
                         parts.length ? el('div', { 'data-dscw-p-meta': '' }, parts.join(' · ')) : null,
                         barTotal > 0 ? progressBar(barDone, barTotal) : null,
                       )

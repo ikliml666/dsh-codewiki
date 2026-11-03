@@ -4539,7 +4539,15 @@ export function installWebServer(ctx, service, extra = {}) {
           }
           reposCacheAt = Date.now()
         }
-        writeJson(res, 200, reposCache)
+        // 待确认状态与 needsConfirm 不进 30s 缓存：它随调度心跳实时变化，缓存会让用户
+        // 在「已登记待确认」后 30 秒内看不到确认按钮（面板每 2s 拉一次）。这两项每次求值。
+        const livePending = (schedState?.pendingConfirm ?? []).map((p) => p.cwd)
+        const livePendingKeys = new Set(livePending.map(normPathKey))
+        writeJson(res, 200, {
+          ...reposCache,
+          repos: (reposCache.repos ?? []).map((r) => ({ ...r, needsConfirm: livePendingKeys.has(normPathKey(r.cwd)) })),
+          scheduler: { ...reposCache.scheduler, lastScanPending: schedState?.lastScanPending ?? null, pendingConfirm: livePending },
+        })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
         }
@@ -4699,7 +4707,25 @@ export function installWebServer(ctx, service, extra = {}) {
           }
           return
         }
-        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."} / {"action":"compile","cwd":"..."} / {"action":"refresh"}' })
+        // 首次编译确认（0.17.27）：从待确认清单里摘掉并立即提交，语义等于用户手动点编译。
+        // 手动路径本来就不需要确认（用户按下按钮就是确认），所以这里不再二次校验。
+        if (body?.action === 'confirm' && body?.cwd) {
+          if (typeof compile !== 'function') { writeJson(res, 501, { error: '编译入口未初始化' }); return }
+          const dir = String(body.cwd)
+          const key = path.normalize(dir).replace(/[\\/]+$/, '').toLowerCase()
+          if (Array.isArray(schedState?.pendingConfirm)) {
+            schedState.pendingConfirm = schedState.pendingConfirm.filter((p) => path.normalize(String(p.cwd ?? '')).replace(/[\\/]+$/, '').toLowerCase() !== key)
+          }
+          reposCache = null
+          try {
+            const r = await compile({ cwd: dir, scope: ['auto', 'full', 'stale'].includes(body?.scope) ? body.scope : 'auto' }, {})
+            writeJson(res, 200, { ok: true, ...r })
+          } catch (err) {
+            writeJson(res, 400, { ok: false, error: String(err?.message ?? err) })
+          }
+          return
+        }
+        writeJson(res, 400, { error: '未知 action；支持 {"action":"cancel","jobId":"..."} / {"action":"compile","cwd":"..."} / {"action":"confirm","cwd":"..."} / {"action":"refresh"}' })
       },
     })
   })
@@ -4919,7 +4945,17 @@ export function apply(ctx, config) {
   // 必须合并持久仓库清单与 job 历史：后者最多保留 MAX_JOBS_KEPT 条，且启动会清理
   // Temp 终态；只扫历史会让清单里仍然过期的仓库永久退出自动更新。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
-  const schedState = { lastScan: 0, scanning: false, lastError: null, lastScanRepos: null, lastScanSubmitted: null, lastScanBusy: null, lastScanNoop: null, lastScanSkipped: null }
+  // pendingConfirm（0.17.27）：自动调度**不得**替用户决定「这个仓库要不要有 wiki」。
+  // 从没有过任何编译任务的仓库先登记在这里，等用户在面板上点「确认编译」；不想要就点
+  // 「排除」，进 excludePaths 后再也不会被扫到。判断依据只用 job 历史，不去跑 `cw status`：
+  // wiki 只可能由本插件的任务产生，没有任何任务历史 = 从没编译过，这是可证伪的判据。
+  // 只在内存里：重启后重新扫一遍会重新登记，而用户点过确认的仓库已经有任务历史，
+  // 不会再被登记——持久化反而会留下「确认过但任务被清理」的悬挂条目。
+  const schedState = {
+    lastScan: 0, scanning: false, lastError: null,
+    lastScanRepos: null, lastScanSubmitted: null, lastScanBusy: null, lastScanNoop: null,
+    lastScanSkipped: null, lastScanPending: null, pendingConfirm: [],
+  }
   let scanning = false
   const autoScan = async () => {
     const c = liveConfig(config)
@@ -4933,11 +4969,13 @@ export function apply(ctx, config) {
     schedState.lastScanBusy = 0
     schedState.lastScanNoop = 0
     schedState.lastScanSkipped = 0
+    schedState.lastScanPending = 0
     try {
-      const cwds = [...new Set([
-        ...loadKnownRepos(),
-        ...service.list().map((j) => j.cwd),
-      ].filter(Boolean))]
+      const known = loadKnownRepos()
+      const jobList = service.list()
+      const cwds = [...new Set([...known, ...jobList.map((j) => j.cwd)].filter(Boolean))]
+      // 有过编译任务历史的仓库集合：不在这个集合里的仓库即「从没编译过 wiki」。
+      const compiledKeys = new Set(jobList.map((j) => normPathKey(j.cwd)))
       // workspaceOnly（默认开）：只自动处理属于已添加 dsh 工作区（含子目录）的仓库。
       // 只让面板过滤遵守它，会出现「被移出工作区的仓库仍被后台定时编译、产物悄悄写进
       // 它的 .codewiki/，而面板上根本看不到这条任务」——用户既不知道它在编译也取消不了。
@@ -4945,13 +4983,43 @@ export function apply(ctx, config) {
       const wsPaths = workspaceFilterPaths(schedWorkspaceRegistry, config ?? {})
       for (const cwd of cwds) {
         if (wsPaths && !isExcluded(cwd, wsPaths)) { schedState.lastScanSkipped++; continue }
-        if (isExcluded(cwd, c.excludePaths)) continue
+        if (isExcluded(cwd, c.excludePaths)) {
+          // 已排除的仓库不再需要确认：等确认的条目留着会让面板显示一个用户刚拒绝的仓库
+          schedState.pendingConfirm = schedState.pendingConfirm.filter((p) => normPathKey(p.cwd) !== normPathKey(cwd))
+          continue
+        }
         // worktree 目录静默跳过（1.2.0）：历史任务里可能留着 worktree 路径，不编译也不记错误
         if (isWorktreeCwd(cwd)) continue
         // 空壳目录静默跳过（1.2.1）：扫不出源码的目录永远编译不出东西，submit 闸门虽也会拦，
         // 但在这里先跳掉更省事——不产生 job、不进 queueAhead 的「在等谁」名单。
         if (!hasCompilableSources(cwd)) continue
         schedState.lastScanRepos++
+        // 首次编译必须用户确认（0.17.27）：从没有过任何编译任务、磁盘上也没有 wiki 的仓库
+        // 只登记，不提交。判据取两者的**交集**，两个单独都不够：
+        //   · 只看任务历史：历史被 MAX_JOBS_KEPT 截断或手动清理后，编译过 wiki 的仓库会被
+        //     当成首次，用户每次清历史都要重新点一遍确认；
+        //   · 只看 status：wiki 目录被删掉的仓库报 missing，但它曾经编译过，用户已经表过态。
+        // 只有「没历史 + 没 wiki」才真正是「这次要第一次为它生成 wiki」。有历史的仓库仍然
+        // 走原路径，自动调度对它们的额外成本为零（不跑 cw status）。
+        if (!compiledKeys.has(normPathKey(cwd))) {
+          const binary = resolveBinary(c)
+          let state = ''
+          try {
+            state = parseStatus((await runCw(binary, cwd, ['status'], 20000)).stdout).state
+          } catch (err) {
+            // 判不出来就不替用户做决定：本轮跳过这个仓库（不提交也不登记），
+            // 下一轮重试。错误照旧记进 lastError，面板上看得见。
+            schedState.lastError = `${new Date().toISOString()} ${cwd} 判态失败：${String(err?.message ?? err).slice(0, 160)}`
+            continue
+          }
+          if (state === 'missing' || state === 'uncompiled') {
+            schedState.lastScanPending++
+            if (!schedState.pendingConfirm.some((p) => normPathKey(p.cwd) === normPathKey(cwd))) {
+              schedState.pendingConfirm.push({ cwd, at: new Date().toISOString() })
+            }
+            continue
+          }
+        }
         try {
           const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})
           // 三个口径分开计：submitted=本轮真提交了编译；busy=已有活动任务（幂等命中，不是没扫到，

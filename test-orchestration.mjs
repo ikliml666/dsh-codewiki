@@ -1292,6 +1292,71 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
   }
 }
 
+// ============================ 首次编译必须用户确认（0.17.27） ============================
+await cleanupServices()
+console.log('== 自动调度：从未编译过 wiki 的仓库只登记待确认，不替用户提交 ==')
+{
+  // 用户口径：原来没有编译过 codewiki 的项目，要不要生成 wiki 得由用户点确认；
+  // 不想要就加入排除。自动调度只负责把这类仓库挑出来，不负责替用户决定。
+  const freshRepo = makeFixtureRepo()
+  const mockFresh = makeBatchMock()
+  const repoFile = process.env.DSH_CODEWIKI_REPOS_FILE || reposFileFor(JOBS_FILE)
+  fs.writeFileSync(JOBS_FILE, JSON.stringify({ jobs: [] }), 'utf8')
+  // 仓库在已知清单里（用户加过工作区/见过它），但从没有过任何编译任务
+  fs.writeFileSync(repoFile, JSON.stringify({ repos: [freshRepo] }), 'utf8')
+  const ctxFresh = makeCtx()
+  try {
+    apply(ctxFresh.ctx, batchCfg({ autoUpdate: true, autoUpdateMin: 0 }))
+    const ctl = ctxFresh.endpoints.find((e) => e.path === '/api/codewiki/control')
+    const reposEp = ctxFresh.endpoints.find((e) => e.path === '/api/codewiki/repos')
+    // 心跳间隔默认为 60s，测试里靠 DSH_CODEWIKI_AUTO_SCAN_MS 缩短；等它扫到该仓库
+    let pending = []
+    let scanned = 0
+    const deadline = Date.now() + 15000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 150))
+      const res = fakeRes()
+      await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), res)
+      const data = JSON.parse(res.out)
+      pending = data?.scheduler?.pendingConfirm ?? []
+      scanned = data?.scheduler?.lastScanRepos ?? 0
+      if (pending.length) break
+    }
+    check(pending.some((p) => p.toLowerCase() === freshRepo.toLowerCase()),
+      `从没编译过的仓库进入待确认清单（实际 ${JSON.stringify(pending)}，扫到 ${scanned} 仓）`)
+    const jobsNow = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []
+    check(jobsNow.filter((j) => j.cwd.toLowerCase() === freshRepo.toLowerCase()).length === 0,
+      `待确认期间不得为它提交任何编译任务（实际 ${JSON.stringify(jobsNow.map((j) => ({ kind: j.kind, stage: j.stage })))}）`)
+    check(mockFresh.llmCalls.length === 0, '待确认期间不得发起任何模型请求')
+
+    // 总览卡片要能显示「需要确认」，面板据此给按钮
+    const resR = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resR)
+    const row = (JSON.parse(resR.out).repos ?? []).find((x) => x.cwd.toLowerCase() === freshRepo.toLowerCase())
+    check(row?.needsConfirm === true, `总览行标记 needsConfirm（实际 ${JSON.stringify(row && { state: row.state, needsConfirm: row.needsConfirm })}）`)
+
+    // 确认 → 立即编译，且确认清单里摘掉它
+    const resC = fakeRes()
+    await ctl.handler(fakeReq({ action: 'confirm', cwd: freshRepo }, '127.0.0.1', 'POST'), resC)
+    const confirmed = JSON.parse(resC.out)
+    check(resC.code === 200 && confirmed.ok === true, `confirm 动作被接受（实际 ${resC.code} ${resC.out?.slice(0, 120)}）`)
+    check(confirmed.submitted === true, `确认后立即提交编译（实际 ${JSON.stringify(confirmed).slice(0, 160)}）`)
+    await waitJob(freshRepo)
+    const resAfter = fakeRes()
+    await reposEp.handler(fakeReq({}, '127.0.0.1', 'GET'), resAfter)
+    const after = JSON.parse(resAfter.out)
+    check((after?.scheduler?.pendingConfirm ?? []).every((p) => p.toLowerCase() !== freshRepo.toLowerCase()),
+      '确认之后不再留在待确认清单里')
+    const rowAfter = (after.repos ?? []).find((x) => x.cwd.toLowerCase() === freshRepo.toLowerCase())
+    check(rowAfter?.needsConfirm === false, '已确认的仓库不再显示 needsConfirm')
+  } finally {
+    for (const dispose of ctxFresh.disposers) dispose()
+    mockFresh.restore()
+    fs.rmSync(freshRepo, { recursive: true, force: true })
+    try { fs.unlinkSync(repoFile) } catch { /* 测试清理 */ }
+  }
+}
+
 // ============================ 工作区任务过滤（0.4.9） ============================
 await cleanupServices()
 console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） ==')

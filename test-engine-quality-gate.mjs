@@ -647,6 +647,28 @@ await check('别名：模块名带扩展名的页，mod.md 被判命中且改写
   assert.match(page.content, /\]\(mod-ts\.md\)/, page.content)
 })
 
+// ── 10. 引擎编造页名：产物缺陷如实上报，但落进 wiki 的正文不得留死链 ────────
+await check('未命中链接在渲染期降级为纯文字，缺陷仍由 dead-link 如实上报', async () => {
+  // 两条要求同时成立，缺一条都不行：
+  //   · output.js 必须报 dead-link（引擎编造页名是真实缺陷，不许静默吞掉）；
+  //   · 渲染进 wiki 的正文里不能留 [文字](不存在的页.md)（点开就是 404）。
+  const docs = join(root, 'drop-dead-link')
+  mkdirSync(docs, { recursive: true })
+  writeFileSync(join(docs, 'overview.md'), '# 概览\n\n根页。\n', 'utf8')
+  writeFileSync(join(docs, 'other.md'), '# other\n\n见 [编造的页](gone.md) 与 [真实页](real.md)。\n', 'utf8')
+  writeFileSync(join(docs, 'real.md'), '# real\n\n## 职责\n\n真实页正文。\n', 'utf8')
+  writeFileSync(join(docs, 'module_tree.json'), JSON.stringify({
+    other: { path: 'src/other.ts', components: [], children: {} },
+    real: { path: 'src/real.ts', components: [], children: {} },
+  }), 'utf8')
+  const r = gateNativeOutput({ docsDir: docs, requireCommittedInput: false, includeContent: true })
+  assert.ok(r.defects.some((d) => d.kind === 'dead-link'), JSON.stringify(r.defects))
+  const page = r.rendered.find((p) => p.wikiPath.endsWith('/other.md'))
+  assert.ok(page, JSON.stringify(r.rendered.map((p) => p.wikiPath)))
+  assert.equal(page.content.includes('gone.md'), false, page.content)
+  assert.match(page.content, /见 编造的页 与 \[真实页\]\(real\.md\)/, page.content)
+})
+
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) {
