@@ -2,37 +2,18 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f"
+    "baseCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f",
+    "headCommit": "a5b26e641327a215edf2309f2028d8110c4a172b"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "19721a5478389e8ce4d73de10d5939451a90e703",
-    "headCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f",
+    "baseCommit": "d5f240bd51c47851edc4daaf3925299d810dd05f",
+    "headCommit": "a5b26e641327a215edf2309f2028d8110c4a172b",
     "committed": [
-      "CHANGELOG.md",
-      "README.md",
-      "client.js",
-      "docs/fsoft-native-engine.md",
       "index.js",
-      "lib/article-contract.js",
-      "lib/engine/manifest.js",
-      "lib/engine/native-run.js",
-      "lib/engine/output.js",
       "lib/engine/python/entry.py",
-      "lib/engine/quality-gate.js",
-      "package.json",
-      "patches/README.md",
-      "patches/upstream-module-parallel.patch",
-      "test-article-contract.mjs",
-      "test-client-panel.mjs",
       "test-config.mjs",
       "test-engine-native-job.mjs",
-      "test-engine-output.mjs",
-      "test-engine-python-entry.mjs",
-      "test-engine-quality-gate.mjs",
-      "test-fixtures/fake-native-engine.mjs",
-      "test-orchestration.mjs",
       "test-upstream-parallel.mjs"
     ],
     "staged": [],
@@ -49,7 +30,8 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mvzfsruh-5-native（40 个文件）"
+    "持久化基线 19721a5 与本次 cw 基线 d5f240b 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0075ut-5-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-02T16:31:06.045Z"
+  "updatedAt": "2026-11-03T01:33:31.065Z"
 }
