@@ -162,7 +162,11 @@ function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {
     if (action === 'update' && fs.existsSync(abs)) return
     fs.writeFileSync(abs, body, 'utf8')
   }
-  keep('overview.md', '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n')
+  // deadlink：正文链到一个模块树里不存在的页。真机上这是 partial 的主因（模型照旧
+  // 聚类记忆编造页名），用来验证「语义校对改对后重判门」这条链路。
+  keep('overview.md', MODE === 'deadlink'
+    ? '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](gone-module.md)。\n'
+    : '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n')
   keep('core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
   // missing-page：这一页**怎么都不写**（既不新建也不重写）。用来模拟「全量修复
   // 也补不齐」的真实形态（provider 空响应 / 模块树与产物不符），从而验证调用方

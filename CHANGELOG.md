@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.17.31 — 2026-11-04
+
+### 步骤条对齐真实流程 + 新增语义校对（模型编造的页名当场改对）
+
+用户反馈「任务标签展示的流程与现有流程不符，请改进」并「增加校对流程」。核对后确认面板
+确实在说两件不成立的事：
+
+- **「横切」永远不会发生**：单轮写作通道 0.17.5 已退役，原生任务只走 `tickNative`，
+  `crosscut` 这个格子在真实编译里始终是空的；
+- **「校对」装的是结构校验**：`NATIVE_STAGE_TO_PANEL` 把引擎的 `validate`（质量门结构校验）
+  塞进 `review` 格子，而当时根本没有语义校对这回事。写作前的 `env`/`graph`/`cluster`
+  三段又全被映射成「文章」，等于什么都没说。
+
+改法：
+
+1. `client.js` 步骤条改为对齐真实动作的七步：排队／准备／文章／校对／校验／索引／提交。
+   `NATIVE_STAGE_TO_PANEL` 同步改为 `env|graph|cluster → prepare`、`proofread → review`、
+   `validate → validate`。旧任务记录里的 `crosscut`/`plan` 经 `LEGACY_STAGE` 归并，
+   历史任务不会因为字段消失而显示空白。
+2. **新增语义校对阶段**（`lib/engine/proofread.js`）：在质量门之前，把「正文链到不存在
+   页面」的链接当场改对。
+
+校对为什么需要、以及它不是什么：原生引擎写作时，模型会照着旧版聚类的记忆编造页面名
+（真机 `dsh-git-worktree` 的 `client_review_console/status_readouts.md`、`dsh-hindsight-on-demand`
+漏写 `_ui` 后缀的 `settings_and_logs.md`），模块树里根本没有那些页。质量门如实判 `dead-link`，
+于是这些仓库每轮都停在「部分完成」——判据没错，是产物真的错。所以校对**修正文、不放宽判据**：
+它只处理这一类可证伪的问题（只看本页 + 真实页名清单就能改对），改完仍要重新判一遍门，
+改不掉就照旧判 partial。
+
+实现要点：
+
+- `proofreadPages({docsDir, sources, chat, maxPages})` 逐篇：解析本页失效链接 → 一次单轮
+  模型请求 → 解析 `<PAGE>` 段 → **三重护栏**（缺 frontmatter 保留原文、模型没改对即失效数
+  未减少保留原文、模型报 `NO_CHANGE` 不写盘）→ 写盘并记 note。
+- 只把有失效链接的页送去校对（`missingLinksOf` 为 0 的页不发请求），默认上限 6 篇，
+  单篇一次请求。
+- 接线在 `native-run.js` 的「2.6) 校对」段：先跑一次门拿到 `dead-link` 的源页（门是纯读
+  `docsDir` 的，跑两次无副作用），校对后若真有改写就重判门。`deps.chat` 未注入时整段跳过，
+  行为与旧版完全一致。
+- `index.js` 用 `llmChat` 接上 `deps.chat`，复用编译模型的 provider/model/思考档位，
+  不额外配置一套模型。
+
+验证：
+
+- `test-engine-proofread.mjs`（新增，13 项）覆盖判据、提示词、回复解析与三类护栏；
+- `test-engine-proofread-e2e.mjs`（新增，11 项）走真实链路（真 spawn 假引擎 → 真门 →
+  真校对 → 再判门 → 真落地）：开校对后 `dead-link` 消失、关校对时如实 partial、
+  模型没改对时保留原文仍 partial；
+- `test-client-panel.mjs` 步骤键清单同步为七步（`stepCrosscut` 已不存在）；
+- 全套回归 **39 个文件全绿**。
+
 ## 0.17.30 — 2026-11-03
 
 ### 无变化轮也要清残留页：残骸不再只能等「源码刚好有改动」才被清理

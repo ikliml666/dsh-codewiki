@@ -2457,10 +2457,12 @@ function createJobService(config, onSettled) {
 
   // 原生八段 → 面板现有阶段。面板步骤条按 ACTIVE_STAGES 渲染，改它会牵动一大堆
   // 布局与文案；真实引擎阶段另存 job.nativeStage，让面板既能显示「在第几步」，
-  // 又能显示「引擎自己走到哪」。映射原则：凡是写文章之前的一律算「写文章中」。
+  // 又能显示「引擎自己走到哪」。映射原则：引擎里发生在写作之前的三段（探测环境、
+  // 解析代码图、聚类模块）合成步骤条的「准备」——它们对用户是同一件事：还在摸清仓库。
+  // validate 有自己的格子（校验），不再借用 review（那现在是校对真正发生的位置）。
   const NATIVE_STAGE_TO_PANEL = {
-    env: 'articles', graph: 'articles', cluster: 'articles', articles: 'articles',
-    validate: 'review', index: 'index', baseline: 'index', commit: 'commit',
+    env: 'prepare', graph: 'prepare', cluster: 'prepare', articles: 'articles',
+    proofread: 'review', validate: 'validate', index: 'index', baseline: 'index', commit: 'commit',
   }
   // 引擎事件日志：内存留最近 40 条给面板即时看，同时逐条追加到仓库外的 NDJSON
   // （lib/job-logs.js）。两条路都必须有——内存那份随任务记录截断/宿主重启消失，
@@ -2521,6 +2523,19 @@ function createJobService(config, onSettled) {
             engineRoot: '',
           },
           llm: llmRef,
+          // 语义校对的单轮通道：用与写作同一个编译模型，不再单独配一套。
+          // 校对发生在质量门之前，只改「链到不存在页面」的链接，改完重新判门。
+          chat: async (prompt, signal) => {
+            const r = await llmChat({
+              llm: llmRef,
+              provider: c.batchProvider,
+              model: c.batchModel,
+              reasoningEffort: c.batchReasoningEffort,
+              prompt,
+              signal,
+            })
+            return r.content
+          },
           // 会话记录钩子：原生通道的模型请求全部经 llm-bridge 打进来，不在这里接线
           // 面板「会话」视图就永远是空列表（batch/agentic 通道早已各自接好）。
           onRequestStart: (task) => beginSessionRecord(job, task),

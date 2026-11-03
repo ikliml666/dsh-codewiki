@@ -366,6 +366,7 @@ test-engine-python-entry.mjs / test-engine-output.mjs / test-engine-output-real.
 test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.mjs
 test-engine-llm-bridge.mjs / test-engine-native-job.mjs
 test-engine-native-incremental.mjs / test-engine-process-tree.mjs
+test-engine-proofread.mjs / test-engine-proofread-e2e.mjs（语义校对，0.17.31）
 
 # 增量并行与断点续跑（0.17.2）/ 全量并行与缺页修复（0.17.12）
 test-fsoft-runtime.mjs / test-fsoft-coverage.mjs（含全量并行、module_tree 并发合并、未归属文件补挂） / test-upstream-parallel.mjs

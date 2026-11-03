@@ -208,8 +208,10 @@ const gotoTab = (Panel, React, reset, key = 'tabTasks') => {
 
 // 步骤条每个阶段都必须有字典项：漏一个就在面板上显示裸键名。真机截图里第 7 项就这样
 // 显示了 stepCommit —— 0.17.5 把「提交」接进步骤条，却没有补对应文案。
+// 0.17.31 起步骤条对齐真实流程：排队／准备／文章／校对／校验／索引／提交，
+// 「横切」（crosscut）在原生通道里永远不会发生，已从步骤条移除。
 const STEP_KEYS = [
-  'stepQueued', 'stepArticles', 'stepCrosscut', 'stepReview', 'stepIndex', 'stepCommit',
+  'stepQueued', 'stepPrepare', 'stepArticles', 'stepReview', 'stepValidate', 'stepIndex', 'stepCommit',
 ]
 
 await check('面板：步骤条每个阶段都有中英文文案（防裸键名）', async () => {

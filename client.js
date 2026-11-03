@@ -29,8 +29,15 @@ window.__ModuleLoader__.load({
     // 选了模型不支持的值由 llmChat 兜底剥档重试，不会失败
     const GENERIC_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
     const REPOS_POLL_MS = 10000
-    // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队
-    const ACTIVE_STAGES = ['queued', 'articles', 'crosscut', 'review', 'index', 'commit']
+    // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队。
+    // 后面六步就是编译真实发生的事，一步不多：准备（探测环境+解析代码图+聚类）→ 写作 →
+    // 校对 → 校验 → 索引 → 提交。旧值 crosscut（横切）随单轮写作通道退役，原生通道
+    // （唯一通道）从不经过它；review 现在是校对真正发生的位置。
+    const ACTIVE_STAGES = ['queued', 'prepare', 'articles', 'review', 'validate', 'index', 'commit']
+    // 历史任务里还留着已退役的阶段名：不映射的话 indexOf 得 -1，步骤条在失败/取消时
+    // 会整条熄灭、不标红，用户看不出卡在哪一步。
+    const LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }
+    const stageOf = (job) => LEGACY_STAGE[job?.stage] ?? job?.stage
 
     const zh = () => ({
       title: 'CodeWiki',
@@ -123,10 +130,10 @@ window.__ModuleLoader__.load({
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stageQueued: '排队中',
+      stagePrepare: '准备中',
       stageArticles: '写文章中',
-      stageCrosscut: '横切中',
-      stageCompose: '合成中',
       stageReview: '校对中',
+      stageValidate: '校验中',
       stageIndex: '建索引中',
       stageCommit: '提交产物中',
       stageDone: '已完成',
@@ -141,6 +148,7 @@ window.__ModuleLoader__.load({
       nativeGraph: '解析代码图',
       nativeCluster: '聚类模块',
       nativeValidate: '产物校验',
+      nativeProofread: '语义校对',
       nativeBaseline: '推进基线',
       gateLabel: '质量门',
       applyLabel: '落地',
@@ -192,9 +200,10 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: '最小 5；扫描对 jobs 历史工作区逐个 cw status 判态，仅提交有变更的。',
       excludePathsLabel: '排除清单',
       excludePathsHint: '这些目录（含子目录）不编译 CodeWiki；换行/分号/逗号分隔绝对路径。',
+      stepPrepare: '准备',
       stepArticles: '文章',
-      stepCrosscut: '横切',
       stepReview: '校对',
+      stepValidate: '校验',
       stepIndex: '索引',
       stepCommit: '提交',
       perMin: '篇/分',
@@ -315,10 +324,10 @@ window.__ModuleLoader__.load({
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stageQueued: 'Queued',
+      stagePrepare: 'Preparing',
       stageArticles: 'Writing articles',
-      stageCrosscut: 'Cross-cutting',
-      stageCompose: 'Composing',
       stageReview: 'Proofreading',
+      stageValidate: 'Validating',
       stageIndex: 'Indexing',
       stageCommit: 'Committing',
       stepQueued: 'Queue',
@@ -332,6 +341,7 @@ window.__ModuleLoader__.load({
       nativeGraph: 'Parsing code graph',
       nativeCluster: 'Clustering modules',
       nativeValidate: 'Validating output',
+      nativeProofread: 'Proofreading content',
       nativeBaseline: 'Advancing baseline',
       gateLabel: 'Quality gate',
       applyLabel: 'Apply',
@@ -382,9 +392,10 @@ window.__ModuleLoader__.load({
       autoUpdateMinHint: 'Minimum 5. Each scan runs cw status per historical workspace and submits only changed ones.',
       excludePathsLabel: 'Excluded paths',
       excludePathsHint: 'CodeWiki is never compiled under these directories (subtree included). Separate absolute paths with newlines, semicolons or commas.',
+      stepPrepare: 'Prep',
       stepArticles: 'Write',
-      stepCrosscut: 'Cross',
       stepReview: 'Proof',
+      stepValidate: 'Check',
       stepIndex: 'Index',
       stepCommit: 'Commit',
       perMin: 'articles/min',
@@ -1069,7 +1080,7 @@ window.__ModuleLoader__.load({
         // 直接映射回步骤条标签，避免同一阶段出现两种说法。
         const NATIVE_STAGE_KEYS = {
           env: 'nativeEnv', graph: 'nativeGraph', cluster: 'nativeCluster',
-          articles: 'stageArticles', validate: 'nativeValidate',
+          articles: 'stageArticles', proofread: 'nativeProofread', validate: 'nativeValidate',
           index: 'stageIndex', baseline: 'nativeBaseline', commit: 'stageCommit',
         }
         const nativeStageName = (stage) => (stage && NATIVE_STAGE_KEYS[stage] ? tBound(NATIVE_STAGE_KEYS[stage]) : null)
@@ -1122,17 +1133,22 @@ window.__ModuleLoader__.load({
             el('path', { d, fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }))
         }
 
-        // 六阶段步骤条：已完成绿点（title 带各阶段耗时）、当前阶段实心点+实时计时、
-        // 失败/取消在最后计时段标红/黄。终态 done 全绿。
+        // 七步步骤条（排队 + 六个真实阶段）：已完成绿点（title 带各阶段耗时）、
+        // 当前阶段实心点+实时计时、失败/取消在最后计时段标红/黄。终态 done 全绿。
         const stepName = (s) => tBound(`step${s.charAt(0).toUpperCase()}${s.slice(1)}`)
-        // 旧任务可能残留已删阶段（如 plan）的计时键——过滤掉，避免 indexOf 得 -1
-        // 导致失败/取消时 failIdx 失效、步骤条全熄不标红
+        // 阶段耗时按「当前阶段名」取：历史任务里的键可能是已退役的 plan/crosscut。
+        const timingsOf = (job) => {
+          const out = {}
+          for (const [k, v] of Object.entries(job.stageTimings ?? {})) out[LEGACY_STAGE[k] ?? k] = v
+          return out
+        }
         const lastTimedStage = (job) => {
-          const keys = Object.keys(job.stageTimings ?? {}).filter((k) => ACTIVE_STAGES.includes(k))
+          const keys = Object.keys(job.stageTimings ?? {}).map((k) => LEGACY_STAGE[k] ?? k)
+            .filter((k) => ACTIVE_STAGES.includes(k))
           return keys.length ? keys[keys.length - 1] : null
         }
         const stageBar = (job) => {
-          const idx = ACTIVE_STAGES.indexOf(job.stage)
+          const idx = ACTIVE_STAGES.indexOf(stageOf(job))
           const terminal = idx < 0
           // partial（部分完成）与 done 一样「所有阶段都跑过了」，区别只在终态标签与
           // 未消化变化的提示——所以步骤条不该停在某个阶段标红，只有 failed/cancelled 才这样。
@@ -1143,7 +1159,7 @@ window.__ModuleLoader__.load({
               const done = terminal ? ((failIdx < 0 && cleanEnd) || i < failIdx) : i < idx
               const running = !terminal && i === idx
               const failedStep = terminal && failIdx >= 0 && i === failIdx
-              const dur = job.stageTimings?.[s]
+              const dur = timingsOf(job)[s]
               const live = running && job.stageStartedAt ? ` ${fmtMs(Date.now() - Date.parse(job.stageStartedAt))}` : ''
               const label = `${stepName(s)}${running || failedStep ? (live || (dur ? ` ${fmtMs(dur)}` : '')) : ''}`
               return el('div', {
@@ -1158,11 +1174,11 @@ window.__ModuleLoader__.load({
             }))
         }
         // 总进度：各阶段定权线性推进，阶段内按 taskList 完成数折算；封顶 99，done 才 100。
-        // compose（合成）阶段 0.17.5 已随单轮写作通道退役，权重按去掉它之后的阶段重新分配，
-        // 保持总和为 1——否则百分比会在横切→校对之间凭空跳掉 5 个点。
-        const STAGE_WEIGHTS = { queued: 0, articles: 0.66, crosscut: 0.11, review: 0.16, index: 0.05, commit: 0.02 }
+        // 权重对应七步里除排队外的六个真实阶段，总和为 1——漏一步或比例错，百分比就会在
+        // 相邻两步之间凭空跳点。准备阶段（环境+代码图+聚类）在大仓库上最费时间，给到 0.24。
+        const STAGE_WEIGHTS = { queued: 0, prepare: 0.24, articles: 0.46, review: 0.14, validate: 0.07, index: 0.05, commit: 0.04 }
         const overallPct = (job) => {
-          const idx = ACTIVE_STAGES.indexOf(job.stage)
+          const idx = ACTIVE_STAGES.indexOf(stageOf(job))
           // partial 是所有阶段都跑完但完整性没成立：进度按 100 显示（活干完了），
           // 由终态标签「部分完成」+ 阻塞原因说明为什么没算完整成功。
           if (idx < 0) return (job.stage === 'done' || job.stage === 'partial') ? 100 : null
@@ -1170,12 +1186,12 @@ window.__ModuleLoader__.load({
           for (let i = 0; i < idx; i++) pct += STAGE_WEIGHTS[ACTIVE_STAGES[i]] ?? 0
           const tl = Array.isArray(job.taskList) ? job.taskList : []
           const frac = tl.length ? tl.filter((x) => x.state === 'done').length / tl.length : 0
-          return Math.min(99, Math.round((pct + (STAGE_WEIGHTS[job.stage] ?? 0) * frac) * 100))
+          return Math.min(99, Math.round((pct + (STAGE_WEIGHTS[stageOf(job)] ?? 0) * frac) * 100))
         }
         // 吞吐徽标：实时通道显示 tok/s + spark；批量通道显示完成速率（篇/分，EWMA 平滑）+ ETA；
         // 批次尚无完成样本时显示排队/执行时长（batchSubmittedAt 起算）
         const throughputBadge = (job, sparkOf, rateOf) => {
-          if (!ACTIVE_STAGES.includes(job.stage)) return null
+          if (!ACTIVE_STAGES.includes(stageOf(job))) return null
           if (typeof job.tps === 'number' && job.tps > 0) {
             return el('span', { 'data-dscw-p-badge': '', 'data-tone': 'live' },
               `${job.tps >= 100 ? Math.round(job.tps) : job.tps.toFixed(1)} tok/s`,
@@ -1625,7 +1641,7 @@ window.__ModuleLoader__.load({
 
           const kindLabel = (kind) => (t(`kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`))
 
-          const isActive = (job) => ACTIVE_STAGES.includes(job.stage)
+          const isActive = (job) => ACTIVE_STAGES.includes(stageOf(job))
 
           // 按工作区（cwd）分组；保持首次出现顺序，组内最新在前（服务历史折叠区）
           const groups = []
