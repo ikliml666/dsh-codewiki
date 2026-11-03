@@ -21,7 +21,7 @@ import {
   finishReasonToOpenAI,
   chunksToCompletion,
   sseFrame,
-  chunksToSse,
+  streamChunkToSse,
   PLACEHOLDER_KEY_PATTERN,
   isPlaceholderKey,
 } from './lib/engine/openai-bridge.js'
@@ -276,66 +276,59 @@ await check('sseFrame：格式是 data: <json>\\n\\n，[DONE] 是独立帧', asy
   assert.equal(sseFrame('[DONE]'), 'data: [DONE]\n\n')
 })
 
-await check('chunksToSse：首个帧带 role，文本增量逐帧，末帧带 finish_reason', async () => {
-  const frames = chunksToSse({
-    id: 'chatcmpl-2',
-    model: 'hy3',
-    created: 1700000000,
-    chunks: [
-      chunk('text-delta', { index: 0, text: 'A' }),
-      chunk('text-delta', { index: 0, text: 'B' }),
-      chunk('finish', { reason: { kind: 'stop' } }),
-    ],
-  })
-  const objs = frames.filter((f) => f !== 'data: [DONE]\n\n').map((f) => JSON.parse(f.slice(6)))
+// 桥真实的发送路径是「每收到一个 chunk 就转一帧」，所以这里也逐帧验证。
+// 曾经有个 chunksToSse 把入参当成「一整条已结束的流」，缺 finish 就替调用方补一个结束帧；
+// 逐帧调用它等于给每个中间帧都塞了假的 finish_reason，引擎会以为这一轮已结束。已删除。
+function framesOf(chunks, meta = { id: 'chatcmpl-2', model: 'hy3', created: 1700000000 }) {
+  const frames = []
+  for (const c of chunks) frames.push(...streamChunkToSse(c, meta))
+  return frames
+}
+
+await check('streamChunkToSse：首个帧带 role，正文增量逐帧，只有 finish 帧带 finish_reason', async () => {
+  const objs = framesOf([
+    chunk('text-delta', { index: 0, text: 'A' }),
+    chunk('text-delta', { index: 0, text: 'B' }),
+    chunk('finish', { reason: { kind: 'stop' } }),
+  ]).map((f) => JSON.parse(f.slice(6)))
   assert.equal(objs[0].object, 'chat.completion.chunk')
   assert.equal(objs[0].choices[0].delta.role, 'assistant')
-  const text = objs.map((o) => o.choices[0]?.delta?.content ?? '').join('')
-  assert.equal(text, 'AB')
-  const last = objs[objs.length - 1]
-  assert.equal(last.choices[0].finish_reason, 'stop')
-  assert.equal(frames[frames.length - 1], 'data: [DONE]\n\n', '必须以 [DONE] 收尾，否则引擎的流读取会挂住')
+  assert.equal(objs.map((o) => o.choices[0]?.delta?.content ?? '').join(''), 'AB')
+  assert.equal(objs[objs.length - 1].choices[0].finish_reason, 'stop')
+  assert.deepEqual(objs.slice(0, -1).map((o) => o.choices[0].finish_reason), [null, null], '中间帧不得带 finish_reason')
 })
 
-await check('chunksToSse：tool call 增量逐帧带 id/name/arguments 片段', async () => {
-  const frames = chunksToSse({
-    id: 'c', model: 'm', created: 1,
-    chunks: [
-      chunk('tool-call-delta', { index: 0, id: 'call_1', name: 'read_file', argumentsDelta: '{"p' }),
-      chunk('tool-call-delta', { index: 0, id: 'call_1', argumentsDelta: ':1}' }),
-      chunk('finish', { reason: { kind: 'tool-calls' } }),
-    ],
-  })
-  const objs = frames.filter((f) => f !== 'data: [DONE]\n\n').map((f) => JSON.parse(f.slice(6)))
+await check('streamChunkToSse：tool call 增量逐帧带 id/name/arguments 片段', async () => {
+  const objs = framesOf([
+    chunk('tool-call-delta', { index: 0, id: 'call_1', name: 'read_file', argumentsDelta: '{"p' }),
+    chunk('tool-call-delta', { index: 0, id: 'call_1', argumentsDelta: ':1}' }),
+    chunk('finish', { reason: { kind: 'tool-calls' } }),
+  ]).map((f) => JSON.parse(f.slice(6)))
   const calls = objs.flatMap((o) => o.choices[0]?.delta?.tool_calls ?? [])
-  assert.ok(calls.length >= 2, JSON.stringify(objs))
+  assert.equal(calls.length, 2)
   assert.equal(calls[0].id, 'call_1')
   assert.equal(calls[0].function.name, 'read_file')
-  const args = calls.map((c) => c.function?.arguments ?? '').join('')
-  assert.equal(args, '{"p:1}')
-  const last = objs[objs.length - 1]
-  assert.equal(last.choices[0].finish_reason, 'tool_calls')
+  assert.equal(calls.map((c) => c.function?.arguments ?? '').join(''), '{"p:1}')
+  assert.equal(objs[objs.length - 1].choices[0].finish_reason, 'tool_calls')
 })
 
-await check('chunksToSse：usage 单独成帧（带 usage 字段，OpenAI stream_options 语义）', async () => {
-  const frames = chunksToSse({
-    id: 'c', model: 'm', created: 1,
-    chunks: [
-      chunk('text-delta', { index: 0, text: 'x' }),
-      chunk('usage', { usage: { inputTokens: 5, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } }),
-      chunk('finish', { reason: { kind: 'stop' } }),
-    ],
-  })
-  const objs = frames.filter((f) => f !== 'data: [DONE]\n\n').map((f) => JSON.parse(f.slice(6)))
+await check('streamChunkToSse：usage 单独成帧（带 usage 字段，OpenAI stream_options 语义）', async () => {
+  const objs = framesOf([
+    chunk('text-delta', { index: 0, text: 'x' }),
+    chunk('usage', { usage: { inputTokens: 5, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } }),
+    chunk('finish', { reason: { kind: 'stop' } }),
+  ]).map((f) => JSON.parse(f.slice(6)))
   const usageFrame = objs.find((o) => o.usage)
   assert.ok(usageFrame, '流式必须能带 usage，否则引擎的用量账本永远是 0')
   assert.equal(usageFrame.usage.prompt_tokens, 5)
   assert.equal(usageFrame.usage.completion_tokens, 2)
 })
 
-// ---------------------------------------------------------------------------
-// 占位 key（凭证边界）
-// ---------------------------------------------------------------------------
+await check('streamChunkToSse：reasoning/block 类 chunk 不产出任何帧（不进正文、不伪造结束）', async () => {
+  assert.deepEqual(framesOf([{ type: 'reasoning-delta', index: 0, text: '思考' }]), [])
+  assert.deepEqual(framesOf([{ type: 'block-start', index: 0 }]), [])
+  assert.deepEqual(framesOf([{ type: 'block-end', index: 0 }]), [])
+})
 
 await check('isPlaceholderKey：只认桥自己发的占位 key，真实 key 一律不认', async () => {
   assert.equal(isPlaceholderKey('dsh-bridge-placeholder'), true)

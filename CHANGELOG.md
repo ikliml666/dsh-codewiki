@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.17.13 — 2026-11-03
+
+### 桥逐帧转发 SSE 时伪造 finish_reason，引擎以为每轮都结束
+
+0.17.12 真机跑 `dsh-git-worktree` 时，约 20 个模块同时报
+`Exceeded maximum output retries (3)` 与 `Please return text or call a tool`。
+当时先怀疑是并行度把模型打崩，实测否掉了：按运行期平均并发分桶，并发 1~1.5 的空输出率
+83%、1.5~2.5 是 95%，低并发一样空；bridge 也没有任何模块级可变状态。
+
+真正的根因在 `lib/engine/llm-bridge.js`：它把每个 chunk 单独交给
+`chunksToSse({ chunks: [chunk] })`，而 `chunksToSse` 的语义是「入参是一整条已结束的流」，
+内部 `if (!sawFinish)` 会补一个 `finish_reason` 结束帧。逐帧调用等于给每个中间分片都补了一个
+假的结束标记，引擎（pydantic-ai）收到后认为这一轮已经结束——既不执行工具调用，也没有正文，
+连续 3 次就抛 `ToolRetryError`。会话记录里 `outputChars === 0` 占 94%（133/142）正是这个形态：
+`003.full.json` 的 messages 是 `system > user > assistant > tool`，assistant 只有一句开场白、
+没有 `tool_calls`，下一轮 tool 消息为空。
+
+该 bug 由提交 `ccc95441`（阶段 1A/1B/1C）引入，与并行实现无关，串行时代同样存在——
+只是并行让它一次暴露在更多模块上。
+
+### 修法：逐帧转发与整条流折叠彻底分开
+
+- `lib/engine/openai-bridge.js` 新增 `streamChunkToSse(chunk, { id, model, created })`：
+  单个 chunk → 帧数组，**不补 finish、不补 `[DONE]`**。`text-delta` / `tool-call-delta` 帧一律
+  `finish_reason: null`；`usage` 出 `choices: []`；只有真正的 `finish` chunk 才产出结束帧；
+  `reasoning-delta` / `block-*` 返回空数组。
+- **删除 `chunksToSse`**：修好后它已无生产调用方，「入参是完整流、缺 finish 就补」的语义
+  正是事故来源，留着只会被下一次误用。整条流折叠仍由 `chunksToCompletion` 负责。
+- `lib/engine/llm-bridge.js` 的流式循环改为 `for (const frame of streamChunkToSse(chunk, {...})) res.write(frame)`。
+
+### 验证
+
+- `test-engine-llm-bridge.mjs` 新增「非结尾 chunk 不得提前补 finish_reason」
+  （断言 finish 序列为 `["tool_calls"]`、以 `data: [DONE]` 收尾）与「同一 index 的参数分片
+  拼到同一个 `tool_calls` 条目」；对修复前的实现为红（实测序列 `["stop","tool_calls","tool_calls","tool_calls"]`）。
+  现 25 项全绿。
+- `test-engine-bridge.mjs` 的 3 个 `chunksToSse` 用例改写为 `streamChunkToSse` 逐帧用例，
+  并新增「reasoning/block 类 chunk 不产出任何帧」。现 25 项全绿。
+- 全套 36 个测试文件（跳过 `test-wiki-anchors.mjs` 的文档锚点检查外）全部通过。
 ## 0.17.12 — 2026-11-03
 
 ### 四个仓库恒定 partial：质量门没错，产物真的缺页

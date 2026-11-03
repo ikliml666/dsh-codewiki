@@ -382,6 +382,51 @@ await check('会话钩子：钩子抛错不拖垮请求（面板记账不能影�
   })
 })
 
+// 真实模型常先吐 reasoning-delta / tool-call-delta，再吐正文或更多调用。这些「不是结尾」的
+// chunk 若在单独的 SSE 帧里带上 finish_reason，引擎会以为这一轮已经结束：既不执行工具、也没有
+// 正文，pydantic-ai 于是判 "Please return text or call a tool" 并重试到上限。
+await check('流式：非结尾 chunk 不得提前补 finish_reason', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'reasoning-delta', index: 0, text: '我先想一下' }
+    yield { type: 'tool-call-delta', index: 0, id: 'call_1', name: 'str_replace_editor', argumentsDelta: '{"command":"view"' }
+    yield { type: 'tool-call-delta', index: 0, argumentsDelta: ',"path":"a.ts"}' }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm' }, async (bridge) => {
+    const res = await post(bridge, { ...simpleBody, stream: true })
+    const text = await res.text()
+    const finishes = text.split('\n\n').filter((f) => f.trim())
+      .map((f) => f.replace(/^data: /, ''))
+      .filter((f) => f !== '[DONE]')
+      .map((f) => JSON.parse(f))
+      .filter((j) => j.choices?.[0]?.finish_reason)
+      .map((j) => j.choices[0].finish_reason)
+    assert.deepEqual(finishes, ['tool_calls'], `非结尾 chunk 不得带 finish_reason，实际：${JSON.stringify(finishes)}`)
+    assert.ok(text.trimEnd().endsWith('data: [DONE]'), '必须以 [DONE] 收尾')
+  })
+})
+
+// 同一轮的多个 tool-call-delta 必须落在同一个 tool_calls[index] 上；逐帧转换若把 index 重排，
+// 引擎会看到多个残缺调用而不是一个完整调用。
+await check('流式：同一 index 的参数分片拼到同一个 tool_calls 条目', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'tool-call-delta', index: 0, id: 'call_1', name: 'edit', argumentsDelta: '{"a"' }
+    yield { type: 'tool-call-delta', index: 0, argumentsDelta: ':1}' }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm' }, async (bridge) => {
+    const text = await (await post(bridge, { ...simpleBody, stream: true })).text()
+    const calls = text.split('\n\n').filter((f) => f.trim())
+      .map((f) => f.replace(/^data: /, ''))
+      .filter((f) => f !== '[DONE]')
+      .map((f) => JSON.parse(f))
+      .flatMap((j) => j.choices?.[0]?.delta?.tool_calls ?? [])
+    assert.equal(calls.length, 2)
+    assert.deepEqual(calls.map((c) => c.index), [0, 0])
+    assert.equal(calls.map((c) => c.function?.arguments ?? '').join(''), '{"a":1}')
+  })
+})
+
 await check('启动参数缺失 → 抛错（不让桥以半配置状态监听端口）', async () => {
   assert.throws(() => startLlmBridge({}), /llm/)
   assert.throws(() => startLlmBridge({ llm: { stream() {} } }), /provider/)
