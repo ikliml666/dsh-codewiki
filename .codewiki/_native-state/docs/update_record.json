@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T09:26:52+0800",
-  "finished_at": "2026-11-03T09:33:30+0800",
+  "started_at": "2026-11-03T11:13:18+0800",
+  "finished_at": "2026-11-03T11:13:18+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -20,28 +20,55 @@
     "use_stale_scan": true,
     "extra": {
       "moduleConcurrency": 2,
-      "resume": false
+      "resume": true,
+      "resumeBaselineDocsDir": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki\\.codewiki\\_native-state\\docs"
     }
   },
   "revision": {
-    "old_commit": "d5f240bd51c47851edc4daaf3925299d810dd05f",
-    "new_commit": "a5b26e641327a215edf2309f2028d8110c4a172b",
+    "old_commit": "a5b26e641327a215edf2309f2028d8110c4a172b",
+    "new_commit": "60b5903e8b39ebc80054c96996ef96e325f7c0bf",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 0,
+      "added": 20,
       "deleted": 0,
-      "interface": 0,
-      "body": 1,
+      "interface": 1,
+      "body": 4,
       "edge": 0,
       "renamed": 0
     },
-    "added": [],
+    "added": [
+      "lib\\engine\\mapping.js::findMissingModuleDocs",
+      "lib\\engine\\mapping.js::hasPageForModule",
+      "lib\\engine\\mapping.js::moduleDocRelPath",
+      "lib\\engine\\mapping.js::normalizeLayout",
+      "lib\\engine\\mapping.js::staleDocPages",
+      "lib\\engine\\native-run.js::walk",
+      "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+      "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__",
+      "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
+      "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
+      "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
+      "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
+      "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+      "lib\\engine\\python\\full_parallel_runtime.py::_node_at",
+      "lib\\engine\\python\\full_parallel_runtime.py::_run_module",
+      "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
+      "lib\\engine\\python\\full_parallel_runtime.py::_walk",
+      "lib\\engine\\python\\full_parallel_runtime.py::configure_full_runtime",
+      "lib\\engine\\python\\full_parallel_runtime.py::current_concurrency",
+      "lib\\engine\\python\\full_parallel_runtime.py::install_full_runtime"
+    ],
     "deleted": [],
-    "interface": [],
+    "interface": [
+      "lib\\engine\\mapping.js::walk"
+    ],
     "body": [
-      "lib\\engine\\python\\entry.py::action_generate"
+      "lib\\engine\\mapping.js::indexModuleTree",
+      "lib\\engine\\native-run.js::runNativeJob",
+      "lib\\engine\\python\\entry.py::action_generate",
+      "package.json::package.json"
     ],
     "edge": [],
     "renamed": {}
@@ -49,27 +76,201 @@
   "repair": {
     "renamed": {},
     "removed": [],
-    "routing": [],
+    "routing": [
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+        "rule": "2:same_dir",
+        "leaf_path": [
+          "Code_Engine_Processing_Pipeline",
+          "code_engine_module",
+          "python_native_runtime"
+        ],
+        "new_leaf": false,
+        "detail": "dir 'lib/engine/python'"
+      },
+      {
+        "component_id": "lib\\engine\\mapping.js::findMissingModuleDocs",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\mapping.js::hasPageForModule",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\mapping.js::moduleDocRelPath",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\mapping.js::normalizeLayout",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\mapping.js::staleDocPages",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\native-run.js::walk",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_install_shared_tree_io",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_node_at",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_run_module",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::_walk",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::configure_full_runtime",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::current_concurrency",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "lib\\engine\\python\\full_parallel_runtime.py::install_full_runtime",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      }
+    ],
     "orphans": [],
     "deleted_nodes": [],
     "created_leaves": [],
-    "growth": {},
+    "growth": {
+      "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": 0.1667
+    },
     "growth_flagged": []
   },
   "reclustered": [],
   "reports": {
-    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/module_indexing": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "python_native_runtime"
+        "module_indexing"
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\python\\entry.py::action_generate"
+        "lib\\engine\\mapping.js::walk",
+        "lib\\engine\\mapping.js::indexModuleTree"
       ],
       "adopted": {
-        "lib\\engine\\python\\entry.py::action_generate": "1:same_file"
+        "lib\\engine\\mapping.js::walk": "1:same_file"
+      },
+      "up": [],
+      "context": [
+        "lib\\engine\\mapping.js::staleDocPages",
+        "lib\\engine\\mapping.js::findMissingModuleDocs"
+      ],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "module_indexing"
+    },
+    "Code_Engine_Processing_Pipeline/code_engine_module/native_runtime_support": {
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "native_runtime_support"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\native-run.js::runNativeJob"
+      ],
+      "adopted": {
+        "lib\\engine\\native-run.js::runNativeJob": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -79,10 +280,85 @@
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
+      "page": "native_runtime_support"
+    },
+    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "python_native_runtime"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\python\\entry.py::action_generate",
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.load_json",
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.save_json",
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__init__",
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO.__getattr__"
+      ],
+      "adopted": {
+        "lib\\engine\\python\\entry.py::action_generate": "1:same_file"
+      },
+      "up": [],
+      "context": [
+        "lib\\engine\\python\\full_parallel_runtime.py::_run_parallel",
+        "lib\\engine\\python\\full_parallel_runtime.py::_merge_tree",
+        "lib\\engine\\python\\full_parallel_runtime.py::_run_module"
+      ],
+      "refch": [],
+      "entered": [
+        "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO"
+      ],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
       "page": "python_native_runtime"
+    },
+    "build_deployment_config": {
+      "leaf_path": [
+        "build_deployment_config"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "build_deployment_config"
     }
   },
   "ownership": [
+    {
+      "component_id": "lib\\engine\\mapping.js::walk",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "module_indexing"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\native-run.js::runNativeJob",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Code_Engine_Processing_Pipeline",
+        "code_engine_module",
+        "native_runtime_support"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
     {
       "component_id": "lib\\engine\\python\\entry.py::action_generate",
       "rule": "1:same_file",
@@ -95,484 +371,42 @@
       "deleted": false
     }
   ],
-  "active": [
-    {
-      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime",
-      "page": "python_native_runtime",
-      "mode": "edit",
-      "order": 0
-    }
-  ],
-  "write_sets": {
-    "python_native_runtime": [
-      "Code_Engine_Processing_Pipeline",
-      "Testing___Probing_Tooling",
-      "code_engine_module",
-      "engine_client",
-      "engine_contracts",
-      "extension_host_core",
-      "job_log_management",
-      "llm_integration_bridges",
-      "module_indexing",
-      "native_runtime_support",
-      "native_state_management",
-      "overview",
-      "probe_tools",
-      "python_native_runtime",
-      "testing_fixtures"
-    ]
-  },
+  "active": [],
+  "write_sets": {},
   "fallback": {
-    "r_leaf": 0.038461538461538464,
+    "r_leaf": 0.15384615384615385,
     "r_tree": 0.0,
-    "n_active": 1,
+    "n_active": 4,
     "n_leaves": 26,
     "n_structural": 0,
     "tau_full": 0.5,
     "tau_tree": 0.3,
     "fired": false
   },
-  "verdicts": [
-    {
-      "page": "python_native_runtime",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "code_engine_module",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Code_Engine_Processing_Pipeline",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_client",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "llm_integration_bridges",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Testing___Probing_Tooling",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_contracts",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "extension_host_core",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "job_log_management",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "module_indexing",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "native_runtime_support",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "native_state_management",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "probe_tools",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    },
-    {
-      "page": "testing_fixtures",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "python_native_runtime",
-      "changed_on_disk": false
-    }
-  ],
+  "verdicts": [],
   "pages_written": [],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {
-    "scanned": 32,
-    "pages_with_hits": {},
-    "fixed": []
-  },
-  "calls": [
-    {
-      "kind": "leaf_agent",
-      "target": "python_native_runtime",
-      "seconds": 398.03706431388855,
-      "usage": {
-        "input_tokens": 658771,
-        "output_tokens": 20416,
-        "cache_read_tokens": 414674,
-        "cache_write_tokens": 0,
-        "total_tokens": 679187,
-        "requests": 15
-      },
-      "error": null
-    },
-    {
-      "kind": "missing_pages",
-      "target": "-",
-      "seconds": 0.030118942260742188,
-      "usage": null,
-      "error": null
-    }
-  ],
+  "stale_scan": {},
+  "calls": [],
   "detector_notes": [],
   "errors": [],
-  "wall_seconds": 398.24,
+  "wall_seconds": 0.06,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "unknown",
-    "incomplete": false,
+    "cost_status": "complete",
+    "incomplete": true,
     "unknown_usage_calls": 0,
-    "n_calls": 15,
+    "n_calls": 0,
     "totals": {
-      "input_tokens": 658771,
-      "output_tokens": 20416,
-      "cache_read_tokens": 414674,
-      "cache_write_tokens": 0,
-      "requests": 15,
-      "total_tokens": 679187
+      "cost_usd": 0.0
     },
-    "by_phase": {
-      "update": {
-        "calls": 15,
-        "input_tokens": 658771,
-        "output_tokens": 20416,
-        "cache_read_tokens": 414674,
-        "cache_write_tokens": 0,
-        "requests": 15,
-        "total_tokens": 679187,
-        "unpriced_calls": 15
-      }
-    },
-    "by_model": {
-      "qfmodel": {
-        "calls": 15,
-        "input_tokens": 658771,
-        "output_tokens": 20416,
-        "cache_read_tokens": 414674,
-        "cache_write_tokens": 0,
-        "requests": 15,
-        "total_tokens": 679187,
-        "unpriced_calls": 15
-      }
-    },
-    "unpriced_models": [
-      "qfmodel"
-    ],
-    "calls": [
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 7.78,
-        "input_tokens": 6778,
-        "output_tokens": 548,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 7326,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 16.17,
-        "input_tokens": 13993,
-        "output_tokens": 1201,
-        "cache_read_tokens": 2400,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 15194,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 11.64,
-        "input_tokens": 25414,
-        "output_tokens": 416,
-        "cache_read_tokens": 13987,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 25830,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 22.67,
-        "input_tokens": 32303,
-        "output_tokens": 254,
-        "cache_read_tokens": 25408,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 32557,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 13.06,
-        "input_tokens": 32452,
-        "output_tokens": 272,
-        "cache_read_tokens": 32297,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 32724,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 30.25,
-        "input_tokens": 32555,
-        "output_tokens": 1623,
-        "cache_read_tokens": 32368,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 34178,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 6.22,
-        "input_tokens": 36104,
-        "output_tokens": 232,
-        "cache_read_tokens": 32471,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 36336,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 17.7,
-        "input_tokens": 46407,
-        "output_tokens": 184,
-        "cache_read_tokens": 36098,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 46591,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 32.86,
-        "input_tokens": 52540,
-        "output_tokens": 1536,
-        "cache_read_tokens": 46401,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 54076,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 28.17,
-        "input_tokens": 59634,
-        "output_tokens": 2092,
-        "cache_read_tokens": 52456,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 61726,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 25.62,
-        "input_tokens": 65222,
-        "output_tokens": 1768,
-        "cache_read_tokens": 59628,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 66990,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 45.38,
-        "input_tokens": 73368,
-        "output_tokens": 3405,
-        "cache_read_tokens": 65216,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 76773,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 27.39,
-        "input_tokens": 51306,
-        "output_tokens": 95,
-        "cache_read_tokens": 6772,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 51401,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 55.72,
-        "input_tokens": 49077,
-        "output_tokens": 2393,
-        "cache_read_tokens": 6772,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 51470,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "python_native_runtime",
-        "model": "qfmodel",
-        "seconds": 57.27,
-        "input_tokens": 81618,
-        "output_tokens": 4397,
-        "cache_read_tokens": 2400,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 86015,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      }
-    ]
+    "by_phase": {},
+    "by_model": {},
+    "unpriced_models": [],
+    "calls": []
   },
-  "run_id": "fd91bb68-9df0-4157-a5ab-632adaf78556"
+  "run_id": "bf1d1afe-3b9c-4bbd-9b6e-179ab2839f05"
 }
