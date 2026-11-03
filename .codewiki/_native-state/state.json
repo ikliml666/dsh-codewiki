@@ -2,19 +2,19 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
-    "headCommit": "546e22574de303ec9aef43b9146e7b627b265384"
+    "baseCommit": "546e22574de303ec9aef43b9146e7b627b265384",
+    "headCommit": "e191756faad249d12f6dd5314418d0d86fb5c250"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "08d66ca9d43c66d535e93d390e813e56fe95e9b0",
-    "headCommit": "546e22574de303ec9aef43b9146e7b627b265384",
+    "baseCommit": "546e22574de303ec9aef43b9146e7b627b265384",
+    "headCommit": "e191756faad249d12f6dd5314418d0d86fb5c250",
     "committed": [
       "CHANGELOG.md",
-      "lib/engine/python/full_parallel_runtime.py",
+      "lib/engine/apply-plan.js",
+      "lib/engine/native-run.js",
       "package.json",
-      "test-fsoft-coverage.mjs",
-      "test-upstream-parallel.mjs"
+      "test-engine-native-incremental.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -31,8 +31,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 4537199 与本次 cw 基线 08d66ca 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0sfw2x-6-native（29 个文件）"
+    "持久化基线 08d66ca 与本次 cw 基线 546e225 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0tnv81-4-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-03T14:49:25.749Z"
+  "updatedAt": "2026-11-03T15:28:54.504Z"
 }

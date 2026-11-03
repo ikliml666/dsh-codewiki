@@ -43,7 +43,7 @@ flowchart TB
 
 **两条验证链：**
 
-- **对拍链（已归档语义参考）**：`gen-graphdiff-golden.py` 用 Python 原生 `difflib` 算出期望值 JSON，供 Node 侧实现逐位比对。据 `package.json`（v0.17.29）记载，Node 侧算法移植（symbols / cluster / graph-diff / incremental / update-planner）已于 0.16.0 phase 7 退役删除，因此该生成器现在作为**冻结的边界用例集**留存——它覆盖了 `difflib.SequenceMatcher` 全部易踩坑的情形，可供未来重新推导语义时参考。
+- **对拍链（已归档语义参考）**：`gen-graphdiff-golden.py` 用 Python 原生 `difflib` 算出期望值 JSON，供 Node 侧实现逐位比对。据 `package.json`（v0.17.30）记载，Node 侧算法移植（symbols / cluster / graph-diff / incremental / update-planner）已于 0.16.0 phase 7 退役删除，因此该生成器现在作为**冻结的边界用例集**留存——它覆盖了 `difflib.SequenceMatcher` 全部易踩坑的情形，可供未来重新推导语义时参考。
 - **探针链（活跃验收）**：`probe-no-llm-graph.py` 以 `中文 空格 fixture` 小仓库为输入，驱动引擎的 `handle_analyze_repo` 走一遍完整的无模型分析，并输出结构化 JSON 判据结果。
 
 ## 2. 组件清单

@@ -467,6 +467,7 @@
       "done",
       "engineResult",
       "findOrphanPages",
+      "findStaleModulePages",
       "gateNativeOutput",
       "isAlive",
       "noop",

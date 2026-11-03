@@ -73,7 +73,7 @@ flowchart LR
     NR --> CL["client.js<br/>runEngine 子进程协议"]
     NR --> MF["manifest.js<br/>doctor / buildLockBody"]
     NR --> QG["quality-gate.js<br/>gateNativeOutput / readCommittedBaseline"]
-    NR --> AP["apply-plan.js<br/>applyNativeOutput / findOrphanPages"]
+    NR --> AP["apply-plan.js<br/>applyNativeOutput / findOrphanPages / findStaleModulePages"]
     NR --> LB["llm-bridge.js<br/>startLlmBridge"]
     NR --> CS["change-set.js<br/>collectChangeSet"]
     NR --> WS["workspace-snapshot.js<br/>createWorkspaceSnapshot"]
@@ -127,7 +127,7 @@ flowchart LR
 7. **质量门（3）**：`gateNativeOutput` 体检产物；`stateIncomplete`（受管状态缺图/树/metadata）时即使 gate 报 `done` 也翻成 `partial`。
 8. **受管状态采集（3.5）**：采集点固定在 gate 之后、apply 之前，产出进 `apply` 的 `extraFiles`，与文章**同批写、同批回滚、同批提交**。「无变化轮」（引擎 `no_change` + 变化集空 + 无未携带账）沿用上一轮状态不重写，避免每次状态查询都制造一次纯记账提交。状态不完整时：不裁旧状态、不推进基线，并追加 blocker。
 9. **首次落锁（3.6）**：`absent` 且本轮要落地时，把 `buildLockBody` 结果作为 `ENGINE_LOCK_REL` 一项塞进写集——修掉旧实现「锁留在工作区当未跟踪脏文件、变化集永远不干净」的缺陷。
-10. **孤儿页（3.7）**：`findOrphanPages` 找出 `source_files` 全部失效的存量页，经落地器 `deleteFiles` 删除（走写集才能随事务回滚/提交）；本轮产物页一律不算孤儿。
+10. **孤儿页与残留页（3.7）**：两类判据都在本轮跑，覆盖不同原因下消失的页——`findOrphanPages` 找出 `source_files` 全部失效的存量页（模块被删），`findStaleModulePages` 找出页名已对不上当前模块树的旧模块页（聚类重构改名/合并；判据要求页带 `fsoft_page` 字段、slug 不在当前树里，人工页一律不动）。两类结果都经落地器 `deleteFiles` 删除（走删除集才能随事务回滚/提交）；本轮产物页一律不算孤儿。扫描不再被无变化轮（`idleRound`）跳过：即使整轮是 `no_change`，只要有残留页待删，落地器也会走 deleteOnly 例外分支照常清理——否则「源码没变化 ≠ 库里没残骸」，无变化轮会把残骸永久留在库里。
 11. **落地器（4）**：`applyNativeOutput` 完成写盘 → index → 基线 → 提交，自带失败回滚。`advanceBaseline` 由裁决决定（状态不完整时强制 `false`），不接受调用方硬开。
 12. **合成终态（5）**：见 3.2。
 
