@@ -5,6 +5,8 @@ source_files:
   - lib/engine/python/entry.py
   - lib/engine/python/fsoft_runtime.py
   - lib/engine/python/stage_map.py
+  - lib/engine/python/full_parallel_runtime.py
+  - lib/engine/python/tree_coverage.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: python_native_runtime.md

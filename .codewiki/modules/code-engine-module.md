@@ -18,6 +18,8 @@ source_files:
   - lib/engine/python/stage_map.py
   - lib/engine/quality-gate.js
   - lib/engine/workspace-snapshot.js
+  - lib/engine/python/full_parallel_runtime.py
+  - lib/engine/python/tree_coverage.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: code_engine_module.md

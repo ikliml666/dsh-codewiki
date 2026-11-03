@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
-    "headCommit": "b22deee6beb5e71cd71609471cbde0d44a6a9f3f"
+    "headCommit": "39c8253544bdddd6ce026a333cad16f73113d81a"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "2351ac7bba292428cc3a54cdaba074b6dd8f6d3f",
-    "headCommit": "b22deee6beb5e71cd71609471cbde0d44a6a9f3f",
+    "headCommit": "39c8253544bdddd6ce026a333cad16f73113d81a",
     "committed": [
       "CHANGELOG.md",
       "README.md",
@@ -35,7 +35,7 @@
   "updateOutcome": "incremental",
   "fallbackReason": "",
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw09j6e4-5-native（40 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0a90m2-6-native（40 个文件）"
   ],
-  "updatedAt": "2026-11-03T05:49:17.548Z"
+  "updatedAt": "2026-11-03T06:09:08.129Z"
 }

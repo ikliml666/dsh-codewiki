@@ -20,6 +20,8 @@ source_files:
   - lib/engine/workspace-snapshot.js
   - lib/articles-agentic.js
   - lib/article-contract.js
+  - lib/engine/python/full_parallel_runtime.py
+  - lib/engine/python/tree_coverage.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: Code_Engine_Processing_Pipeline.md
