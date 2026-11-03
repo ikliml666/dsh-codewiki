@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-03T15:14:12+0800",
-  "finished_at": "2026-11-03T15:14:18+0800",
+  "started_at": "2026-11-03T15:31:14+0800",
+  "finished_at": "2026-11-03T15:31:23+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -24,25 +24,26 @@
     }
   },
   "revision": {
-    "old_commit": "f25d7405670b178974c897fde78857e174f84d9f",
-    "new_commit": "36fde179d3471f690ba01940ab6f197c62555c64",
+    "old_commit": "36fde179d3471f690ba01940ab6f197c62555c64",
+    "new_commit": "1c24304f21973f8dc7f4daad7c03a646bd671843",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 0,
+      "added": 1,
       "deleted": 0,
       "interface": 0,
-      "body": 3,
+      "body": 2,
       "edge": 0,
       "renamed": 0
     },
-    "added": [],
+    "added": [
+      "lib\\engine\\python\\entry.py::_failed_leaves_of"
+    ],
     "deleted": [],
     "interface": [],
     "body": [
-      "lib\\engine\\quality-gate.js::renderArticle",
-      "lib\\engine\\quality-gate.js::rewritePageLinks",
+      "lib\\engine\\python\\entry.py::action_generate",
       "package.json::package.json"
     ],
     "edge": [],
@@ -51,7 +52,15 @@
   "repair": {
     "renamed": {},
     "removed": [],
-    "routing": [],
+    "routing": [
+      {
+        "component_id": "lib\\engine\\python\\entry.py::_failed_leaves_of",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      }
+    ],
     "orphans": [],
     "deleted_nodes": [],
     "created_leaves": [],
@@ -60,20 +69,18 @@
   },
   "reclustered": [],
   "reports": {
-    "Code_Engine_Processing_Pipeline/code_engine_module/quality_gates": {
+    "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime": {
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "quality_gates"
+        "python_native_runtime"
       ],
       "mode": "edit",
       "own": [
-        "lib\\engine\\quality-gate.js::renderArticle",
-        "lib\\engine\\quality-gate.js::rewritePageLinks"
+        "lib\\engine\\python\\entry.py::action_generate"
       ],
       "adopted": {
-        "lib\\engine\\quality-gate.js::renderArticle": "1:same_file",
-        "lib\\engine\\quality-gate.js::rewritePageLinks": "1:same_file"
+        "lib\\engine\\python\\entry.py::action_generate": "1:same_file"
       },
       "up": [],
       "context": [],
@@ -83,7 +90,7 @@
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
-      "page": "quality_gates"
+      "page": "python_native_runtime"
     },
     "build_deployment_config": {
       "leaf_path": [
@@ -107,32 +114,21 @@
   },
   "ownership": [
     {
-      "component_id": "lib\\engine\\quality-gate.js::renderArticle",
+      "component_id": "lib\\engine\\python\\entry.py::action_generate",
       "rule": "1:same_file",
       "leaf_path": [
         "Code_Engine_Processing_Pipeline",
         "code_engine_module",
-        "quality_gates"
+        "python_native_runtime"
       ],
-      "detail": "2 tracked components in file",
-      "deleted": false
-    },
-    {
-      "component_id": "lib\\engine\\quality-gate.js::rewritePageLinks",
-      "rule": "1:same_file",
-      "leaf_path": [
-        "Code_Engine_Processing_Pipeline",
-        "code_engine_module",
-        "quality_gates"
-      ],
-      "detail": "2 tracked components in file",
+      "detail": "3 tracked components in file",
       "deleted": false
     }
   ],
   "active": [
     {
-      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/quality_gates",
-      "page": "quality_gates",
+      "leaf": "Code_Engine_Processing_Pipeline/code_engine_module/python_native_runtime",
+      "page": "python_native_runtime",
       "mode": "edit",
       "order": 0
     },
@@ -144,22 +140,22 @@
     }
   ],
   "write_sets": {
-    "quality_gates": [
+    "python_native_runtime": [
       "Code_Engine_Processing_Pipeline",
-      "article_validation",
+      "Testing___Probing_Tooling",
       "code_engine_module",
+      "engine_client",
       "engine_contracts",
-      "engine_output_processing",
       "extension_host_core",
+      "job_log_management",
       "llm_integration_bridges",
       "module_indexing",
       "native_runtime_support",
+      "native_state_management",
       "overview",
-      "plan_application",
+      "probe_tools",
       "python_native_runtime",
-      "quality_gates",
-      "update_status_tracking",
-      "workspace_snapshots"
+      "testing_fixtures"
     ],
     "build_deployment_config": [
       "Testing___Probing_Tooling",
@@ -185,108 +181,108 @@
   },
   "verdicts": [
     {
-      "page": "quality_gates",
+      "page": "python_native_runtime",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "code_engine_module",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "Code_Engine_Processing_Pipeline",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "overview",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
-      "page": "article_validation",
+      "page": "engine_client",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_contracts",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
-      "changed_on_disk": false
-    },
-    {
-      "page": "engine_output_processing",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
-      "changed_on_disk": false
-    },
-    {
-      "page": "extension_host_core",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "llm_integration_bridges",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Testing___Probing_Tooling",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "python_native_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "engine_contracts",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "python_native_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "extension_host_core",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "python_native_runtime",
+      "changed_on_disk": false
+    },
+    {
+      "page": "job_log_management",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "module_indexing",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
       "page": "native_runtime_support",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
-      "page": "plan_application",
+      "page": "native_state_management",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
-      "page": "python_native_runtime",
+      "page": "probe_tools",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
-      "page": "update_status_tracking",
+      "page": "testing_fixtures",
       "verdict": "no-op",
       "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
-      "changed_on_disk": false
-    },
-    {
-      "page": "workspace_snapshots",
-      "verdict": "no-op",
-      "reason": "no verdict returned by agent",
-      "by_leaf": "quality_gates",
+      "by_leaf": "python_native_runtime",
       "changed_on_disk": false
     },
     {
@@ -364,29 +360,29 @@
   "calls": [
     {
       "kind": "leaf_agent",
-      "target": "quality_gates",
-      "seconds": 5.988159656524658,
+      "target": "python_native_runtime",
+      "seconds": 8.03718614578247,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "leaf_agent",
       "target": "build_deployment_config",
-      "seconds": 2.535810947418213,
+      "seconds": 7.827519416809082,
       "usage": null,
       "error": "UnexpectedModelBehavior: Exceeded maximum output retries (3)"
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.03176593780517578,
+      "seconds": 0.030597925186157227,
       "usage": null,
       "error": null
     }
   ],
   "detector_notes": [],
   "errors": [],
-  "wall_seconds": 6.44,
+  "wall_seconds": 8.52,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -434,9 +430,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "build_deployment_config",
+        "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 0.5,
+        "seconds": 7.49,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -451,26 +447,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "quality_gates",
+        "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 0.59,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 0,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "qfmodel",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "build_deployment_config",
-        "model": "qfmodel",
-        "seconds": 0.22,
+        "seconds": 0.16,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -487,7 +466,7 @@
         "kind": "update_agent",
         "target": "build_deployment_config",
         "model": "qfmodel",
-        "seconds": 0.59,
+        "seconds": 7.77,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -502,9 +481,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "quality_gates",
+        "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 1.72,
+        "seconds": 0.12,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -521,7 +500,7 @@
         "kind": "update_agent",
         "target": "build_deployment_config",
         "model": "qfmodel",
-        "seconds": 1.2,
+        "seconds": 0.02,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -536,9 +515,9 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "quality_gates",
+        "target": "python_native_runtime",
         "model": "qfmodel",
-        "seconds": 1.83,
+        "seconds": 0.02,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -553,9 +532,26 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "quality_gates",
+        "target": "build_deployment_config",
         "model": "qfmodel",
-        "seconds": 1.66,
+        "seconds": 0.01,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 0,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "qfmodel",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "build_deployment_config",
+        "model": "qfmodel",
+        "seconds": 0.02,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_tokens": 0,
@@ -569,5 +565,5 @@
       }
     ]
   },
-  "run_id": "f7ef7460-5913-4304-a811-ff234b5c2292"
+  "run_id": "02c147a1-9b82-4546-b673-af43ef1cd107"
 }
