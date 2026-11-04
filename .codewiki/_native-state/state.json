@@ -2,13 +2,13 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "d2de99557b809c367f2128f8d6a17953f08587ba",
-    "headCommit": "40935b4d4b315181a04e97d4c7ee3094127b2716"
+    "baseCommit": "40935b4d4b315181a04e97d4c7ee3094127b2716",
+    "headCommit": "b239452011f9df13894dcbd22060c77ec2ac6891"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "d2de99557b809c367f2128f8d6a17953f08587ba",
-    "headCommit": "40935b4d4b315181a04e97d4c7ee3094127b2716",
+    "baseCommit": "40935b4d4b315181a04e97d4c7ee3094127b2716",
+    "headCommit": "b239452011f9df13894dcbd22060c77ec2ac6891",
     "committed": [],
     "staged": [],
     "unstaged": [],
@@ -30,8 +30,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 a84167d 与本次 cw 基线 d2de995 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2m3foo-14-native（28 个文件）"
+    "持久化基线 d2de995 与本次 cw 基线 40935b4 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2o8lrz-1c-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T21:14:32.426Z"
+  "updatedAt": "2026-11-04T22:14:30.053Z"
 }
