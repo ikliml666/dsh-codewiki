@@ -373,6 +373,49 @@ await checkAsync('自动提交失败 → 不回滚，记 commit-failed 且终态
   assert.ok(r.applied, 'applied 表示「写盘成立」，与提交成立是两件事')
 })
 
+// 无变化轮不等于落地内容不需要更新：渲染规则（页名别名、跨页链接改写）改进后，
+// 同一份源页会渲染出不同的正文，旧落地页不重写就永远是错的。真机 dsh-hindsight-on-demand
+// 就是这么卡住的——门报 done、42 篇全可写，落地器 written=0，363 条链接仍指改名前的页名。
+await checkAsync('无变化轮：落地页与本次渲染结果不一致 → 照写、按索引提交，但不推进基线', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n旧规则下的正文。\n')
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(r.written.includes('.codewiki/modules/core.md'), JSON.stringify(r.written))
+  assert.equal(readFile(root, '.codewiki/modules/core.md'), '# core\n\n模块正文。\n')
+  assert.equal(r.baseline.advanced, false, '没有消费任何源码变化，基线不许推进')
+  assert.equal(r.baseline.reason, 'no-changes')
+  assert.equal(r.commit.committed, true, '重写了文章就必须入库，否则下一轮又是同一个偏离')
+  assert.ok(seq(calls).includes('index'), '新正文必须重建索引')
+  assert.ok(r.notes.some((n) => n.includes('与当前渲染规则不一致')))
+})
+
+await checkAsync('无变化轮：落地页与渲染结果一致 → 仍然短路，一个字节都不写', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n模块正文。\n')
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.deepEqual(r.written, [])
+  assert.equal(r.commit.noChanges, true)
+  assert.equal(r.index.skipped, true)
+  assert.deepEqual(seq(calls), [], `短路轮不该跑任何 cw 子命令：${JSON.stringify(seq(calls))}`)
+})
+
+await checkAsync('无变化轮：只有行尾差异不算待规范化（不为 CRLF 造噪声提交）', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/modules/core.md', '# core\r\n\r\n模块正文。\r\n')
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
+  assert.deepEqual(r.written, [])
+  assert.equal(r.commit.noChanges, true)
+})
+
 await checkAsync('产物无改动（noChanges）不算失败', async () => {
   const root = makeRepo()
   const docs = makeDocs()

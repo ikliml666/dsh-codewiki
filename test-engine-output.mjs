@@ -17,6 +17,7 @@ import {
   buildWritePlan,
   validateOutput,
   overviewStaleLinks,
+  pageAliases,
 } from './lib/engine/output.js'
 
 let pass = 0
@@ -369,6 +370,21 @@ await check('staleDocPages：不属于当前模块树的旧页被点名清退，
   // 空树：whole-repository 模式没有权威模块名，不能凭名字删页
   assert.deepEqual(staleDocPages({ pages, moduleTree: {} }), [])
 })
+// 落地页名是模块名的 kebab-case（mapping.js 的 moduleSlug），正文里却常写下划线原名：
+// 认不出这条别名，存量页的每一处跨页链接都会一直是死链。
+await check('pageAliases：下划线页名 → 连字符落地页名，唯一命中才给别名', async () => {
+  const aliases = pageAliases(['overview.md', 'Core/llama_and_llm_management.md', 'Core/web_api.md'])
+  assert.equal(aliases.get('Core/llama-and-llm-management.md'), 'Core/llama_and_llm_management.md')
+  assert.equal(aliases.get('Core/web-api.md'), 'Core/web_api.md')
+  // 本来就叫这个名字的页不产生别名（real 优先），也不跨目录猜
+  assert.equal(aliases.has('overview.md'), false)
+  assert.equal(aliases.has('llama-and-llm-management.md'), false)
+  // 两个同名模块的 slug 撞到一起时判不出指向哪一篇，宁可不给别名
+  const ambiguous = pageAliases(['a/x_y.md', 'b/x_y.md'])
+  assert.equal(ambiguous.has('a/x-y.md'), true)
+  assert.equal(ambiguous.has('x-y.md'), false)
+})
+
 // overview 的链接集合必须与当前模块树对齐：上游 reusable_overview 只判「空页/preamble」，
 // 聚类改名后 overview 里的旧模块链接会一直留着，永远点不开。
 await check('overviewStaleLinks：指向已消失页面的链接被点名，命中页与别名不算', async () => {
