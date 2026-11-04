@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "bf1ca01594e6422915f542c93bca3a3293d420ea"
+    "headCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "bf1ca01594e6422915f542c93bca3a3293d420ea",
+    "headCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
     "committed": [
       "CodeWiki.md"
     ],
@@ -88,8 +88,9 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 2012c77e3a32（27 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw28e5fg-1z-native（28 个文件）"
+    "工作区未提交改动已合成临时 commit 93111b3e4166（27 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2952gc-20-native（28 个文件）",
+    "本轮把 27 个未提交源码改动一并写进产物（快照 93111b3e4166）：CHANGELOG.md、README.md、client.js、docs/fsoft-native-engine.md、index.js 等"
   ],
-  "updatedAt": "2026-11-04T14:54:22.700Z"
+  "updatedAt": "2026-11-04T15:18:12.644Z"
 }
