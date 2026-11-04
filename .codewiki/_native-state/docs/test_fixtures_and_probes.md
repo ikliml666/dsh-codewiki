@@ -1,200 +1,284 @@
-# 测试夹具与探针（test_fixtures_and_probes）
+# test_fixtures_and_probes 测试夹具与验收探针
 
-本模块是平台基础设施层的**质量保障资产集**：它不参与插件的运行时数据流，而是为 FSoft 原生引擎通道提供三类开发期验证工具——图差异算法的对拍基准生成器、一个刻意使用「中文 + 空格路径」的多语言微型 fixture 仓库，以及一条完全不依赖 LLM 的阶段 1A 依赖图验收探针。它解决的核心问题是：在「原生引擎 = 模型链路 + 图/artifact 链路」的复杂集成里，先把唯一无模型的一环（tree-sitter 静态依赖图）单独跑通，使后续阶段的故障可以被干净地分离定位。
+## 简介
 
-## 1. 模块定位
+本模块承载 dsh-codewiki 迁移工程中两类**与运行时引擎直接对拍**的测试资产：
 
-本模块是 [platform_infrastructure_and_developer_tooling](platform_infrastructure_and_developer_tooling.md) 的三个子模块之一，与 [job_repository_infrastructure](job_repository_infrastructure.md)（任务仓储）和 [build_packaging_configuration](build_packaging_configuration.md)（构建、打包与环境脚本）并列。它的产出全部是**开发期/验收期资产**：CLI 脚本与 fixture 文件，不进入插件运行时 bundle。
+1. **图 diff 对拍基准生成器** `test-fixtures/gen-graphdiff-golden.py`：用 Python 原生 `difflib` 复现 FSoft 的相似度 / 哈希 / unified diff 语义，产出确定性的 JSON 期望集，供 Node 侧移植代码逐位比对。
+2. **非 ASCII 路径下的「无 LLM 依赖图」验收探针** `tools/fsoft-engine/probe-no-llm-graph.py` 及其被测小仓库 `tools/fsoft-engine/fixtures/中文 空格 fixture/`：在不碰任何模型与凭证的前提下，验证原生 FSoft 引擎通道（`nativeEngine: true`）的 `handle_analyze_repo` 在中文 + 空格路径上能正确出节点、出依赖边、出工作区产物。
 
-```mermaid
-flowchart TB
-  subgraph PLAT["platform_infrastructure_and_developer_tooling 平台基础设施与开发工具"]
-    direction LR
-    JOB["job_repository_infrastructure<br/>任务仓储 / 日志 / 更新记录"]
-    BLD["build_packaging_configuration<br/>package.json / cordis.patch.yml<br/>setup-env.sh 环境脚本"]
-    TFP["test_fixtures_and_probes<br/>本模块：夹具与探针"]
-  end
-  subgraph ENG["fsoft_engine_runtime FSoft 原生引擎运行时"]
-    direction LR
-    JS["fsoft_engine_js_core<br/>Node 编排 / 契约 / 质量门"]
-    PY["fsoft_engine_python_runtime<br/>entry.py 子进程入口"]
-  end
-  GENLIB["lib/graph-diff.js 移植实现（历史对拍目标）"]
+它们共同回答迁移期最棘手的两类问题：**(a) 算法移植是否与上游逐位一致**；**(b) 原生引擎在最难复现的非 ASCII 路径上能否跑通**。探针与 [build_and_configuration](build_and_configuration.md) 阶段的环境脚本 `tools/fsoft-engine/setup-env.sh` 配套使用，是「阶段 1A」验收的入口；被探的引擎本体属于 [engine_runtime_and_codewiki_kernel](engine_runtime_and_codewiki_kernel.md) 中的 `engine_python_runtime` 与上游 vendored `codewiki`。
 
-  BLD -- "setup-env.sh 建 venv，提供 codewiki 包" --> TFP
-  TFP -- "fixture 作为被测仓库输入" --> PY
-  TFP -- "probe 直接调用 handle_analyze_repo<br/>DependencyGraphBuilder 验收图链路" --> PY
-  TFP -- "golden JSON 期望值" --> GENLIB
+---
+
+## 目录结构
+
+```
+test_fixtures_and_probes
+├── test-fixtures/
+│   └── gen-graphdiff-golden.py        # 图 diff 对拍基准生成器（main）
+└── tools/fsoft-engine/
+    ├── probe-no-llm-graph.py           # 阶段 1A 无 LLM 依赖图验收探针（main）
+    └── fixtures/中文 空格 fixture/       # 探针被测的最小多语言小仓库
+        ├── scripts/run.py               # artifact 入口脚本（main）
+        └── src/
+            ├── core/engine.py           # Engine / build_engine
+            └── web/
+                ├── handler.py           # Handler（依赖 core.engine）
+                └── task.ts              # TaskQueue / TaskQueue.push（TypeScript）
 ```
 
-**两条验证链：**
+> 路径中刻意保留**中文字符与空格**（`中文 空格 fixture`），这是整套设计的核心：ASCII 路径永远复现不出 Windows 下 cp936 解码错乱、tree-sitter 路径归一化、Python `sys.path` 拼接等问题。
 
-- **对拍链（已归档语义参考）**：`gen-graphdiff-golden.py` 用 Python 原生 `difflib` 算出期望值 JSON，供 Node 侧实现逐位比对。据 `package.json`（v0.17.32）记载，Node 侧算法移植（symbols / cluster / graph-diff / incremental / update-planner）已于 0.16.0 phase 7 退役删除，因此该生成器现在作为**冻结的边界用例集**留存——它覆盖了 `difflib.SequenceMatcher` 全部易踩坑的情形，可供未来重新推导语义时参考。
-- **探针链（活跃验收）**：`probe-no-llm-graph.py` 以 `中文 空格 fixture` 小仓库为输入，驱动引擎的 `handle_analyze_repo` 走一遍完整的无模型分析，并输出结构化 JSON 判据结果。
+---
 
-## 2. 组件清单
+## 组件一：图 diff 对拍基准生成器
 
-| 文件 | 核心符号 | 角色 |
-|---|---|---|
-| `test-fixtures/gen-graphdiff-golden.py` | `main` | 确定性对拍基准生成器（种子 20261027） |
-| `tools/fsoft-engine/fixtures/中文 空格 fixture/src/core/engine.py` | `Engine`（含 `build_engine`） | fixture 的 Python 核心层 |
-| `tools/fsoft-engine/fixtures/中文 空格 fixture/src/web/handler.py` | `Handler` | fixture 的 Python web 层，依赖 core 层以建出依赖边 |
-| `tools/fsoft-engine/fixtures/中文 空格 fixture/src/web/task.ts` | `TaskQueue`、`TaskQueue.push`、`normalize` | fixture 的 TypeScript 节点 |
-| `tools/fsoft-engine/fixtures/中文 空格 fixture/scripts/run.py` | `main` | fixture 的 artifact 入口脚本 |
-| `tools/fsoft-engine/probe-no-llm-graph.py` | `main` | 阶段 1A 无 LLM 图探针 |
+### 1.1 设计动机
 
-## 3. 对拍基准生成器：gen-graphdiff-golden.py
+`difflib.SequenceMatcher` 的匹配块算法存在大量边界情形（空序列、重复 token、`autojunk` 启发式），靠肉眼核对不可信。该生成器在**纯 Python 侧**用上游同款 `difflib` 喂同一批输入，产出结构化期望值（`expected` 字段），再让 Node 侧实现逐一比对，确保移植与上游逐位一致。
 
-### 3.1 数据流
+### 1.2 三组期望用例
 
-```mermaid
-flowchart TD
-  subgraph G["gen-graphdiff-golden.py（确定性，random.Random(20261027)）"]
-    direction TB
-    S1["相似度用例<br/>13 个手写 + 30 个随机"]
-    S2["哈希用例 6 个手写"]
-    S3["统一 diff 用例<br/>9 个手写 + 20 个随机"]
-    F1["body_similarity<br/>分词 \\w+ 或非词非空白字符<br/>SequenceMatcher autojunk=False"]
-    F2["body_hash<br/>sha1(normalize_body(documented_source))"]
-    F3["unified_body_diff<br/>difflib.unified_diff n=2"]
-  end
-  S1 --> F1
-  S2 --> F2
-  S3 --> F3
-  F1 --> OUT["cases JSON 数组 → stdout<br/>ensure_ascii=False，indent=1"]
-  F2 --> OUT
-  F3 --> OUT
-  OUT --> VS["Node 侧实现读同一批输入<br/>比对 expected 逐位一致"]
-```
+| `kind` | 字段 | 语义 | 覆盖边界 |
+|--------|------|------|----------|
+| `similarity` | `a`, `b`, `expected` | `body_similarity(a,b)` 浮点相似度 | 空串、完全相同、部分相同、全不同、重复 token、中文字符串、多行空白折叠 |
+| `hash` | `code`, `docstring`, `expected` | `body_hash(code, docstring)` 十六进制 SHA1 | 空代码、纯注释、中文、空白折叠、doc 前置拼接 |
+| `unified` | `oldText`, `newText`, `label`, `expected` | `unified_body_diff(...)` unified diff 文本 | 无差异、单 hunk、多 hunk、纯新增、纯删除、缺末尾换行 |
 
-### 3.2 归一化与语义约定
+实现要点：
 
-生成器固化了三条与被移植算法必须一致的规则：
+- **规范化**：`normalize_body` 把连续空白折叠成单空格再算哈希，与上游「注释/空白改动不触发重写」的语义对齐。
+- **doc 前置**：`documented_source` 把 docstring 插到代码前，且不重复粘贴已存在的 doc。
+- **token 化**：`_tokens` 用正则 `\w+|[^\w\s]` 把代码切成词与符号两类 token，再交给 `SequenceMatcher(autojunk=False)`——**显式关掉 autojunk**，避免随机 junk 启发式在短序列上引入不确定的匹配。
+- **确定性随机**：`rng = random.Random(20261027)` 固定种子，在 13 条手工用例之外追加 30 条随机相似度对 + 20 条随机 diff 对，保证基准集可复现。
 
-- **`normalize_body(text)`**：`\s+` 全部折叠为单空格，再 `strip()`——因此 `"x = 1\n  y  =   2"` 与 `"x = 1\ny = 2"` 的哈希相同。
-- **`documented_source(code, docstring)`**：若 docstring 非空且不是 code 的子串，则前置拼成 `doc + "\n" + code` 再哈希；这模拟「函数体 = 代码 + 文档注释」的整体签名。
-- **相似度分词**：正则 `\w+|[^\w\s]`——标识符与标点各自成 token；双空序列相似度为 1.0，单空为 0.0。
+### 1.3 产出与消费
 
-### 3.3 刻意覆盖的边界情形
+生成器直接把 `cases` 数组 `json.dump` 到 stdout（`ensure_ascii=False, indent=1`），不落盘文件。Node 侧测试把这份 JSON 喂给被测模块（历史上的 `lib/graph-diff.js`），逐条断言 `expected` 相等。
 
-手写用例专门覆盖肉眼核对不可信的 `difflib` 边界：
-
-- 空序列双向、完全相同、全不同；
-- 重复 token（`"dup dup dup dup"` vs `"dup dup"`）——`autojunk=False` 关闭了 SequenceMatcher 对高频 token 的启发式跳过，保证确定性；
-- 中文注释（`中文注释 abc` vs `中文注释 abd`）；
-- 仅差空白（归一化后哈希相等）；
-- 统一 diff：纯新增、纯删除、多 hunk（10 行替换 2 处）、无末尾换行（`no-trailing-newline` 对比）、`a\nb` 对比 `a\nb\n` 的末尾换行差异。
-
-### 3.4 使用方式
-
-```bash
-# 生成期望值快照（输出到 stdout，重定向落盘）
-python test-fixtures/gen-graphdiff-golden.py > golden.json
-```
-
-## 4. 中文空格 fixture 小仓库
-
-`tools/fsoft-engine/fixtures/中文 空格 fixture/` 是一个**路径本身就含中文与空格**的微型多语言仓库。路径命名是刻意的：它同时检验两件事——文件系统路径含非 ASCII/空格时，静态分析器是否仍能正确发现文件，以及各语言分析器是否都能产出节点。
-
-### 4.1 内部依赖结构
+> 注：根据 [package.json](../../package.json) 描述，Node 侧的 FSoft 算法重实现（symbols / cluster / graph-diff / incremental / update-planner）已在 0.16.0 phase 7 退役删除。本生成器作为**对拍基准资产**保留，用于回归校验任何未来重新接入的 Node 侧 diff 逻辑，或审计迁移期的历史对拍记录。
 
 ```mermaid
 flowchart LR
-  subgraph FIX["fixtures/中文 空格 fixture"]
-    direction TB
-    ENGP["src/core/engine.py<br/>Engine(name) 持有内部状态<br/>run(payload) / calls 属性<br/>build_engine 构造函数"]
-    HND["src/web/handler.py<br/>Handler 薄壳<br/>构造 build_engine('web')<br/>sys.path 注入 core 父目录"]
-    TSK["src/web/task.ts<br/>TaskQueue 类<br/>push 返回队列长度<br/>normalize 裁剪两端空白"]
-    RUN["scripts/run.py<br/>main: 打印 Handler.handle(argv)"]
-  end
-  HND -- "from core.engine import Engine" --> ENGP
-  RUN -- "from src.web.handler import Handler" --> HND
+    A["gen-graphdiff-golden.py<br/>main()"] --> B["手工用例 13+6+9"]
+    A --> C["随机用例<br/>seed=20261027<br/>30 相似度 + 20 diff"]
+    B --> D["difflib.SequenceMatcher<br/>autojunk=False"]
+    C --> D
+    D --> E["cases[] JSON<br/>stdout"]
+    E --> F["Node 侧测试<br/>逐位比对 expected"]
 ```
 
-### 4.2 四个 fixture 角色
+---
 
-| 组件 | 探针用途 |
-|---|---|
-| `Engine`（core 层） | 作为被依赖方，证明叶子节点被采集（R2 的 leaf_nodes） |
-| `Handler`（web 层） | 通过 `from core.engine import ...` 建出 **web → core 方向的依赖边**（R3 的判据对象） |
-| `TaskQueue`（task.ts） | 提供 **typescript 语言节点**（R2 要求语言集合同时含 python 与 typescript） |
-| `scripts/run.py` | **artifact 节点**：作为可执行入口被采集（R5），证明 artifact 类脚本没有被静态分析漏掉 |
+## 组件二：非 ASCII 路径验收探针 `probe-no-llm-graph.py`
 
-fixture 的设计原则是「最小但每种分析目标恰好一个」：没有多余代码，保证探针报告里的节点/边可以被人工一眼核对。
+### 2.1 定位与边界
 
-## 5. 阶段 1A 无 LLM 探针：probe-no-llm-graph.py
+这是**引擎侧**验收，不碰 DSH 插件、不需要任何模型或凭证。FSoft 的 `handle_analyze_repo` 走 tree-sitter 静态分析，是整条迁移链里**唯一完全无模型的一环**——先让它跑通，才能在后续阶段把「模型链路故障」与「图 / artifact 链路故障」分开定位。
 
-### 5.1 定位与设计意图
-
-这是**引擎侧的验收探针**：不碰 DSH 插件、不需要任何模型或凭证。FSoft 的 `handle_analyze_repo` 走 tree-sitter 静态分析，是整条迁移链路里唯一完全无模型的一环。把它先跑通，才能在阶段 1B/1C 里把「模型链路故障」与「图/artifact 链路故障」分开定位。探针参数化设计——`--fsoft-src`、`--fixture`、`--out` 均可替换，因此可在任意 FSoft 源码树与任意 fixture 上重跑，而非一次性脚本。
-
-### 5.2 执行流程
-
-```mermaid
-flowchart TD
-  A["parse_args<br/>--fsoft-src 必填<br/>--fixture 默认内置中文空格 fixture<br/>--out 默认 tools/fsoft-engine/out-1a"] --> B{"src_root/codewiki 包存在?"}
-  B -- 否 --> X3["输出 ok:false + 错误<br/>退出码 3（异常）"]
-  B -- 是 --> C["sys.path.insert(src_root)<br/>创建 out 目录"]
-  C --> D["handle_analyze_repo<br/>repo_path=fixture<br/>output_dir=out<br/>use_gitignore=False"]
-  D --> E{"R1: 返回 JSON 无 error<br/>且 session_id / files 存在?"}
-  E -- 否 --> Y2["附带 payload_head 前 2000 字符<br/>退出码 2（判据未过）"]
-  E -- 是 --> F["R2: stats 中组件数 大于 0<br/>叶子节点数 大于 0<br/>语言集合含 python 与 typescript"]
-  F --> G["R4: 逐一打开 files 指向的<br/>component_index.json / leaf_nodes.json<br/>summary.json 并 json.loads"]
-  G --> H["新建 Config + DependencyGraphBuilder<br/>build_dependency_graph 直取组件表"]
-  H --> I["R3: 遍历组件 dependsOn<br/>handler 类组件是否依赖 engine"]
-  I --> J["R5: 组件 id 中含 run.py 的 artifact 节点存在?"]
-  J --> K{"全部判据为真?"}
-  K -- 是 --> Z0["打印 JSON ok:true<br/>退出码 0（全过）"]
-  K -- 否 --> Z2["打印 JSON ok:false 与各项明细<br/>退出码 2（判据未过）"]
-  E -. "全程异常兜底" .-> EX["result.exception 写入 traceback<br/>退出码 3"]
-```
-
-### 5.3 五条判据（R1–R5）
-
-| 判据 | 断言内容 | 数据来源 |
-|---|---|---|
-| R1 | `handle_analyze_repo` 返回非 error JSON，含 `session_id` 与 `files` | analyze 原始返回 |
-| R2 | `total_components > 0`、`total_leaf_nodes > 0`，语言集合同时含 python 与 typescript | `payload.stats` |
-| R3 | 依赖图存在 **web.handler → core.engine** 方向的边（兼容读取 `dependsOn` / `depends_on` 两种命名） | `DependencyGraphBuilder` 直建的组件表 |
-| R4 | `component_index.json`、`leaf_nodes.json`、`summary.json` 三个 workspace 文件真实落盘且可 JSON 解析 | `payload.files` 指向的磁盘文件 |
-| R5 | `scripts/run.py` 被采集为 artifact 节点（组件 id 含 `run.py`） | 组件表 id 扫描 |
-
-R3 的实现带两级回退：先扫 `dependsOn` 边表；若 builder 的边命名不同，再退一步检查 handler 组件是否在任何依赖字段里声明了 engine。这种防御式读取是因为探针面向的是**外部 FSoft 源码树**（版本可能漂移），不假设内部字段名一成不变。
-
-### 5.4 退出码语义
-
-| 退出码 | 含义 | 典型场景 |
-|---|---|---|
-| 0 | 五条判据全部为真 | 引擎图链路健康 |
-| 2 | 判据未过（R1 失败或 R2–R5 任一为假） | 引擎已跑但图/节点/边/产物不符预期，JSON 中附明细供定位 |
-| 3 | 异常（参数缺失、fixture 不存在、import 失败、分析抛错） | 环境问题：`codewiki` 包不可导入、路径错误等 |
-
-### 5.5 使用方式
-
-前置条件：先用 [build_packaging_configuration](build_packaging_configuration.md) 中的 `tools/fsoft-engine/setup-env.sh <目标目录> <FSoft 源码根>` 建好含 `codewiki` 包的 venv（该脚本按冻结依赖快照落盘 + `pip check` 闭合验证，详见 `cordis.patch.yml` 中 `nativeEngine` 条目描述的原生通道环境要求）。
+### 2.2 命令行接口
 
 ```bash
-# 默认：使用仓库内置的中文空格 fixture
-python tools/fsoft-engine/probe-no-llm-graph.py --fsoft-src <FSoft 源码根>
-
-# 完整参数化形态
-python tools/fsoft-engine/probe-no-llm-graph.py \
-  --fsoft-src  ../.probe-fsoft/src \
-  --fixture    "tools/fsoft-engine/fixtures/中文 空格 fixture" \
-  --out        tools/fsoft-engine/out-1a
+python probe-no-llm-graph.py \
+    --fsoft-src <FSoft 仓库根，含 codewiki/ 包> \
+    --fixture  <被测小仓库，默认 tools/fsoft-engine/fixtures/中文 空格 fixture> \
+    --out      <工作/输出目录，默认 tools/fsoft-engine/out-1a>
 ```
 
-stdout 输出一份 JSON，包含 `checks`（各判据布尔值）、`stats`、`workspace_files`（三个产物文件的路径/存在性/条目数）、`edge_sample`（边表前 20 条）、`edge_count`、`artifact_ids` 等明细——可直接重定向存档作为阶段 1A 的验收凭据。
+退出码语义：
 
-## 6. 与其他模块的关系
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 全部判据通过 |
+| `2` | 判据未全部通过（结果 JSON 已输出） |
+| `3` | 异常（`--fsoft-src` 缺 `codewiki/`、`--fixture` 不存在、运行时抛错） |
 
-- **上游（环境供给）**：[build_packaging_configuration](build_packaging_configuration.md) 提供 `setup-env.sh`、`locked-requirements.txt` 与 `constraints.txt`，探针能否 import 到 `codewiki.mcp.session` / `codewiki.mcp.tools.analysis` / `codewiki.src.be.dependency_analyzer` 完全取决于该环境。
-- **下游（被测对象）**：探针验证的 `handle_analyze_repo` 与 `DependencyGraphBuilder` 正是 [fsoft_engine_runtime](fsoft_engine_runtime.md) → [fsoft_engine_python_runtime](fsoft_engine_python_runtime.md) 在生产中通过子进程驱动的同一批代码路径；探针绿灯是引擎通道（`nativeEngine: true`，见 `cordis.patch.yml`）整体可用的前置信号。
-- **对拍目标（历史）**：`gen-graphdiff-golden.py` 的期望值原本喂给 Node 侧 `lib/graph-diff.js`；该移植通道已在 0.16.0 phase 7 退役（见 `package.json` 描述），生成器留存为语义基准文档。
-- **运行时无耦合**：本模块不被 `index.js` 或 `lib/engine/*` 任何代码 import——它是纯开发期工具，删除它不影响插件运行。
+### 2.3 五条验收判据
 
-## 7. 维护注意事项
+探针在 stdout 输出一份 JSON 结果，`checks` 对象下含五个布尔判据：
 
-- **确定性**：golden 生成器与探针输出都不应混入随机顺序——golden 用固定种子 20261027，探针 JSON 的 key 已排序，便于 diff 与归档。
-- **路径敏感性**：fixture 目录名含空格与中文，shell 调用时必须加引号；这本身就是被测试的一部分，不要「顺手」改成英文路径。
-- **版本漂移防御**：探针假设外部 FSoft 源码树的 API（`handle_analyze_repo` 签名、`Config` 字段、组件 `dependsOn` 命名）；升级 FSoft 源码后若退出码 3，优先检查 import 面而非 fixture。
+| 判据 | 检查内容 | 为什么要它 |
+|------|----------|------------|
+| **R1** `R1_analyze_returned` | `handle_analyze_repo` 返回非 error JSON，含 `session_id` 与 `files` | 协议层通了 |
+| **R2** `R2_nodes_and_languages` | `total_components > 0`、`total_leaf_nodes > 0`，语言集合含 `python` 与 `typescript` | tree-sitter 两种语言解析器都产出节点 |
+| **R3** `R3_dependency_edge` | 依赖图里存在 `web.handler → core.engine` 方向边 | 依赖建图真的工作（不是只出节点） |
+| **R4** `R4_workspace_files` | `component_index.json` / `leaf_nodes.json` / `summary.json` 真实存在且可 JSON 解析 | 工作区产物落盘正确 |
+| **R5** `R5_artifact_node` | 组件表里存在 id 含 `run.py` 的 artifact 节点 | artifact 采集器把脚本入口收进来了 |
+
+R3 采取**双保险**：除了读 MCP 工具返回，探针还独立构造 `Config` 并直接调 `DependencyGraphBuilder(cfg).build_dependency_graph()`，从 `dependsOn` / `depends_on` 属性里搜 `handler` 节点是否声明了 `engine` 依赖——这样即使 MCP 返回的边表被裁剪，也能从 builder 原始结果兜底判真。
+
+### 2.4 探针执行时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 调用方
+    participant P as probe-no-llm-graph.py
+    participant S as SessionStore
+    participant H as handle_analyze_repo
+    participant B as DependencyGraphBuilder
+    participant FS as 工作区 out/
+
+    U->>P: python probe --fsoft-src ... --fixture 中文 空格 fixture
+    P->>P: 校验 codewiki/ 包与 fixture 路径存在
+    P->>S: store = SessionStore()
+    P->>H: handle_analyze_repo(repo_path, output_dir, use_gitignore=False)
+    H-->>P: raw JSON 字符串 (R1)
+    P->>FS: 写 component_index / leaf_nodes / summary
+    P->>P: R2 统计 languages / components / leaf_nodes
+    P->>FS: R4 逐个读 JSON 文件并解析
+    P->>B: Config(fixture) + build_dependency_graph()
+    B-->>P: components, leaf_nodes
+    P->>P: R3 搜 handler→engine 边（dependsOn / depends_on）
+    P->>P: R5 搜 id 含 run.py 的节点
+    P-->>U: JSON 结果 + 退出码 0 / 2 / 3
+```
+
+---
+
+## 组件三：被测小仓库「中文 空格 fixture」
+
+### 3.1 目录与依赖关系
+
+该 fixture 是一个**刻意最小**的多语言仓库，故意把最容易出问题的维度（非 ASCII、空格、Python↔TypeScript 混语言、artifact 脚本）全压在一个目录里。
+
+```mermaid
+flowchart LR
+    subgraph 中文 空格 fixture
+        direction TB
+        RUN["scripts/run.py<br/>main()<br/>artifact 节点"]
+        HANDLER["src/web/handler.py<br/>Handler"]
+        ENGINE["src/core/engine.py<br/>Engine / build_engine"]
+        TASK["src/web/task.ts<br/>TaskQueue.push"]
+    end
+
+    RUN -->|"导入并调用"| HANDLER
+    HANDLER -->|"sys.path.insert + from core.engine import"| ENGINE
+    TASK -.->|"同目录并列，无 Python 依赖"| HANDLER
+```
+
+### 3.2 各文件职责
+
+| 文件 | 关键符号 | 在探针里验证什么 |
+|------|----------|------------------|
+| `src/core/engine.py` | `Engine`（持有 `_calls` 计数、`run(payload)`）、`build_engine(name)` | 被 web 层依赖的核心模块，应成为叶子节点并被 `handler` 依赖边指到 |
+| `src/web/handler.py` | `Handler`（构造 `build_engine("web")`，`handle()` 转交引擎） | 通过 `sys.path.insert` 绕过包结构直接 import，验证跨目录依赖边被建出 |
+| `src/web/task.ts` | `TaskQueue`（`push()` 返回队列长度）、`normalize()` | TypeScript 解析器在中文空格路径下仍能出节点（R2 的 typescript 语言证据） |
+| `scripts/run.py` | `main(argv)`：实例化 `Handler` 并打印 `handle("ping")` | artifact 采集器识别为脚本入口（R5） |
+
+### 3.3 为什么用这种「薄壳 + 有状态」结构
+
+- `Handler` 只是 `Engine` 的薄壳，但 `Engine.__init__` 持有 `_calls` 内部状态——这避免 fixture 被 tree-sitter 当成「无意义空文件」，同时保证 `handler.py` 的 import 是**真实、可解析**的依赖（不是注释里的假引用）。
+- `run.py` 不被任何模块 import，它是独立的可执行脚本——这正是 artifact 节点与普通组件节点的区别：artifact 由「可执行入口」启发式识别，而非依赖关系。
+
+---
+
+## 在迁移体系中的位置
+
+### 4.1 与环境搭建模块的衔接
+
+探针不是独立工具，它依赖 [build_and_configuration](build_and_configuration.md) 建好的独立 venv：
+
+1. `tools/fsoft-engine/setup-env.sh <venv 目录> <FSoft 源码根>` 用 `--no-deps` 按冻结快照落盘依赖，再 editable 安装 `codewiki` 本体，最后 `pip check` + import 冒烟。
+2. 探针在同一台机器上以 `--fsoft-src <FSoft 源码根>` 把该源码插进 `sys.path`，直接调 `codewiki.mcp.tools.analysis.handle_analyze_repo` 与 `codewiki.src.be.dependency_analyzer.DependencyGraphBuilder`。
+
+`cordis.patch.yml` 也明确把 `nativeEngine: true` 指向 `tools/fsoft-engine/setup-env.sh` 作为环境准备入口，二者构成「先建环境 → 再跑探针」的阶段 1A 闭环。
+
+### 4.2 与引擎运行时模块的衔接
+
+探针**绕过**了 [engine_runtime_and_codewiki_kernel](engine_runtime_and_codewiki_kernel.md) 的 Node 适配层（`lib/engine/client.js` JSON-lines 协议、`lib/engine/python/entry.py` 薄入口、`lib/engine/manifest.js` 指纹锁），直接在 Python 进程内调 FSoft 原语。这种「绕过协议」的设计是有意的：
+
+- 阶段 1A 只验证 **FSoft 本体在非 ASCII 路径下能出图**；
+- Node↔Python 协议（stdout 守卫、UTF-8 编码、心跳、取消语义）在后续阶段由 `test-engine-client.mjs` 等协议测试覆盖；
+- 一旦 1A 探针失败，故障域被精确定位在 tree-sitter / 依赖分析 / artifact 采集，而不是跨语言协议。
+
+```mermaid
+flowchart TB
+    subgraph 本模块
+        G["gen-graphdiff-golden.py<br/>对拍基准"]
+        PR["probe-no-llm-graph.py<br/>1A 探针"]
+        FX["中文 空格 fixture<br/>被测小仓库"]
+    end
+
+    subgraph "build_and_configuration 模块"
+        SE["setup-env.sh<br/>venv + 冻结依赖"]
+        PJ["package.json<br/>nativeEngine 默认 true"]
+        CP["cordis.patch.yml<br/>引擎通道配置"]
+    end
+
+    subgraph "engine_runtime_and_codewiki_kernel 模块"
+        HB["handle_analyze_repo<br/>FSoft MCP 工具"]
+        DB["DependencyGraphBuilder<br/>tree-sitter 建图"]
+        ENTRY["lib/engine/python/entry.py<br/>JSON-lines 薄入口"]
+        CLIENT["lib/engine/client.js<br/>Node 适配层"]
+    end
+
+    SE -->|"提供 codewiki 可导入环境"| PR
+    PR -->|"直接调用（绕过协议）"| HB
+    PR -->|"直接调用"| DB
+    HB --> DB
+    FX -->|"作为 repo_path 输入"| HB
+    G -.->|"历史对拍 Node diff 逻辑"| CLIENT
+    ENTRY -->|"生产路径下"| HB
+    CLIENT -->|"spawn 子进程"| ENTRY
+    CP --> PJ
+```
+
+---
+
+## 复现与排障指南
+
+### 5.1 一次完整的 1A 验收
+
+```bash
+# 1. 准备 FSoft 源码与 venv（在插件仓库外）
+bash tools/fsoft-engine/setup-env.sh ../.probe-fsoft/venv ../.probe-fsoft/src
+
+# 2. 跑探针（用同一 venv 的 python）
+../.probe-fsoft/venv/bin/python tools/fsoft-engine/probe-no-llm-graph.py \
+    --fsoft-src ../.probe-fsoft/src \
+    --out tools/fsoft-engine/out-1a
+
+# 3. 看退出码与 checks
+echo $?
+```
+
+### 5.2 典型失败模式
+
+| 现象 | 定位 |
+|------|------|
+| 退出码 `3` + `--fsoft-src 下没有 codewiki/ 包` | FSoft 源码路径不对，先跑 `setup-env.sh` |
+| R1 false + `payload_head` 截断 | `handle_analyze_repo` 自身报错，看 payload 前 2000 字符 |
+| R2 false 且语言缺 `typescript` | tree-sitter 的 TypeScript 解析器未装进 venv，查 `pip check` |
+| R3 false 且 `edge_count = 0` | `handler.py` 的 `sys.path.insert` 没生效或 import 失败，fixture 自身有问题 |
+| R4 false 且某 key `exists: false` | FSoft 版本的产物文件名与探针预期不一致（`component_index` / `leaf_nodes` / `summary`） |
+| R5 false 且 `artifact_ids` 为空 | artifact 启发式不识别 `scripts/run.py`，可能是 FSoft 版本漂移 |
+
+### 5.3 探针结果 JSON 字段速查
+
+```json
+{
+  "ok": false,
+  "fsoft_src": "...",
+  "fixture": ".../中文 空格 fixture",
+  "payload_keys": ["session_id", "files", "stats"],
+  "stats": { "total_components": 4, "total_leaf_nodes": 3, "languages": {...} },
+  "checks": { "R1_analyze_returned": true, "R2_nodes_and_languages": true,
+              "R3_dependency_edge": false, "R4_workspace_files": true,
+              "R5_artifact_node": true },
+  "workspace_files": { "component_index": {"path": "...", "exists": true, "items": 4} },
+  "edge_sample": [ {"id": "web.handler", "dependsOn": ["core.engine"]} ],
+  "edge_count": 1,
+  "artifact_ids": ["scripts/run.py"]
+}
+```
+
+---
+
+## 设计取舍小结
+
+1. **为什么 fixture 路径一定要有中文和空格**：ASCII 路径永远复现不出 Windows cp936 误解码、`sys.path` 拼接、tree-sitter 路径归一化的缺陷；`entry.py` 文档明确记载过「中文路径请求行被按 cp936 误解码导致 repo_path 变成乱码」的真实事故。
+2. **为什么探针绕过 Node 协议直接调 Python**：把「环境 / 图 / artifact」故障与「跨语言协议」故障分离，是迁移期分阶段验收的核心手段。
+3. **为什么对拍基准用 `autojunk=False`**：短代码序列上 `SequenceMatcher` 的 junk 启发式会引入非确定性，关掉它才能拿到逐位可复现的期望。
+4. **为什么 fixture 是 Python + TypeScript 混语言**：单语言仓库无法暴露「不同 tree-sitter 解析器在同一路径下的协同问题」，混语言是 R2 判据的前提。

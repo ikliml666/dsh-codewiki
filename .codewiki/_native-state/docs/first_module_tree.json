@@ -1,5 +1,5 @@
 {
-    "codewiki_user_facing_surfaces": {
+    "client_panel_ui": {
         "path": "client.js",
         "components": [
             "client.js::CodewikiCard",
@@ -14,51 +14,11 @@
             "client.js::line",
             "client.js::mount",
             "client.js::save",
-            "client.js::zh",
-            "vendor\\codewiki\\src\\config.rs::project_name",
-            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
-            "vendor\\codewiki\\src\\main.rs::Cli",
-            "vendor\\codewiki\\src\\main.rs::capitalize",
-            "vendor\\codewiki\\src\\main.rs::main",
-            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
-            "vendor\\codewiki\\src\\setup.rs::claude_home"
+            "client.js::zh"
         ],
-        "children": {
-            "browser_ui_panel": {
-                "path": "client.js",
-                "components": [
-                    "client.js::CodewikiCard",
-                    "client.js::CodewikiPanel",
-                    "client.js::PanelIcon",
-                    "client.js::ReposTab",
-                    "client.js::SessionView",
-                    "client.js::Spark",
-                    "client.js::byUpdated",
-                    "client.js::discard",
-                    "client.js::en",
-                    "client.js::line",
-                    "client.js::mount",
-                    "client.js::save",
-                    "client.js::zh"
-                ],
-                "children": {}
-            },
-            "codewiki_rust_vendor": {
-                "path": "",
-                "components": [
-                    "vendor\\codewiki\\src\\config.rs::project_name",
-                    "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
-                    "vendor\\codewiki\\src\\main.rs::Cli",
-                    "vendor\\codewiki\\src\\main.rs::capitalize",
-                    "vendor\\codewiki\\src\\main.rs::main",
-                    "vendor\\codewiki\\src\\meta.rs::WikiMeta",
-                    "vendor\\codewiki\\src\\setup.rs::claude_home"
-                ],
-                "children": {}
-            }
-        }
+        "children": {}
     },
-    "agentic_orchestration_and_article_pipeline": {
+    "job_orchestration_and_agentic_article_pipeline": {
         "path": "index.js",
         "components": [
             "index.js::allowedLinkTargets",
@@ -86,10 +46,16 @@
             "lib\\article-contract.js::issueSummary",
             "lib\\articles-agentic.js::runPool",
             "lib\\articles-agentic.js::worker",
-            "lib\\change-set.js::collect"
+            "lib\\change-set.js::collect",
+            "lib\\git-paths.js::decodeGitPath",
+            "lib\\job-logs.js::removeLog",
+            "lib\\job-store.js::normKey",
+            "lib\\job-store.js::save",
+            "lib\\update-record.js::isTerminalStage",
+            "lib\\update-record.js::loadUpdateRecord"
         ],
         "children": {
-            "main_orchestrator": {
+            "main_job_orchestrator": {
                 "path": "index.js",
                 "components": [
                     "index.js::allowedLinkTargets",
@@ -114,7 +80,7 @@
                 ],
                 "children": {}
             },
-            "agentic_article_pipeline": {
+            "agentic_article_workflow": {
                 "path": "",
                 "components": [
                     "lib\\agentic-host.js::absOf",
@@ -126,15 +92,28 @@
                     "lib\\change-set.js::collect"
                 ],
                 "children": {}
+            },
+            "job_and_repository_infrastructure": {
+                "path": "",
+                "components": [
+                    "lib\\git-paths.js::decodeGitPath",
+                    "lib\\job-logs.js::removeLog",
+                    "lib\\job-store.js::normKey",
+                    "lib\\job-store.js::save",
+                    "lib\\update-record.js::isTerminalStage",
+                    "lib\\update-record.js::loadUpdateRecord"
+                ],
+                "children": {}
             }
         }
     },
-    "fsoft_engine_runtime": {
+    "engine_runtime_and_codewiki_kernel": {
         "path": "",
         "components": [
             "lib\\engine\\apply-plan.js::applyNativeOutput",
             "lib\\engine\\apply-plan.js::defaultRunCw",
             "lib\\engine\\apply-plan.js::findOrphanPages",
+            "lib\\engine\\apply-plan.js::findStaleModulePages",
             "lib\\engine\\client.js::runEngine",
             "lib\\engine\\contract.js::describeEngineResult",
             "lib\\engine\\contract.js::normalizeBlocker",
@@ -148,8 +127,10 @@
             "lib\\engine\\openai-bridge.js::isPlaceholderKey",
             "lib\\engine\\output.js::add",
             "lib\\engine\\process-tree.js::isAlive",
+            "lib\\engine\\proofread.js::proofreadPages",
             "lib\\engine\\quality-gate.js::gateNativeOutput",
             "lib\\engine\\quality-gate.js::toQualityIssues",
+            "lib\\engine\\wiki-links.js::isExternalTarget",
             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
             "lib\\engine\\workspace-snapshot.js::shortSha",
             "lib\\engine\\workspace-snapshot.js::snapshotExists",
@@ -159,15 +140,23 @@
             "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
             "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
             "lib\\engine\\python\\stage_map.py::articles_ceiling",
-            "lib\\engine\\python\\tree_coverage.py::file_owner"
+            "lib\\engine\\python\\tree_coverage.py::file_owner",
+            "vendor\\codewiki\\src\\config.rs::project_name",
+            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+            "vendor\\codewiki\\src\\main.rs::Cli",
+            "vendor\\codewiki\\src\\main.rs::capitalize",
+            "vendor\\codewiki\\src\\main.rs::main",
+            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+            "vendor\\codewiki\\src\\setup.rs::claude_home"
         ],
         "children": {
-            "fsoft_engine_js_core": {
+            "engine_core": {
                 "path": "",
                 "components": [
                     "lib\\engine\\apply-plan.js::applyNativeOutput",
                     "lib\\engine\\apply-plan.js::defaultRunCw",
                     "lib\\engine\\apply-plan.js::findOrphanPages",
+                    "lib\\engine\\apply-plan.js::findStaleModulePages",
                     "lib\\engine\\client.js::runEngine",
                     "lib\\engine\\contract.js::describeEngineResult",
                     "lib\\engine\\contract.js::normalizeBlocker",
@@ -181,79 +170,89 @@
                     "lib\\engine\\openai-bridge.js::isPlaceholderKey",
                     "lib\\engine\\output.js::add",
                     "lib\\engine\\process-tree.js::isAlive",
+                    "lib\\engine\\proofread.js::proofreadPages",
                     "lib\\engine\\quality-gate.js::gateNativeOutput",
                     "lib\\engine\\quality-gate.js::toQualityIssues",
+                    "lib\\engine\\wiki-links.js::isExternalTarget",
                     "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                     "lib\\engine\\workspace-snapshot.js::shortSha",
                     "lib\\engine\\workspace-snapshot.js::snapshotExists"
                 ],
                 "children": {
-                    "engine_runtime_orchestration": {
+                    "native_apply_and_quality_gate": {
                         "components": [
                             "lib\\engine\\apply-plan.js::applyNativeOutput",
                             "lib\\engine\\apply-plan.js::defaultRunCw",
                             "lib\\engine\\apply-plan.js::findOrphanPages",
-                            "lib\\engine\\client.js::runEngine",
+                            "lib\\engine\\apply-plan.js::findStaleModulePages",
                             "lib\\engine\\native-run.js::noop",
-                            "lib\\engine\\process-tree.js::isAlive"
+                            "lib\\engine\\native-state.js::stateDocFiles",
+                            "lib\\engine\\quality-gate.js::gateNativeOutput",
+                            "lib\\engine\\quality-gate.js::toQualityIssues",
+                            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+                            "lib\\engine\\workspace-snapshot.js::shortSha",
+                            "lib\\engine\\workspace-snapshot.js::snapshotExists"
                         ],
                         "children": {
-                            "native_apply_plan": {
+                            "native_output_application_logic": {
                                 "components": [
                                     "lib\\engine\\apply-plan.js::applyNativeOutput",
                                     "lib\\engine\\apply-plan.js::defaultRunCw",
-                                    "lib\\engine\\apply-plan.js::findOrphanPages"
+                                    "lib\\engine\\apply-plan.js::findOrphanPages",
+                                    "lib\\engine\\apply-plan.js::findStaleModulePages"
                                 ],
                                 "children": {}
                             },
-                            "engine_client": {
-                                "components": [
-                                    "lib\\engine\\client.js::runEngine"
-                                ],
-                                "children": {}
-                            },
-                            "native_process_runtime": {
+                            "native_execution_and_workspace_infrastructure": {
                                 "components": [
                                     "lib\\engine\\native-run.js::noop",
-                                    "lib\\engine\\process-tree.js::isAlive"
+                                    "lib\\engine\\native-state.js::stateDocFiles",
+                                    "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+                                    "lib\\engine\\workspace-snapshot.js::shortSha",
+                                    "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                                ],
+                                "children": {}
+                            },
+                            "native_output_quality_gate": {
+                                "components": [
+                                    "lib\\engine\\quality-gate.js::gateNativeOutput",
+                                    "lib\\engine\\quality-gate.js::toQualityIssues"
                                 ],
                                 "children": {}
                             }
                         }
                     },
-                    "result_contract_and_quality_gates": {
+                    "engine_orchestration": {
+                        "components": [
+                            "lib\\engine\\client.js::runEngine",
+                            "lib\\engine\\manifest.js::doctor",
+                            "lib\\engine\\manifest.js::writeLock",
+                            "lib\\engine\\output.js::add",
+                            "lib\\engine\\process-tree.js::isAlive"
+                        ],
+                        "children": {}
+                    },
+                    "article_validation_and_contract": {
                         "components": [
                             "lib\\engine\\contract.js::describeEngineResult",
                             "lib\\engine\\contract.js::normalizeBlocker",
                             "lib\\engine\\contract.js::validateEngineResult",
-                            "lib\\engine\\output.js::add",
-                            "lib\\engine\\quality-gate.js::gateNativeOutput",
-                            "lib\\engine\\quality-gate.js::toQualityIssues"
+                            "lib\\engine\\mapping.js::findMissingModuleDocs",
+                            "lib\\engine\\proofread.js::proofreadPages",
+                            "lib\\engine\\wiki-links.js::isExternalTarget"
                         ],
                         "children": {}
                     },
-                    "llm_provider_bridges": {
+                    "llm_bridge_integration": {
                         "components": [
                             "lib\\engine\\llm-bridge.js::startLlmBridge",
                             "lib\\engine\\openai-bridge.js::isPlaceholderKey"
                         ],
                         "children": {}
-                    },
-                    "workspace_state_and_integrity": {
-                        "components": [
-                            "lib\\engine\\manifest.js::doctor",
-                            "lib\\engine\\manifest.js::writeLock",
-                            "lib\\engine\\mapping.js::findMissingModuleDocs",
-                            "lib\\engine\\native-state.js::stateDocFiles",
-                            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
-                            "lib\\engine\\workspace-snapshot.js::shortSha",
-                            "lib\\engine\\workspace-snapshot.js::snapshotExists"
-                        ],
-                        "children": {}
                     }
                 }
             },
-            "fsoft_engine_python_runtime": {
+            "engine_python_runtime": {
                 "path": "",
                 "components": [
                     "lib\\engine\\python\\entry.py::_ProtocolOnly",
@@ -265,18 +264,25 @@
                     "lib\\engine\\python\\tree_coverage.py::file_owner"
                 ],
                 "children": {}
+            },
+            "vendored_codewiki": {
+                "path": "",
+                "components": [
+                    "vendor\\codewiki\\src\\config.rs::project_name",
+                    "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+                    "vendor\\codewiki\\src\\main.rs::Cli",
+                    "vendor\\codewiki\\src\\main.rs::capitalize",
+                    "vendor\\codewiki\\src\\main.rs::main",
+                    "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+                    "vendor\\codewiki\\src\\setup.rs::claude_home"
+                ],
+                "children": {}
             }
         }
     },
-    "platform_infrastructure_and_developer_tooling": {
+    "build_configuration_and_test_verification_tooling": {
         "path": "",
         "components": [
-            "lib\\git-paths.js::decodeGitPath",
-            "lib\\job-logs.js::removeLog",
-            "lib\\job-store.js::normKey",
-            "lib\\job-store.js::save",
-            "lib\\update-record.js::isTerminalStage",
-            "lib\\update-record.js::loadUpdateRecord",
             "cordis.patch.yml::cordis.patch.yml",
             "package.json::package.json",
             "tools/fsoft-engine/setup-env.sh::setup-env.sh",
@@ -289,19 +295,7 @@
             "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
         ],
         "children": {
-            "job_repository_infrastructure": {
-                "path": "",
-                "components": [
-                    "lib\\git-paths.js::decodeGitPath",
-                    "lib\\job-logs.js::removeLog",
-                    "lib\\job-store.js::normKey",
-                    "lib\\job-store.js::save",
-                    "lib\\update-record.js::isTerminalStage",
-                    "lib\\update-record.js::loadUpdateRecord"
-                ],
-                "children": {}
-            },
-            "build_packaging_configuration": {
+            "build_and_configuration": {
                 "path": "",
                 "components": [
                     "cordis.patch.yml::cordis.patch.yml",
