@@ -66,6 +66,7 @@ flowchart TD
 | `defaultRunCw` | `apply-plan.js` | 默认 `cw` CLI 通道（同步 spawn 包装成统一接口） |
 | `findOrphanPages` | `apply-plan.js` | 扫描孤儿页：`source_files` 全部失效的存量模块页 |
 | `findStaleModulePages` | `apply-plan.js` | 扫描聚类重构残骸：slug 已不在当前模块树的引擎产出页；并回收无 `fsoft_page` 标记的旧通道（0.16.0 之前）模块页，结果项带 `legacy` 标记 |
+| `findSupersededLegacyPages` | `apply-plan.js` | 被取代旧页报告：无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块、且至少一个 `source_files` 已被当前树别的模块认领（结果项带 `coveredSource`）；只报告，不自动删除 |
 | `auditExistingArticles` | `apply-plan.js` | 存量体检：扫 `.codewiki/` 下非 `_` 前缀的存量文章，error 级坏页记 `existing-bad-article`（不回滚、挡基线） |
 | `checkWriteTargets` | `apply-plan.js` | 写集白名单校验（纯函数） |
 | `checkDeleteTargets` | `apply-plan.js` | 删除集白名单校验（与写集共用 `checkTargetPath` 同一把尺子） |
@@ -219,7 +220,10 @@ sequenceDiagram
 
 ## 孤儿页与残留模块页扫描
 
-这两个函数是本模块相对其他阶段最独特的能力——**删除**而不只是写入。
+这两个函数是本模块相对其他阶段最独特的能力——**删除**而不只是写入（另有 `findSupersededLegacyPages` 只报告、不自动删，见下）。
+
+（注：本节介绍三个扫描函数，其中 `findSupersededLegacyPages` 只报告、不自动删除；前两个负责实际的删除清理。）
+
 
 ### `findOrphanPages`
 
@@ -238,6 +242,12 @@ sequenceDiagram
 2. **0.16.0 之前 Node 通道生成的旧页**（无 `fsoft_page` 标记）：命中两条可证特征之一——① `title` 恒等于自己的文件名 slug（旧通道 frontmatter 模板是 `title: <模块名>`）；② 落在 `modules/` 的子目录里（原生通道的模块页永远 flat，映射只产出 `modules/<slug>.md`）——再叠加两道闸（`type: module`、`source_files` 非空）才当成旧页回收。
 
 它解决 `findOrphanPages` 覆盖不到的情况：聚类重构让模块改名后，旧页的 `source_files` 指向的文件**全都还在**，只是不再归属任何模块。
+
+### `findSupersededLegacyPages`（只报告、不自动删）
+
+除上述两类自动回收的残骸，还有一条**不自动删**的线索：旧页声明的 `source_files` 已被当前模块树里的**别的**模块认领（`findSupersededLegacyPages` 收集当前树全部组件声明的源文件归一成覆盖集，逐篇比对旧页 frontmatter 的 `source_files`）。命中条件与 `findStaleModulePages` 的旧页判据一脉相承——无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块——结果项带 `coveredSource`（被认领的那个源文件路径）。
+
+刻意只报告、不自动删除：真机 Wxxy-CampusHub 的 11 篇页全中这条线索，而它们各有 4~20 次人工提交（正文里是人工补的迁移警告与 decisions 链接）。这条线索走报告通道，删除权留给人。
 
 两条刻意的保守修正：
 

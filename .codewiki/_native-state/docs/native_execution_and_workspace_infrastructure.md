@@ -75,6 +75,8 @@ env(doctor + engine-lock) → 增量决议(change-set + 受管状态) → 工作
 → 受管状态采集 → 首次落锁 → 孤儿/残留页清理 → 落地器(写盘→index→基线→提交) → 合成终态
 ```
 
+**「孤儿/残留页清理」的第三类判据——只报告不删（3.7 段）：** 该步骤同时跑三类存量页扫描。孤儿页（`source_files` 全部失效）与残留页（页名已不属于当前模块树）入 `deleteFiles`，随落地器同事务删除、同次回滚；但还有一类旧页——**源码确实已被当前模块树接手、页内却含大量人工维护内容**（真机上单篇 4~20 次人工提交）——凭 slug 撞车自动删就是毁人手写的东西。这类页由 `findSupersededLegacyPages`（可经 `deps.findSupersededLegacyPages` 注入）判定后只在终态 notes 里如实列出（前 5 篇路径 +「等」），不自动删除，合并或移除留给人工决定。
+
 **五条硬不变量：**
 
 1. **锁不一致 / 依赖不闭合 → 直接 failed，不跑引擎**：跑出来的产物不可信，「先跑再发现环境漂了」只会让用户看到一堆无意义的失败文章。
@@ -106,7 +108,7 @@ flowchart LR
 | `DEFAULT_UPDATE_OPTIONS` | `{ rung: '3' }` | 显式要求组件级增量（图 diff 决定哪些模块重写）；不留空是为了防止上游默认值漂移导致增量语义静默变化 |
 | `DEFAULT_ENGINE_TIMEOUT_MS` | `180 * 60 * 1000`（3 小时） | 按真机实测 174 分钟余量定的上限；超时靠引擎侧进程树终止兜底，不靠上层 tick |
 
-**依赖注入设计：** 所有实现都可通过 `deps` 注入（`deps.doctor` / `deps.runEngine` / `deps.gate` / `deps.apply` / `deps.bridge` / `deps.collectChangeSet` / `deps.snapshot` …）。测试可以用假 `runEngine` + 真实 gate/apply，既覆盖接线又覆盖裁决。
+**依赖注入设计：** 所有实现都可通过 `deps` 注入（`deps.doctor` / `deps.runEngine` / `deps.gate` / `deps.apply` / `deps.bridge` / `deps.collectChangeSet` / `deps.snapshot` / `deps.findSupersededLegacyPages` …）。测试可以用假 `runEngine` + 真实 gate/apply，既覆盖接线又覆盖裁决。
 
 **统一出口 `settle()`：** 所有分支（取消、环境失败、引擎失败、成功）都经过同一函数构造 `EngineResult`，保证 outcome 合法（done 不许带 blockers、partial 必须带 blockers、failed 必须有 error），并携带现场证据：`incremental`（决议现场）、`gate` / `apply` / `engineLock` / `artifacts`（含 `rawTree` 留档目录）、`notes`。三个基线与计数事实**分开记、各有来源**：`baselineEligible` 是质量门许可（`report.baselineEligible === true && !stateIncomplete`）；`baselineAdvanced` 是落地器事实（`applyRes.baseline.advanced === true`），兼容字段 `canAdvanceBaseline` 读它——此前没有任何业务分支传过 `baselineAdvanced`，JobService 落账的 `canAdvanceBaseline` 恒为 false，与「基线其实已经推进」的事实相反；`writtenCount` 只认落地器的实际写入数（0 就是 0），不再回退引擎自报值——曾写成 `written || 引擎自报值`，于是整批回滚的一轮在账上仍是「写入了 N 篇」，取消/失败的结果被引擎的意图数洗白。最后，若质量门报告了 `report.baseline.consumedInput`（产物 commit 与本轮合成快照一致、即「这轮把工作区未提交改动也写进了文章」），settle 前先把它压进 `notes`——基线推进过去靠「工作区必须干净」把关，现在改为认快照一致性，那「吞了哪些未提交改动」就必须让人看得见。
 
@@ -226,6 +228,7 @@ sequenceDiagram
     Run->>St: captureDocsDir + buildStatePayload
     St-->>Run: stateFiles（写集项）+ missing?
     Run->>Ap: applyNativeOutput(extraFiles=stateFiles, deleteFiles=孤儿/残留页)
+    Note over Run: 被新树接手但含人工维护内容的旧页只记 note，不入 deleteFiles
     Ap->>Git: 写盘 → cw index（+存量体检）→ 基线 → 自动提交（写盘/索引/基线失败整体回滚）
     Ap-->>Run: applyRes（applied / rolledBack / baseline）
     Run->>Run: weakest(engine, gate, apply) 合成终态
@@ -251,3 +254,4 @@ sequenceDiagram
 | 状态为什么放 `_native-state` | `cw index` 只跳过 `_` 前缀；否则持久化文章被收成第二份索引 |
 | 无变化轮 | 不重写状态（指纹比对）、不裁旧状态、不推进基线/提交 |
 | 原始产物可追溯 | `archiveDocsTree` 在被加工前整棵留档到仓库外（`rawTree` 字段），失败不影响终态 |
+| 被新树接手但含人工内容的旧页 | `findSupersededLegacyPages` 只在 notes 列出、不自动删除（合并/移除留人工） |

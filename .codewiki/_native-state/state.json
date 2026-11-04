@@ -2,41 +2,19 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
-    "headCommit": "1c3483551b6e1886951396ddd44779c88562cb54"
+    "baseCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
+    "headCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
-    "headCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
+    "baseCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
+    "headCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1",
     "committed": [
       "CHANGELOG.md",
-      "README.md",
-      "client.js",
-      "docs/fsoft-native-engine.md",
-      "index.js",
-      "lib/article-contract.js",
       "lib/engine/apply-plan.js",
-      "lib/engine/client.js",
-      "lib/engine/contract.js",
-      "lib/engine/manifest.js",
       "lib/engine/native-run.js",
-      "lib/engine/proofread.js",
-      "lib/engine/python/entry.py",
-      "lib/engine/python/stage_map.py",
-      "lib/engine/quality-gate.js",
-      "lib/engine/wiki-links.js",
       "package.json",
-      "test-article-contract.mjs",
-      "test-batch.mjs",
-      "test-client-panel.mjs",
-      "test-config.mjs",
-      "test-engine-apply-plan.mjs",
-      "test-engine-contract.mjs",
-      "test-engine-native-incremental.mjs",
-      "test-engine-proofread-e2e.mjs",
-      "test-engine-quality-gate.mjs",
-      "test-wiki-entry.mjs"
+      "test-engine-apply-plan.mjs"
     ],
     "staged": [],
     "unstaged": [],
@@ -54,12 +32,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 17c43b7 与本次 cw 基线 ba1c710 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2bdl7z-1-native（28 个文件）"
+    "持久化基线 ba1c710 与本次 cw 基线 1c34835 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2def35-8-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T16:15:16.382Z"
+  "updatedAt": "2026-11-04T17:20:23.054Z"
 }

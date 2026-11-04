@@ -148,7 +148,8 @@
             "vendor\\codewiki\\src\\main.rs::capitalize",
             "vendor\\codewiki\\src\\main.rs::main",
             "vendor\\codewiki\\src\\meta.rs::WikiMeta",
-            "vendor\\codewiki\\src\\setup.rs::claude_home"
+            "vendor\\codewiki\\src\\setup.rs::claude_home",
+            "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
         ],
         "children": {
             "engine_core": {
@@ -177,7 +178,8 @@
                     "lib\\engine\\wiki-links.js::isExternalTarget",
                     "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                     "lib\\engine\\workspace-snapshot.js::shortSha",
-                    "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                    "lib\\engine\\workspace-snapshot.js::snapshotExists",
+                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
                 ],
                 "children": {
                     "native_apply_and_quality_gate": {
@@ -192,7 +194,8 @@
                             "lib\\engine\\quality-gate.js::toQualityIssues",
                             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                             "lib\\engine\\workspace-snapshot.js::shortSha",
-                            "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                            "lib\\engine\\workspace-snapshot.js::snapshotExists",
+                            "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
                         ],
                         "children": {
                             "native_output_application_logic": {
@@ -200,7 +203,8 @@
                                     "lib\\engine\\apply-plan.js::applyNativeOutput",
                                     "lib\\engine\\apply-plan.js::defaultRunCw",
                                     "lib\\engine\\apply-plan.js::findOrphanPages",
-                                    "lib\\engine\\apply-plan.js::findStaleModulePages"
+                                    "lib\\engine\\apply-plan.js::findStaleModulePages",
+                                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
                                 ],
                                 "children": {}
                             },
