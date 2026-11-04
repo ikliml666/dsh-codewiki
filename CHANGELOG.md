@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.17.40 — 2026-11-05
+
+拿真实项目（`Wxxy-CampusHub`，254 个文件、80 Rust + 47 TSX，从 9 月底的旧 Node 通道产物起飞）全量编译了一遍，逼出两个 0.17.39 没覆盖到的问题。
+
+### 自动提交失败时只报 git 警告，真正的错误被挤出可视窗口
+
+`commitWikiArtifacts` 用 `(add.stderr || add.stdout).trim().slice(0, 200)` 当失败原因。Windows 上 `git add` 会先打一串 `warning: in the working copy of '...', LF will be replaced by CRLF`，200 字全花在这些警告上，真正的 `error: open("CodeWiki.md"): Permission denied` / `fatal: adding files failed` 一个字都看不到——排查时只能靠猜。
+
+改为新增 `errText(r)`：优先取 `/^(error|fatal):/i` 开头的行，取不到才退回原文，上限放到 400 字。`git add` 与 `git commit` 两处失败都改用它。
+
+（这次真机撞到的具体成因是 `CodeWiki.md` 的 Windows ACL 只剩一条陌生 SID 条目，`git add` exit 128。ACL 与代码无关，已单独修好；代码侧要修的是「别把警告当原因」。）
+
+### 旧格式页的第三条判据：报告，不删除
+
+0.17.39 给旧通道页加了两条判别式（`title` 等于 slug / 落在 `modules/` 子目录）。真机上还有第三类：标题写成「CAS 协议核心（campus-auth）」这种描述性名字（第一条不中），平铺在 `modules/` 根下（第二条不中），而 `findOrphanPages` 要求 source_files **全部**失效，这几篇只缺一两个 `NOTICE.md` / live 测试文件（第三条也不中）——三个判据同时擦肩而过，11 篇旧页原地留存。
+
+第一版把「任一 source_file 已被当前树认领」也做成**删除**判据，真机精度确实是 11/11（`campus-auth` ← `crates/campus-auth/src/cas.rs`、`frontend-shell` ← `tauri-app/frontend/src/App.tsx`……）。但随即发现这 11 篇各有 4~20 次人工提交（`campus-hub-tauri` 20 次、`frontend-shell` 15 次），正文里是人工补的迁移警告、行号更正和 `[[decisions/...]]` 交叉链接——它们是**人工维护的知识页**，只是 slug 恰好撞上旧聚类。自动删就是凭页名毁掉用户手写的内容。
+
+所以拆成两个函数：
+
+- `findStaleModulePages`（进删除集）保留两条判据，删掉第三判据；
+- 新增 `findSupersededLegacyPages`（只报告，不进删除集），判据是「slug 不在树里 + 无 `fsoft_page` + 至少一个 source_file 已被当前树别的模块认领」，返回命中的那个文件作为「被谁接手」的证据。
+
+`native-run.js` 把它接进 notes：「有 N 篇旧页的源码已被当前模块树接手，但页内含人工维护内容，未自动删除（需人工决定合并或移除）：…」。删除权留给人。
+
+### 校验
+
+- 39 个测试全绿（33 个非 venv + 6 个 venv 全跑）：`test-engine-apply-plan` 59 条、`test-engine-native-incremental` 159 条、`test-engine-native-job` 141 条、`test-wiki-anchors` 369 过 / 0 败 / 3 待重编译。
+- 真机双仓验证：`Wxxy-CampusHub` 自动删除 **0** 篇、仅报告 **11** 篇（每条都带接手源码）；`dsh-codewiki` 自动删除 0 篇、仅报告 0 篇。
+- `Wxxy-CampusHub` 全量编译结果：基线 `124863b3` → `ac7bdcbb`（=HEAD），`modules/` 11 篇 → 57 篇，9 个顶层模块覆盖 134 个源文件，`_index.md` 收录 102 条。
+- 两篇 `learnings/` 的锚点随代码前移再对齐一次（`normalizeIndexLinks` 落到 `index.js:325-333`、`installUpdateReminder` 落到 `index.js:4933`）。
+
 ## 0.17.39 — 2026-11-04
 
 全仓审计后的收口：修掉让基线永不推进的死锁、让换通道后的残骸页永远堆积的判据缺口、以及一整批「文档说的事代码里没有」。另外把旧 Node 通道遗留的横切产物（`_architecture.md` / `_patterns.md` / `concepts/`）整体下线——它们描述的是 0.16.0 已删除的规划层。

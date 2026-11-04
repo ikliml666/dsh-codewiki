@@ -40,7 +40,7 @@ tags: [cw-cli, binary, path-separator, windows, lesson, defense]
 - **契约注释**（`index.js:189-198`）：把 `cw` 的三态输出与逐行清单固化成契约——`No wiki found. Run \`cw init\` first.` / `Wiki has not been compiled yet.` / `Wiki is up to date.` / `Changed since last compile (<hash>):` 加 `  M <file>` / `Stale articles:` 加 `  ! <article>`。注释首行（`index.js:189`）仍声明「本地 fork，源码 vendor/codewiki，行为基线上游 main 64323823」，历史段（`index.js:196-198`）仍写「见 vendor/codewiki/FORK.md 与 .codewiki/learnings/cw-binary-source-lost.md」——**FORK.md 已不在工作树，这段注释本身是漂移点，但保留作历史记录**。
 - **`normalizeArticlePath`**（`index.js:321`）：单行纯函数，把反斜杠统一替换为正斜杠；对 `undefined` 安全返回空串。是 `parseStatus` 和 stale 清单进插件后第一道规范化。
 - **`parseStatus`**（`index.js:213-226`）：先用子串判定 `missing` / `uncompiled` / `clean` 三态（对应 `index.js:215-217`）；其余一律 stale，再用 `matchAll(/^\s+[M!]\s+(.+)$/gm)` 逐行分流（`index.js:220`）：`M` 走 changedFiles、`!` 走 staleArticles（两者都过 `normalizeArticlePath`，`index.js:222-223`）。
-- **`normalizeIndexLinks`**（`index.js:325-333`）：`cw index` 直接写盘 `_index.md`，本函数事后只修链接头（动机注释 `index.js:3049-3050`）——只替换 `[[` 到 `|` 之间那段的反斜杠（正则在 `index.js:207`），正文里的 `E:\ik\repo` 之类不受影响；文件不存在静默返回 `false`（`index.js:206`），无改动也返回 `false`（`index.js:208`），写回在 `index.js:209`，天然幂等。由 `tickIndex` 在 `cw index` 成功后调用（`index.js:3074`），命中时记 note「_index.md 链接路径已规范化（\ → /）」。
+- **`normalizeIndexLinks`**（`index.js:325-333`）：`cw index` 直接写盘 `_index.md`，本函数事后只修链接头（动机注释 `index.js:323`）——只替换 `[[` 到 `|` 之间那段的反斜杠（正则在 `index.js:329`），正文里的 `E:\ik\repo` 之类不受影响；文件不存在静默返回 `false`（`index.js:328`），无改动也返回 `false`（`index.js:330`），写回在 `index.js:331`，天然幂等。由 `tickIndex` 在 `cw index` 成功后调用（`index.js:3333`），命中时记 note「_index.md 链接路径已规范化（\ → /）」。
 - **`countWikiArticles`**（`index.js:229-241`）：递归统计 `.codewiki/` 下 `.md` 篇数（含 `_index`），总览卡展示用（注释 `index.js:228`）。
 
 ### 插件侧：索引收尾、入口补建与产物提交

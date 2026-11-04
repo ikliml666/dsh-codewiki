@@ -82,7 +82,7 @@ tags: [reminder, gating, invariant, bugfix, hook]
 - `tickCommit(job)`（index.js:2843-2859）：独立提交阶段（0.10.11 起），`autoCommitWiki` 走主题分支合并式提交（index.js:1865）；完成后 `setStage(job, 'done')`（index.js:1487）、写 `finishedAt`（index.js:1774），同样 `onSettled` 唤醒（index.js:1774）。
 
 - `wakeCompileSession(job, outcome, agents = agentsRef)`（index.js:1757-1772）：编译终态的 steer 唤醒，与系统提示提醒互为补充。0.10.9 起成功且插件已自动提交（或非 pending）则完全不打扰会话（门控在 index.js:1757）。
-  - 无 `job.sessionId` 或无 agents 服务直接返回（index.js:70），取不到 agent 或 agent 没有 `steer` 也返回（index.js:3157-3158）。
+  - 无 `job.sessionId` 或无 agents 服务直接返回（index.js:2106），取不到 agent 或 agent 没有 `steer` 也返回（index.js:2901）。
   - 失败文案「【CodeWiki 编译失败】…」（index.js:1765），成功但未自动提交文案「【CodeWiki 产物待提交】…检查 `.codewiki/` 与 `CodeWiki.md` 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不需要就忽略）」（index.js:1766）。
   - `agent.steer(...)` 抛错被吞掉，不影响编译任务本身（index.js:1765）。
 
@@ -108,9 +108,9 @@ tags: [reminder, gating, invariant, bugfix, hook]
 │ │       ├─ writtenCount>0→runCw index/meta index.js:2754-2755│
 │ │       ├─ ensureWikiEntry(job.cwd) index.js:2801          │
 │ │       └─ autoCommit开→tickCommit→autoCommitWiki index.js:2810-2824│
-│ ├─ installUpdateReminder(ctx, config) index.js:4010        │
-│ │   └─ sp.section('codewiki:update-reminder') index.js:4019│
-│ │       └─ text()每次求值 index.js:4023-4029              │
+│ ├─ installUpdateReminder(ctx, config) index.js:4933        │
+│ │   └─ sp.section('codewiki:update-reminder') index.js:4943│
+│ │       └─ text()每次求值 index.js:4945-4952              │
 │ │           ├─ updateReminder===false→'' index.js:4023     │
 │ │           ├─ 无<cwd>/CodeWiki.md→''  index.js:4024-4025 │
 │ │           ├─ reminderText(cwd)        index.js:4001      │
