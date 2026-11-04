@@ -75,6 +75,7 @@ flowchart TD
 | `defaultRunCw` | `apply-plan.js` | 默认 `cw` CLI 通道（同步 spawn 包装成统一接口） |
 | `findOrphanPages` | `apply-plan.js` | 扫描孤儿页：`source_files` 全部失效的存量模块页 |
 | `findStaleModulePages` | `apply-plan.js` | 扫描聚类重构残骸：slug 已不在当前模块树的引擎产出页 |
+| `auditExistingArticles` | `apply-plan.js` | 存量体检：扫 `.codewiki/` 下非 `_` 前缀的存量文章，error 级坏页记 `existing-bad-article`（不回滚、挡基线） |
 | `checkWriteTargets` | `apply-plan.js` | 写集白名单校验（纯函数） |
 | `checkDeleteTargets` | `apply-plan.js` | 删除集白名单校验（与写集共用 `checkTargetPath` 同一把尺子） |
 | `commitWikiArtifacts` | `apply-plan.js` | 内置默认提交器：只 add wiki 两个路径，安全边界逐条对齐宿主 |
@@ -90,7 +91,7 @@ APPLY_STAGES        // ['write', 'index', 'baseline', 'commit']
 APPLY_PROBLEM_KINDS // 写集校验机读类别
 APPLY_RESULT_KINDS  // 'write-failed' | 'index-failed' | 'baseline-failed'
                     // | 'commit-failed' | 'commit-scope' | 'not-writable'
-                    // | 'wiki-missing' | 'gate-partial'
+                    // | 'wiki-missing' | 'gate-partial' | 'existing-bad-article'
 ```
 
 ---
@@ -123,7 +124,10 @@ flowchart TD
     NORM --> MISS["findArticlesMissingFromIndex<br/>核对 frontmatter 静默跳过"]
     MISS -- "有缺页" --> RB2["rollback + index-failed"]
 
-    MISS -- "完整" --> B{"shouldAdvance?<br/>normal 且 canAdvanceBaseline"}
+    MISS -- "完整" --> AUDIT["auditExistingArticles<br/>存量坏页体检（跳过本轮已知页）"]
+    AUDIT -- "有存量坏页" --> BAD["记 existing-bad-article<br/>不回滚！终态降 partial、基线不推进"]
+    AUDIT -- "无" --> B{"shouldAdvance?<br/>normal 且 canAdvanceBaseline<br/>且无存量坏页"}
+    BAD --> B
     B -- "否" --> COMMIT
     B -- "是" --> META["cw meta update"]
     META -- "exit != 0" --> RB3["rollback + baseline-failed"]
@@ -147,7 +151,7 @@ flowchart TD
 | 阶段 | 动作 | 失败行为 |
 | --- | --- | --- |
 | `write` | 写所有 `targets`，内容等价（行尾归一）的文件跳过重写 | 失败 → 回滚 pre-image |
-| `index` | 跑 `cw index`，规范化 `_index.md` 链接分隔符 | 失败 → 回滚 pre-image |
+| `index` | 跑 `cw index`，规范化 `_index.md` 链接分隔符，核对本轮写集全部被收录，并体检存量坏页 | 写集缺页 → 回滚 pre-image；存量坏页 → 不回滚，只记 `existing-bad-article` 挡基线 |
 | `baseline` | 跑 `cw meta update` 推进基线 | 失败 → 回滚 pre-image |
 | `commit` | 用内置或注入的提交器提交 wiki 产物 | 失败 → **不回滚**，只记 `commit-failed` |
 
@@ -161,11 +165,11 @@ flowchart TD
 stateDiagram-v2
     [*] --> normal: 有变化
     [*] --> normalize: 无变化但落地页与当前渲染规则不一致
-    [*] --> delete-only: 无变化但有残留页待删
+    [*] --> deleteOnly: 无变化但有残留页待删
     [*] --> idle: 无变化也无事可做
     normal: normal — 写文章 + 推进基线
     normalize: normalize — 重写文章，不推进基线
-    delete-only: delete-only — 只删 + 索引，不写不推进
+    deleteOnly: delete-only — 只删 + 索引，不写不推进
     idle: idle — 整轮短路
 ```
 
@@ -174,7 +178,7 @@ stateDiagram-v2
 | `normal` | ✅ 只写 `defects === 0` 的页 | ✅ 若 `report.canAdvanceBaseline` | 有变化的正常轮 |
 | `normalize` | ✅ **全写**（含缺陷页） | ❌ | 渲染规则改进后让库与规则对齐 |
 | `delete-only` | ❌ | ❌ | 只清理源码已删的残骸页 |
-| `idle` | ❌ | ❌ | 整轮短路 done |
+| `idle` | ❌ | ❌ | 整轮短路 done；dryRun 下预览不落盘，`applied=false`（「无需动作」≠「已交付」） |
 
 > 为什么 `normalize` 轮要连缺陷页一起写：这一轮的职责是让库与当前渲染规则对齐，坏页同样是旧规则的产物，留在库里只会继续错下去（缺陷本身仍由门如实上报）。
 
@@ -288,6 +292,8 @@ deps = {
 }
 ```
 
+**注入的 `runCw` 刻意不接取消 signal**：原生通道（阶段 4）由 `index.js` 注入时**故意不传** `nativeAborters` 的 AbortController——落地事务（写盘→index→基线→提交）一旦开始就必须跑完，取消只终止引擎阶段。曾传了 signal，取消会 kill 掉正在跑的 `cw meta update` 触发回滚，把「已落盘的文章」连同基线一起撤掉而终态只报「已取消」。事务自身有 120s 超时兜底。
+
 「可注入」不等于「默认什么都不做」——默认提交器 `commitWikiArtifacts` 的安全边界逐条对齐宿主版（只 add wiki 两个路径 / 不 amend 不 push / 合并冲突与无 HEAD 一律拒绝 / 检查 `.gitignore`）。否则阶段 3 自己跑起来产物只落盘不入库，报告却仍是 done。
 
 ### 问题类别到契约的映射
@@ -301,6 +307,8 @@ deps = {
 | `baseline-failed` | `baseline-failed` |
 | `commit-failed` / `commit-scope` | `commit-failed` |
 | `not-writable` / `gate-partial` | `quality-gate` |
+| `wiki-missing` | `index-failed` |
+| `existing-bad-article` | `quality-gate` |
 
 映射表未登记的 kind 会**直接抛错**——契约测试会枚举全表，写错 kind 会让面板与终态判定同时失明。
 
@@ -310,7 +318,13 @@ deps = {
 
 ### 为什么 `cw index` 成功还要再核对一次收录
 
-上游 `vendor/codewiki/src/main.rs` 的实现是逐篇 `frontmatter::parse`，**解析失败就 continue**，最后照样写索引并返回 0。于是 frontmatter 写坏的文章会静默缺席，落地器拿到 exit 0 判 done——这就是「缺页静默成功」。本模块的 `findArticlesMissingFromIndex` 会读 `_index.md`、比对每条 `[[link]]` 是否真的收录了本次写的文章，缺页即整体回滚。
+上游 `vendor/codewiki/src/main.rs` 的实现是逐篇 `frontmatter::parse`，**解析失败就 continue**，最后照样写索引并返回 0。于是 frontmatter 写坏的文章会静默缺席，落地器拿到 exit 0 判 done——这就是「缺页静默成功」。本模块的 `findArticlesMissingFromIndex` 会读 `_index.md`、比对每条 `[[link]]` 是否真的收录了本轮写集（`targets`，不只是实际落盘的 `written`——内容等价被 `writeAll` 跳过重写的页也必须在校验范围内）。链接只取 `[[` 之后到 `|` / `]` / 行尾的目标路径段：cw 写的 title 是原文照搬，标题里出现 `]`（如「数组下标 [i] 详解」）时整条匹配会漏判。缺页即整体回滚。
+
+### 存量体检：为什么写集之外的坏页也要拦
+
+上面那道闸只比对本轮写集——历史坏页从没被重写过就永远照不到，而 `cw index` 照样收它、读者照样点进去。`auditExistingArticles` 在索引成功后扫一遍 `.codewiki/` 下非 `_` 前缀的存量文章（与 cw 自身的跳过规则逐字一致：判相对 `.codewiki/` 的完整路径前缀，`modules/_draft.md` 这类页仍要查），对本轮已写与已渲染的页跳过（同一缺陷门里已记过一次账），只取 error 级 issue。
+
+处置刻意与写盘失败不同：**不回滚**。存量坏页删不掉也修不了，而回滚会把本轮刚写好的文章一并撤掉——用一个既存缺陷否掉一批好产物。只记 `existing-bad-article` 阻塞，让终态降 `partial`、基线不推进（`shouldAdvance` 额外一票否决），等下次重编译把它修掉。
 
 ### 为什么内容比较要归一化行尾
 
@@ -323,6 +337,8 @@ CRLF/LF 是写入时机的产物（git `core.autocrlf=true` 时读出来就是 C
 ### 为什么自动提交要反查 scope
 
 安全边界写在 `git add -- .codewiki CodeWiki.md` 的 pathspec 里，但「命令带了 pathspec」和「提交里真的只有这两个路径」是两件事（仓库钩子、并发暂存、`.gitignore` 变化都可能让它跑偏）。`verifyCommitScope` 用 `git show --name-only` 反查实际提交内容，把边界变成可断言的事实，并强制 `core.quotepath=false` + 解码（[job_and_repository_infrastructure](job-and-repository-infrastructure.md) 的 `decodeGitPaths`）以兼容中文模块名。
+
+反查时还带 `--first-parent`：自动提交走「主题分支提交 → merge 回原分支」，编译期间用户在原分支有过提交时会合成真 merge commit，而 `git show --name-only` 对 merge commit 默认不输出与父提交的 diff——空清单会被当成「没有越界路径」，越界检查被洗白成 ok。
 
 ---
 

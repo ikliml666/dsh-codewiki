@@ -203,7 +203,4 @@ The end-to-end data flow, from a raw repo through to article tasks, with the cal
 
 Component id convention: every component id is `${relativePath}#${name}` (`test-cluster.mjs:28`, `test-cluster.mjs:277`). `validIds` in `parseClusterResponse` is the full set of ids (`lib/cluster.js:156`); any id the LLM returns that is not in `validIds` is dropped with a warning (`lib/cluster.js:176`).
 
-## Connections
-## Data Flow
-## Connections
 ## Known Issues

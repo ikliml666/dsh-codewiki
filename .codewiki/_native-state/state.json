@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "c6fe93fa4e416f451305d026aa9ea8f8986db592"
+    "headCommit": "eb1054f7084fafda376cb18b723e8880f40f3284"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "c6fe93fa4e416f451305d026aa9ea8f8986db592",
+    "headCommit": "eb1054f7084fafda376cb18b723e8880f40f3284",
     "committed": [],
     "staged": [],
     "unstaged": [
@@ -19,13 +19,16 @@
       "index.js",
       "lib/article-contract.js",
       "lib/engine/apply-plan.js",
+      "lib/engine/client.js",
       "lib/engine/contract.js",
+      "lib/engine/manifest.js",
       "lib/engine/native-run.js",
       "lib/engine/proofread.js",
       "lib/engine/python/entry.py",
       "lib/engine/python/stage_map.py",
       "lib/engine/quality-gate.js",
       "package.json",
+      "test-article-contract.mjs",
       "test-batch.mjs",
       "test-client-panel.mjs",
       "test-config.mjs",
@@ -53,7 +56,9 @@
     "index.js",
     "lib/article-contract.js",
     "lib/engine/apply-plan.js",
+    "lib/engine/client.js",
     "lib/engine/contract.js",
+    "lib/engine/manifest.js",
     "lib/engine/native-run.js",
     "lib/engine/proofread.js",
     "lib/engine/python/entry.py",
@@ -61,6 +66,7 @@
     "lib/engine/quality-gate.js",
     "lib/engine/wiki-links.js",
     "package.json",
+    "test-article-contract.mjs",
     "test-batch.mjs",
     "test-client-panel.mjs",
     "test-config.mjs",
@@ -76,8 +82,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit cd152b0950e9（22 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1yexv4-11-native（28 个文件）"
+    "工作区未提交改动已合成临时 commit c095bdf27803（29 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw20hsgz-17-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T10:16:13.920Z"
+  "updatedAt": "2026-11-04T11:52:17.094Z"
 }

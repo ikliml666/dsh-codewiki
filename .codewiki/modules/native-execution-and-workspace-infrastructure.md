@@ -92,7 +92,7 @@ env(doctor + engine-lock) → 增量决议(change-set + 受管状态) → 工作
 2. **引擎 done 不能替代质量门**：gate 说 partial，终态就是 partial。
 3. **落地器说 partial/failed，终态不许是 done**：产物没入库就是没交付。
 4. **failed/cancelled/partial 一律不推进基线**：未完整消化的变化留到下一轮；已写出的合格文章可保留，但整批变化不记为已消费。
-5. **取消是终态**：取消后不再 gate/apply，也不覆盖已写好的终态。
+5. **取消是终态，但取消不得抹掉已经发生的事实**：取消信号只终止引擎进程树（abort 在引擎阶段触发时不再 gate/apply）；落地器不接 signal，apply 一旦开始就跑完。走到合成终态这一步时若产物真的已落地（`applyRes.applied === true`），即使 signal 已 aborted 也按真实结果收尾，只把「取消来晚了」记进 notes——真正没落地（回滚或失败）时，取消才是那个该被报出来的事实（曾无条件报 cancelled，把已提交、已推进基线的一轮改写成「产物未落地、基线未推进」，下一轮从旧基线重新消费一批已消化的变化）。
 
 **终态强弱合成（`RANK` + `weakest`）：**
 
@@ -119,7 +119,7 @@ flowchart LR
 
 **依赖注入设计：** 所有实现都可通过 `deps` 注入（`deps.doctor` / `deps.runEngine` / `deps.gate` / `deps.apply` / `deps.bridge` / `deps.collectChangeSet` / `deps.snapshot` …）。测试可以用假 `runEngine` + 真实 gate/apply，既覆盖接线又覆盖裁决。
 
-**统一出口 `settle()`：** 所有分支（取消、环境失败、引擎失败、成功）都经过同一函数构造 `EngineResult`，保证 outcome 合法（done 不许带 blockers、partial 必须带 blockers、failed 必须有 error），并携带现场证据：`baselineEligible`（质量门许可）、`baselineAdvanced`（落地事实）、`incremental`（决议现场）、`gate` / `apply` / `engineLock` / `artifacts`（含 `rawTree` 留档目录）、`notes`。
+**统一出口 `settle()`：** 所有分支（取消、环境失败、引擎失败、成功）都经过同一函数构造 `EngineResult`，保证 outcome 合法（done 不许带 blockers、partial 必须带 blockers、failed 必须有 error），并携带现场证据：`incremental`（决议现场）、`gate` / `apply` / `engineLock` / `artifacts`（含 `rawTree` 留档目录）、`notes`。三个基线与计数事实**分开记、各有来源**：`baselineEligible` 是质量门许可（`report.baselineEligible === true && !stateIncomplete`）；`baselineAdvanced` 是落地器事实（`applyRes.baseline.advanced === true`），兼容字段 `canAdvanceBaseline` 读它——此前没有任何业务分支传过 `baselineAdvanced`，JobService 落账的 `canAdvanceBaseline` 恒为 false，与「基线其实已经推进」的事实相反；`writtenCount` 只认落地器的实际写入数（0 就是 0），不再回退引擎自报值——曾写成 `written || 引擎自报值`，于是整批回滚的一轮在账上仍是「写入了 N 篇」，取消/失败的结果被引擎的意图数洗白。
 
 ### 2. 增量决议（runNativeJob 1.5 段 + native-state.js）
 
@@ -142,8 +142,8 @@ flowchart TD
 三个决议要点（源码注释强调）：
 
 - **「变化集为空」不是跳过引擎的理由**：FSoft 的「有没有变」由**图 diff** 判定，不是 git 路径集合（重命名/跨文件重构能让路径集非空而图不变）。change-set 只决定「增量可不可信」，「变没变」留给引擎的 `update_record`。
-- **水合后的缺页/陈链检测**：模块树里有从未写过页面的模块，或 overview 有指向已消失页面的陈链（聚类重构的残骸），必须转全量修复；但若同一棵树、同一批缺口上一轮已试过全量仍补不上（`missingRepair` 凭据比对 `baseCommit` + 缺口清单 + 无新变化），本轮不再重复全量浪费几十分钟，只如实报 partial。
-- **只有「引擎真做了组件级增量（`updateOutcome=incremental`）且 gate/apply 全 done」才推进基线**；引擎自退全量（`full_fallback`）、检测器失败、gate 判 partial，一律不推进基线——下一轮 change-set 仍从旧基线算起，变化不会丢。
+- **水合后的缺页/陈链检测**：模块树里有从未写过页面的模块，或 overview 有指向已消失页面的陈链（聚类重构的残骸），必须转全量修复；但若同一棵树、同一批缺口上一轮已试过全量仍补不上（`missingRepair` 凭据比对 `baseCommit` + 缺口清单 + 无新变化），本轮不再重复全量浪费几十分钟，只如实报 partial。注意拿一棵解析不出来的 `module_tree.json` 去判缺页，判定结果必然不可信——因此 `module_tree.json` JSON 损坏（SyntaxError）时这一轮直接以 `failed`（stage=`graph`）收场，与 3.7 段孤儿页扫描「ENOENT 才吞、JSON 损坏必须抛」的口径一致；只有目录读不到这类环境问题不阻塞增量，记进 notes 让质量门在后面判。
+- **只有「引擎真做了组件级增量（`updateOutcome=incremental`）且 gate/apply 全 done」才推进基线**；引擎自退全量（`full_fallback`）、检测器失败、gate 判 partial，一律不推进基线——下一轮 change-set 仍从旧基线算起，变化不会丢。推进基线的许可也不接受调用方硬开：`advanceBaseline` 只由裁决决定，受管状态不完整（`stateIncomplete`）**或引擎自报非 done（一批叶子失败）**时一律给 `false`——质量门只看产物质量、不知道引擎有一批叶子没写完，曾只传 `stateIncomplete`，于是引擎 partial + 门 done 时基线照常前移而终态却是 partial，那批没写完的变化从新基线算变化集时永久失明。
 
 ### 3. native-state.js ——跨轮受管状态底座
 
@@ -237,7 +237,7 @@ sequenceDiagram
     Run->>St: captureDocsDir + buildStatePayload
     St-->>Run: stateFiles（写集项）+ missing?
     Run->>Ap: applyNativeOutput(extraFiles=stateFiles, deleteFiles=孤儿/残留页)
-    Ap->>Git: 写盘 → cw index → 基线 → 自动提交（失败整体回滚）
+    Ap->>Git: 写盘 → cw index（+存量体检）→ 基线 → 自动提交（写盘/索引/基线失败整体回滚）
     Ap-->>Run: applyRes（applied / rolledBack / baseline）
     Run->>Run: weakest(engine, gate, apply) 合成终态
     Run-->>Job: EngineResult + incremental/gate/apply 现场证据

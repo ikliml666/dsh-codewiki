@@ -265,7 +265,7 @@ Windows 盘符里的 `:` 混淆；方法为 `#<类名>.<方法名>`）。该约�
 - **无可直接引用的「功能禁用 / 注释关闭」项**：本模块所有导出函数均在 `test-graphdiff.mjs` 与生产链路中被引用，
   未发现被 `#` 注释禁用或功能被关闭的代码；上述均为设计取舍而非禁用。
 
-## Architecture
+## Architecture Detail
 
 `diffGraphs` 的判定分两大阶段：**同 id 组件分类**与**跨 id 改名配对**，二者都复用 `bodyHash` / `signature` / `pairRenames` 等纯函数。
 

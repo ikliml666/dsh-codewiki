@@ -102,6 +102,7 @@ stateDiagram-v2
 - **超时/静默的口径一致**：已写出文章（`writtenCount > 0`）→ `partial` 交付（保住成果、允许基线推进打破死循环），一篇没写 → `failed`；
 - **结果宽限**（`DEFAULT_RESULT_GRACE_MS = 2000`）：`result` 到达后进程若卡在收尾僵死，给 2 秒自行退场窗口，超时杀掉**但不改判已确定的语义结果**——这是为了防止「明明产物早写完了」被 10 分钟静默改判成卡死/超时；
 - **取消是终态**：`reader.markCancelled()` 之后到达的任何 `result` 记 `late-result` 违规并丢弃——迟到的成功不能洗白取消。
+- **进度帧的消费者异常必须抛出**：`flushProgress` 逐帧调用 `onProgress(p)` 时**不吞异常**（只有 `onLog` 的 stderr 回调仍被 try/catch 兜住）。native-run 的 `onProgress` 在契约阶段名对不上时会当场抛；若这里吞掉，那类编程错误就变成「某一帧悄悄丢了、任务照样报成功」。异常从 stdout 的 `data` 事件冒出来，由调用方 try/catch 收成 `engine-crashed`，不留下半截状态。
 
 #### `createProtocolReader({requestId, maxLineBytes})`
 
@@ -133,16 +134,16 @@ flowchart LR
     FP --> CMP["compareLock(current, lock)"]
     LOCK[".codewiki/engine-lock.json<br/>上次落盘的环境事实"] --> CMP
     CMP --> R{"status"}
-    R -->|"首次运行"| A["absent"]
-    R -->|"完全一致"| M["match"]
-    R -->|"版本/Python/commit 变了"| D["drift"]
-    R -->|"指纹一致但 pip check 失败"| H["unhealthy"]
+    R -->|"首次运行（无 lock）且依赖闭合"| A["absent"]
+    R -->|"完全一致（依赖闭合）"| M["match"]
+    R -->|"版本/Python/commit 变了（依赖闭合）"| D["drift"]
+    R -->|"pip check 失败：依赖不闭合<br/>（无论有无 lock 都报 unhealthy）"| H["unhealthy"]
 ```
 
 **关键设计决策**：
 
 - `UPSTREAM_COMMIT = '1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d'` 是**显式常量**，不从运行时探测。原因：引擎自报的 `engine.commit` 取自**被编译仓库的 HEAD**（`_git_commit(repo_path)`），不是 FSoft 源码自己的 commit；把它当上游锁会让「换了上游源码」永远不进指纹，而「本仓库提交了一次」反而像换了引擎。且 `codewiki 2.0.0` 这个版本号在 pyproject 里写死、不随源码 commit 变——上游换 commit 而版本号不动时，只有把 commit 算进指纹才能发现漂移；
-- `pip check` 的 ok **不参与**指纹——依赖闭合是「能不能跑」的闸门，不是「产物会是什么」的输入；但不闭合时状态报 `unhealthy`（能跑但不可信）；
+- `pip check` 的 ok **不参与**指纹——依赖闭合是「能不能跑」的闸门，不是「产物会是什么」的输入；但不闭合时状态报 `unhealthy`（能跑但不可信）。注意「没有 lock」不等于「环境健康」：`compareLock` 在无 lock 分支里也要先看 `pipCheckOk`——pip check 失败时即使是首次运行也报 `unhealthy` 而不是 `absent`（否则调用方看到 absent 只会以为「首次运行」照跑不误，产物不可信这条事实被整个吞掉）；
 - `buildLockBody(current)` 把锁正文拆成纯函数：「落锁」时机必须与产物同批——native-run 把这份正文当成 apply 写集里的一项，与文章/状态共享同一份 pre-image，失败一起回滚；若由 `writeLock` 在 apply 之后直接写盘，那份文件落在提交之外，下一轮会凭空产生一个 commit；
 - `doctor({probe, repoRoot, engineRoot})` 是**只读诊断**：probe 由调用方注入（本层不 spawn，保持纯、可单测），probe 抛错变成 `ok:false` 的 `probe-failed`，**永不抛异常**。不装依赖、不修环境——修复指引是 `bash tools/fsoft-engine/setup-env.sh <目标目录> <FSoft 源码根> [python]`（见下文「环境与配置」）。
 
@@ -196,14 +197,14 @@ sequenceDiagram
     participant OT as output.js
 
     NR->>MF: doctor(probe, repoRoot)
-    MF-->>NR: {ok, status: match/absent/drift, current}
+    MF-->>NR: {ok, status: match/absent/drift/unhealthy, current}
     Note over NR: 锁不一致/依赖不闭合 → 直接 failed，不跑引擎
     NR->>CL: runEngine({action: generate, requestId, payload, signal})
     CL->>EP: spawn（detached 进程组）
     CL->>EP: stdin 写入一行 JSON 请求 + EOF
     loop 每个协议帧
         EP-->>CL: progress JSON-lines（stage/percent/writtenCount）
-        CL->>NR: onProgress(p) 实时推送面板
+        CL->>NR: onProgress(p) 实时推送面板#59消费者抛错不吞，收成 engine-crashed
     end
     EP-->>CL: result JSON-lines（outcome=done/partial/failed）
     Note over CL: resultGrace 2s 内进程未退 → 杀树按 result 收尾

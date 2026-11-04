@@ -74,7 +74,7 @@ flowchart TD
 | `tickNative`（内部） | 原生通道驱动 | 启动一次长任务 → 每轮 tick 只等待结果 → 收割 `EngineResult` 并映射终态；承担重放（replay）与快照管理 |
 | `runPool` / `worker`（`runRealtimeTasks` 内部） | 并发执行器 | 默认档 / 大档**双池**唯一 LLM 执行器；`signal` 驱动取消；`onRequestStart` 挂钩会话记录 |
 | `wakeCompileSession` | 终态唤醒 | 仅在「失败」或「产物待提交（autoCommit 未成功）」时对发起会话 `steer` 一条消息；成功且已自动提交时完全静默 |
-| `onAbort` | 取消传导 | `runCw` 的 abort 监听与 `batchAborters`/`nativeAborters` 的 AbortController；取消是终态但不是成功，基线绝不前移 |
+| `onAbort` | 取消传导 | `runCw` 的 abort 监听与 `batchAborters`/`nativeAborters` 的 AbortController；取消信号只到引擎进程树与在飞 LLM 请求，原生落地事务刻意不接该 signal；取消是终态但不是成功，基线绝不前移 |
 | `allowedLinkTargets` / `makeLinkExists` | 链接校验输入 | 为文章契约闸门收集「现存 wiki 文章 + 本轮计划产出文章」的允许链接目标集 |
 | `symbolsOnLine` | 锚点符号提取 | `fixAnchors` 行号校正的符号绑定规则（与测试校验器同源） |
 | `currentCommit` | 环境感知 | `git rev-parse --short HEAD`，为快照记录「这份图对应哪个提交」 |
@@ -108,7 +108,7 @@ stateDiagram-v2
     submitting --> cancelled: cancelRequested
     articles --> cancelled
     queued --> cancelled
-    NAT --> cancelled: abort 进程树
+    NAT --> cancelled: abort 引擎进程树 → 收割 cancelled
 
     done --> [*]
     partial --> [*]
@@ -187,6 +187,7 @@ flowchart LR
 2. **终态不在 tick 里重写**：引擎内部已走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门 + 落地器严格裁决；本层只映射面板阶段与搬运字段。
 3. **重放安全**：宿主重启后按持久化快照（`snapshotNativeRun` / `planNativeReplay`）重建，已落盘叶子按断点续跑。
 4. **证据留档**：引擎原始 docs 树在被映射/裁剪之前拷到仓库外临时目录（`nativeRawTreeDir`），作为「事实来源」；工作副本 `docsDir` 在 `finally` 中清理。
+5. **取消边界：落地事务不接 signal**：注入给落地器的 `runCw` **故意不传** `nativeAborters` 的 AbortController——落地事务（写盘→index→基线→提交）一旦开始就必须跑完（事务自身有 120s 超时兜底）。取消只终止引擎进程树：曾传 signal，取消会 kill 掉正在跑的 `cw meta update` 触发回滚，把「已落盘的文章」连同基线一起撤掉，而终态只报一句「已取消」——一次取消就吞掉一整轮编译成果。
 
 **legacy 通道的兜底网络**：
 
@@ -218,7 +219,7 @@ sequenceDiagram
             T->>T: planForeignJob：接管 / 作废 / 离开
         end
         alt cancelRequested
-            T->>H: abort 在飞请求与原生进程树
+            T->>H: 三路分流#59 已收割按真实结果收尾#59 执行中 abort 引擎进程树（落地器不接 signal）#59 其余直接置 cancelled
         end
         alt queued 且闸门轮到
             T->>H: setStage(articles)
@@ -237,7 +238,7 @@ sequenceDiagram
 
 - **实例身份**：每个 `createJobService` 拿到随机 `instanceId`；tick 只推进本实例作业，外实例作业靠 `planForeignJob` 决定「接管（adoptOrphan）/ 作废（排队项从未真正开始）/ 离开」。
 - **脏标记 + dirtyIds**：只有状态变更过的 job 才进落盘合并集合，防止无事可做的旧实例用过期快照覆盖新实例现场。合并后的落盘统一走 `createJobsStore.save`（临时文件 + fsync + rename 的原子写，序列化时拦截凭证与函数值），`flush` 与 `saveJobs` 不再各自直接写 `JOBS_FILE`。
-- **取消终态化**：取消到达时若原生结果已落地，按真实结果收尾而不丢弃产物；否则 abort 进程树并置 `cancelled`。
+- **取消终态化（原生通道三路分流）**：取消到达时——① 原生结果已落地（`nativeResults`）或执行器已结束待收割（`nativeExecutionFinished`）→ 按真实结果收尾而不丢弃产物；② 原生执行器仍在跑（`nativeRuns`）→ `abort()` 终止引擎进程树、记一条「已取消：原生引擎进程树已终止，未进入落地阶段」的 note 并 `touch`，但**不直接置 `cancelled`**：落地器不接 signal，apply 一旦开始就会跑完，终态交给执行器的真实结果（此刻直接判 cancelled 会把「已落盘、已提交、基线已推进」的事实改写成「产物未落地，基线未推进」，下一轮从旧基线重复消费一批变化）；③ 其余（legacy 通道或未起执行器的原生作业）→ abort 在飞 LLM 请求并直接置 `cancelled`。
 - **停止即失效**：`stop()` 后入口与 flush 双重让路，防止飞行中的旧 tick 把已终态任务「复活」。
 
 ---

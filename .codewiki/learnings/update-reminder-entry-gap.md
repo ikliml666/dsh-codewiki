@@ -4,6 +4,7 @@ type: learning
 source_files:
   - index.js
 tags: [reminder, gating, invariant, bugfix, hook]
+---
 
 ## Overview
 
