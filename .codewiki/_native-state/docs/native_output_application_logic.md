@@ -95,7 +95,10 @@ flowchart TD
     K -- "true" --> RS["计算 roundKind<br/>idle / normalize / delete-only"]
     K -- "false" --> N1["roundKind = normal"]
     RS --> IDLE{"idle?"}
-    IDLE -- "是" --> DONE_DONE["整轮短路 done"]
+    IDLE -- "是" --> IDLEAUDIT["idle 轮也跑存量体检<br/>auditExistingArticles（与质量门同口径）"]
+    IDLEAUDIT -- "有存量坏页" --> IDLEBAD["记 existing-bad-article<br/>终态降 partial、不报 done"]
+    IDLEAUDIT -- "无坏页" --> DONE_DONE["整轮短路 done"]
+    IDLEBAD --> END
 
     N1 --> V1{"report.writable?"}
     RS --> V1
@@ -142,7 +145,7 @@ flowchart TD
 | 阶段 | 动作 | 失败行为 |
 | --- | --- | --- |
 | `write` | 写所有 `targets`，内容等价（行尾归一）的文件跳过重写 | 失败 → 回滚 pre-image |
-| `index` | 跑 `cw index`，规范化 `_index.md` 链接分隔符，核对本轮写集全部被收录，并体检存量坏页 | 写集缺页 → 回滚 pre-image；存量坏页 → 不回滚，只记 `existing-bad-article` 挡基线 |
+| `index` | 跑 `cw index`，规范化 `_index.md` 链接分隔符，核对本轮写集全部被收录，并体检存量坏页 | 写集缺页 → 回滚 pre-image；存量坏页 → 不回滚，只记 `existing-bad-article` 挡基线（idle 短路轮同样跑此体检） |
 | `baseline` | 跑 `cw meta update` 推进基线 | 失败 → 回滚 pre-image |
 | `commit` | 用内置或注入的提交器提交 wiki 产物 | 失败 → **不回滚**，只记 `commit-failed` |
 
@@ -169,7 +172,7 @@ stateDiagram-v2
 | `normal` | ✅ 只写 `defects === 0` 的页 | ✅ 若 `report.canAdvanceBaseline` | 有变化的正常轮 |
 | `normalize` | ✅ **全写**（含缺陷页） | ❌ | 渲染规则改进后让库与规则对齐 |
 | `delete-only` | ❌ | ❌ | 只清理源码已删的残骸页 |
-| `idle` | ❌ | ❌ | 整轮短路 done；dryRun 下预览不落盘，`applied=false`（「无需动作」≠「已交付」） |
+| `idle` | ❌ | ❌ | 整轮短路 done；dryRun 下预览不落盘，`applied=false`（「无需动作」≠「已交付」）。短路前仍跑同一体检：库里有存量坏页则记 `existing-bad-article`、终态降 partial，杜绝「门说 0 缺陷、终态报 done、库里躺着坏文章」的假绿 |
 
 > 为什么 `normalize` 轮要连缺陷页一起写：这一轮的职责是让库与当前渲染规则对齐，坏页同样是旧规则的产物，留在库里只会继续错下去（缺陷本身仍由门如实上报）。
 
@@ -210,6 +213,7 @@ sequenceDiagram
 2. **pre-image 不存在 = 本次新建**：回滚时删掉该文件。
 3. **`.codewiki/` 若本轮才新建**：回滚时连目录一起删掉，避免留下空壳。
 4. **裁剪与删除同入 pre-image**：被 prune 掉的过期状态文件、被删的孤儿页都可被回滚恢复，避免「索引失败回滚」只恢复文章不恢复被删状态。
+5. **非法裁剪根必须进终态**：`collectPruneTargets` 对不合法的裁剪根（越界 / 规范化后为空）不再静默跳过——拒绝必须以 `write-failed`（`[prune-<kind>]`）记进 problems、降终态，否则「该裁的目录没裁」与「裁了但没报」长得一样，调用方对世界的认知错误会被掩盖。
 
 ---
 
@@ -313,7 +317,11 @@ deps = {
 
 ### 存量体检：为什么写集之外的坏页也要拦
 
-上面那道闸只比对本轮写集——历史坏页从没被重写过就永远照不到，而 `cw index` 照样收它、读者照样点进去。`auditExistingArticles` 在索引成功后扫一遍 `.codewiki/` 下非 `_` 前缀的存量文章（与 cw 自身的跳过规则逐字一致：判相对 `.codewiki/` 的完整路径前缀，`modules/_draft.md` 这类页仍要查），对本轮已写与已渲染的页跳过（同一缺陷门里已记过一次账），只取 error 级 issue。
+上面那道闸只比对本轮写集——历史坏页从没被重写过就永远照不到，而 `cw index` 照样收它、读者照样点进去。`auditExistingArticles` 扫一遍 `.codewiki/` 下非 `_` 前缀的存量文章（与 cw 自身的跳过规则逐字一致：判相对 `.codewiki/` 的完整路径前缀，`modules/_draft.md` 这类页仍要查），对本轮已写与已渲染的页跳过（同一缺陷门里已记过一次账），只取 error 级 issue。
+
+它跑在两个时机：`cw index` 成功之后（正常 / 规范化 / delete-only 轮），以及 **idle 无变化短路轮**——Node 通道在 `tickIndex` 开头无条件跑同一体检，落地器若随短路一起跳过，库里躺着的坏文章永远不会被发现、终态还报 done，即「假绿」。存量坏页不是本轮产物，两个时机都**只记问题、不回滚**（回滚会删掉本轮好文章）。
+
+体检口径与质量门判「刚渲染出来的页」用同一套 `inspectArticle` 选项（`NATIVE_ARTICLE_OPTS`）：两处各写一遍时已经漂过一次，会出现「门说 defects=0、存量体检说这篇坏了」同时挂在一个终态里。
 
 处置刻意与写盘失败不同：**不回滚**。存量坏页删不掉也修不了，而回滚会把本轮刚写好的文章一并撤掉——用一个既存缺陷否掉一批好产物。只记 `existing-bad-article` 阻塞，让终态降 `partial`、基线不推进（`shouldAdvance` 额外一票否决），等下次重编译把它修掉。
 

@@ -142,7 +142,7 @@ flowchart TD
 三个决议要点（源码注释强调）：
 
 - **「变化集为空」不是跳过引擎的理由**：FSoft 的「有没有变」由**图 diff** 判定，不是 git 路径集合（重命名/跨文件重构能让路径集非空而图不变）。change-set 只决定「增量可不可信」，「变没变」留给引擎的 `update_record`。
-- **水合后的缺页/陈链检测**：模块树里有从未写过页面的模块，或 overview 有指向已消失页面的陈链（聚类重构的残骸），必须转全量修复；但若同一棵树、同一批缺口上一轮已试过全量仍补不上（`missingRepair` 凭据比对 `baseCommit` + 缺口清单 + 无新变化），本轮不再重复全量浪费几十分钟，只如实报 partial。注意拿一棵解析不出来的 `module_tree.json` 去判缺页，判定结果必然不可信——因此 `module_tree.json` JSON 损坏（SyntaxError）时这一轮直接以 `failed`（stage=`graph`）收场，与 3.7 段孤儿页扫描「ENOENT 才吞、JSON 损坏必须抛」的口径一致；只有目录读不到这类环境问题不阻塞增量，记进 notes 让质量门在后面判。
+- **水合后的缺页/陈链检测**：模块树里有从未写过页面的模块，或 overview 有指向已消失页面的陈链（聚类重构的残骸），必须转全量修复；但若同一棵树、同一批缺口上一轮已试过全量仍补不上（`missingRepair` 凭据比对 `baseCommit` + 缺口清单 + 无新变化），本轮不再重复全量浪费几十分钟，只如实报 partial。注意拿一棵解析不出来的 `module_tree.json` 去判缺页，判定结果必然不可信——因此 `module_tree.json` JSON 损坏（SyntaxError）时这一轮直接以 `failed`（stage=`graph`）收场，与 3.7 段孤儿页扫描「ENOENT 才吞、JSON 损坏必须抛」的口径一致；目录读不到、文件刚被别的进程挪走这类环境问题不阻塞增量，但**不能假装检查过**：notes 如实记「产物完整性检查未执行（带原始 errno）」而不是「检查失败」——「检查失败」与「没做检查」是两件事，后者必须让下游知道这一轮的增量决议未经缺页/陈页校验、少了一道证据。
 - **只有「引擎真做了组件级增量（`updateOutcome=incremental`）且 gate/apply 全 done」才推进基线**；引擎自退全量（`full_fallback`）、检测器失败、gate 判 partial，一律不推进基线——下一轮 change-set 仍从旧基线算起，变化不会丢。推进基线的许可也不接受调用方硬开：`advanceBaseline` 只由裁决决定，受管状态不完整（`stateIncomplete`）**或引擎自报非 done（一批叶子失败）**时一律给 `false`——质量门只看产物质量、不知道引擎有一批叶子没写完，曾只传 `stateIncomplete`，于是引擎 partial + 门 done 时基线照常前移而终态却是 partial，那批没写完的变化从新基线算变化集时永久失明。
 
 ### 3. native-state.js ——跨轮受管状态底座

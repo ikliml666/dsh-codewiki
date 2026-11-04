@@ -107,7 +107,7 @@ sequenceDiagram
 纯函数（不碰文件系统，可单测），主入口 `inspectArticle(content, opts)` 返回 `issues[]`，空数组 = 通过。这是对旧闸门的审计修复：旧版只查 frontmatter 有没有开头闭合，于是重复贴头、空章节、死链、围栏未闭合都能入库。判据：
 
 - **结构解析**：`parseFrontmatter`（文首第一个 `---` 块 + 极简 `parseYamlLite`，双引号标量优先 `JSON.parse` 还原转义）、`extractSections`（跳过代码围栏收集 `## ` 章节）、`fencesBalanced`；
-- **判项**：必填字段 `title/type/source_files/tags`、type 与目录匹配（`TYPE_BY_DIR`）、`source_files` 格式/存在性/**证据校验**（格式只按仓库相对路径守卫——拒绝绝对路径、Windows 盘符、`../` 上跳与尾部斜杠，**不再按「有无扩展名」判目录**：`Dockerfile`/`Makefile`/`LICENSE` 这类无扩展名文件是合法条目；存在性与证据校验要求必须是本次实际读给模型的文件子集，`source-not-evidence`）、重复 frontmatter（`hasDuplicateFrontmatter`，跳过围栏内的 `---` 示例）、死链（`collectWikiLinks`，先用 `stripCode` 把围栏块与行内代码等长替换——等长是硬契约，供 `rewritePageLinks` 偏移回原文）；
+- **判项**：必填字段 `title/type/source_files/tags`、type 与目录匹配（`TYPE_BY_DIR`）、`source_files` 格式/存在性/**证据校验**（格式只按仓库相对路径守卫——拒绝绝对路径、Windows 盘符、`../` 上跳与尾部斜杠，**不再按「有无扩展名」判目录**：`Dockerfile`/`Makefile`/`LICENSE` 这类无扩展名文件是合法条目；存在性按 `fsImpl.exists` 判定，且调用方提供 `fsImpl.isDirectory` 时会额外识别「不带尾斜杠但实为目录」的路径并报 `bad-source`（如 `src/util`——不带尾斜杠在格式上完全合法，单靠存在性判不出它是目录），不提供 `isDirectory` 则只做存在性判定；指向不存在的文件报 `missing-source`；存在性与证据校验要求必须是本次实际读给模型的文件子集，`source-not-evidence`）、重复 frontmatter（`hasDuplicateFrontmatter`，跳过围栏内的 `---` 示例）、死链（`collectWikiLinks`，先用 `stripCode` 把围栏块与行内代码等长替换——等长是硬契约，供 `rewritePageLinks` 偏移回原文）；
 - **两级严重度**（`SEVERITY`）：`error` = 结构已破坏必须拒写（`hasBlockingIssue` 判据）；`warning` = 内容不达标但结构完整，放行但让编译终态降为 partial、阻止基线前移。
 - 通道适配：原生引擎通道可传 `requiredSections=[]`（它的章节名不是本仓库的 `## Overview`）与 `allowEmptySourceFiles=true`（whole-repo 模式下 source_files 为空是诚实记录），默认值对既有通道行为不变。
 - `issueSummary(issues)` 把问题压成一行人类可读文案（null = 通过）。写集闸门 `makeWriteSet`/`isWritable`/`normalizeWritePath` 也在本文件，供执行层复用。

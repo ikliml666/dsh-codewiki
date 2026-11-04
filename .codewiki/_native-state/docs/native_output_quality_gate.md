@@ -254,7 +254,7 @@ sequenceDiagram
 2. **frontmatter 只填有证据的字段**。`source_files` 原样来自映射（空就是空），绝不按目录名猜；空列表显式写成 `source_files: []`，让 downstream 区分「声明为空」与「没声明」。`fsoft_page` 记住正文来自 FSoft 原始树的哪个文件，保证可回溯。
 3. **链接重写的解析基准是引擎源页目录，不是落地目录**。层级布局下正文写 `x_sibling.md` / `../parent.md`，而落地时页被拍平到 `.codewiki/modules/` 单层；按落地目录解析 pageMap 一条都命不中（真机测得 420 条内部链接 412 条失效）。pageMap 还并入 `README.md` / `overview.md` → `CodeWiki.md` 别名与 `pageAliases` 别名表。
 4. **代码区域不改写**。演示链接写法的行内代码/围栏块由 `stripCode` 等长掩蔽后再扫描，避免把语法示例改成真实路径。
-5. **原生通道不沿用 agentic 通道的章节要求**。`NATIVE_REQUIRED_SECTIONS = []`：FSoft 正文结构由上游 prompt 决定，计划硬约束是「不改技术内容」；用别的通道的章节名去判，产出的每条都是不可修复的 warning。章节非空性由 `checkRendered` 单独判「至少一个非空二级标题」。
+5. **原生通道不沿用 agentic 通道的章节要求**。`checkRendered` 通过共享常量 `NATIVE_ARTICLE_OPTS`（`requiredSections` 置空）调用 `inspectArticle`：FSoft 正文结构由上游 prompt 决定，计划硬约束是「不改技术内容」；用别的通道的章节名去判，产出的每条都是不可修复的 warning。`NATIVE_ARTICLE_OPTS` 与落地器的存量体检（`auditExistingArticles`）共用同一套 `inspectArticle` 选项，避免两处各写一遍后漂移。章节非空性由 `checkRendered` 单独判「至少一个非空二级标题」。
 6. **空壳页兜底**。`bodyLength` 只跳第一个标题行，直接喂全文会把合成的 8 行 frontmatter 当正文——`checkRendered` 先剥掉 frontmatter 再算空正文，兜住「只有标题的空壳页」。
 7. **YAML 安全序列化用 `JSON.stringify`**。serde_yaml 是 JSON 的超集，真实页标题里的 `: `、` #`、反斜杠（Windows 路径）、`true`/`null` 等裸写都会被误解析；安全形态保持裸值，与既有文章观感一致。
 
