@@ -2,18 +2,14 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d"
+    "baseCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
+    "headCommit": "1c3483551b6e1886951396ddd44779c88562cb54"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
+    "baseCommit": "ba1c710bde76428f6a9ecc493ed78d5ada0dbc3d",
+    "headCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
     "committed": [
-      "CodeWiki.md"
-    ],
-    "staged": [],
-    "unstaged": [
       "CHANGELOG.md",
       "README.md",
       "client.js",
@@ -29,6 +25,7 @@
       "lib/engine/python/entry.py",
       "lib/engine/python/stage_map.py",
       "lib/engine/quality-gate.js",
+      "lib/engine/wiki-links.js",
       "package.json",
       "test-article-contract.mjs",
       "test-batch.mjs",
@@ -41,9 +38,9 @@
       "test-engine-quality-gate.mjs",
       "test-wiki-entry.mjs"
     ],
-    "untracked": [
-      "lib/engine/wiki-links.js"
-    ],
+    "staged": [],
+    "unstaged": [],
+    "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
@@ -52,34 +49,7 @@
     ".tmp-keys.mjs",
     ".tmp-probe-tabs.mjs",
     ".tmp-type.mjs",
-    ".tmp-verify-cov.mjs",
-    "CHANGELOG.md",
-    "README.md",
-    "client.js",
-    "docs/fsoft-native-engine.md",
-    "index.js",
-    "lib/article-contract.js",
-    "lib/engine/apply-plan.js",
-    "lib/engine/client.js",
-    "lib/engine/contract.js",
-    "lib/engine/manifest.js",
-    "lib/engine/native-run.js",
-    "lib/engine/proofread.js",
-    "lib/engine/python/entry.py",
-    "lib/engine/python/stage_map.py",
-    "lib/engine/quality-gate.js",
-    "lib/engine/wiki-links.js",
-    "package.json",
-    "test-article-contract.mjs",
-    "test-batch.mjs",
-    "test-client-panel.mjs",
-    "test-config.mjs",
-    "test-engine-apply-plan.mjs",
-    "test-engine-contract.mjs",
-    "test-engine-native-incremental.mjs",
-    "test-engine-proofread-e2e.mjs",
-    "test-engine-quality-gate.mjs",
-    "test-wiki-entry.mjs"
+    ".tmp-verify-cov.mjs"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
@@ -88,9 +58,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 93111b3e4166（27 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2952gc-20-native（28 个文件）",
-    "本轮把 27 个未提交源码改动一并写进产物（快照 93111b3e4166）：CHANGELOG.md、README.md、client.js、docs/fsoft-native-engine.md、index.js 等"
+    "持久化基线 17c43b7 与本次 cw 基线 ba1c710 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2bdl7z-1-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T15:18:12.644Z"
+  "updatedAt": "2026-11-04T16:15:16.382Z"
 }
