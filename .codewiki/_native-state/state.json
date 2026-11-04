@@ -2,35 +2,32 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "e191756faad249d12f6dd5314418d0d86fb5c250",
-    "headCommit": "cb83fce1cc49a113a33df6f38a56577065412468"
+    "baseCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
+    "headCommit": "08674b6c5e2f743d5a7f58e636308ab082923077"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "e191756faad249d12f6dd5314418d0d86fb5c250",
-    "headCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
-    "committed": [
-      "CHANGELOG.md",
-      "README.md",
-      "client.js",
-      "index.js",
-      "lib/engine/native-run.js",
-      "lib/engine/proofread.js",
-      "package.json",
-      "test-client-panel.mjs",
-      "test-engine-proofread-e2e.mjs",
-      "test-engine-proofread.mjs",
-      "test-fixtures/fake-native-engine.mjs",
-      "test-wiki-entry.mjs"
-    ],
+    "baseCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
+    "headCommit": "08674b6c5e2f743d5a7f58e636308ab082923077",
+    "committed": [],
     "staged": [],
-    "unstaged": [],
+    "unstaged": [
+      "lib/engine/apply-plan.js",
+      "lib/engine/output.js",
+      "test-engine-apply-plan.mjs",
+      "test-engine-output.mjs"
+    ],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [],
+  "unconsumed": [
+    "lib/engine/apply-plan.js",
+    "lib/engine/output.js",
+    "test-engine-apply-plan.mjs",
+    "test-engine-output.mjs"
+  ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
@@ -38,7 +35,9 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw0xy3fv-4-native（30 个文件）"
+    "持久化基线 e191756 与本次 cw 基线 cb83fce 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit 48d032361244（4 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1h0uk2-5-native（30 个文件）"
   ],
-  "updatedAt": "2026-11-03T17:22:07.599Z"
+  "updatedAt": "2026-11-04T02:11:52.239Z"
 }

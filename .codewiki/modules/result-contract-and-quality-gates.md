@@ -178,7 +178,7 @@ sequenceDiagram
 | `collectOutput({docsDir})` | 递归读 docs 页（跳过 `temp/` 与隐藏目录）+ 四个 JSON；坏文件变 problem 不抛 |
 | `buildWritePlan(...)` | 读 docs → `mapFsoftOutput`，产出 `{collected, mapped}` |
 | `validateOutput(...)` | 产物自洽校验：入口缺失、空正文、未映射页、缺页、`source_files` 存在性、死链 |
-| `pageAliases(pages)` | 引擎页名别名表（`X.ts.md`→`X.md`、子模块父前缀简写），**唯一命中**才给出，歧义时宁报死链 |
+| `pageAliases(pages)` | 引擎页名别名表（`X.ts.md`→`X.md`、页名按 `moduleSlug` 连字符化如 `agent_runtime`→`agent-runtime`、子模块父前缀简写），**唯一命中**才给出，歧义时宁报死链 |
 
 ### quality-gate.js
 

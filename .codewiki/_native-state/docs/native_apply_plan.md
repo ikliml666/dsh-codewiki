@@ -105,16 +105,16 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["入口校验：repoRoot 存在？"] --> NCH{"noChanges 且无残留页待删?"}
+    A["入口校验：repoRoot 存在？"] --> NCH{"noChanges 且既无待删残留页<br/>也无待规范化的落地页?"}
     NCH -->|"是：引擎与四路变化集均无变化"| SC["无变化短路 done：跳过写盘/索引/基线/提交<br/>但必须基于已通过的完整裁决"]
-    NCH -->|"否（含有残留页待删的 deleteOnly 例外）"| B{"report.writable === true?"}
+    NCH -->|"否（deleteOnly 或 normalizeOnly 例外）"| B{"report.writable === true?"}
     SC -->|"writable 不通过 → not-writable failed"| FAIL1["done failed"]
     B -->|"否：not-writable 整批拒写"| FAIL1
     B -->|"是"| C{"report.outcome 是 done?"}
     C -->|"否但 writable=true<br/>记 gate-partial，不准洗成 done"| D
-    C -->|"是"| DEL{"deleteOnly?（无变化轮但有残留页）"}
+    C -->|"是"| DEL{"deleteOnly?（无变化轮但有残留页，且无待规范化页）"}
     DEL -->|"是：不收集写集、不写文章/状态/入口<br/>只删除残留页并跑索引"| DP["记 note：本轮到删残骸为止"]
-    DEL -->|"否"| D["收集写集：rendered 文章 + extraFiles 引擎状态 + 入口页"]
+    DEL -->|"否（normalizeOnly：落地页与当前渲染规则不一致）"| D["收集写集：rendered 文章 + extraFiles 引擎状态 + 入口页"]
     DP --> DRY
     D --> E["checkWriteTargets 校验<br/>空/绝对/上跳/越界/重复/非字符串"]
     E -->|"problems 非空 → write-failed"| FAIL2["done failed（一个字都没写）"]
@@ -151,13 +151,14 @@ flowchart TD
 **写盘（write）**：`writeAll` 逐字节比对磁盘内容——相同的项跳过重写，避免「产物无改动」的空写产生 mtime 抖动和假提交。写盘之后紧接着做两件删除，同属一个事务：
 - `collectPruneTargets`：裁剪 `pruneRoots`（受管状态目录，如模块树/依赖图）里「本轮写集没有」的过期文件。受管状态是**下一轮引擎的输入**，留着旧文件会让下一轮水合把已删的页复活。
 - 删除 `deleteFiles`（孤儿页候选）：与裁剪共用 pre-image 与回滚语义。
-- **`deleteOnly` 例外轮**：`noChanges` 且 `deleteFiles` 非空时，跳过整个写集收集（不写文章、不写 `extraFiles` 引擎状态、不写入口页、不跑 `checkWriteTargets`），只保留「删除残留页 → `cw index` → 自动提交」；基线不推进。动机：源码没有变化不等于库里没有残骸，而残骸只有落地器能删（要能回滚、要与索引同事务、要进同一个 commit）——真机五仓验证里四个仓库全是 no_change 轮、残留页一个都没清掉，正是因为旧实现无条件短路。
+- **`deleteOnly` 例外轮**：`noChanges` 且 `deleteFiles` 非空（且无待规范化的落地页）时，跳过整个写集收集（不写文章、不写 `extraFiles` 引擎状态、不写入口页、不跑 `checkWriteTargets`），只保留「删除残留页 → `cw index` → 自动提交」；基线不推进。动机：源码没有变化不等于库里没有残骸，而残骸只有落地器能删（要能回滚、要与索引同事务、要进同一个 commit）——真机五仓验证里四个仓库全是 no_change 轮、残留页一个都没清掉，正是因为旧实现无条件短路。
+- **`normalizeOnly` 例外轮**：`noChanges` 但 `findStaleLanded(root, report.rendered)` 非空时——库中落地页的磁盘内容与当前渲染产物逐字不一致（页名别名、跨页链接改写等渲染规则改进后，旧落地页不重写就永远错下去）。这一轮照常收集写集并写盘（引擎确实没消化新源码变化，但这些页必须改写），只不推进基线；待规范化的页与索引同事务提交。死链只存在于库里、不在源页里，下一轮 `no_change` 又会短路回去，因此必须在落地器内就地改写。
 
 **索引（index）**：除了跑 `cw index`，还有两道防「假成功」的附加校验：
 - `normalizeIndexLinksIn`：把 `_index.md` 里 `[[link|title]]` 链接头的 `\` 规范成 `/`（Windows 上 cw 会写出反斜杠链接，不规范化等于索引不可信）；读写异常直接抛、按索引失败回滚。
 - `findArticlesMissingFromIndex`：vendor/codewiki 的 `cw index` 对 frontmatter 解析失败的文章是**静默跳过、退出码仍为 0**。本步骤比对「本次写的文章是否真的进了索引链接集」，缺页即整体回滚——这正是「缺页静默成功」的对策。
 
-**基线（baseline）**：`cw meta update` 只在 `report.canAdvanceBaseline === true`（或被 `advanceBaseline` 覆盖）时执行。失败连文章一起回滚：留下「文章比基线新」的状态会导致下一轮把同一批变化重复消化一次。**`deleteOnly` 例外轮（无源码变化、只删残留页）一律不推进基线**：删残骸不涉及任何源码变化，推进基线等于凭空记一笔「这些变化已消化」，而它们本来就没有待消化的变化，记 `reason: 'no-changes'`。
+**基线（baseline）**：`cw meta update` 只在 `report.canAdvanceBaseline === true`（或被 `advanceBaseline` 覆盖）时执行。失败连文章一起回滚：留下「文章比基线新」的状态会导致下一轮把同一批变化重复消化一次。**`deleteOnly` 与 `normalizeOnly` 两种例外轮（无源码变化）一律不推进基线**：删残骸或重写待规范化的落地页都不涉及任何源码变化，推进基线等于凭空记一笔「这些变化已消化」，而它们本来就没有待消化的变化，两种例外轮都记 `reason: 'no-changes'`。
 
 **提交（commit）**：失败**不回滚**（不变量 3）。提交成立后用 `verifyCommitScope` 反查实际提交内容；混进 wiki 之外的路径只报 `commit-scope` 阻塞、不回滚。终态兜底：只要没提交成功（且不是无改动可提交），绝不允许干净的 `done`。
 
@@ -267,7 +268,7 @@ flowchart TD
 ## 设计要点速查
 
 - **dryRun**：只算写集与判定，不写盘、不跑 cw、不提交；返回里 `applied=false` 且带 `dryRun=true`，调用方必须把预览和完成分开看。
-- **noChanges 短路**：引擎与四路变化集均无变化时，跳过写盘/索引/基线/提交，但必须基于已通过的完整裁决，否则报 failed。**唯一例外是 `deleteOnly`**：`noChanges` 但 `deleteFiles` 非空（有残留页待删）时不短路——不写文章、不写受管状态、不推进基线，但照常删残留页、跑 `cw index` 并随自动提交入库（`baseline.reason = 'no-changes'`）。
+- **noChanges 短路**：引擎与四路变化集均无变化时，跳过写盘/索引/基线/提交，但必须基于已通过的完整裁决，否则报 failed。**两类例外不短路**：`deleteOnly`——`noChanges` 但 `deleteFiles` 非空（有残留页待删）时不写文章、不写受管状态、不推进基线，但照常删残留页、跑 `cw index` 并随自动提交入库；`normalizeOnly`——`noChanges` 但库里有落地页与当前渲染规则不一致（`findStaleLanded` 逐字比对 `report.rendered` 与磁盘），照常重写这些页并随索引同事务提交，但不推进基线。两类例外轮的 `baseline.reason` 都是 `'no-changes'`。
 - **entryMode**：仓库根已有 `CodeWiki.md` 时 `keep`（默认，保留人工入口）/ `skip`（不写）/ `overwrite`。入口页必须存在（overview），拒绝生成只有文章的 wiki；入口正文会剥掉 frontmatter。
 - **extraFiles**：引擎原始状态（模块树/元数据/依赖图/增量凭据）与文章共用同一份 pre-image、同一次回滚、同一个自动提交——这就是「原始图/模块树/metadata 与文章同事务」的实现方式。
 - **findOrphanPages**：判据刻意保守——`source_files` 为空（whole-repository 模式无归属证据）跳过；只要还有一个文件存在就不是孤儿；frontmatter 缺失/坏掉的页不动（可能是人工页）。宁可漏删不可误删。
