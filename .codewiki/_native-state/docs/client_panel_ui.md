@@ -66,7 +66,7 @@ flowchart TB
 
 | 组件 | 类型 | 职责 |
 | --- | --- | --- |
-| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 编译模型 / 大档模型 / 调度与排除四个 section + 保存条） |
+| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 section + 保存条） |
 | `CodewikiPanel` | React 组件 | 侧边栏面板容器：四个标签页（总览 / 任务 / 会话 / 设置），jobs 轮询与差分统计，焦点任务 + 历史折叠区，取消任务、复制 wiki 路径 |
 | `ReposTab` | React 组件 | 「总览」标签页：所有已编译仓库的 wiki 状态卡片 + 自动更新调度信息，支持排除 / 取消排除、确认首次编译、手动「更新」 |
 | `SessionView` | React 组件 | 「会话」视图：并发池里每一次 LLM 请求的列表（5s 轮询）+ 点开看 prompt / 模型输出全文；支持 job 级单任务视图与 `job=null` 全局聚合视图，`embedded=true` 时嵌在面板标签页内不套 page 容器 |
@@ -194,7 +194,7 @@ sequenceDiagram
 
 - **草稿隔离**：`snapshot`（服务端值）与 `draft`（编辑态）分离，`dirty` 由两者 `JSON.stringify` 比对得出，只有 dirty 时「放弃 / 保存」按钮才可点；
 - **乐观并发**：`mutate(ops, snapshot.revision)` 携带 revision，他处改过则返回 false 报冲突，不强制覆盖；
-- **差分提交**：只把 `draft[key] !== base[key]` 的键生成 `{ op: 'set', path: [key], value }` 操作，覆盖 enabled / 并发 / 模型 / 大档 / 调度 / 排除清单等 24 个键；
+- **差分提交**：只把 `draft[key] !== base[key]` 的键生成 `{ op: 'set', path: [key], value }` 操作，覆盖 enabled / 并发 / 模型 / 大档 / 原生引擎 / 调度 / 排除清单等 27 个键（此前只能改配置文件的 `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs` 四项已纳入表单，原「兜底档位 `sessionTier`」输入框已移除）；
 - **模型目录联动**：拉不到 `/api/codewiki/models` 时（`catalogError`）整体退回「手填 provider / model id」形态，不阻断保存；已配置但目录里消失的 provider 保留为 `__custom` 选项，避免静默丢配置；换 provider 时自动清空 model 与 effort；
 - **思考程度档位**：优先取 `/api/codewiki/model-efforts` 返回的 `efforts` 列表；目录未声明时退回通用档位 `GENERIC_EFFORTS = ['off','low','medium','high','xhigh','max']`，选了模型不支持的值由服务端 `llmChat` 兜底剥档重试。
 

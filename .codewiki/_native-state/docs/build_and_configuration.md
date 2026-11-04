@@ -101,6 +101,11 @@ flowchart TB
 | `batchProvider` | `volces-ark` | 编译模型提供商（必须是模型设置里已注册的 provider；留空 = 提交失败） |
 | `batchModel` | `glm-5.3-flash` | 编译模型 id（512k 上下文） |
 | `batchReasoningEffort` | 模型默认档 | 思考程度档位（取值来自模型目录 `reasoning.efforts`） |
+| `bigEnabled` | 关 | 大档模型（超长输入）开关：关闭后超过普通预算的请求不换大上下文模型，按大档预算兜底或退回会话通道；模型与预算配置保留，重开无需重填 |
+| `bigProvider` | 空 | 大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）；`bigEnabled` 关闭时不生效 |
+| `bigModel` | 空 | 大档模型 id（该 provider 下） |
+| `bigReasoningEffort` | 模型默认档 | 大档模型思考程度档位（取值来自模型目录 `reasoning.efforts`）；留空 = 模型默认档 |
+| `bigTokenBudget` | `420000` | 大档单请求输入预算（token）：输入超普通预算的请求改用大档；生效值为 `max(普通预算, 此值)`。由 `bigTierOf(cfg)` 一次性解析——provider/model 任一留空即返回 `null`（大档不可用） |
 | `maxConcurrency` | `2` | 默认档并发上限（1–8） |
 | `bigConcurrency` | `0`（跟随默认档） | 大档并发上限（1–8）；两档独立限流、同时推进 |
 | `serialProjects` | 开 | 同一时刻只推进一个仓库的编译任务，其余排队 |

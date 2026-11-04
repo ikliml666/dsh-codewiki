@@ -3,17 +3,18 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "259f6af3ff05beb62c4d9b10b7fd8c4d9614dad8"
+    "headCommit": "17593baf6f8c77bb90b72e0f8451e49d001a1c1c"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "259f6af3ff05beb62c4d9b10b7fd8c4d9614dad8",
+    "headCommit": "17593baf6f8c77bb90b72e0f8451e49d001a1c1c",
     "committed": [],
     "staged": [],
     "unstaged": [
       "CHANGELOG.md",
       "README.md",
+      "client.js",
       "docs/fsoft-native-engine.md",
       "index.js",
       "lib/article-contract.js",
@@ -31,6 +32,8 @@
       "test-engine-quality-gate.mjs"
     ],
     "untracked": [
+      ".tmp-type.mjs",
+      ".tmp-verify-cov.mjs",
       "lib/engine/wiki-links.js"
     ],
     "deleted": [],
@@ -38,8 +41,11 @@
     "reason": ""
   },
   "unconsumed": [
+    ".tmp-type.mjs",
+    ".tmp-verify-cov.mjs",
     "CHANGELOG.md",
     "README.md",
+    "client.js",
     "docs/fsoft-native-engine.md",
     "index.js",
     "lib/article-contract.js",
@@ -60,13 +66,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "full_fallback",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 cb83fce 与本次 cw 基线 17c43b7 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "工作区未提交改动已合成临时 commit f9d18c29fbc6（18 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1ozmzb-7-native（26 个文件）"
+    "工作区未提交改动已合成临时 commit d13c5d98ed51（21 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1rzf58-e-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T06:15:46.413Z"
+  "updatedAt": "2026-11-04T07:32:13.939Z"
 }

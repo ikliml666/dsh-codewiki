@@ -262,7 +262,7 @@ sequenceDiagram
 | 维度 | 代表字段 | 语义 |
 | --- | --- | --- |
 | 模型通道 | `batchProvider/batchModel`、`batchReasoningEffort` | 唯一模型通道；档位合法性提交前经 `resolveModelEfforts` 校验，静默空跑在提交入口就被拦下 |
-| 大档 | `bigEnabled/bigProvider/bigModel/bigTokenBudget` | 关闭时 `bigProvider` 直接清空（模型 id 与预算保留，重开无需重填） |
+| 大档 | `bigEnabled/bigProvider/bigModel/bigTokenBudget` | 大档由 `bigTierOf` 统一收口构造：`bigProvider` 与 `bigModel` **同时非空**才生效（模型不再在运行时回落内置默认值，只填 provider 不再触发大档）；关闭时 `bigProvider` 直接清空（模型 id 与预算保留，重开无需重填） |
 | 并发 | `maxConcurrency`（硬顶 8）、`bigConcurrency`（0=跟随默认档）、`moduleConcurrency`（原生引擎模块并行度） | 默认档与大档**各自独立限流、同时推进** |
 | 项目闸门 | `serialProjects`、`parallelProjects`（1–4） | 多仓库排队或并行 |
 | 原生通道 | `nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs` | 默认开启；解释器解析顺序：配置 > `DSH_CODEWIKI_PYTHON` > PATH |
