@@ -2,20 +2,14 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
-    "headCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1"
+    "baseCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1",
+    "headCommit": "e9d87f6117b34024ca20b9cb1117da58c4a0979d"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "1c3483551b6e1886951396ddd44779c88562cb54",
-    "headCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1",
-    "committed": [
-      "CHANGELOG.md",
-      "lib/engine/apply-plan.js",
-      "lib/engine/native-run.js",
-      "package.json",
-      "test-engine-apply-plan.mjs"
-    ],
+    "baseCommit": "68f47ac05ad13f2c6650fa19704c7fe683286ee1",
+    "headCommit": "e9d87f6117b34024ca20b9cb1117da58c4a0979d",
+    "committed": [],
     "staged": [],
     "unstaged": [],
     "untracked": [],
@@ -32,12 +26,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 ba1c710 与本次 cw 基线 1c34835 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2def35-8-native（28 个文件）"
+    "持久化基线 1c34835 与本次 cw 基线 68f47ac 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw2fnxed-g-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T17:20:23.054Z"
+  "updatedAt": "2026-11-04T18:14:34.130Z"
 }
