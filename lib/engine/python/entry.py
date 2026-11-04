@@ -140,7 +140,7 @@ PROTOCOL_VERSION = 1
 # 为什么单独抽常量：此前 5 处字面量 `1` 散在 emit_progress / failure / doctor /
 # _done_result / _cancelled_result 里，升版本时漏改一处就会出现「同一进程报两个
 # 契约版本」，client.js 的 validateEngineResult 只在测试里跑，真机上没人拦。
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 ACTIONS = ("doctor", "generate", "update", "cancel")
 
 # 进度帧里 writtenCount 的重新清点间隔（秒）。
@@ -1082,25 +1082,24 @@ def _failed_calls_of(adapter):
     """
     out = []
     seen = set()
-    try:
-        record = getattr(adapter, "_last_update_record", None)
-        if record is None:
-            return out
-        for call in getattr(record, "calls", None) or []:
-            if not isinstance(call, dict):
-                continue
-            kind = str(call.get("kind") or "")
-            if kind not in ("leaf_agent", "missing_pages"):
-                continue
-            error = str(call.get("error") or "").strip()
-            target = str(call.get("target") or "").strip() or "-"
-            key = (kind, target)
-            if not error or key in seen:
-                continue
-            seen.add(key)
-            out.append((kind, target, error))
-    except Exception:
+    # 全量 generate 路径没有 UpdateRecord：`getattr` 的默认值就是这条事实的表达，
+    # 不是「读失败」的兜底，因此不需要 try/except —— 真读失败必须抛出去。
+    record = getattr(adapter, "_last_update_record", None)
+    if record is None:
         return out
+    for call in getattr(record, "calls", None) or []:
+        if not isinstance(call, dict):
+            continue
+        kind = str(call.get("kind") or "")
+        if kind not in ("leaf_agent", "missing_pages"):
+            continue
+        error = str(call.get("error") or "").strip()
+        target = str(call.get("target") or "").strip() or "-"
+        key = (kind, target)
+        if not error or key in seen:
+            continue
+        seen.add(key)
+        out.append((kind, target, error))
     return out
 
 

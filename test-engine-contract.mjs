@@ -41,10 +41,10 @@ async function check(label, fn) {
 // ---------------------------------------------------------------------------
 
 await check('契约版本是显式数字，阶段顺序固定且覆盖流水线全链', async () => {
-  // 0.16.7 起为 2：doctor 出参补 checks、cancel 改 {cancelled}、partial 允许推进基线
-  // 都属于破坏性契约变更，按 docs/fsoft-native-engine.md 的「改契约必须升版本」执行。
-  assert.equal(ENGINE_CONTRACT_VERSION, 2)
-  assert.deepEqual(ENGINE_STAGES, ['env', 'graph', 'cluster', 'articles', 'validate', 'index', 'baseline', 'commit'])
+  // 3（0.17.38）：ENGINE_STAGES 补登 'proofread'（0.17.32 校对格子不亮的根因）。
+  // 阶段枚举是契约的一部分，加阶段必须升版本——docs/fsoft-native-engine.md 要求同步。
+  assert.equal(ENGINE_CONTRACT_VERSION, 3)
+  assert.deepEqual(ENGINE_STAGES, ['env', 'graph', 'cluster', 'articles', 'proofread', 'validate', 'index', 'baseline', 'commit'])
   assert.deepEqual([...TERMINAL_OUTCOMES].sort(), ['cancelled', 'done', 'failed', 'partial'])
 })
 

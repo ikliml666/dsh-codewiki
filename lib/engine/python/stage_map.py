@@ -17,11 +17,13 @@ job.stage 与取消检查点的共同依据；FSoft 自己的 ``ProgressTracker`
 """
 
 # 必须与 lib/engine/contract.js 的 ENGINE_STAGES 完全一致（测试双向对账）。
+# proofread 由 Node 侧在质量门之后执行，FSoft 不参与上报，但它属于契约枚举。
 ENGINE_STAGES = [
     "env",
     "graph",
     "cluster",
     "articles",
+    "proofread",
     "validate",
     "index",
     "baseline",

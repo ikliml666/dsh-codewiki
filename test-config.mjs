@@ -44,7 +44,7 @@ check(liveConfig(defaults).requestLimit === 100, '单模块请求上限默认 10
 }
 // ── 大档开关 ────────────────────────────────────────────────────────────────
 // schemastery 返回带 get() 的包装对象，取值一律走 liveConfig（运行期也是它）
-check(liveConfig(defaults).bigEnabled === true, '大档默认开启（沿用既有行为，升级后不改变编译结果）')
+check(liveConfig(defaults).bigEnabled === false, '大档默认关闭（0.17.34：超长输入不再默认换模型）')
 
 {
   const live = liveConfig(Config({
@@ -66,9 +66,10 @@ check(liveConfig(defaults).bigEnabled === true, '大档默认开启（沿用既�
 }
 
 {
-  // 未显式配置 bigEnabled（老 settings.json）时按开启处理，不改变既有编译行为
+  // 未显式配置 bigEnabled（老 settings.json）时按关闭处理——默认值只在 Config 里，
+  // liveConfig 不能自己再补一个「开启」的隐含默认，否则两处口径打架。
   const live = liveConfig({ bigProvider: 'volces-ark' })
-  check(live.bigEnabled === true && live.bigProvider === 'volces-ark', '缺省 bigEnabled 视为开启')
+  check(live.bigEnabled === false && live.bigProvider === '', '缺省 bigEnabled 视为关闭，provider 一并清空')
 }
 
 // ── 大档关闭后下游确实不再选大档 ────────────────────────────────────────────

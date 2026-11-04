@@ -81,23 +81,19 @@ fs.utimesSync(sessFile, old, old)
 check(classifySessionTask({ articlePath: sessFile, dispatchedAt: new Date().toISOString() }) === 'wait', '目标文件早于派发时间（旧文未更新）→ wait')
 fs.rmSync(sessDir, { recursive: true, force: true })
 
-// ---------- 3d. 会话通道 steer 文本：档位钉死 ----------
-section('buildSessionSteerText：sessionTier 是否写进 steer 文本')
+// ---------- 3d. 会话通道 steer 文本 ----------
+// sessionTier 已在 0.17.34 移除（只服务旧通道的可达路径），steer 文本不再提档位。
+section('buildSessionSteerText：不再有档位参数')
 const steerSnaps = [{ name: 'modules/a.md', articlePath: 'X:/w/modules/a.md', promptFile: 'X:/t/a.prompt.txt' }]
-const steerArt = buildSessionSteerText({ job: { id: 'job-t', cwd: 'X:/w', stage: 'articles' }, snapshots: steerSnaps, tier: '' })
-check(!steerArt.includes('tier:'), '未填 sessionTier → 不提档位（保持自动选路旧行为）')
-const steerTier = buildSessionSteerText({ job: { id: 'job-t', cwd: 'X:/w', stage: 'articles' }, snapshots: steerSnaps, tier: 'codeiwiki' })
-check(steerTier.includes('tier: "codeiwiki"'), '填了 sessionTier → 文本要求显式传 tier')
-check(steerTier.includes('不要依赖自动选路'), '填了 sessionTier → 明确禁止依赖自动选路')
-check(steerTier.includes('X:/t/a.prompt.txt') && steerTier.includes('X:/w/modules/a.md'), '任务文件与目标路径都写进文本')
-check(steerTier.includes('{') === false || !steerTier.includes('${'), '无未替换的模板占位符')
-const steerReview = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'review' }, snapshots: steerSnaps, tier: 'codeiwiki' })
+const steerArt = buildSessionSteerText({ job: { id: 'job-t', cwd: 'X:/w', stage: 'articles' }, snapshots: steerSnaps })
+check(!steerArt.includes('tier:'), 'steer 文本不再要求显式传 tier')
+check(steerArt.includes('X:/t/a.prompt.txt') && steerArt.includes('X:/w/modules/a.md'), '任务文件与目标路径都写进文本')
+check(!steerArt.includes('${'), '无未替换的模板占位符')
+const steerReview = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'review' }, snapshots: steerSnaps })
 check(steerReview.includes('超预算校对任务') && steerReview.includes('校对指令'), 'review 阶段文案按校对措辞')
-check(steerReview.includes('tier: "codeiwiki"'), 'review 阶段同样钉死档位')
-const steerResend = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'review' }, snapshots: steerSnaps, tier: 'codeiwiki', resend: true })
-check(steerResend.includes('重新派发') && steerResend.includes('tier: "codeiwiki"'), '重发文案带「重新派发」并仍钉死档位')
-const steerNoTierResend = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'articles' }, snapshots: steerSnaps, tier: '', resend: true })
-check(!steerNoTierResend.includes('tier:'), '重发且未填档位 → 不提档位')
+check(!steerReview.includes('tier:'), 'review 阶段同样不提档位')
+const steerResend = buildSessionSteerText({ job: { id: 'job-r', cwd: 'X:/w', stage: 'review' }, snapshots: steerSnaps, resend: true })
+check(steerResend.includes('重新派发'), '重发文案带「重新派发」')
 
 // ---------- 4. runRealtimeTasks：宿主 llm 通道（0.10.1 起唯一通道） ----------
 section('runRealtimeTasks：宿主 llm 通道与请求体')

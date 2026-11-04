@@ -310,11 +310,17 @@ if (want(3)) { console.log('== 用例 3：四路变化与 delete/rename 都被 c
   const st = readJson(path.join(repo, STATE_DIR, 'state.json'))
   const unconsumed = Array.isArray(st.unconsumed) ? st.unconsumed : []
   check(unconsumed.includes('brand-new.py') && unconsumed.includes('staged.py'), `未提交变化进 unconsumed（${unconsumed.slice(0, 6).join('、')}）`)
-  // 未提交源码改动会让质量门判 uncommitted-input：终态至少 partial，基线不推进（变化不丢）
-  check(r.job?.stage !== 'done', `有未提交源码改动时不得 done（实际 ${r.job?.stage}）`)
-  check(r.job?.nativeResult?.apply?.baseline?.advanced !== true, '基线未推进（未提交变化不会被记成已消化）')
+  // 未提交源码改动**已经随快照进了这批文章**（产物 commit_id === 快照 sha），
+  // 所以它不是「变化被悄悄丢掉」，而是「变化被权威地吞下」：轮次可以 done、
+  // 基线可以推进。真正的防丢机制是上面那条 unconsumed 携带 —— 改动没进 commit
+  // 之前一直留在账本里，下一轮继续消费。
+  check(r.job?.stage === 'done', `未提交改动被快照覆盖时可以 done（实际 ${r.job?.stage}；blockers=${JSON.stringify(r.job?.blockers ?? [])}）`)
+  check(r.job?.nativeResult?.apply?.baseline?.advanced === true, '基线推进（产物对得上快照，变化已被吞下）')
   const blockersText = JSON.stringify(r.job?.blockers ?? [])
-  check(/uncommitted-input|quality-gate/.test(blockersText), `阻塞原因说清是未提交输入（${blockersText.slice(0, 160)}）`)
+  check(!/uncommitted-input/.test(blockersText), `不再把「已吞下」误报成未提交输入（${blockersText.slice(0, 160)}）`)
+  // 吞下了什么必须可见：这是「基线推进条件放宽」的代价，必须在任务记录里说清楚。
+  const noteText = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
+  check(/本轮把 \d+ 个未提交源码改动一并写进产物/.test(noteText), `notes 明示吞下了哪些未提交改动（${noteText.slice(0, 300)}）`)
   // ── S4：未提交的三路不止「记账」，而是被合成成一棵真实的树交给引擎 ──
   //
   // 规格 L82 的症结是 FSoft 只从 `<old>..<new>` 取 diff：Node 侧若只把工作区路径
@@ -702,9 +708,13 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   fs.mkdirSync(mods, { recursive: true })
   fs.writeFileSync(path.join(mods, 'agent-runtime.md'),
     '---\ntitle: agent-runtime\ntype: module\nsource_files:\n  - core/core.py\ntags: []\nfsoft_page: agent_runtime.md\n---\n\n# agent-runtime\n\n旧聚类的残骸。\n', 'utf8')
-  // 人工页没有 fsoft_page，不在删除范围
+  // 人工页没有 fsoft_page，且标题是人写的（不等于文件名），不在删除范围
   fs.writeFileSync(path.join(mods, 'handwritten.md'),
-    '---\ntitle: handwritten\ntype: module\nsource_files: []\ntags: []\n---\n\n# handwritten\n\n人工维护。\n', 'utf8')
+    '---\ntitle: 人工维护的笔记\ntype: module\nsource_files:\n  - core/core.py\ntags: []\n---\n\n# 人工维护的笔记\n\n人工维护，别删。\n', 'utf8')
+  // 没有归属证据的草稿页（title 恰好等于文件名、但 source_files 空）同样不删：
+  // 判据只认「旧通道模板的三个特征同时成立」，不赌人工页不会这样起名。
+  fs.writeFileSync(path.join(mods, 'draft.md'),
+    '---\ntitle: draft\ntype: module\nsource_files: []\ntags: []\n---\n\n# draft\n\n草稿。\n', 'utf8')
   // 源码真变了，这一轮才会真正落地（no_change 轮不清理存量页）
   fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
 
@@ -713,6 +723,7 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   check(/发现 1 个残留页/.test(notes), `notes 点名残留页数量（实际 ${notes.slice(-240)}）`)
   check(!fs.existsSync(path.join(mods, 'agent-runtime.md')), '残留页被删除')
   check(fs.existsSync(path.join(mods, 'handwritten.md')), '没有 fsoft_page 的人工页不得被删')
+  check(fs.existsSync(path.join(mods, 'draft.md')), 'source_files 为空的页不得被删（没有归属证据）')
 }
 
 // ============================ 用例 17：无变化轮也要清残留页 ============================

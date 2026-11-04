@@ -32,14 +32,15 @@ graph-diff/incremental/update-planner 五个模块及其 7 套测试**已删除*
 
 ### EngineResult
 
-一次 `generate` / `update` 的完整结果。`contractVersion` 固定为 `2`（0.16.7 起；
-改契约必须同步升 `lib/engine/contract.js` 的 `ENGINE_CONTRACT_VERSION` 与 `test-engine-contract.mjs`）。
+一次 `generate` / `update` 的完整结果。`contractVersion` 固定为 `3`（0.17.38 起；
+改契约必须同步升 `lib/engine/contract.js` 的 `ENGINE_CONTRACT_VERSION` 与 `test-engine-contract.mjs`，
+`lib/engine/python/entry.py` 的 `CONTRACT_VERSION` 也要跟着改）。
 
 ```jsonc
 {
-  "contractVersion": 2,
+  "contractVersion": 3,
   "outcome": "done|partial|failed|cancelled",
-  "stage": "env|graph|cluster|articles|validate|index|baseline|commit|null",
+  "stage": "env|graph|cluster|articles|proofread|validate|index|baseline|commit|null",
   "blockers": [{ "kind": "article-failed", "detail": "...", "target": "modules/a.md" }],
   "error": { "code": "engine-crashed", "message": "...", "stage": "articles", "retryable": false },
   "writtenCount": 0, "failedCount": 0, "keptCount": 0, "removedCount": 0, "unmappedCount": 0,
@@ -76,7 +77,7 @@ blocker 用，但枚举里没有它，`normalizeBlocker` 会静默降级成 `eng
 ### EngineProgress
 
 推进中的阶段快照，tick 与面板共用同一份：`stage` 必须在 `ENGINE_STAGES` 内
-（`env → graph → cluster → articles → validate → index → baseline → commit`），
+（`env → graph → cluster → articles → proofread → validate → index → baseline → commit`），
 `percent` 夹到 0–100，计数缺失按 0 解释（旧 job 兼容）。
 
 ### EngineError
@@ -295,16 +296,12 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
   重置”），故八场景真实验收用 `workbuddy/glm-5.3`。这是**上游配额**不是适配层问题，
   但规格的硬门禁确实没满足——额度恢复后把 `batchModel` 改回 `hy3` 重跑八场景
   才算闭环。
-- **strict 锚点未全绿**。`node test-wiki-anchors.mjs --strict` 实测
-  **3354 过 / 59 败 / 32 待重编译**（默认档 3354 过 / 5 败 / 86 待重编译）。59 条
-  失败构成：34 条「指向空行」（锚点行落在空行或区间内无代码，`test-engine-apply-plan.mjs`
-  占 26 条、`index.js` 8 条、`README.md` 6 条）、20 条「符号未绑定」（`idleRound`/
-  `symbolIncremental`/`runEngine`/`normalizeIndexLinks`/`normalizeArticlePath`/
-  `resolveBinary`/`numberLines` 等不在所引区间内）、4 条「符号不存在」（该符号在
-  目标文件里 0 次出现）、1 条「起始行越界」（`test-wiki-anchors.mjs:778` 超出该文件
-  当前 404 行）。**绝大多数是 `.codewiki/` 文章滞后于本轮代码**，属文档滞后而非
-  校验器缺陷：按纪律不手改文章，留待一次真实全量重编译覆盖（重编译后基线前移，
-  这些会自动升级为硬断言）。
+- **strict 锚点已全绿**。`node test-wiki-anchors.mjs --strict` 实测
+  **369 过 / 0 败 / 3 待重编译**（默认档同值）。0.17.39 之前是 3354 过 / 59 败 /
+  32 待重编译，那 59 条全部落在旧 Node 通道遗留的横切产物（`_architecture.md` /
+  `_patterns.md` / `concepts/`，描述的是 0.16.0 已删除的规划层）与两篇
+  `learnings/` 上：前者已整体下线，后者是锚点行号随代码前移后的机械漂移，已逐条对齐。
+  剩余 3 条「待重编译」是 `.codewiki/` 尚未跟上本轮源码改动，重编译后自动升为硬断言。
 - **阶段 7 受控退役已执行（0.16.0）**，用户明确指示「可以删除」。切换与删除内容：
   - `nativeEngine` 默认值 `false` → `true`（`index.js` Config 与 `liveConfig`、
     `client.js` 提示文案、README/docs/CHANGELOG 同步）。

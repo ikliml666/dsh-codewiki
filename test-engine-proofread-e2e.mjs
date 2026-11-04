@@ -99,6 +99,7 @@ console.log('== 用例 2：校对通道把失效链接改对后，门不再报 d
   const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-proof-docs2-'))
   madeDirs.push(docs)
   let promptSeen = ''
+  const stages = []
   const res = await runNativeJob({
     repoRoot: repo,
     scope: 'full',
@@ -108,6 +109,7 @@ console.log('== 用例 2：校对通道把失效链接改对后，门不再报 d
       // 模型：把 gone-module.md 改成真实存在的 core.md（页面清单里给的）
       return '<PAGE>\n# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n</PAGE>'
     }),
+    onProgress: (f) => stages.push(f.stage),
   })
   check(promptSeen.includes('core.md'), '校对提示里给出了真实页名清单')
   check(promptSeen.includes('gone-module.md'), '校对提示里点出了失效目标')
@@ -122,6 +124,10 @@ console.log('== 用例 2：校对通道把失效链接改对后，门不再报 d
     (res.notes ?? []).some((n) => /语义校对改写了/.test(n)),
     `notes 记录校对改写了哪些页（实际 ${JSON.stringify((res.notes ?? []).filter((n) => n.includes('校对')))}）`,
   )
+  // 契约阶段名写错时 engineProgress 会抛错；若调用方 catch 一吞，帧就静悄悄消失，
+  // 面板上「校对」这一步永远不亮。这里直接断言帧真的送到了消费者手里。
+  check(stages.includes('proofread'), `onProgress 收到 proofread 帧（实际 ${JSON.stringify([...new Set(stages)])}）`)
+  check(stages.includes('validate'), 'onProgress 也收到 validate 帧（契约里两个阶段都在）')
 }
 
 // ── 用例 3：模型没修对 → 保留原文，门照旧判 partial（不许越修越坏）────────────

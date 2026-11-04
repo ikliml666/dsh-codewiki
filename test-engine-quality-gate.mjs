@@ -153,7 +153,12 @@ await check('gate：模块页只有标题（空壳）→ partial，且那篇 act
   assert.ok(r.defects.some((d) => d.kind === 'empty-body'), JSON.stringify(r.defects))
   const web = r.articles.find((a) => a.source === 'Web.md')
   assert.equal(web.action, 'skip', '空壳页不许写进 wiki')
-  assert.equal(r.rendered.some((x) => x.source === 'Web.md'), false, '有缺陷的页不进 rendered（否则上游会绕过 skip 整篇落盘）')
+  // rendered 收全部页的渲染结果并带 defects 计数：落地器要靠它发现「库里那篇旧的自己也
+  // 不合规」，进而按轮次决定写不写。写不写是 apply-plan 的职责（正常轮只写 defects===0），
+  // 门这边的契约是 articles[].action 必须如实为 skip。
+  const webRendered = r.rendered.find((x) => x.source === 'Web.md')
+  assert.ok(webRendered, '缺陷页也要有渲染结果，否则落地器看不见它')
+  assert.equal(webRendered.defects, 1, '缺陷页的 defects 计数必须如实')
 })
 
 await check('gate：source_files 指向不存在的文件 → partial（编造会让增量归属静默错位）', async () => {
@@ -564,7 +569,11 @@ if (!existsSync(REAL)) {
     assert.ok(r.defects.some((d) => d.kind === 'empty-body' && /web_layer/.test(d.source ?? '')), JSON.stringify(r.defects))
     const web = r.articles.find((a) => /web_layer/.test(a.source))
     assert.equal(web.action, 'skip')
-    assert.equal(r.rendered.some((p) => /web_layer/.test(p.source)), false)
+    // 缺陷页仍出渲染结果（带 defects 计数），但正常轮落地器按 defects>0 跳过它 ——
+    // 见 test-engine-apply-plan.mjs「正常轮不写缺陷页」。
+    const webRendered = r.rendered.find((p) => /web_layer/.test(p.source))
+    assert.ok(webRendered, '缺陷页仍要出渲染结果，否则库里那篇旧页永远不被发现')
+    assert.ok(webRendered.defects > 0, JSON.stringify(webRendered.defects))
   })
 
   // 真机 job-mvzcxmxg-0 的截图暴露的缺陷：引擎页名 agent_runtime.md 落地改名成

@@ -93,6 +93,14 @@ const makeReact = () => {
 
 // 会话端点的桩数据；用例可改写它来验证「有进行中任务但还没发请求」这类形态
 let SESSIONS_PAYLOAD = { sessions: [], active: [] }
+// 总览页数据；用例可改写它来验证仓库列表与空态
+let REPOS_PAYLOAD = {
+  scheduler: { enabled: true, intervalMin: 30, scanning: false, lastScan: '2026-11-02T00:00:00.000Z', lastScanRepos: 3 },
+  repos: [
+    { cwd: 'C:/repo/demo', state: 'stale', staleArticles: 2, changedFiles: 5, articleCount: 18, needsConfirm: false, excluded: false, lastJob: null },
+    { cwd: 'C:/repo/fresh', state: 'uncompiled', articleCount: 0, needsConfirm: true, excluded: false, lastJob: null },
+  ],
+}
 
 const platform = () => {
   globalThis.document = {
@@ -104,6 +112,7 @@ const platform = () => {
     json: async () => {
       const u = String(url)
       if (u.endsWith('/api/codewiki/jobs')) return { jobs: [JOB] }
+      if (u.endsWith('/api/codewiki/repos')) return REPOS_PAYLOAD
       if (u.includes('/api/codewiki/sessions')) return SESSIONS_PAYLOAD
       return {}
     },
@@ -133,7 +142,12 @@ const render = (node, react) => {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
   if (Array.isArray(node)) return node.map((n) => render(n, react)).join('')
   if (node.type === react.Fragment) return render(node.children, react)
-  if (typeof node.type === 'function') return render(react.renderComponent(node.type, node.props), react)
+  // 函数组件要拿到 children：createElement 把子节点放在第三个参数之后，桩若只透传 props，
+  // 所有 Button/Tag/Switch 的子内容都会渲染成空——断言「按钮文案在」时会被误判成缺失。
+  if (typeof node.type === 'function') {
+    const props = node.children.length ? { ...node.props, children: node.children } : node.props
+    return render(react.renderComponent(node.type, props), react)
+  }
   const attrs = Object.entries(node.props ?? {})
     .filter(([k]) => k.startsWith('data-'))
     .map(([k, v]) => ` ${k}="${String(v)}"`)
@@ -150,18 +164,25 @@ const check = async (label, fn) => {
   catch (err) { fails.push({ label, err }); console.log(`FAIL  ${label}\n      ${err.message}`) }
 }
 
-const mountPanel = () => {
+const mountPanel = (tFactory = null) => {
   const { React, reset, cleanups } = makeReact()
   platform()
   reset()
   const { plugin } = loadPlugin(React)
   let Panel = null
   const ctx = {
-    // bind 返回可辨识的包装值：裸键名出现在输出里就说明某处没走 t()
-    locale: { bind: () => (key) => `«${key}»`, register: () => () => {} },
+    // bind 返回可辨识的包装值：裸键名出现在输出里就说明某处没走 t()。
+    // tFactory 只给「必须看到插值结果」的用例用（例如分组条数 {n}）。
+    locale: { bind: () => tFactory ?? ((key) => `«${key}»`), register: () => () => {} },
     effect: (fn) => { fn(); return () => {} },
     configForms: {
-      get: () => ({ getSnapshot: () => ({ values: {}, writable: true }), mutate: async () => ({}) }),
+      // subscribe 必须存在：设置页的 CodewikiCard 会订阅 snapshot 变化，缺了它
+      // 整个设置 Tab 会在渲染期抛 TypeError（此前没有任何用例渲染过设置页）。
+      get: () => ({
+        getSnapshot: () => ({ status: 'ready', revision: 1, value: {}, writable: true, subscribe: () => () => {} }),
+        subscribe: () => () => {},
+        mutate: async () => ({}),
+      }),
       whileServed: () => () => {},
     },
     slots: {
@@ -204,6 +225,38 @@ const gotoTab = (Panel, React, reset, key = 'tabTasks') => {
   const tab = findTab(tree)   // 遍历复用的是这份树，不再重入组件
   assert.ok(tab, `未找到「${key}」Tab 按钮`)
   tab.props.onClick()
+}
+
+// settle 的退出条件是「出现任务标识就返回」——点进会话视图后任务页内容仍在 DOM 里，
+// 它会立刻交出上一帧。需要等特定结构出现时用这个版本。
+const settleUntil = async (Panel, React, reset, want, rounds = 20) => {
+  let html = ''
+  for (let i = 0; i < rounds; i++) {
+    reset()
+    html = render(React.renderComponent(Panel, {}), React)
+    if (want.test(html)) return html
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  return html
+}
+
+// 按文案点任意「带 onClick 的节点」：任务卡里的「会话」按钮是宿主 Button 组件，
+// 桩环境里被 passthrough 掉，不会渲染成 <button>，gotoTab 的判据在这里不适用。
+const clickByLabel = (Panel, React, reset, key) => {
+  const find = (node) => {
+    if (node == null || typeof node !== 'object') return null
+    if (Array.isArray(node)) return node.map(find).find(Boolean) ?? null
+    if (node.type === React.Fragment) return find(node.children)
+    const text = String(render(node.children, React))
+    if (typeof node.props?.onClick === 'function' && text.includes(`«${key}»`)) return node
+    return find(node.children)
+  }
+  reset()
+  const tree = React.renderComponent(Panel, {})   // 展开当前 Tab 的元素树
+  reset()
+  const hit = find(tree)
+  assert.ok(hit, `未找到「${key}」按钮`)
+  hit.props.onClick()
 }
 
 // 步骤条每个阶段都必须有字典项：漏一个就在面板上显示裸键名。真机截图里第 7 项就这样
@@ -311,6 +364,201 @@ await check('会话页：已有请求记录时进行中任务标注请求数', a
     assert.ok(/«sessActiveRequests»/.test(html), '有请求时应显示「已发 N 个请求」')
   } finally {
     SESSIONS_PAYLOAD = { sessions: [], active: [] }
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 总览页从「每个仓库一个描边盒子」改成「列表 + 行级分隔线」之后，仓库行必须仍然渲染。
+// 这条用例挡的是「改样式时把 map 包错一层，仓库整块消失」——探针期间就发生过一次。
+await check('总览页：仓库列表渲染在 repolist 容器里，待确认仓库带确认按钮', async () => {
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `总览页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-repolist=/.test(html), '缺少仓库列表容器')
+    assert.equal((html.match(/data-dscw-p-repo=/g) ?? []).length, REPOS_PAYLOAD.repos.length, '仓库行数与数据不符')
+    assert.ok(/«confirmCompile»/.test(html), '待确认仓库没有渲染确认按钮')
+  } finally {
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 空态：一句灰字看不出「是空还是没加载完」。空态块必须带一个标题（<strong>），
+// 而不是只有一个 span —— 这是 redesign 里补的 empty state 的验收点。
+await check('空态：任务页没有任务时给出带标题的引导块', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs') ? { jobs: [] } : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `空态渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-empty=""><strong[^>]*>[^<]+</.test(html), '空态块缺少标题')
+    assert.ok(/«emptyTasksTitle»/.test(html), '空态标题没有走文案字典')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 设置页：分组必须有 data-dscw-sec（样式挂了分隔线），保存条要 sticky。
+// 这条同时是「设置 Tab 能在桩环境里渲染」的唯一护栏——之前它根本没人渲染过。
+await check('设置页：分组容器与粘底保存条就位', async () => {
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSettings')
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `设置页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok((html.match(/data-dscw-sec=/g) ?? []).length >= 5, '设置页分组数不足')
+    assert.ok(/data-dscw-bar=/.test(html), '缺少保存条')
+  } finally {
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 总览的第一件事是回答「有多少仓要处理、现在在跑什么」，不是把仓库列表再抄一遍。
+// 统计条是这一步的验收点：五格数字必须都渲染，且待确认/有变更非零时要点成 warn。
+await check('总览页：统计条渲染五格数字，待确认非零时标成 warn', async () => {
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `总览页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-stats=/.test(html), '缺少统计条')
+    const cells = html.match(/data-dscw-p-stat=/g) ?? []
+    assert.equal(cells.length, 5, `统计条格数应为 5，实际 ${cells.length}`)
+    // REPOS_PAYLOAD 里有一个 needsConfirm 仓库 → 待确认格必须是 warn
+    assert.ok(/data-dscw-p-stat="" data-tone="warn"><b>1<\/b>/.test(html), '待确认非零时该格应标 warn')
+  } finally {
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 待办优先：需要人动手的两档（待确认 0 / 有变更 1）必须排在「干净的」前面。
+// 这条挡的是「排序被写成按 cwd 字典序」——那样每天最该点的几行会被推来推去。
+await check('总览页：待确认与有变更排在干净的前面', async () => {
+  REPOS_PAYLOAD = {
+    scheduler: { enabled: true, intervalMin: 30, scanning: false, lastScan: '2026-11-02T00:00:00.000Z' },
+    repos: [
+      { cwd: 'C:/repo/aaa-clean', state: 'clean', articleCount: 9, needsConfirm: false, excluded: false, lastJob: null },
+      { cwd: 'C:/repo/zzz-stale', state: 'stale', staleArticles: 1, changedFiles: 2, articleCount: 9, needsConfirm: false, excluded: false, lastJob: null },
+    ],
+  }
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    const order = [...html.matchAll(/data-dscw-p-repo="" data-rank="(\d)"[^>]*>(.*?)<\/div>/gs)]
+    assert.ok(order.length >= 2, '仓库行没渲染出来')
+    const firstRank = Number(order[0][1])
+    assert.ok(firstRank <= 1, `排第一的行 rank=${firstRank}，应是最需要动手的那档`)
+    assert.ok(/zzz-stale/.test(order[0][2]), '有变更的仓库没有排在最前')
+  } finally {
+    REPOS_PAYLOAD = {
+      scheduler: { enabled: true, intervalMin: 30, scanning: false, lastScan: '2026-11-02T00:00:00.000Z', lastScanRepos: 3 },
+      repos: [
+        { cwd: 'C:/repo/demo', state: 'stale', staleArticles: 2, changedFiles: 5, articleCount: 18, needsConfirm: false, excluded: false, lastJob: null },
+        { cwd: 'C:/repo/fresh', state: 'uncompiled', articleCount: 0, needsConfirm: true, excluded: false, lastJob: null },
+      ],
+    }
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 全局会话里几十条请求分属多个仓库，平铺时「这条属于哪个仓」只能靠行尾目录名去认。
+// 分组头是唯一的仓库上下文，所以必须真的按 cwd 分组、且条数写对。
+await check('会话页：全局视图按工作区分组，条数与仓库名对得上', async () => {
+  SESSIONS_PAYLOAD = {
+    sessions: [
+      { n: 1, jobId: 'job-a', cwd: 'C:/repo/alpha', name: 'a.md', status: 'done', startedAt: '2026-11-02T00:02:00.000Z' },
+      { n: 2, jobId: 'job-a', cwd: 'C:/repo/alpha', name: 'b.md', status: 'done', startedAt: '2026-11-02T00:01:00.000Z' },
+      { n: 3, jobId: 'job-b', cwd: 'C:/repo/beta', name: 'c.md', status: 'done', startedAt: '2026-11-02T00:03:00.000Z' },
+    ],
+    active: [],
+  }
+  // {n} 必须能看出被替换成了真实条数，否则「2 条请求写成一坨」也照样通过
+  const t = (key) => (key === 'sessGroupCount' ? '{n} 条请求' : `«${key}»`)
+  const { Panel, React, reset, cleanups } = mountPanel(t)
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSessions')
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `会话页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-sessgroups=/.test(html), '缺少工作区分组容器')
+    assert.equal((html.match(/data-dscw-p-sessgroup=/g) ?? []).length, 2, '应按 2 个仓库分成两组')
+    assert.ok(/alpha/.test(html) && /beta/.test(html), '分组头缺少仓库名')
+    assert.equal((html.match(/data-dscw-p-sessrow=/g) ?? []).length, 3, '分组里的请求行总数应为 3')
+    // beta 的最新一条（00:03）比 alpha（00:02）晚，所以 beta 组排在前面
+    const firstGroup = html.slice(html.indexOf('data-dscw-p-sessgroup='), html.indexOf('data-dscw-p-sessgroup=', html.indexOf('data-dscw-p-sessgroup=') + 1))
+    assert.ok(/beta/.test(firstGroup), '最近活动的工作区应排在第一组')
+    assert.ok(/2 条请求/.test(html) && /1 条请求/.test(html), '分组头的条数不对')
+    assert.ok(!/\{n\}/.test(html), '分组条数的 {n} 占位符没被替换')
+  } finally {
+    SESSIONS_PAYLOAD = { sessions: [], active: [] }
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 单任务视图只有一个仓，再套一层分组容器就是纯粹的多余嵌套。
+// 这条真的点进单任务视图（任务卡的「会话」按钮）再断言，而不是在全局视图下凑数。
+await check('会话页：单任务视图不再分组', async () => {
+  SESSIONS_PAYLOAD = {
+    sessions: [{ n: 1, jobId: 'job-panel-smoke', cwd: 'C:/repo/demo', name: 'a.md', status: 'done', startedAt: '2026-11-02T00:01:00.000Z' }],
+    active: [],
+  }
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)                       // 先到任务页
+    await settle(Panel, React, reset)
+    clickByLabel(Panel, React, reset, 'sessBtn')       // 点「会话」进单任务视图
+    const html = await settleUntil(Panel, React, reset, /data-dscw-p-sessrow=|data-dscw-p-empty=/)
+    assert.ok(!/Panel error:/.test(html), `单任务会话视图渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-sessrow=/.test(html), '单任务视图里没有请求行')
+    assert.ok(!/data-dscw-p-sessgroups=/.test(html), '单任务视图不该出现工作区分组容器')
+    assert.ok(!/data-dscw-p-sessgroup=/.test(html), '单任务视图不该出现分组头')
+  } finally {
+    SESSIONS_PAYLOAD = { sessions: [], active: [] }
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 设置页从「一列到底」改成分类卡片：卡片容器存在、每张卡片是 data-dscw-sec。
+await check('设置页：分组包在 cards 容器里，每张卡是独立 section', async () => {
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSettings')
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `设置页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-cards=/.test(html), '缺少卡片容器')
+    assert.ok((html.match(/data-dscw-sec=/g) ?? []).length >= 5, '卡片数不足 5 张')
+    // 卡片容器必须包住所有 section，而不是和它们平级
+    assert.ok(/data-dscw-cards=""><section data-dscw-sec=/.test(html), 'section 没有被 cards 容器包住')
+  } finally {
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 自动保存：没有保存按钮了，改为状态行。状态行的存在本身就是「改动会自动落盘」的凭据，
+// 而 data-state 让用户能看出当前是保存中、已保存还是失败。
+await check('设置页：保存按钮换成自动保存状态行', async () => {
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSettings')
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `设置页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-bar="" data-state=/.test(html), '缺少带状态的自动保存行')
+    assert.ok(/data-dscw-savestate=/.test(html), '缺少保存状态文案')
+    assert.ok(!/«save»/.test(html) && !/«discard»/.test(html), '保存/放弃按钮应已移除')
+  } finally {
     cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
   }
 })

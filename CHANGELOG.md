@@ -1,5 +1,437 @@
 # Changelog
 
+## 0.17.39 — 2026-11-04
+
+全仓审计后的收口：修掉让基线永不推进的死锁、让换通道后的残骸页永远堆积的判据缺口、以及一整批「文档说的事代码里没有」。另外把旧 Node 通道遗留的横切产物（`_architecture.md` / `_patterns.md` / `concepts/`）整体下线——它们描述的是 0.16.0 已删除的规划层。
+
+### 基线死锁：脏工作区不再一票否决基线
+
+**症状**：连续 6 轮原生编译全部落 `partial`，blocker 恒为同一条 `[quality-gate] [uncommitted-input/product] 工作区有 22~25 个未提交源码改动…`，`baselineAdvanced` 与 `baselineEligible` 全 false。`_meta.yaml` 的 `last_compiled_commit` 停在 `17c43b7b`，而 HEAD 已经到了 `a370691a`——**产物每轮都被自动提交，只有基线不推进**，于是 `cw status` 永远 stale，`stale` 范围下每轮都在重写同一批页。
+
+**根因**：`native-run.js` 早就把工作区快照的 SHA 传给了质量门（`consumedInputCommit`），但门里只把它用于**绕过 commit-mismatch**（`art !== headCommit && art !== consumed`），`uncommitted-input` 那条分支完全不看它。于是「脏工作区 → 合成快照 → 产物对得上快照 → 仍然报缺陷」这条闭环谁也走不出去。
+
+**修法**：不放松 `baselineEligible = outcome === 'done'`（0.16.1 的教训是让 partial 偷偷推进，等于把没消化完的变化记成已消化），而是让**脏工作区在快照成立时不再产生缺陷**：
+
+- `quality-gate.js` 的 `assessBaseline` 新增 `consumedInput` 返回值。脏工作区的分支改成：`consumed` 有效且产物 commit 恰等于 `consumed` 时，把脏路径收进 `consumedInput = { commit, paths }` 并**不 push defect**；只有「脏但没被快照覆盖」（`!consumed || art !== consumed`）才照旧报 `uncommitted-input`。
+- `gateNativeOutput` 把 `consumedInput` 透传进 report 的 `baseline` 对象。
+- `native-run.js` 在 validate 段之后落一条可见的 note：「本轮把 N 个未提交源码改动一并写进产物（快照 xxxxxxxx）：paths…」。**吞下脏改动是事实，必须在面板与日志里看得见**，否则「基线推进了」和「悄悄忽略了你的改动」在外部无法区分。
+- 未消费的变化仍由 `_native-state/state.json` 的 `unconsumed` 跨轮携带（只有出现在下一轮 `committed` 里才算消化），所以放行脏工作区不会丢变化。
+
+`test-engine-native-incremental.mjs` 原有用例断言的正是旧行为（stage ≠ done、基线不推进、blockers 含 uncommitted-input），已改写成新语义，并补一条「notes 必须点名吞下的改动」。`test-engine-quality-gate.mjs` 的旧用例不传 `consumedInputCommit`，仍然成立，无需改动。
+
+### 残骸页：判据只认新格式，旧格式页永远删不掉
+
+**症状**：模块树 19 个节点、磁盘 `.codewiki/modules/` 45 篇、`_index.md` 收录 46 条——26 篇是历史残骸，新旧页在索引里并存（`engine_core` 与 `engine-core` 各一条）。`findStaleModulePages` 与 `findOrphanPages` 对它们**都返回 0**。
+
+**根因**：两个判据都只认本引擎写的新格式。`findOrphanPages` 要求 `source_files` **全部**失效才算孤儿，而残骸页的 `source_files`（`lib/agentic.js`、`index.js` 等）全都还在；`findStaleModulePages` 要求 frontmatter 有 `fsoft_page`，残骸页一个都没有，于是被当成「人工页，一律不动」。
+
+**修法**：`findStaleModulePages` 在「无 `fsoft_page`」分支里补一条旧格式判别，命中任一条即可：
+
+1. `title` 恒等于自己的文件名 slug（旧通道的 frontmatter 模板就是 `title: <模块名>`）；
+2. 落在 `modules/` 的**子目录**里——原生通道的模块页永远是 flat（映射只产出 `modules/<slug>.md`，metadata 里 `layout: flat`），嵌套只可能来自旧通道。
+
+再叠加两道闸（`type: module`、`source_files` 非空）防止误删人写的内容。真机验证：对本仓库模块树跑该函数，**26 篇命中，全部 `legacy: true`**，名单与人工核对的残骸完全一致。
+
+第 2 条是补真机漏网来的：`modules/engine-apply-output/apply-plan.md` 的 title 是「apply_plan（阶段 3 落地器）」这种描述性标题，第 1 条抓不到，而它在目录里，第 2 条能抓到。这篇页正文写的是 739 行的 `apply-plan.js`，实际源码已经 1335 行。
+
+同步删掉的 27 篇（26 篇顶层 + 1 篇嵌套）已 `git rm`，`.codewiki/modules/` 现在 19 篇，与模块树的 live slug 一一对应；`cw index` 重建后 `_index.md` 无重复、无残骸。
+
+### 横切产物下线
+
+`.codewiki/_architecture.md`（27KB）、`_patterns.md`（24KB）、`concepts/`（9 篇）全部是旧 Node 通道 `tickCrosscut` 的产物，mtime 停在 Node 通道最后一次写入。grep `crosscut` 在本仓库只命中 `index.js`（文案与旧阶段机）和 `native-run.js` 一句性能注释——原生通道**从不写这三类文件**。
+
+内容审计的结论是「留着比没有更糟」：`concepts/wiki-generation-flow.md` 整篇在讲 `lib/cluster.js` + `lib/symbols.js` 的 semanticPlan、`planMode`、`agenticArticles`、`prepareArticleTasks`、`runRealtimeTasks` 双池——这些在 0.16.0/0.17.x 已全部删除；`_architecture.md` 的 96 项 `source_files` 里有 24 项已失效。`test-wiki-anchors.mjs` 修复前报的 26 处锚点漂移**全部**落在这批页上。
+
+已整体删除，并同步修掉三处仍指向它们的引用：
+
+- `index.js` 的 `ensureWikiEntry` 生成文案（原指向 `_architecture.md` 与 `concepts/`，原生通道永不产出）；
+- `index.js` 的 `reminderText`（原承诺「learnings/、decisions/ 补文章与索引刷新均由流水线完成」，而全库没有任何代码向这两个目录写文章，`decisions/` 目录根本不存在）；
+- `README.md` 的 `updateReminder` 条目同款假承诺。
+
+架构总览的替代品本来就有：引擎每轮重写的 `overview` 页；模块级结构表达由模块页内的 mermaid 图承担（45 篇里 20 篇有图）。仓库根 `CodeWiki.md` 也已重写：原内容停留在 0.10.x 的 Node 通道（`prepareArticleTasks`/`sessionTier`/`localPlan`/`workbuddy`/`hy3`），现在是当前原生通道的速查。
+
+### 文档债与死代码
+
+- `requestLimit` 的默认值在三处口径不一：`DEFAULT_REQUEST_LIMIT = 100`、`index.js` 的 description 写「默认 300」、`client.js` 面板 `?? 300`。统一为 100（上游默认值），并说明 300 是「先全部改回上游逻辑验证」之前的临时值。
+- 删除 `index.js` 里连续两个 `return result` 的重复死代码。
+- `.codewiki/learnings/` 两篇（`cw-binary-source-lost.md`、`update-reminder-entry-gap.md`）的 17 处 `index.js:NNN` 锚点随代码前移全部漂移，已逐条按当前符号位置重定位。这两篇是人工产出的，`codewiki_generate` 不会重写 `learnings/`，所以只能手工对齐。
+- 大档（`bigEnabled`/`bigProvider`/`bigModel`/`bigReasoningEffort`/`bigTokenBudget`）在原生通道 grep 零命中——原生通道的输入预算由 FSoft 引擎按模块切分，不经这一档；`llm-bridge` 的模型在桥启动时就固定了，`body.model` 只用于记账，没法在请求级切档。**没有凭空接线**（那要改上游引擎的请求路由），改为在 Config 描述与设置页提示里诚实标注「仅 Node 兼容通道生效」。
+
+### 验证
+
+- **33 个不依赖 venv 的测试 + 6 个需要 `.probe-fsoft/venv` 的测试，共 39 个全部 exit 0。** 后者（`test-engine-output-real` / `test-engine-python-entry` / `test-engine-quality-gate` / `test-fsoft-coverage` / `test-fsoft-runtime` / `test-upstream-parallel`）此前长期被跳过，这次用 `DSH_CODEWIKI_PYTHON=.probe-fsoft/venv/Scripts/python.exe` 真跑了一遍：11 / 24 / 37 / 6 / 6 / 11 条断言全过。
+- **真机验证基线放行**（`assessBaseline` 对真实仓库，28 个未提交改动）：
+  - 不传 `consumedInputCommit` → `defects: ['missing-metadata', 'uncommitted-input']`（旧行为不变）；
+  - 传快照 `c9987fba` 且产物 commit 等于它 → `defects: []`，`consumedInput` 收下 28 条路径；
+  - 传快照但产物 commit 不匹配 → `defects: ['commit-mismatch', 'uncommitted-input']`（没被快照覆盖的照旧拦）。
+
+  三态都对，说明放行有明确边界，不是无脑跳过。
+- **真机验证 cw 侧闭环**（临时仓库）：`cw init` → `cw meta update` → `cw status` 报 `Wiki is up to date.`；工作区脏但未提交时 status 仍是 up to date（cw 只看已提交历史，符合预期）；提交后 status 才列出变更。这印证「基线推进后 stale 自动消解」这条链路本体没问题——之前卡住的是插件侧不推进，不是 cw 判错。
+- `test-wiki-anchors.mjs --strict`：**369 过 / 0 败 / 3 待重编译**（修复前 59 败）。两篇 `learnings/` 的锚点行号已随代码前移逐条对齐。
+- `findStaleModulePages` 真机命中 26 篇残骸，全部 `legacy: true`。
+
+## 0.17.38 — 2026-11-04
+
+原生通道有了存量体检：库里躺着的坏文章不再只有被重写时才可能被发现。顺带修掉九处「判据与事实脱节」的缺陷，以及契约层把无扩展名文件一律判成坏源文件的老误判。
+
+### 存量体检：坏文章不再依赖「恰巧被重写」
+
+Node 通道的 `tickIndex` 一直在扫全库（`index.js` 的 `auditExistingArticles`），原生通道却没有这一步：落地器只比对「本轮写集 vs `_index.md` 实收」，再加上删孤儿页。于是没被重写的存量坏文章永远发现不了，`_index.md` 也永远缺一条——`cw index` 对 frontmatter 写坏的文章是静默跳过的，退出码照样 0。
+
+现在 `lib/engine/apply-plan.js` 导出 `auditExistingArticles(repoRoot, skipRels)`，在索引段的缺页校验之后、基线之前跑：
+
+- 递归扫 `.codewiki/`，只取 `.md`，相对路径以 `_` 开头的整棵子树跳过（与 `vendor/codewiki/src/main.rs` 的 `rel_str.starts_with('_')` 同一条规则，所以 `_index.md`、`_native-state/`、`temp/` 不会被误扫）。
+- `skipRels` 传本轮裁决里的页（写集 + `report.rendered` 的 `wikiPath`），已经由质量门判过的页不重复上报。
+- 口径与 `checkRendered` 完全对齐：`fsImpl: null`、`allowedLinks: null`、`requiredSections: []`、`allowEmptySourceFiles: true`、`expectedType: null`（让目录推断生效）。带 `fsImpl` 会额外判 `missing-source`，本仓库实测会多报 12 篇——那些多数是「引用了早已删除的文件」的真实缺陷，但把它们塞进同一个闸门的结果是终态永远 partial、基线永不推进，闸门退化成噪声。源文件存在性仍归 output 侧的 `source-missing` 管。
+- 命中则 `pushProblem('existing-bad-article', …)`，**不触发回滚**：存量坏页不是本轮写的，回滚会连本轮的好文章一起删掉。它只让终态落到 partial、让基线一票否决（`blockedByExisting` → `shouldAdvance = false`，`baseline.reason = 'existing-bad-article'`）。
+
+配套修了同一条链上的两处：
+
+- **契约层误判**：`lib/article-contract.js` 的 `isRepoRelativeFile` 末行原本是 `return path.posix.basename(s).includes('.')`，凡是文件名不含点的合法文件（`Dockerfile`、`Makefile`、`LICENSE`）一律被判 `bad-source`。本仓库的 `_architecture.md` 与 `modules/fsoft_fixtures.md` 就因此常年被判坏——它们引用的是真实存在的 `tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile`。去掉了扩展名判据，目录判定交给前面的 `endsWith('/')` 与后面的越界检查。
+- **索引缺页正则**：`findArticlesMissingFromIndex` 原本用 `/\[\[([^\]|\n]+)(?:\|[^\]\n]*)?\]\]/g` 整条匹配，`cw` 写进索引的 title 是原文照搬，一旦标题含 `]` 就整条漏匹配，合法页被判缺页 → 整批回滚，而且重跑也一样。改成逐行找 `[[`、按 `]` 或 `|` 截断取路径段。
+
+### 九处判据与事实脱节
+
+都是「闸门在，但判的不是那件事」这一类。
+
+1. **partial 会推进基线**（最严重）。`native-run.js` 原本传 `advanceBaseline: stateIncomplete ? false : null`，`null` 的含义是「交给 `report.canAdvanceBaseline`」，而质量门里的 `baselineEligible = outcome === 'done'` 只看产物质量、不知道引擎有失败叶子。于是引擎 partial + 门 done 时基线照常前移，终态却是 partial——下一轮从新基线算变化集，那批没写完的变化永久失明。现在 `engineOutcome !== 'done'` 也一起否决。
+2. **已落地的轮次被报成 cancelled**。落地器全程不接 signal，取消却无条件把终态改写成 cancelled，于是已提交、已推进基线的那一轮在结果里变成「产物未落地、基线未推进」。现在取消分支加前提 `applyRes?.applied !== true`，并让 `index.js` 的 `applyDeps.runCw` 不再透传 signal——原来取消会 kill 掉正在跑的 `cw meta update` 并触发回滚，一次取消吞掉一整轮成果。
+3. **`canAdvanceBaseline` 恒为 false**。settle 的兼容字段读 `patch.baselineAdvanced`，而 19 个业务分支一个都没传过它。现在成功路径补 `baselineEligible` 与 `baselineAdvanced` 两个字段，各有独立来源。
+4. **回滚快照把读失败当「文件不存在」**。`capturePre` 的 catch 原本把非 ENOENT 也记成 `exists = false`，回滚时 `restorePre` 会 `unlinkSync` 真删掉用户文件。现在非 ENOENT（`EISDIR` 除外，目录形态的 `_index.md` 是测试用来制造 index 失败的，必须容忍）一律抛。
+5. **裁剪根可穿透删源码**。`collectPruneTargets` 的白名单只做字符串前缀比较，`.codewiki/../src` 能穿过；改用与写集同一套 `checkTargetPath`（normalize + 判 `..`）。
+6. **merge commit 下越界检查被洗白**。`defaultVerifyCommit` 跑的是 `git show --name-only --pretty=format:<sha>`，对 merge commit 输出空清单，越界检查于是 `ok: true`；补 `--first-parent`。
+7. **dryRun 在 idle 轮被跳过**。无变化 + dryRun 时返回 `applied: true`，与「没有落任何盘」相反。
+8. **索引收录校验只看本轮写了什么**。`writeAll` 把「内容相同」与「仅行尾差异」的页归入 unchanged 不重写，这些页逃过 `findArticlesMissingFromIndex` 的检查；改用完整写集。
+9. **同一磁盘状态的三种口径**。`native-run.js` 的完整性检查 catch 里只 `notes.push` 后继续走增量，而同文件对同一个 `module_tree.json` 又规定「ENOENT 才吞、JSON 损坏必须抛」。现在 `SyntaxError` 一律判 `engine-output` 失败。另外 `manifest.js` 的 `compareLock` 在 lock 缺失时早退，绕过了后面的 `pipCheckOk !== true` 判定；把 pip check 提到前面、`absent` 也照样判 unhealthy。`client.js` 的 `flushProgress` 也不再把 `onProgress` 的异常吞掉——`native-run.js` 那边的注释写着「不吞异常」，两处口径本来就相反。
+
+顺手把 `settle` 的 `writtenCount` 改成只认落地器的实际写入数。原来是 `written || 引擎自报值`，整批回滚的一轮在账上仍是「写入了 N 篇」，用户在面板上看到「写入 N 篇」而库一个字没变。
+
+### 口径收成一处，无变化轮也要体检
+
+上一版把存量体检接进原生通道时，`apply-plan.js` 和 `quality-gate.js` 各自手写了一组 `inspectArticle` 配置。两处当时碰巧一致，但它们之间没有任何联系——改一处、忘另一处，判据就分叉了，而且分叉后两边都自称在「按契约检查」。现在这组口径是 `lib/article-contract.js` 导出的 `NATIVE_ARTICLE_OPTS`，两边都展开它，各自的差异项（`cwd`、`articlePath`、`expectedType`、`allowedLinks`）才单独写。
+
+同一条链上还漏了一格：无变化轮（引擎与四路变化集都空）在落地器里是提前返回的，返回点排在存量体检之前，于是「库里躺着坏文章」这件事在这条路径上永远看不到——终态照样报 done。Node 通道的 `tickIndex` 是在开头无条件跑体检的，两边行为不一致。现在 idle 分支先跑体检再返回，命中则终态降为 partial、基线照旧不动（无变化轮本来也不推进会基线）。
+
+契约层补回目录判定。上一版为了让 `Dockerfile` 这类无扩展名文件不被误判，把 `isRepoRelativeFile` 的最后一行直接改成了 `return true`，代价是「`source_files` 指向一个目录」这条判据彻底消失。现在恢复为「尾斜杠即目录、绝对路径与上跳即非法」，并且 `inspectArticle` 在调用方提供了 `isDirectory` 能力时，对不带尾斜杠的目录路径也判 `bad-source`——`index.js` 的 `contractCheck` 把它接上了。
+
+另外三处：
+
+- `apply-plan.js` 挑写哪些页时读 `r.defects ?? 0`。`rendered` 项由 `quality-gate.js` 生成，`defects` 是那里的必填字段，`?? 0` 永远用不上，只会让「字段没填」看起来像「零缺陷」。去掉。
+- `collectPruneTargets` 拒掉非法裁剪根时是静默 `continue`。于是「裁剪根写错了」和「那里本来就没东西可裁」在结果里长得完全一样，调用方无从知道自己的参数被丢弃。现在拒绝进 `problems`（`[prune-<kind>]`），终态可见。
+- `native-run.js` 的完整性检查失败文案改成「产物完整性检查未执行（<code>）：本轮增量决议未经缺页/陈页校验」。原来写「检查失败」，读者会以为检查跑了并给了结论，实际是没跑。
+
+契约版本升到 `3`。`ENGINE_STAGES` 在 0.17.32 补了 `'proofread'`，但 `ENGINE_CONTRACT_VERSION` 一直留在 `2`——`docs/fsoft-native-engine.md` 明文要求「改契约必须同步升版本」，而 python 侧的 `CONTRACT_VERSION` 也存在同一条要求。两处一起改成 `3`，文档里的版本号、JSON 示例与 stage 枚举补齐。
+
+### 修掉 4 篇存量坏文章
+
+存量体检上线后立刻在本库查出 6 篇；2 篇是上面那处契约层误判的假阳性，另外 4 篇是文章自身的真实结构缺陷：
+
+- `learnings/update-reminder-entry-gap.md`：frontmatter 只有开头一个 `---`，补闭合。
+- `modules/incremental_update.md`：frontmatter 缺 `tags`，补 `tags: []`。
+- `modules/clustering.md`：末尾重复的空标题 `## Connections`、`## Data Flow`、`## Connections`，删掉。
+- `modules/graph_diff.md`：末尾重复的 `## Architecture` 改名 `## Architecture Detail`，并补回被截断的正文首句。
+
+修完后 `auditExistingArticles(process.cwd())` 返回空集。
+
+### 实测
+
+```
+test-engine-apply-plan.mjs          55 passed, 0 failed   （基线 48，新增 7 条）
+test-article-contract.mjs           33 passed, 0 failed   （基线 31，新增 2 条）
+test-engine-native-job.mjs          141/141 通过
+test-engine-native-incremental.mjs  157/157 通过
+test-job-reliability.mjs            125/125 通过
+test-batch.mjs                      117 通过
+test-engine-client.mjs              29 passed
+test-engine-manifest.mjs            27 passed
+test-engine-contract.mjs            19 passed
+test-engine-quality-gate.mjs        37 passed
+test-engine-output.mjs              32 passed
+test-engine-proofread.mjs           13 passed
+test-engine-python-entry.mjs        24 passed
+test-engine-bridge.mjs              25 passed
+test-engine-llm-bridge.mjs          28 passed
+test-agentic.mjs                    55 passed
+```
+
+新增的 7 条覆盖：存量坏文章阻碍基线推进但绝不回滚本轮产物、不重复上报本轮裁决里的页、跳过 `_` 开头的路径、标题含 `]` 不被判缺页、裁剪根 `.codewiki/../src` 不得删源码、dryRun + 无变化不得报 `applied: true`、无变化轮同样要体检存量。其中「不进回滚」那条比对的是回滚前后的库内容，而不是只看 `rolledBack` 标志。
+
+`test-wiki-anchors.mjs` 仍是红的（2527 过 / 26 败）：`.codewiki/` 里的行号引用滞后于工作区代码，属既有未提交改动造成的历史状态，需要一次重编译才能消化。
+
+## 0.17.37 — 2026-11-04
+
+总览先回答「要处理几个仓」，会话按工作区分组，设置页改成分类卡片 + 自动保存。另核实了过期会话清理确实在跑。
+
+### 总览不再只是仓库清单
+
+原来的页面从调度条直接跳到十几个仓库的平铺列表，读者得自己数「有变更」才知道总量，等于没有总览；而且清单按插入序排，刚加入的新仓库会插到中间，每天最该点的几行位置天天变。
+
+现在顶部先给五格数字：待确认 / 有变更 / 进行中 / 干净 / 合计。待确认与有变更非零时整格标成 warn 色，进行中非零标成 ok 色——扫一眼就知道要不要动手。清单改成待办优先排序（待确认 → 有变更 → 其他 → 干净 → 已排除），左侧 2px 色条区分档位，不需要逐个读状态词。
+
+### 会话按工作区分组
+
+全局会话里几十条请求分属十几个仓库，平铺时「这条属于哪个仓」只能靠每行尾部那个目录名字去认，滚动时上下文完全丢失。改成一组一个 `<details>`，头部是仓库名 + 条数，组顺序按组内最新一条的时间倒序（刚活动过的仓排最前），首组默认展开。单任务视图只有一个仓，不再套这层分组容器。
+
+### 设置页：分类卡片 + 自动保存
+
+- 取消「保存 / 放弃更改」按钮，改为改动后 500ms 自动落盘，底部状态行显示「修改会自动保存 / 保存中… / 已保存 / 保存失败（可重试）」。保存串行执行，保存期间又改动的会在这一轮结束后补一次，不会丢改动。退出页面时若还有未提交的改动，卸载钩子里补提交一次。
+- 参数按用途分成六张卡片（运行 / 并发与语言 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除），自适应多列排布，最宽 1280px（原来固定 880px，宽面板右侧全是空白）。卡片内改成单列字段 + 标签在上，不再用「132px 标签列 + 输入」的两栏网格——卡片最窄 340px 时那套网格会把输入框压到 200px 以下，长 placeholder 直接被截掉。
+- 字段校验在保存前跑：并发 1–8、大档并发 0 或 1–8、请求上限 1–1000；不合法就不提交，状态行报错并给重试按钮。
+
+### 布局再修：卡片高度不齐、开关字段空半行
+
+第一版卡片用的是网格（`auto-fit` + `minmax(340px, 1fr)`），运行卡有十个字段、大档卡只有两行，同一个网格行里两张卡被拉成同一高度，短卡底部就剩一大片空白；加上每条说明都是两到四行，整页看起来像五块高度随机的白板。三处改动：
+
+- **换成多列布局**。`columns: 3` 按列填充，卡片之间不再有「行内高度差」这个视觉对象，短卡自然被下一张卡接上。窄面板退两列（≤1020px）/ 一列（≤660px），并且给 `break-inside: avoid-column` 兜住 Safari 的列内断卡。
+- **开关字段改成标签与开关同行**。开关本来只有一行高，之前按「标签一行 + 控件一行 + 说明三行」堆，卡片里会连续出现几条只有右边一个小圆点的空白带。新增 `[data-dscw-toggle]` 行（标签左、开关右、`justify-content: space-between`），八个开关字段全部改用。
+- **运行卡拆成两张**：行为开关（启用 / 提醒 / 自动提交 / 只看工作区）留在「运行」，并发数与文章语言另立「并发与语言」。原来那张卡独占一列还最矮，是三列里最难看的那个。
+
+文案同步压短：设置页实际渲染的说明从 1015 字降到 719 字，每条压到一句。顺手修掉两处已不成立的表述——`bigProviderHint` 还写「留空则关闭大档通道」（0.17.5 起开关是 `bigEnabled`），`bigModelHint` 还写「默认 glm-5.3-flash」（0.17.34 起没有默认模型，provider 与 model 都填空由用户选）。
+
+底部自动保存行加了状态圆点（空闲灰、保存中品牌色呼吸、成功绿、失败红，`prefers-reduced-motion` 下不呼吸）。原来只有「改动会自动保存」六个字贴在左下角，读起来像一句孤立的注解。
+
+### 顺带核实：过期会话确实在删
+
+`pruneSessionRecords` 按文件 mtime 判过期（24h TTL），挂在 10 分钟一轮的 tick 上；job 目录删空后连同目录一起移除。实测本机会话目录当前 3 个 job / 64 个文件 / 超期 0 个（最旧 17:10，最新 17:23），即清理在工作，只是还没产生超期记录。`test-sessions.mjs` 已覆盖（把 mtime 改到 25h 前 → 断言删除数、目录移除、重复执行幂等）。
+
+### 面板测试从 8 条扩到 14 条
+
+新增 6 条，覆盖本轮三个改动面：总览统计条五格与 warn 着色、待办优先排序、会话全局视图按仓分组并核对条数、单任务视图不分组、设置页 cards 容器包住全部 section、保存按钮换成自动保存状态行。
+
+这 6 条都做过变异验证：把统计条的 total 格删掉、单任务视图强制分组、排序改成字典序、保存行去掉 `data-state`，四种改动各自只让对应的那一条变红——说明断言确实打在行为上，不是同义反复。其中「会话分组条数」那条还需要给桩注入真实 `t`，否则 `{n}` 占位符没被替换，「条数写错」这种缺陷照样能通过。
+
+### 实测
+
+```
+test-client-panel.mjs     14 passed, 0 failed
+test-wiki-entry.mjs       全部断言通过
+test-config.mjs           PASS：设置项契约全部通过
+test-reasoning-effort.mjs PASS：思考档位校验全部通过
+test-sessions.mjs         PASS：会话记录存储冒烟全部通过
+```
+
+全量 39 个测试文件里仍红两个：`test-wiki-anchors.mjs`（wiki 产物滞后于源码，需重编译）、`test-engine-native-job.mjs`（用例 22「取消晚于落地」两条，属既有时序 flake，单独重跑 141/141 通过）。
+
+## 0.17.36 — 2026-11-04
+
+### 四个标签页统一重做：导航、总览、会话、设置
+
+这一轮只动界面，不改行为。目标是让四个标签页看起来像同一个产品的四个面，
+而不是四段各自生长的代码。
+
+**1）标签条从「四个药丸」改成等分格子 + 滑动下划线**——原先当前页是一个实心品牌色
+药丸，视觉重量和旁边的操作按钮相当，读者第一眼分不清「哪个能点、哪个是位置指示」。
+现在四格等分、透明底，当前页用一条 2px 品牌色下划线条标出（`::after` 画线，
+`transform: scaleX(0→1)` 过渡 0.22s），并补了 `:focus-visible` 焦点环——
+键盘 Tab 过来时能看见自己在哪一格。
+
+**2）总览页去掉「每个仓库一个描边盒子」的堆叠**——调度信息和十几个仓库各套一个
+0.5px 圆角框时，页面上出现十几个同等重量的边界，看不出主次，滚动时也读不出
+「哪几行是同一件事」。改成：调度信息是一块浅底摘要（它不是一个可操作对象，
+不该被框成卡），仓库列表用行级分隔线 + 悬停淡底，最后一个不画线。
+仓库容器补了 `data-dscw-p-repolist` 包裹层，测试据此断言行数。
+
+**3）空状态从一句灰字改成带标题的引导块**——原先空态就是一个 `<span>`，
+读者分不清「这里确实是空的」和「还没加载出来」。现在三处空态（总览没有仓库、
+任务页没有记录、会话页没有请求）都带一个 `<strong>` 标题 + 一句说明，
+垂直留白 18px，不再是挤在边上的小灰字。
+
+**4）加载态用骨架屏替掉裸「…」**——新增 `Skeleton` 组件（三行不同宽度的呼吸条，
+`dscw-shimmer` 1.4s 线性动画，`prefers-reduced-motion` 下关闭动画）。
+骨架让人在等待时就知道「马上会出现什么、大概多高」，数据到达时也不会整块跳一下。
+
+**5）会话列表从「一行一个描边框」改成列表 + 左侧状态色细条**——并发池的请求动辄
+几十条，每行描边就成了一叠等重的盒子。现在每行左侧一条 2px 竖条（跑动=成功色、
+出错=错误色、其余=边框色），悬停淡底，`:focus-visible` 有轮廓。
+`pre` 区块去掉边框改淡底 + 等宽字体（10.5px），`<summary>` 用 `▸` 指示器并在展开时
+旋转 90°，`word-break` 从 `break-all` 改成 `break-word`——前者会把英文单词从中间劈开。
+
+**6）设置页：分组有标签线、左列改为顶对齐、保存条钉底**——五个分组原先只靠 24px
+空白区隔，滚动时看不出边界，现在每个分组标题下有一条 0.5px 细线（比再加一个描边
+盒子轻得多），设置区本身那层「盒中盒」也去掉了。`align-items` 从 `center` 改为
+`start`：字段列里有 textarea 和多行提示时，居中对齐会让标签浮在两行中间，看起来和
+上一行错位。左列宽度 160px → 132px，行间距 10px → 12px。
+保存条 `position: sticky; bottom: -1px` + `backdrop-filter: blur(6px)`——
+设置页比一屏高，滚到一半想保存时不该再滚回去找按钮。
+
+**7）`articleLanguage` 补上缺失的字段容器与说明**——它是唯一一个「label 后面直接跟
+裸 `<Input>`」的字段：没包进 `data-dscw-field`，也就没有 hint，grid 里那一格的高度
+和别的行不齐。现在补齐容器与「留空则跟随当前会话语言」的说明。
+
+**8）可折叠行统一 `▸` 指示器**——`tasklist`、`repofold` 设了 `list-style: none`
+之后连原生三角都没了，读者无从判断「这行能点开」；`history`、`engine-log` 则靠浏览器
+默认 marker，不同字号下行高对不齐。现在四类折叠行共用一条 `::before` 三角规则，
+展开时统一旋转。
+
+**9）顺带修掉一处 sed 事故**——`content: "\u25b8"` 曾被 sed 改坏成 `"25b8"`，
+`node --check` 能过但渲染出来是字面量四个字符。已还原为转义序列。
+
+实测：探针渲染四个标签页各一遍——总览 1 个调度摘要 + 1 个仓库列表 + 3 行仓库，
+任务页 1 张卡 / 1 条分段带 / 1 行图例 / 4 条活动流行，会话页 3 行请求，
+设置页 5 个分组 + 5 个 grid + 1 条保存条，四个页面 `Panel error` 均为 false，
+裸键名 0 个；中英文字典各 216 键，键集完全一致、无空值。
+`test-client-panel.mjs` 从 5 条扩到 8 条（新增总览仓库列表、空态标题、
+设置页分组三条护栏，另修掉桩里函数组件不透传 `children` 的缺陷——
+该缺陷会让所有 `Button`/`Tag` 的子内容渲染成空，`确认编译` 按钮因此从未被断言到）。
+
+## 0.17.35 — 2026-11-04
+
+### 任务面板改成百分比驱动；卡片收成三分之一高；同时显示多个进行中的任务
+
+**1）进度读数是百分比，一行给全**——大数字（22px，tabular-nums）+ 主进度条
++ 当前步骤说明压在同一行。原来的七步步骤条（10px 圆点 + 连接线）删掉，因为它只能
+表达「到第几步」，表达不了「这一步走了多少」。数字块、进度条、说明各占一行会
+把一张卡撑到 300px 以上，信息量没变，高度翻了四倍。
+
+**2）阶段进度收成一条分段带 + 一行图例**——早先每个阶段一条独立轨道（七行，
+每行名字 + 轨 + 百分比），一张卡就吃掉半屏；而且「排队」权重为 0 却也渲染一行
+100%，纯噪声。现在是一条 5px 高的带子，**段宽 = 该阶段在总进度里的权重，
+段内填充 = 该阶段自己的完成度**——「文章那段最宽」这件事本身就在说它最费时间；
+下面跟一行小字图例「准备 36% 文章 0% …」，当前阶段加粗，放不下就换行。
+宽度为 0 的阶段（排队）不出段也不出图例。
+
+**3）分段带有了颜色图例，活动流改成时间线**——分段带的颜色原先只表达了状态，
+但没有任何地方说明「绿色是什么、灰色是什么」，颜色信息等于白给。现在每一项
+图例前带一个与上方对应段同色的色块，悬停还能看到该阶段的状态词与准确耗时。
+活动流从「一坨等宽文字」改成时间线：每条前面一个状态点（绿=推进、黄=需要注意、
+红=出错、灰=普通），备注里含 `（articles）` 这类写法的会被摘成阶段小标签，
+`3/6` 的计数说明折叠里少的那条是已经常显的最新一条。折叠头写了这个原因。
+
+**4）卡片高度砍到原来的三分之一**——真机截图里一张卡吃掉近 500px，罪魁是每样次要
+信息各占一行：独立 meta 行、独立用量行、独立备注、活动流、引擎日志、逐篇清单。
+现在 meta / 用量 / 最新一条备注合成**一条可折行的流水线**，逐篇清单与活动流收进
+`<details>` 默认收起，排队中的卡不再画分段带（进度是 0，画出来就是空条）。
+活动流折叠里不再重复已经常显的那条备注。
+
+**5）同时显示多个进行中的任务**——原先前端只取第一个进行中任务做 hero 卡，
+其余全塞进「历史」折叠，并发跑两三个仓库时只有一个能看见。现在
+`actives = all.filter(isActive)` 全部平铺在「进行中 (N)」分区，各自带仓库名；
+只有没有进行中任务时才退回「最近一个任务」单卡展示。历史列表按仓库折叠，
+不再重复出现在进行中分区里。
+**6）卡片视觉重做**——左侧 2px 状态色竖轨（`data-tone` 区分
+done/partial/cancelled/failed），12px 圆角，进度条 5px 圆角轨道 +
+`cubic-bezier(.22,.61,.36,1)` 0.45s 过渡，卡片内间距 10px、元素间距 7px，
+徽标改方角淡底去描边，tab 补 hover 底色。终态卡片不展开分阶段（避免一排 100% 的噪声）。
+
+**7）每阶段耗时进悬停提示**——分段带每一段的 `title` 里带该阶段精确耗时。
+绝对毫秒跨仓库不可比，但「这一轮里哪一步最费时」可比；段宽已经把这件事画出来了，
+精确值放悬停里，不占常驻高度。
+
+**8）进度趋势线**——进度区右侧一条小 spark，记录最近 24 次采样的总进度。
+只看数字不知道「还剩多久」，看斜率才知道：曲线平了说明卡住，还在涨说明在推进。
+`overallPct` 没取到的采样直接跳过，不会把曲线拉成 0。
+
+**9）并发总览**——「进行中 (N)」标题右侧给出池内平均进度与最慢的那个仓库。
+排队中的任务不计入平均（它的进度恒为 0，算进来会让「最慢」永远是还没开始的仓库），
+排队数单独报。一次跑多个仓库时不用逐个点开卡片拼整体节奏。
+
+**10）历史区按仓库折叠**——原来几十轮同一仓库的历史平铺在一起，会把别的仓库
+彻底挤出视野。改成 `<details>` 按仓库分组，默认收起，头部右侧标这一组有几轮。
+
+实测：注入 3 个任务复现真机截图（trae_tools 准备中·聚类 36%、
+dsh-presets-Switch 排队中、dsh-codewiki 写文章 62%）跑渲染，得到 3 张卡、
+2 条分段带（排队那张不出带）共 12 段、3 条紧凑优先信息行；旧的七行轨道节点数为 0，
+独立的 meta / usage / note 行数也都是 0。第一张卡的图例读数
+`准备 36% 文章 0% 校对 0% 校验 0% 索引 0% 提交 0%`，次要信息行是
+`已写 2/3 篇 · 引擎阶段 聚类 36% · 已用时 …（排队 … · 执行 …） 用量 … 第三条备注` 一条。
+换一份 6 条备注的任务再验：图例 6 项各带色块、活动流 5 行（1 行常显 + 5 条折叠、
+`5/6` 计数），语气序列 `warn ok plain ok error`，`（articles）` 被摘成阶段标签，
+`未过契约闸门` 判为红点、`空产出` 判为黄点。
+`test-client-panel.mjs` 5 passed；`test-wiki-entry.mjs`、`test-config.mjs`、
+`test-batch.mjs`（117 通过）、`test-reasoning-effort.mjs`、`test-engine-client.mjs`
+（29 passed）全部通过。
+
+## 0.17.34 — 2026-11-04
+
+### 设置页不再替你猜模型；大档默认关闭；原生引擎参数进面板
+
+**1）编译模型取消默认值**——`batchProvider`/`batchModel`/`bigProvider`/`bigModel`
+四项默认值全改为空字符串，并删掉 `DEFAULT_BATCH_PROVIDER`/`DEFAULT_BATCH_MODEL`/
+`DEFAULT_BIG_PROVIDER`/`DEFAULT_BIG_MODEL` 四个常量。`liveConfig` 里两处
+`|| DEFAULT_*_MODEL` 兜底一并去掉——留着它，用户清空模型会被静默改回 `glm-5.3-flash`，
+而模型目录里没有这个 id 时上游回 200 + 空内容，整轮编译空跑（0.17.24 的事故形态）。
+提交任务时仍由 `index.js:3671` 的两条校验明确报错，不会静默失败。
+
+**2）大档默认关闭**——`bigEnabled` 默认 `true` 改为 `false`，
+`liveConfig` 的 `bigEnabled = val(c.bigEnabled) !== false` 改为 `=== true`。两处口径必须
+一致：只改 Config 的话，老 settings.json 没这个字段时 `liveConfig` 仍按开启处理，
+等于默认值形同虚设。大档关闭时 `bigProvider` 一并清空，模型与预算保留，
+重新开启不用重填。
+
+**3）移除 `sessionTier`**——它只被旧通道 `tickArticles` 的会话兜底路径读取，
+而原生任务一律只走 `tickNative`（`index.js:3544`），这条路径在原生编译里不可达；
+默认值本就是空字符串，删除等价于固定「自动选路」，无行为损失。连带
+`buildSessionSteerText` 去掉 `tier` 形参与三行档位文案。
+
+**4）原生引擎四项参数进设置页**——`nativeEngine`（编译通道开关）、
+`nativeEnginePython`（解释器路径）、`nativeEngineEntry`（入口脚本）、
+`nativeEngineTimeoutMs`（单次超时）此前只能改配置文件，现在补进设置页新增的
+「原生引擎」分组，渲染、save 字段表、中英文案一并补齐。至此 `Config` 的 27 个字段
+全部可在面板调整（逐字段核对，无遗漏无多余）。
+
+**5）修掉三处 `z.number()` 字段的保存缺陷**——`requestLimit`、`bigTokenBudget`、
+`nativeEngineTimeoutMs` 的 `onChange` 直接把 `e.target.value`（字符串）塞进 draft，
+而 schemastery 对 `z.number()` 收到字符串会抛 `expected number but got 500`，
+保存直接失败。改为空串给 0、其余 `Number()`。
+
+**6）说明文字按「不查文档猜不到的那一句」重写**——中英各 20 条 hint 全部压缩：
+去掉复述字段名的句子、过时措辞（「横切」「审校」）、真机吞吐数字与「12 分钟」这类
+会过期的细节，只保留改动后果与边界条件。
+
+## 0.17.33 — 2026-11-04
+
+### 校对格子真的能亮了；行尾差异不再制造噪声提交
+
+0.17.32 声称修好了「校对格子不显示」，实际只是把 bug 换了个位置。这一版把根因修掉，
+并把同一批审查里发现的相关缺陷一起处理。
+
+**1）`proofread` 不在引擎契约里，进度帧在构造时就被抛掉了**——0.17.32 把
+`progress('review', …)` 改成 `progress('proofread', …)`，而 `ENGINE_STAGES` 只有
+`env/graph/cluster/articles/validate/index/baseline/commit` 八段。`engineProgress` 对着
+非法 stage 直接抛错，调用处的空 catch 把它吞了，于是 `onProgress` 一帧都没收到，
+`NATIVE_STAGE_TO_PANEL.proofread → 'review'` 这条映射从来没被执行过。
+实测证据：同一轮里校对确实跑了（notes 记着「校对改写 1 处失效链接」「语义校对改写了 1 篇，
+改后重新判门」），但 `onProgress` 收到的 11 帧里 `proofread` 出现 0 次。
+修法：把 `proofread` 登记进 `lib/engine/contract.js` 与 `lib/engine/python/stage_map.py`
+（阶段枚举是契约不是实现细节，面板步骤条、`job.stage` 映射、取消检查点都按它对齐），
+并删掉两处吞异常的 `try/catch` —— 契约名对不上属于必须当场看见的编程错误。
+
+**2）行尾差异在比对侧被豁免，在写入侧没有**——`findStaleLanded` 用 `
+ → 
+` 归一后
+比较，`writeAll` 却逐字节比。结果：只要有一篇真 stale 触发规范化轮，写集取的是全部
+`rendered`，那批「只差 CRLF」的页会被一起翻成 LF，制造一次纯行尾的噪声提交
+（实测 written 里混进了 `.codewiki/modules/b.md`，它的内容与磁盘只差行尾）。
+修法：抽出 `sameContent()`，比对与写入共用同一口径。
+
+**3）缺陷页永远不参与比对**——`rendered` 只收 `pageDefects.length === 0` 的页，于是
+「库里那篇旧的自己也不合规」这种情况落地器根本看不见，而渲染规则改进后要修的恰恰是它们。
+修法：`rendered` 收全部页并带 `defects` 计数；写不写由落地器按轮次决定——正常轮只写
+`defects === 0` 的页（坏内容不落库），规范化轮全写（职责是与当前渲染规则对齐，
+缺陷仍由门如实上报）。
+
+**4）顺带收口的实现问题**：`apply-plan.js` 的三布尔组合（`noChanges`/`deleteOnly`/
+`normalizeOnly` 散在五处）收成单一的 `roundKind` 枚举；跨页链接扫描原来在三处各写一个
+正则且已经分叉，统一到 `lib/engine/wiki-links.js`；`/api/codewiki/repos` 与 control 端点
+对同一作用域的 `schedState` 不再层层可选链，confirm 的路径键改用既有的 `normPathKey`
+（原先手写的版本总是折叠大小写，在大小写敏感平台会误删不相干的待确认条目）。
+
+**5）记录一处从未入账的行为变更**：0.17.27 的提交（`feat(scheduler): 首次编译需确认`）
+同时改了 `quality-gate.js` 的渲染路径，让**未命中的 `.md` 链接在渲染期降级成纯文字**
+（`dropUnresolved`）。这让产物里不再有任何指向不存在页面的链接语法，读者只看到一段普通
+文字——死链事实仍由 `output.js` 报，但「点开 404」这件事已经从产物层消失了。这个改动
+与当版 CHANGELOG 一起发布却没有任何记录，现补记于此。
+
+**关于「全套回归全绿」**：0.17.32 那句「39 个文件全绿」不实。当时有两个文件是红的：
+`test-wiki-anchors.mjs`（23 条 `.codewiki/` 文章的锚点失效——wiki 产物滞后于源码，
+需要重编译，不是源码缺陷）与 `test-engine-native-job.mjs` 的 2 条用例（用例 22
+「取消晚于落地」，来自 2026-11-01 的提交，在本次改动前的基线上同样失败，属既有失败）。
+本版如实记录，不再用「全绿」概括。
+
+验证：`test-engine-contract.mjs` / `test-engine-quality-gate.mjs` / `test-engine-apply-plan.mjs`
+/ `test-engine-proofread.mjs` / `test-engine-python-entry.mjs` 等全部通过；
+`test-wiki-anchors.mjs` 的 23 条锚点失效由本轮收尾的 wiki 重编译解决。
+
 ## 0.17.32 — 2026-11-04
 
 ### 面板「有变更」不再被自己的产物顶住；校对阶段能显示出来

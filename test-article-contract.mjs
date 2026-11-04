@@ -107,6 +107,35 @@ await check('source_files 指向目录/绝对路径/越界 → bad-source', asyn
   }
 })
 
+await check('不带尾斜杠的目录靠 fsImpl.isDirectory 判出来', async () => {
+  // 格式层判不出 `src/util` 是目录——它和 `Dockerfile` 长得一样。只有 exists 的实现
+  // 会把「目录存在」当成「文件存在」放行，于是文章可以拿一个目录当代码依据。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-contract-'))
+  fs.mkdirSync(path.join(dir, 'src/util'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'src/util/strings.js'), 'export const a = 1\n')
+  fs.writeFileSync(path.join(dir, 'src/util/Dockerfile'), 'FROM node:22\n')
+  const fsImpl = {
+    exists: (p) => fs.existsSync(p),
+    isDirectory: (p) => { try { return fs.statSync(p).isDirectory() } catch { return false } },
+  }
+  const asDir = inspectArticle(GOOD({ source_files: ['src/util'] }), { cwd: dir, articlePath: 'modules/util.md', fsImpl })
+  assert.ok(kinds(asDir).includes('bad-source'), `目录应判 bad-source，实际 ${JSON.stringify(kinds(asDir))}`)
+  for (const ok of ['src/util/strings.js', 'src/util/Dockerfile']) {
+    const issues = inspectArticle(GOOD({ source_files: [ok] }), { cwd: dir, articlePath: 'modules/util.md', fsImpl })
+    assert.ok(!kinds(issues).includes('bad-source'), `${ok} 不该判 bad-source，实际 ${JSON.stringify(kinds(issues))}`)
+  }
+})
+
+await check('source_files 里的无扩展名文件（Dockerfile/Makefile）是合法文件路径', async () => {
+  // 曾经的判据是「basename 含点才算文件」，于是 Dockerfile、Makefile、LICENSE 这类
+  // 合法文件名一律被判 bad-source。真实仓库里 tools/fsoft-engine/fixtures 下就有
+  // Dockerfile，而映射测试期待它出现在 sourceFiles 里，两处判据互相矛盾。
+  for (const ok of ['Dockerfile', 'tools/fsoft-engine/fixtures/中文 空格 fixture/Dockerfile', 'Makefile', 'vendor/codewiki/LICENSE']) {
+    const issues = inspectArticle(GOOD({ source_files: [ok] }), { articlePath: 'modules/util.md' })
+    assert.ok(!kinds(issues).includes('bad-source'), `${ok} 不该判 bad-source，实际 ${JSON.stringify(kinds(issues))}`)
+  }
+})
+
 await check('source_files 指向不存在的文件 → missing-source（真实缺陷：.tmp-test-*.log）', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cwac-'))
   fs.mkdirSync(path.join(dir, 'src', 'util'), { recursive: true })

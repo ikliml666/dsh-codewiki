@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -68,10 +68,12 @@ function exists(root, rel) {
 
 // 造一份「能过门」的裁决：两篇文章 + 入口
 function makeReport({ pages = null, canAdvanceBaseline = true, writable = true, outcome = 'done' } = {}) {
-  const list = pages ?? [
+  const base = [
     { source: 'overview.md', wikiPath: WIKI_ENTRY, type: 'overview', content: '# 项目\n\n入口正文。\n' },
     { source: 'core.md', wikiPath: '.codewiki/modules/core.md', type: 'module', content: '# core\n\n模块正文。\n' },
   ]
+  // defects 是 quality-gate 的必填字段：apply-plan 直接读 r.defects，不再 `?? 0`。
+  const list = (pages ?? base).map((p) => ({ defects: 0, ...p }))
   return {
     version: 1,
     ok: outcome === 'done',
@@ -119,8 +121,12 @@ function recordingDeps(overrides = {}) {
         writeFileSync(join(cwd, '.codewiki', '_meta.yaml'), 'last_compiled_commit: null\n', 'utf8')
       }
       if (args[0] === 'index') {
-        // 真 cw index 会写 _index.md：桩也写，才能验证回滚会把它复原
-        writeFileSync(join(cwd, '.codewiki', '_index.md'), '# Wiki Index\n\n- [[modules/core|core]]\n', 'utf8')
+        // 真 cw index 会按磁盘上真实存在的文章写 _index.md：桩也写，才能验证回滚会把它复原
+        const modsDir = join(cwd, '.codewiki', 'modules')
+        const mods = existsSync(modsDir)
+          ? readdirSync(modsDir).filter((f) => f.endsWith('.md')).map((f) => `- [[modules/${f.slice(0, -3)}|${f.slice(0, -3)}]]`)
+          : []
+        writeFileSync(join(cwd, '.codewiki', '_index.md'), `# Wiki Index\n\n${mods.join('\n')}\n`, 'utf8')
       }
       if (args[0] === 'meta') {
         writeFileSync(join(cwd, '.codewiki', '_meta.yaml'), 'last_compiled_commit: deadbeef\n', 'utf8')
@@ -239,6 +245,73 @@ await checkAsync('正常路径：写盘 + index + baseline + commit → done', a
   assert.deepEqual(seq(calls), ['index', 'meta update'], '必须先 index 后 meta')
   assert.equal(r.commit.committed, true)
   assert.equal(r.commit.scope.ok, true)
+})
+
+await checkAsync('存量坏文章：阻碍基线推进，但绝不回滚本轮产物', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  // 库里躺着的坏页：不是本轮产物，也从没被重写过（cw index 照样把它收进索引）。
+  writeFile(root, '.codewiki/modules/legacy.md', '# legacy\n\n没有 frontmatter 的历史页。\n')
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
+  assert.equal(r.outcome, 'partial', '存量坏页必须把终态拉成 partial')
+  assert.equal(r.applied, true, '存量坏页不阻止本轮落盘')
+  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
+  assert.ok(r.blockers.some((b) => b.kind === 'quality-gate'), '经 toApplyBlockers 映射成 quality-gate')
+  // 回滚是错的处置：它会把刚写好的 core.md / CodeWiki.md 一起撤掉，用一个既存缺陷
+  // 否掉一批好产物。存量坏页既删不掉也修不了，只能记账。
+  assert.equal(r.rolledBack, false)
+  assert.ok(exists(root, '.codewiki/modules/core.md'), '本轮产物必须留在磁盘上')
+  assert.ok(exists(root, '.codewiki/modules/legacy.md'), '存量坏页也不能被删掉')
+  assert.equal(r.baseline.advanced, false, '基线绝不推进')
+  assert.equal(r.canAdvanceBaseline, false)
+  assert.ok(!calls.some((c) => c.args === 'meta update'), `不该跑 meta update：${JSON.stringify(seq(calls))}`)
+})
+
+await checkAsync('存量体检不重复上报本轮裁决里的页（同一缺陷不记两遍）', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  // 这一页本身不合规（无 frontmatter），但它在 rendered 里——gate 已经判过它，
+  // 若存量体检再报一次，同一个缺陷就在一个终态里出现两次。
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n旧内容。\n')
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(!r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
+})
+
+await checkAsync('存量体检跳过 `_` 开头的路径（与 cw index 同一规则）', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  // cw index 只跳「相对 .codewiki/ 的完整路径以 _ 开头」，_native-state/ 与 _index.md
+  // 都符合；这些页永不进索引，体检它们只是噪声。
+  writeFile(root, '.codewiki/_native-state/docs/raw.md', '引擎原始产物副本，没有 frontmatter。\n')
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+})
+
+
+await checkAsync('无变化轮同样要体检存量：库里躺着坏文章时不许报 done', async () => {
+  // Node 通道在 tickIndex 开头无条件跑存量体检。原生通道若把体检放在 idle 短路之后，
+  // 「引擎没变化」就等于「库是干净的」—— 两件毫无关系的事被划上等号，终态假绿：
+  // 坏文章永远没人发现，基线照旧不动，面板却一直显示 done。
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n模块正文。\n')
+  writeFile(root, '.codewiki/modules/broken.md', '# broken\n\n没有 frontmatter 的历史页。\n')
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
+  assert.deepEqual(r.written, [])
+  assert.equal(r.applied, true)
+  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
+  assert.equal(r.outcome, 'partial', '无变化轮里库是脏的，终态不许报 done')
+  assert.equal(r.index.skipped, true)
+  assert.deepEqual(seq(calls), [], '无需写盘时仍不该跑任何 cw 子命令')
 })
 
 await checkAsync('入口写的是 docs 里那份的正文（frontmatter 被剥掉）', async () => {
@@ -415,6 +488,63 @@ await checkAsync('无变化轮：只有行尾差异不算待规范化（不为 C
   assert.deepEqual(r.written, [])
   assert.equal(r.commit.noChanges, true)
 })
+
+// 判据必须同时管住写入侧：只要有一篇真 stale 触发规范化轮，写集取的是全部 rendered，
+// 若写入侧还按逐字节比较，仅差 CRLF 的页会被一起翻成 LF，白造一次行尾提交。
+await checkAsync('无变化轮：一篇真 stale + 一篇仅行尾差异 → 只重写真 stale 的那篇', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, '.codewiki/modules/a.md', '# a\n\n旧规则下的正文。\n')
+  writeFile(root, '.codewiki/modules/b.md', '# b\r\n\r\n模块正文。\r\n')
+  const report = makeReport({ pages: [
+    { source: 'overview.md', wikiPath: WIKI_ENTRY, type: 'overview', content: '# 项目\n\n入口正文。\n' },
+    { source: 'a.md', wikiPath: '.codewiki/modules/a.md', type: 'module', content: '# a\n\n模块正文。\n' },
+    { source: 'b.md', wikiPath: '.codewiki/modules/b.md', type: 'module', content: '# b\n\n模块正文。\n' },
+  ] })
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report, docsDir: docs, noChanges: true, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(r.written.includes('.codewiki/modules/a.md'), `真 stale 的页必须重写：${JSON.stringify(r.written)}`)
+  assert.ok(!r.written.includes('.codewiki/modules/b.md'), `仅行尾差异的页不该被连带重写：${JSON.stringify(r.written)}`)
+  assert.equal(readFile(root, '.codewiki/modules/b.md'), '# b\r\n\r\n模块正文。\r\n', '磁盘上的 CRLF 原样保留')
+})
+
+// 缺陷页若永不进 rendered，落地器就看不见「库里那篇旧的自己也不合规」——
+// 而这正是渲染规则改进后要修的东西。规范化轮必须把它们纳入比对与写集。
+await checkAsync('无变化轮：带缺陷的落地页也参与比对，并在规范化轮被重写', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n旧规则下带死链的正文。\n')
+  const report = makeReport({ pages: [
+    { source: 'overview.md', wikiPath: WIKI_ENTRY, type: 'overview', content: '# 项目\n\n入口正文。\n' },
+    { source: 'core.md', wikiPath: '.codewiki/modules/core.md', type: 'module', content: '# core\n\n模块正文。\n', defects: 2 },
+  ] })
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report, docsDir: docs, noChanges: true, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(r.written.includes('.codewiki/modules/core.md'), `缺陷页在规范化轮必须重写：${JSON.stringify(r.written)}`)
+  assert.equal(readFile(root, '.codewiki/modules/core.md'), '# core\n\n模块正文。\n')
+  assert.equal(r.baseline.advanced, false, '规范化轮不推进基线')
+})
+
+// 正常轮相反：缺陷页不许落库，坏内容留在门外由门如实上报。
+await checkAsync('正常轮：缺陷页不进写集（坏内容不落库）', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  const report = makeReport({ pages: [
+    { source: 'overview.md', wikiPath: WIKI_ENTRY, type: 'overview', content: '# 项目\n\n入口正文。\n' },
+    { source: 'core.md', wikiPath: '.codewiki/modules/core.md', type: 'module', content: '# core\n\n模块正文。\n', defects: 1 },
+  ] })
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report, docsDir: docs, deps })
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(!r.written.includes('.codewiki/modules/core.md'), `有缺陷的页不该写入：${JSON.stringify(r.written)}`)
+})
+
+
+
 
 await checkAsync('产物无改动（noChanges）不算失败', async () => {
   const root = makeRepo()
@@ -618,6 +748,72 @@ await checkAsync('cw index 退出 0 但文章没进索引 → 同样是 index-fa
   assert.equal(readFile(root, '.codewiki/_meta.yaml'), 'last_compiled_commit: cafe\n')
 })
 
+// cw 写的链接是 `- [[<path>|<title>]]`，title 是 frontmatter 原文照搬、不加引号也不转义
+// （vendor/codewiki/src/main.rs 的 `format!("- [[{}|{}]]")`）。标题里出现 `]` 完全合法：
+// `数组下标 [i] 详解`、`a[i]`、`[草案]` 都常见。曾经的判据是整条链接正则匹配、
+// 要求 title 段不含 `]`，于是一篇**已收录**的文章被判成缺页 → 整批回滚，且标题不改
+// 就每次重试都失败，永久不可自愈。这里钉的是：路径段才是判据，title 里有什么都不影响。
+await checkAsync('索引链接的标题里含 `]` 时，已收录的文章不得被判缺页', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  const { deps } = recordingDeps()
+  const rawRunCw = deps.runCw
+  deps.runCw = async (bin, cwd, args) => {
+    const res = await rawRunCw(bin, cwd, args)
+    if (args[0] === 'index') {
+      const lines = ['# Wiki Index', '', '## Module', '']
+      for (const f of readdirSync(join(cwd, '.codewiki', 'modules'))) {
+        if (!f.endsWith('.md')) continue
+        const slug = f.slice(0, -3)
+        lines.push(`- [[modules/${slug}|数组下标 [i] 详解]]`)
+      }
+      writeFileSync(join(cwd, '.codewiki', '_index.md'), `${lines.join('\n')}\n`, 'utf8')
+    }
+    return res
+  }
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
+  assert.deepEqual(r.index.missing ?? [], [], `标题里的 ] 让合法页被判缺页：${JSON.stringify(r.problems)}`)
+  assert.equal(r.outcome, 'done')
+  assert.equal(r.rolledBack, false)
+})
+
+await checkAsync('裁剪根带上跳（`.codewiki/../src`）不得删到源码：与写集同一把尺子', async () => {
+  // 裁剪是删除通道：判据只做字符串前缀比时，`.codewiki/../src` 的前缀是 `.codewiki/`、
+  // 白名单放行，path.join 之后解析成 <repo>/src，整棵源码目录被当成「本轮没写到的多余状态」。
+  // 写集/删除集都走 checkTargetPath（normalize + 上跳判定），裁剪根当时漏了——
+  // 文件头把「写集封闭」当硬不变量，同等级的删除通道却绕过了它。
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, 'src/precious.js', 'export const keep = 1\n')
+  const { deps } = recordingDeps()
+  const r = await applyNativeOutput({
+    repoRoot: root, report: makeReport(), docsDir: docs, deps,
+    pruneRoots: ['.codewiki/../src'],
+  })
+  assert.equal(exists(root, 'src/precious.js'), true, '源码被裁剪通道删掉了')
+  assert.equal(readFile(root, 'src/precious.js'), 'export const keep = 1\n')
+  // 拒绝必须是可见的：静默 continue 会让「本该裁剪的目录没裁」和「裁了」长得一样，
+  // 调用方永远不知道自己的裁剪根写错了。`.codewiki/../src` 规范化后是 `src`，
+  // 于是落在 out-of-scope 而不是 escaping-target——两者都说明同一件事：越界。
+  assert.ok(r.problems.some((p) => p.kind === 'write-failed' && p.detail.startsWith('[prune-')),
+    `非法裁剪根必须进终态：${JSON.stringify(r.problems)}`)
+})
+
+await checkAsync('dryRun + 无变化：预览不得报 applied:true（预览不落盘）', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({
+    repoRoot: root, report: makeReport(), docsDir: docs, deps, noChanges: true, dryRun: true,
+  })
+  assert.equal(r.dryRun, true)
+  assert.equal(r.applied, false, `dryRun 的无变化轮报了 applied:true：${JSON.stringify({ applied: r.applied, outcome: r.outcome })}`)
+  assert.equal(seq(calls).length, 0, `dryRun 不许跑 cw：${JSON.stringify(seq(calls))}`)
+})
+
 await checkAsync('孤儿页：source_files 全部失效的存量模块页被识别为孤儿（重命名/删除后必须清）', async () => {
   // 真实现场（阶段 6.5）：`git rm src/svc/kv_store.py` 之后，引擎回 full_fallback、
   // pages_removed 为空，`.codewiki/modules/` 里那篇 source_files 指向 kv_store.py 的页
@@ -692,6 +888,63 @@ await check('残留页：页名已不属于当前模块树的引擎页被识别�
   )
   // 整仓模式（module_tree={}）没有权威模块名：凭页名猜会删掉全部正文
   assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree: {} }), [])
+})
+
+await check('残留页：0.16.0 之前 Node 通道生成的旧格式页也被识别（否则换通道后永久堆积）', () => {
+  // 原生通道把页名规范成 kebab、标题写成可读名，并带 fsoft_page；换通道之前的旧页
+  // 既没有 fsoft_page，标题又恰好是它自己的 slug（旧模板就是 `title: <模块名>`），
+  // 两条判据都扫不到，于是永久留在库里并挂在 _index.md 上。
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(mods, { recursive: true })
+  writeFile(repoRoot, 'lib/agentic.js', 'x\n')
+  const legacy = (slug) => ['---', `title: ${slug}`, 'type: module',
+    'source_files:', '  - lib/agentic.js', 'tags: []', '---', '', `# ${slug}`, ''].join('\n')
+  writeFileSync(join(mods, 'legacy_mod.md'), legacy('legacy_mod'), 'utf8')
+  // 人工页即便碰巧 title === slug，只要 type 不是 module 就不动
+  writeFileSync(join(mods, 'handwritten.md'), ['---', 'title: handwritten', 'type: concept', '---', '', '# h', ''].join('\n'), 'utf8')
+  // 人工页 title 与 slug 不一致 → 不动
+  writeFileSync(join(mods, 'human-note.md'), ['---', 'title: 人工笔记', 'type: module', '---', '', '# n', ''].join('\n'), 'utf8')
+
+  const moduleTree = { fresh_mod: { path: 'lib', components: [], children: {} } }
+  const stale = findStaleModulePages({ repoRoot, moduleTree })
+  assert.deepEqual(stale.map((o) => o.rel), ['.codewiki/modules/legacy_mod.md'], JSON.stringify(stale))
+  assert.equal(stale[0].legacy, true)
+  assert.equal(stale[0].moduleName, 'legacy_mod')
+})
+
+await check('残留页：modules/ 子目录里的旧页也认得（原生页永远 flat，嵌套只可能来自旧通道）', () => {
+  // 真机漏网：旧页把 title 写成「apply_plan（阶段 3 落地器）」这类描述性标题，
+  // 「title === slug」抓不到，于是它在模块树重构后永久留在库里，正文写的还是
+  // 739 行的旧行号，而源码已经是 1335 行。原生通道只产出 modules/<slug>.md
+  // （metadata 里 layout: flat），嵌套目录本身就足以证明它不是本引擎写的。
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(join(mods, 'engine-apply-output'), { recursive: true })
+  writeFile(repoRoot, 'lib/engine/apply-plan.js', 'x\n')
+  const legacy = ['---', 'title: apply_plan（阶段 3 落地器）', 'type: module',
+    'source_files:', '  - lib/engine/apply-plan.js', 'tags: []', '---', '', '# apply_plan', ''].join('\n')
+  writeFileSync(join(mods, 'engine-apply-output', 'apply-plan.md'), legacy, 'utf8')
+  // 顶层同名页在树里 → 不是残留，不动
+  writeFileSync(join(mods, 'apply-plan.md'), legacy, 'utf8')
+
+  const moduleTree = { apply_plan: { path: 'lib', components: [], children: {} } }
+  const stale = findStaleModulePages({ repoRoot, moduleTree })
+  assert.deepEqual(stale.map((o) => o.rel), ['.codewiki/modules/engine-apply-output/apply-plan.md'], JSON.stringify(stale))
+  assert.equal(stale[0].legacy, true)
+  assert.equal(stale[0].moduleName, 'apply-plan')
+})
+
+await check('残留页：嵌套目录里的人工页仍不动（type 或 source_files 不满足）', () => {
+  const repoRoot = makeRepo()
+  const mods = join(repoRoot, '.codewiki', 'modules')
+  mkdirSync(join(mods, 'notes'), { recursive: true })
+  // type=concept：目录再深也不动
+  writeFileSync(join(mods, 'notes', 'a.md'), ['---', 'title: 笔记', 'type: concept', 'source_files:', '  - lib/a.js', '---', '', '# a', ''].join('\n'), 'utf8')
+  // source_files 为空：没有归属证据
+  writeFileSync(join(mods, 'notes', 'b.md'), ['---', 'title: b', 'type: module', 'source_files: []', '---', '', '# b', ''].join('\n'), 'utf8')
+  const moduleTree = { fresh_mod: { path: 'lib', components: [], children: {} } }
+  assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree }), [])
 })
 
 await checkAsync('孤儿页：删除走写集（进 pre-image，能回滚，可审计）', async () => {

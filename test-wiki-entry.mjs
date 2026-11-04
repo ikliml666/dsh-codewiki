@@ -28,7 +28,10 @@ check(ensureWikiEntry(repo1, '中文') === true, '缺失入口时返回 true 并
 const text1 = fs.readFileSync(path.join(repo1, 'CodeWiki.md'), 'utf8')
 check(text1.includes(path.join(repo1, '.codewiki')), '正文含 .codewiki 绝对路径')
 check(text1.includes('codewiki_generate'), '正文含收尾工具名 codewiki_generate')
-check(text1.includes('.codewiki/_architecture.md'), '正文含架构总览指引')
+// 原生通道只产 overview + 模块页，没有 _architecture.md / concepts/：入口指引必须指向
+// 真实存在的产物，否则模型照着读会去拉一个永远不存在的文件。
+check(text1.includes('.codewiki/modules/'), '正文含模块文章指引')
+check(!text1.includes('_architecture.md'), '正文不再指向原生通道不产出的 _architecture.md')
 check(text1.includes('不会覆盖'), '正文声明不覆盖人工入口')
 
 // 2. 已有入口 → 绝不覆盖

@@ -40,15 +40,10 @@ const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', '
 const CONCURRENCY_HARD_CAP = 8
 // 默认并发：2 路并发足够，且不触发上游限流（glm-5.3-flash 实测无压力）
 const DEFAULT_CONCURRENCY = 2
-// 默认编译模型：volces-ark/glm-5.3-flash（512k 上下文，宿主 llm 服务通道）
-// 0.16.13 起不再默认 workbuddy/hy3：hy3 的 192k 窗口装不下本仓库的模块源码，
-// 且上游空内容/截断频率明显更高（真机 job-mvu2lmd1-a 即因 hy3 返回空内容整轮失败）。
-const DEFAULT_BATCH_PROVIDER = 'volces-ark'
-const DEFAULT_BATCH_MODEL = 'glm-5.3-flash'
-// 大档模型：单批输入超过普通预算 110k 时改用它（512k 上下文的 glm-5.3-flash）。
-// 目的：超过 128k 的内容也不交会话模型，仍在插件内跑完。
-const DEFAULT_BIG_PROVIDER = 'volces-ark'
-const DEFAULT_BIG_MODEL = 'glm-5.3-flash'
+// 编译模型没有默认值（0.17.34）：provider/model 一律由用户在设置页选定。
+// 早先默认 volces-ark/glm-5.3-flash，等于替用户拍板「用这个模型编译」——模型目录、
+// 凭证、上下文窗口都随环境不同，猜错的表现是上游 200 + 空内容静默空跑（见 effortError 注释）。
+// 留空的后果在提交任务时显式报错（见 submitJob 的唯一模型通道校验），不会静默失败。
 // 大档单请求输入预算：模型 512k 上下文，留出输出与系统提示余量后取 420k
 const DEFAULT_BIG_TOKEN_BUDGET = 420000
 // 单模块写作的 LLM 请求上限（上游叫 request_limit）：上游默认 100，但 1b4af43 起
@@ -76,18 +71,17 @@ function normalizeCwd(input) {
 export const Config = z.object({
   enabled: z.boolean().default(true).volatile().description('停用后两个工具立即报错'),
   binaryPath: z.string().default('').volatile().description('cw 可执行文件路径；留空优先用 PATH 里的 cw（与 codewiki 源码同步），找不到再用插件自带 bin/cw(.exe)'),
-  batchProvider: z.string().default(DEFAULT_BATCH_PROVIDER).volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
-  batchModel: z.string().default(DEFAULT_BATCH_MODEL).volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id'),
+  batchProvider: z.string().default('').volatile().description('编译模型提供商（必须是 DSH 模型设置里已注册的 provider id）：batchModel 填该 provider 的模型 id。留空将无法提交任务'),
+  batchModel: z.string().default('').volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id。留空将无法提交任务'),
   batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
-  bigEnabled: z.boolean().default(true).volatile().description('大档模型（超长输入）开关：关闭后超过普通预算的请求不再换大上下文模型，直接按大档预算兜底或退回会话通道；大档的模型与预算配置保留，重新开启无需重填'),
-  bigProvider: z.string().default(DEFAULT_BIG_PROVIDER).volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：bigEnabled 关闭时不生效，退回会话通道兜底'),
-  bigModel: z.string().default(DEFAULT_BIG_MODEL).volatile().description('大档模型 id（该 provider 下）。默认火山方舟 glm-5.3-flash（512k 上下文）'),
-  bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取'),
-  bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底'),
-  sessionTier: z.string().default('').volatile().description('会话通道档位 id（仅当大档都装不下且大档已关闭时兜底使用，dsh-subagent-auto-router 里的档位如 codewiki）：留空=让会话模型自动选路；填了则 steer 文本要求 delegate 显式传该 tier'),
+  bigEnabled: z.boolean().default(false).volatile().description('大档模型（超长输入）开关：关闭后超过普通预算的请求不再换大上下文模型，直接按大档预算兜底或退回会话通道；大档的模型与预算配置保留，重新开启无需重填。只对 Node 兼容通道（nativeEngine=false）生效——原生通道的输入预算由 FSoft 引擎按模块切分，不经过这一档'),
+  bigProvider: z.string().default('').volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：bigEnabled 关闭时不生效，退回会话通道兜底。仅 Node 兼容通道使用'),
+  bigModel: z.string().default('').volatile().description('大档模型 id（该 provider 下，仅 Node 兼容通道使用）'),
+  bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取（仅 Node 兼容通道使用）'),
+  bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底（仅 Node 兼容通道使用）'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
   moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（与 bigConcurrency 同一约定，真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
-  requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 300；上游默认 100 时大模块会撞上限中断整轮编译（真机 change_set_management 撞 100 抛错，已写 31 篇被记成 partial）'),
+  requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 100（上游默认值）；调小能压住单模块成本，调大能减少大模块被预算中断的补写次数'),
   bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
@@ -115,19 +109,19 @@ export function liveConfig(config) {
   const c = config ?? {}
   const concurrency = Number(val(c.maxConcurrency))
   const bigConcurrency = Number(val(c.bigConcurrency))
-  const bigEnabled = val(c.bigEnabled) !== false
+  // 大档默认关闭（0.17.34）：缺省即关闭，只有显式开成 true 才启用
+  const bigEnabled = val(c.bigEnabled) === true
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
     batchProvider: String(val(c.batchProvider) ?? '').trim(),
-    batchModel: String(val(c.batchModel) ?? '').trim() || DEFAULT_BATCH_MODEL,
+    batchModel: String(val(c.batchModel) ?? '').trim(),
     batchReasoningEffort: String(val(c.batchReasoningEffort) ?? '').trim(),
     bigEnabled,
     bigProvider: bigEnabled ? String(val(c.bigProvider) ?? '').trim() : '',
-    bigModel: String(val(c.bigModel) ?? '').trim() || DEFAULT_BIG_MODEL,
+    bigModel: String(val(c.bigModel) ?? '').trim(),
     bigReasoningEffort: String(val(c.bigReasoningEffort) ?? '').trim(),
     bigTokenBudget: Math.max(BATCH_TOKEN_BUDGET, Number(val(c.bigTokenBudget)) || DEFAULT_BIG_TOKEN_BUDGET),
-    sessionTier: String(val(c.sessionTier) ?? '').trim(),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : DEFAULT_CONCURRENCY,
@@ -165,6 +159,22 @@ export function liveConfig(config) {
     nativeEnginePython: String(val(c.nativeEnginePython) ?? '').trim(),
     nativeEngineEntry: String(val(c.nativeEngineEntry) ?? '').trim(),
     nativeEngineTimeoutMs: Number(val(c.nativeEngineTimeoutMs)) || 0,
+  }
+}
+
+// 大档模型的运行参数（写文章与校对两条旧通道各拼一份，逐字相同）。
+// provider 留空 = 大档不可用，返回 null；模型留空也按不可用处理——拿空 model 去请求
+// 只会在上游换回 200 + 空内容，不如让调用方按「没有大档」走普通预算。
+export function bigTierOf(cfg) {
+  const provider = String(cfg?.bigProvider ?? '').trim()
+  const model = String(cfg?.bigModel ?? '').trim()
+  if (!provider || !model) return null
+  const effort = String(cfg?.bigReasoningEffort ?? '').trim()
+  return {
+    provider,
+    model,
+    ...(effort ? { reasoningEffort: effort } : {}),
+    budget: Math.max(BATCH_TOKEN_BUDGET, Number(cfg?.bigTokenBudget) || DEFAULT_BIG_TOKEN_BUDGET),
   }
 }
 
@@ -421,7 +431,7 @@ export function ensureWikiEntry(cwd, language = '中文') {
       '本仓库的活 wiki 由 dsh-codewiki 编译流水线自动维护（`codewiki_generate` 工具 / 编译面板）。',
       '',
       `- 入口与全部文章位于仓库根 \`${wiki}\`（在仓库根之外读写它们时一律用绝对路径）`,
-      '- 索引 .codewiki/_index.md · 架构总览 .codewiki/_architecture.md · 模块文章 .codewiki/modules/ · 概念 .codewiki/concepts/',
+      '- 索引 .codewiki/_index.md · 模块与架构文章 .codewiki/modules/ · 系统总览即本文件',
       '- 涉及代码改动的任务收尾必须运行 codewiki_generate（scope=auto）更新受影响文章；.codewiki/ 改动与代码一起提交',
       '',
       '> 本文件由编译流水线在缺失时自动生成；若改写为人工速查手册，流水线不会覆盖。',
@@ -434,7 +444,7 @@ export function ensureWikiEntry(cwd, language = '中文') {
       'The living wiki of this repo is maintained by the dsh-codewiki pipeline (`codewiki_generate` tool / the CodeWiki panel).',
       '',
       `- Entry and all articles live at \`${wiki}\` (use absolute paths outside the repo root)`,
-      '- Index: .codewiki/_index.md · Architecture: .codewiki/_architecture.md · Modules: .codewiki/modules/ · Concepts: .codewiki/concepts/',
+      '- Index: .codewiki/_index.md · Modules: .codewiki/modules/ · System overview: this file',
       '- After code changes, run codewiki_generate (scope=auto) at wrap-up; commit .codewiki/ together with the code',
       '',
       '> Auto-generated by the pipeline when missing; a hand-written entry is never overwritten.',
@@ -645,13 +655,18 @@ function wikiRelOf(articlePath) {
 // 不存在或不是本次读取的证据、死链、正文空、必需章节空着）；warning 级（缺章节）放行
 // 但记账，由终态判定把本次编译降为 partial，不推进基线。
 // 返回 { blocking:[], warnings:[] }。
+const CONTRACT_FS = {
+  exists: (p) => { try { return fs.existsSync(p) } catch { return false } },
+  isDirectory: (p) => { try { return fs.statSync(p).isDirectory() } catch { return false } },
+}
+
 function contractCheck(content, { articlePath, cwd, sources, allowedLinks }) {
   const issues = inspectArticle(content, {
     cwd: cwd ?? null,
     articlePath: wikiRelOf(articlePath),
     readableSources: Array.isArray(sources) && sources.length ? sources : null,
     allowedLinks: Array.isArray(allowedLinks) ? allowedLinks : null,
-    fsImpl: { exists: (p) => { try { return fs.existsSync(p) } catch { return false } } },
+    fsImpl: CONTRACT_FS,
   })
   return {
     issues,
@@ -1865,16 +1880,10 @@ export function classifySessionTask(task, nowMs = Date.now()) {
   return 'harvest'
 }
 
-// 会话通道 steer 文本（0.9.2，纯函数，测试直接断言）：sessionTier 非空时把档位钉死。
-// 背景：codewiki 的编译主链不走子智能体档位路由（模型由 batchProvider/batchModel 决定），
-// 只有「超预算转会话通道」这一段经过 delegate。原来 steer 文本不给 tier，会话模型就按
-// 决策模型自动选路——「写 CodeWiki 模块文章」实测被判给 default（置信 0.88–0.99），
-// 用户自建的 codewiki 档永远轮不到。填 sessionTier 后本函数在文本里要求显式传 tier。
-export function buildSessionSteerText({ job, snapshots, tier = '', resend = false }) {
+// 会话通道 steer 文本（纯函数，测试直接断言）。
+// 只有「超预算转会话通道」这一段经过 delegate，档位交给会话模型自己选路。
+export function buildSessionSteerText({ job, snapshots, resend = false }) {
   const proofread = job.stage === 'review'
-  const tierLine = tier
-    ? [`派单要求：调用 delegate 时必须显式传 tier: "${tier}"（不要依赖自动选路），mode 用 spec${resend ? '' : '，并按档位要求保持思考程度'}。`]
-    : []
   const lines = snapshots.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
   const kind = proofread ? '校对' : '文章'
   const head = resend
@@ -1887,7 +1896,7 @@ export function buildSessionSteerText({ job, snapshots, tier = '', resend = fals
     : (resend
         ? '子智能体要求：读取任务文件（完整写作指令，含源码与格式要求），写出完整文章（以 --- frontmatter 开头）后直接写入对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
         : '子智能体要求：任务文件是完整写作指令（含全部源码与文章格式要求，源码以「行号| 」前缀标注）；文件较大时用 read 的 offset/limit 分段读取。读出完整文章（以 --- frontmatter 开头）后用文件工具直接写入对应目标路径（UTF-8，覆盖旧文），无需另写标记文件。编译服务会轮询目标文件收割，超时未产出按失败处理。')
-  return [head, ...lines, '', ...tierLine, requirement].join('\n')
+  return [head, ...lines, '', requirement].join('\n')
 }
 // 孤儿接管阈值：另一实例的 job 停更超过该时长视为宿主重启遗留，本实例接管推进
 const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)
@@ -2559,7 +2568,11 @@ function createJobService(config, onSettled) {
             jobId: job.id,
             // 落地器的 cw 与自动提交都复用主实现：阶段 3 的那份是「等阶段 4 注入」的
             // 临时件，两套提交语义并存迟早分叉。
-            runCw: (binary, cwd, args, timeoutMs) => runCw(binary, cwd, args, timeoutMs, ac.signal),
+            // 这里**故意不传 ac.signal**：落地事务（写盘→index→基线→提交）不可中断，
+            // 取消只终止引擎阶段。曾传了 signal，于是取消会 kill 掉正在跑的 `cw meta update`
+            // 触发回滚，把「已落盘的文章」连同基线一起撤掉，而终态只报一句「已取消」——
+            // 一次取消就吞掉一整轮编译成果。事务自身有 120s 超时兜底。
+            runCw: (binary, cwd, args, timeoutMs) => runCw(binary, cwd, args, timeoutMs),
             commit: (root, opts) => autoCommitWiki(root, opts),
           },
         },
@@ -2906,16 +2919,14 @@ function createJobService(config, onSettled) {
       return null
     }
     const minutes = Math.round(SESSION_TASK_TIMEOUT_MS / 60000)
-    // 0.9.2：档位钉死（sessionTier 非空时文本里要求显式传 tier，见 buildSessionSteerText）
-    const tier = String(liveConfig(config).sessionTier ?? '').trim()
-    const text = buildSessionSteerText({ job, snapshots, tier })
+    const text = buildSessionSteerText({ job, snapshots })
     try {
       agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
     } catch (err) {
       fail(job, `会话通道 steer 失败 —— ${String(err?.message ?? err)}`)
       return null
     }
-    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体${tier ? `，档位钉死 ${tier}` : '，档位自动选路'}），等待产出（超时 ${minutes} 分钟）`)
+    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体，档位自动选路），等待产出（超时 ${minutes} 分钟）`)
     return snapshots
   }
 
@@ -2951,8 +2962,7 @@ function createJobService(config, onSettled) {
       note(job, '会话通道任务接管后重发 steer 失败（发起会话不可用），等待超时按失败处理')
       return
     }
-    const tier = String(liveConfig(config).sessionTier ?? '').trim()
-    const text = buildSessionSteerText({ job, snapshots: job.sessionTasks, tier, resend: true })
+    const text = buildSessionSteerText({ job, snapshots: job.sessionTasks, resend: true })
     try {
       agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
       note(job, '会话通道任务已重新派发（宿主重启接管）')
@@ -3090,14 +3100,7 @@ function createJobService(config, onSettled) {
     // 拆分判定用原始总量——packArticles 只截后续文章头部，pack 体积永远装得下，不能作依据。
     // hy3 适配（0.10.8）：110k~大档预算之间单批直出（任务标大档），仅连大档都装不下才拆观察。
     const c0 = liveConfig(config)
-    const bigTier = String(c0.bigProvider ?? '').trim()
-      ? {
-          provider: String(c0.bigProvider).trim(),
-          model: String(c0.bigModel ?? '').trim() || DEFAULT_BIG_MODEL,
-          ...(String(c0.bigReasoningEffort ?? '').trim() ? { reasoningEffort: String(c0.bigReasoningEffort).trim() } : {}),
-          budget: Math.max(BATCH_TOKEN_BUDGET, Number(c0.bigTokenBudget) || DEFAULT_BIG_TOKEN_BUDGET),
-        }
-      : null
+    const bigTier = bigTierOf(c0)
     const bigLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
     const totalTokens = texts.reduce((n, a) => n + estimateTokens(a.text), 0)
     // 单批直出：packArticles 保证装得下（超预算的文章只截头部并标注），不再有
@@ -3156,14 +3159,7 @@ function createJobService(config, onSettled) {
       // hy3 适配（0.10.8）：逐篇准备（文章+源码）后按普通预算贪心合并成批量校对请求，
       // 输出按 @@@article/@@@end 标记分节拆回逐篇落盘——请求数从≈文章数降到≈总输入/110k
       const c0 = liveConfig(config)
-      const bigTier = String(c0.bigProvider ?? '').trim()
-        ? {
-            provider: String(c0.bigProvider).trim(),
-            model: String(c0.bigModel ?? '').trim() || DEFAULT_BIG_MODEL,
-            ...(String(c0.bigReasoningEffort ?? '').trim() ? { reasoningEffort: String(c0.bigReasoningEffort).trim() } : {}),
-            budget: Math.max(BATCH_TOKEN_BUDGET, Number(c0.bigTokenBudget) || DEFAULT_BIG_TOKEN_BUDGET),
-          }
-        : null
+      const bigTier = bigTierOf(c0)
       const bigLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
       const tasks = []
       const sessionTasks = []
@@ -3490,6 +3486,20 @@ function createJobService(config, onSettled) {
             note(job, '取消到达前原生执行器已结束，交由结果收割核对落盘事实')
             await tickNative(job, job.nativeChannel)
             persist()
+            continue
+          }
+          if (job.channel === 'native' && nativeRuns.has(job.id)) {
+            // 原生执行器还在跑：abort 会终止引擎进程树，但落地器不接 signal —— apply 一旦
+            // 开始就会跑完。此刻直接判 cancelled 会把「已落盘、已提交、基线已推进」的
+            // 事实改写成「产物未落地，基线未推进」，下一轮再从旧基线重复消费一批变化。
+            // 取消仍然生效（引擎被杀），但终态交给执行器的真实结果。
+            const nac0 = nativeAborters.get(job.id)
+            if (nac0) nac0.abort()
+            if (job.cancelNoted !== true) {
+              job.cancelNoted = true
+              note(job, '已取消：原生引擎进程树已终止，未进入落地阶段')
+            }
+            touch(job)
             continue
           }
           setStage(job, 'cancelled')
@@ -4051,7 +4061,6 @@ function generateToolDefinition(cfg, svc) {
           }
           notes.push(`有 ${status.changedFiles.length} 个文件变更但未命中任何文章的 source_files，且无基线/文章可做归属判定，不刷新编译基线（建议 scope=full）`)
           return result
-          return result
         }
         notes.push('cw status 输出无法解析，改走全量编译')
       }
@@ -4409,7 +4418,10 @@ export function workspaceFilterPaths(registry, config) {
 }
 
 export function installWebServer(ctx, service, extra = {}) {
-  const { config, schedState, compile } = extra
+  // 调度器可能没装（测试 ctx、或调度不可用但仍要看面板）：这里一次性定成空对象，
+  // 后面各处直接读字段。读不到是 undefined，与可选链结果一致，但不必层层 `?.`。
+  const { config, compile } = extra
+  const schedState = extra.schedState ?? {}
   if (typeof ctx.inject !== 'function') return
   // 宿主工作区注册表（WorkspaceRegistry.list() 同步内存投影）：任务页过滤数据源。
   // 服务缺失（老宿主/测试 ctx）时保持 null——jobs 端点不过滤，行为与 0.4.8 一致。
@@ -4547,30 +4559,30 @@ export function installWebServer(ctx, service, extra = {}) {
             scheduler: {
               enabled: c.autoUpdate,
               intervalMin: c.autoUpdateMin,
-              lastScan: schedState?.lastScan ? new Date(schedState.lastScan).toISOString() : null,
-              scanning: schedState?.scanning === true,
-              lastError: schedState?.lastError ?? null,
-              lastScanRepos: schedState?.lastScanRepos ?? null,
-              lastScanSubmitted: schedState?.lastScanSubmitted ?? null,
+              lastScan: schedState.lastScan ? new Date(schedState.lastScan).toISOString() : null,
+              scanning: schedState.scanning === true,
+              lastError: schedState.lastError ?? null,
+              lastScanRepos: schedState.lastScanRepos ?? null,
+              lastScanSubmitted: schedState.lastScanSubmitted ?? null,
               // 分工口径：本轮扫到但已有活动任务（幂等命中）、以及判态干净/无变更可做的仓数。
               // 只暴露 submitted 时，「扫到 N 仓、提交 0」无法区分「正在编译」与「无事可做」。
-              lastScanBusy: schedState?.lastScanBusy ?? null,
-              lastScanNoop: schedState?.lastScanNoop ?? null,
+              lastScanBusy: schedState.lastScanBusy ?? null,
+              lastScanNoop: schedState.lastScanNoop ?? null,
               // 因 workspaceOnly 被跳过（不在已添加工作区里）的仓数：否则「清单里有 N 个仓库、
               // 扫到 M 个」的缺口在面板上无法解释，用户会以为调度器丢了仓库。
-              lastScanSkipped: schedState?.lastScanSkipped ?? null,
+              lastScanSkipped: schedState.lastScanSkipped ?? null,
             },
           }
           reposCacheAt = Date.now()
         }
         // 待确认状态与 needsConfirm 不进 30s 缓存：它随调度心跳实时变化，缓存会让用户
         // 在「已登记待确认」后 30 秒内看不到确认按钮（面板每 2s 拉一次）。这两项每次求值。
-        const livePending = (schedState?.pendingConfirm ?? []).map((p) => p.cwd)
+        const livePending = (schedState.pendingConfirm ?? []).map((p) => p.cwd)
         const livePendingKeys = new Set(livePending.map(normPathKey))
         writeJson(res, 200, {
           ...reposCache,
           repos: (reposCache.repos ?? []).map((r) => ({ ...r, needsConfirm: livePendingKeys.has(normPathKey(r.cwd)) })),
-          scheduler: { ...reposCache.scheduler, lastScanPending: schedState?.lastScanPending ?? null, pendingConfirm: livePending },
+          scheduler: { ...reposCache.scheduler, lastScanPending: schedState.lastScanPending ?? null, pendingConfirm: livePending },
         })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err), stack: String(err?.stack ?? '').split('\n').slice(0, 8) })
@@ -4736,9 +4748,11 @@ export function installWebServer(ctx, service, extra = {}) {
         if (body?.action === 'confirm' && body?.cwd) {
           if (typeof compile !== 'function') { writeJson(res, 501, { error: '编译入口未初始化' }); return }
           const dir = String(body.cwd)
-          const key = path.normalize(dir).replace(/[\\/]+$/, '').toLowerCase()
-          if (Array.isArray(schedState?.pendingConfirm)) {
-            schedState.pendingConfirm = schedState.pendingConfirm.filter((p) => path.normalize(String(p.cwd ?? '')).replace(/[\\/]+$/, '').toLowerCase() !== key)
+          // 与 needsConfirm 的比对必须用同一个键函数：手写「总是折叠大小写」的版本，
+          // 在大小写敏感的平台会把两个不同目录当成同一个，误删掉不相干仓库的待确认。
+          const key = normPathKey(dir)
+          if (Array.isArray(schedState.pendingConfirm)) {
+            schedState.pendingConfirm = schedState.pendingConfirm.filter((p) => normPathKey(p.cwd) !== key)
           }
           reposCache = null
           try {
@@ -4908,7 +4922,7 @@ export function commitHintText(cwd, jobs = loadJobs()) {
 function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
-    '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——learnings/、decisions/ 补文章与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
+    '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——模块文章、入口 CodeWiki.md 与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
     '- codewiki_generate 是后台编译：调用即返回提交回执，编译由宿主服务推进——调用后本步就此结束，不要等待、不要轮询、不要为了看进度而反复调 codewiki_progress；继续你的其他工作，编译完成的产物由插件自己提交入库（autoCommit 默认开：主题分支提交后合并回原分支），无需你跑 git；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
     '- 若收到「产物待提交」提醒，说明插件自动提交没成功（非 git 仓库/被忽略/冲突等），此时才需要你代为提交一次；没有该提醒就不要动 .codewiki/ 的 git 状态（插件已提交或产物无改动时不会有提醒）；',

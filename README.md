@@ -23,7 +23,7 @@
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
-| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 规划 → 写文章 → 横切 → 审校 → 索引 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；0.17.5 起写作只剩 agentic 工具循环一条通道（按需 `read_code` 读源码，不再整包内联），单篇体积不再触发观察→合成分割 |
+| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 准备 → 文章 → 校对 → 校验 → 索引 → 提交 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；0.17.5 起写作只剩 agentic 工具循环一条通道（按需 `read_code` 读源码，不再整包内联），单篇体积不再触发观察→合成分割 |
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
 | `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled`。0.17.0 起另带 `baselineEligible`（质量门是否许可推进基线）与 `baselineAdvanced`（本轮基线**事实上**是否已前移）——提交失败时会看到 `baselineAdvanced:true` 而 `deliveryComplete:false`，两者口径不同 |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
@@ -31,7 +31,7 @@
 `codewiki_generate` 关键行为：
 
 - `scope=auto`（默认）：无 wiki / 未编译 → 全量；有变更 → 逐篇更新过期文章；最新 → 直接报告。
-- 全部模型环节（写文章/横切/审校）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型；不再委托发起会话的主模型。
+- 全部模型环节（写文章/语义校对）在插件内跑，共用 `batchProvider`/`batchModel` 一个模型；不再委托发起会话的主模型。
 - 单篇文章失败只记账不中断；**只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial` 而不是 `done`**。基线推进的判据是**完整性**：`done` 才推进；`partial`/`failed`/`cancelled` 一律不动基线，未消化的变化下一轮还会被看见（0.16.1–0.16.16 曾按「`partial` 且有原始树留档就推进」实现，那是拿「有产物」冒充「消化完」；0.17.0 已改回单一判据，并用「空骨架不算未入库基线」解决首次编译原先必然 `partial` 的死循环）。
 - 请求并发分两档独立限流：默认档 `maxConcurrency` 默认 2（硬顶 8），大档 `bigConcurrency` 默认跟随默认档（`0`）；两池同时推进，总在飞为两者之和。
 - `serialProjects` 默认开：同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued` 排队，前一个收尾后自动轮到。
@@ -196,12 +196,10 @@ stderr、阶段切换这些真正有用的事件挤出去。查看方式三选�
   `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”）。
   这是上游配额，不是适配层问题。**规格的 hy3 硬门禁因此没有通过**：换额度可用后必须把
   `batchModel` 改回 `hy3` 重跑八场景，才算闭环；在那之前这里是「替代验证」而非「符合规格」。
-- `node test-wiki-anchors.mjs --strict` 实测 **3354 过 / 59 败 / 32 待重编译**（默认档
-  3354 过 / 5 败 / 86 待重编译）。59 条失败里 34 条「指向空行」（`test-engine-apply-plan.mjs`
-  26 条、`index.js` 8 条、`README.md` 6 条）、20 条「符号未绑定」（`idleRound`/
-  `symbolIncremental`/`runEngine`/`normalizeIndexLinks` 等不在所引区间内）、4 条
-  「符号不存在」、1 条「起始行越界」。**主体是 `.codewiki/` 文章滞后于本轮代码**，
-  不是校验器缺陷；按纪律不手改文章，留待一次真实全量重编译覆盖。
+- `node test-wiki-anchors.mjs --strict` 实测 **369 过 / 0 败 / 3 待重编译**（默认档同值）。
+  0.17.39 之前是 3354 过 / 59 败 / 32 待重编译——那 59 条**全部**落在旧 Node 通道遗留的
+  横切产物（`_architecture.md` / `_patterns.md` / `concepts/`）与两篇 `learnings/` 上，
+  前者已整体下线，后者是锚点行号随代码前移后的机械漂移，已逐条对齐。
 - **阶段 7 受控退役已执行**（0.16.0）：`nativeEngine` 默认 `true`；`lib/symbols.js`、
   `lib/cluster.js`、`lib/graph-diff.js`、`lib/incremental.js`、`lib/update-planner.js`
   与对应 7 套测试已删除。已知能力损失：兼容通道失去符号级增量与语义聚类（都只剩最小
@@ -271,7 +269,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `batchReasoningEffort`（0.10.0）：该模型的思考程度档位 id。**可选值不手填**，设置页从模型目录实时读取（`GET /api/codewiki/model-efforts?provider=&model=` → 宿主 `resolveModel().reasoning.efforts`）；留空 = 用该模型的默认档。
 - `bigEnabled`（0.17.5，默认开）：大档模型的**总开关**。关闭时大档不生效——`liveConfig` 直接把 `bigProvider` 置空，所有按「大档是否配置」判定的下游路径（文章写作双池、横切/校对大档装填、`markBigAgenticTasks`）一并退回默认档；同时设置页折叠整组大档字段。`bigModel` / `bigReasoningEffort` / `bigTokenBudget` / `bigConcurrency` 的取值保留，重新打开即恢复，不需要重填。
 - `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`（0.10.4，0.10.8 全面启用）：大档模型——模块源文本量超 `bigTokenBudget` 的写作任务、输入超 110k 普通预算的横切与批量校对请求，改用该档在插件内一次写完。默认 `volces-ark` / `glm-5.3-flash`（512k 上下文），预算 420k token。是否启用只看 `bigEnabled`，不再用「`bigProvider` 留空」这种隐式约定。
-- `requestLimit`（0.17.8，默认 300，1–1000）：单个模块写作允许的 LLM 请求次数。上游 1b4af43 起，写作校验会给没写出页面的模块续发最多 2 次补写提醒，**每次提醒都是一次独立的 `agent.run`，各自吃满一份预算**；上游默认 100 在真机上不够大模块用——本仓库全量编译时 `change_set_management` 撞满 100 次请求后抛错，已写好的 31 篇被整轮判成 `partial`。300 是实测能写完大模块的经验值；调得太小会让复杂模块更容易中断成「部分完成」。
+- `requestLimit`（0.17.8 引入，**0.17.12 起默认回到上游的 100**，1–1000）：单个模块写作允许的 LLM 请求次数。上游 1b4af43 起，写作校验会给没写出页面的模块续发最多 2 次补写提醒，**每次提醒都是一次独立的 `agent.run`，各自吃满一份预算**。0.17.8 曾按一次实测把默认提到 300，但那是「先全部改回上游逻辑验证」之前的临时值；现在默认 100 与上游一致，撞上限的模块会以 `article-failed` 上报而不是被静默截断。调小能压住单模块成本，调大能减少大模块被预算中断的补写次数。
 - `sessionTier`（0.9.2）：**仅校对阶段的超大输入兜底**时才用。0.17.5 起写作走 agentic 工具循环、横切单批直出，都不再有会话通道；只剩「单篇文章源码连 `bigTokenBudget` 大档都装不下」的校对任务会转给发起会话的模型处理，此时派给哪个子智能体档位（`dsh-subagent-auto-router` 里的档位 id，如 `codeiwiki`）。留空 = 让会话模型自动选路；填了则 steer 文本要求 `delegate` 显式传 `tier`。
 
 - `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`（0.15.0 引入，**0.16.0 起 `nativeEngine` 默认 `true`**）：原生引擎通道；需要本机 Python 3.10+ 与闭合依赖环境。详细要求见上文「原生引擎通道」。**0.16.5 起默认超时从 45 分钟改为 180 分钟**：45 分钟是早期按小 fixture（约 1 分钟）估的，真机全量实测约 174 分钟（`job-mvt1mrvu-6`：articles 66.0min + crosscut 10.0min + review 68.9min），预算低于物理耗时意味着每次都在阶段 3 刚开头被砍、一篇都写不出来，重试多少次都一样。
@@ -280,7 +278,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
 - `articleLanguage`：文章语言，默认中文。**两条通道都生效**：兼容通道写进提示词，原生通道经 `runNativeJob` 的 `language` 字段传进引擎 payload、落在 `agent_instructions.language`（上游 `config.py` 的 `language` property 读它）。0.16.7 之前原生通道整条链路都没接这个字段，引擎静默按英文写。
-- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（learnings/decisions 补文章与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
+- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（模块文章、入口 `CodeWiki.md` 与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
 - `autoCommit`（0.10.9，0.10.10 修正文档与三态）：编译产物自动提交，默认开。编译终态（done 且有文章写成功）后由插件自己 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`，带任务 id 与篇数），把「等编译完成 → 会话模型代跑 git」这件事彻底收回插件侧——会话模型因此不必等待编译、不必轮询、不必提交。安全边界：改动由 pathspec 限定在这两个路径（不是 `-A`/`--all`/`.`，因此不会卷进工作区其它改动）、不 amend/push/改写历史、不跑仓库钩子；以下情形一律**拒绝并降级**为一次性「产物待提交」提醒（不会半个提交、不会静默丢产物）：非 git 仓库、仓库无 HEAD、merge/rebase/cherry-pick 进行中、目标路径存在未解决冲突、`.codewiki/`（或未 tracked 的 `CodeWiki.md`）被 `.gitignore` 忽略、缺 `user.name`/`user.email`、`git add`/`git commit` 失败（含 `index.lock` 被并发占用）。结果写入 job 的 `autoCommit`（`committed`/`sha`/`message`/`reason`/`noChanges`），`codewiki_progress` 输出与侧边栏任务卡直接显示；三条通道（唤醒、系统提示提醒、面板）统一按 `autoCommitState()` 判定三态：已提交 → 静默、产物无改动 → 静默不催、未提交 → 才提醒一次。
 - `autoUpdate` / `autoUpdateMin`（0.4.0 引入，0.16.2 修正扫描来源，0.16.3 遵守 `workspaceOnly`）：自动更新默认关；开启后服务每 60s 心跳一次，距上次扫描超过扫描间隔（`autoUpdateMin`，默认 30 分钟，最小 5）时逐仓 `scope=auto` 判态提交（被排除目录、worktree、空壳目录静默跳过），单仓失败只记 `lastError` 不中断。**0.16.2 起扫描来源是「已知仓库清单 ∪ 任务历史」**（`REPOS_FILE`，`rememberRepo()` 在每次提交时写入）：只扫任务历史会让「编译过一次、后来没再手动编译」的仓库在 job 被 `MAX_JOBS_KEPT=30` 截断或 Temp 终态启动清理后永久退出自动扫描——面板仍显示过期，却永远等不到自动编译。**0.16.3 起自动调度与面板一样遵守 `workspaceOnly`**：不在已添加 dsh 工作区清单里的仓库（如已移出工作区的目录）不再被后台定时编译——旧实现只让面板过滤遵守它，会产物悄悄写进别人的 `.codewiki/` 而面板上根本看不到那条任务；被跳过的仓数在面板上以「工作区外跳过 N」显示（`scheduler.lastScanSkipped`）。心跳间隔可用环境变量 `DSH_CODEWIKI_AUTO_SCAN_MS` 覆盖（下限 100ms，仅用于测试；生产别设）；空壳判定缓存可用 `DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS` 覆盖「无源码」结论的 TTL（默认 60s，命中源码时仍缓存 10 分钟）。**0.16.6 起仓库清单的落点跟随 `JOBS_FILE` 名字**（`reposFileFor()`）：`dsh-codewiki-jobs.json` → `dsh-codewiki-repos.json`，`dsh-codewiki-jobs-test-<pid>-<token>.json` → `dsh-codewiki-repos-test-<pid>-<token>.json`；显式 `DSH_CODEWIKI_REPOS_FILE` 仍最优先。旧实现只按**目录**推导，导致任何改了 `DSH_CODEWIKI_JOBS_FILE` 的测试都写到真实宿主的清单文件里——真机上该文件曾被塞进 `%TEMP%/cw-orch-xxxxxx` 这类早已删除的 fixture 目录，每次自动扫描都要为它们空跑一轮探测。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
