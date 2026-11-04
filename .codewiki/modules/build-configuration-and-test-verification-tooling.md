@@ -62,7 +62,7 @@ flowchart TB
 
 ### 构建与配置装配：[build_and_configuration](build-and-configuration.md)
 
-- **包清单层**：`package.json` 声明身份（`@local/dsh-codewiki` v0.17.36，纯 ESM）、导出面（`.` 主半边 / `./client` 面板半边）、引擎约束（`node>=20`、`dsh>=0.2.0-rc.0`）与 `dsh` 元数据（`bundle.patch` 指向 `cordis.patch.yml`）。
+- **包清单层**：`package.json` 声明身份（`@local/dsh-codewiki` v0.17.37，纯 ESM）、导出面（`.` 主半边 / `./client` 面板半边）、引擎约束（`node>=20`、`dsh>=0.2.0-rc.0`）与 `dsh` 元数据（`bundle.patch` 指向 `cordis.patch.yml`）。
 - **装配声明层**：`cordis.patch.yml` 随包自动合并到宿主 profile，内置整个 `codewiki` 配置命名空间（`batchProvider` / `batchModel` / `maxConcurrency` / `nativeEngine` / `nativeEnginePython` 等设置项），并给出 bundle 依赖与 `file:///` 直挂两种装法，以及同 id 整对象替换的配置覆盖规则。
 - **原生引擎环境层**：`tools/fsoft-engine/setup-env.sh` 在插件仓库之外的独立目录建造闭合 venv——`--no-deps` 按冻结快照落盘、editable 安装 FSoft 本体、`pip check` 反向验证、import 冒烟，四步全部通过才算环境就绪。
 

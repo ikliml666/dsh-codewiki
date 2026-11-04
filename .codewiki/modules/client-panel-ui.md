@@ -75,15 +75,15 @@ flowchart TB
 
 | 组件 | 类型 | 职责 |
 | --- | --- | --- |
-| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 `data-dscw-sec` section + 保存条；每个 section 由 `data-dscw-head` 标题行与 `data-dscw-grid` 字段网格组成，字段本身仍包在 `data-dscw-field` 内，字段下可挂 `data-dscw-hint` 说明——如「文章语言」字段新增 `articleLanguageHint`：留空跟随当前会话语言） |
+| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 `data-dscw-sec` section，整体包在 `data-dscw-cards` 容器内；每个 section 由 `data-dscw-head` 标题行与 `data-dscw-grid` 字段网格组成，字段本身仍包在 `data-dscw-field` 内，字段下可挂 `data-dscw-hint` 说明——如「文章语言」字段新增 `articleLanguageHint`：留空跟随当前会话语言）+ 底部自动保存状态行 `data-dscw-bar`：不再有「保存 / 放弃」按钮，只报 idle / saving / saved / error 四种状态，校验失败时附「立即重试」按钮，`writable=false` 时附「当前配置只读」提示 |
 | `CodewikiPanel` | React 组件 | 侧边栏面板容器：四个标签页（总览 / 任务 / 会话 / 设置），jobs 轮询差分采样（tps 30 点窗口、吞吐 EWMA、总进度 24 点趋势窗），进行中任务全部展开（无进行中时留最近一个当门面）、进行中头部附并发总览 `poolSummary`，历史区按仓库各自折叠，取消任务、复制 wiki 路径 |
-| `ReposTab` | React 组件 | 「总览」标签页：所有已编译仓库的 wiki 状态卡片 + 自动更新调度信息，支持排除 / 取消排除、确认首次编译、手动「更新」 |
-| `SessionView` | React 组件 | 「会话」视图：并发池里每一次 LLM 请求的列表（5s 轮询）+ 点开看 prompt / 模型输出全文；支持 job 级单任务视图与 `job=null` 全局聚合视图，`embedded=true` 时嵌在面板标签页内不套 page 容器 |
+| `ReposTab` | React 组件 | 「总览」标签页：顶部五格统计条 `data-dscw-p-stats`（待确认 / 有变更 / 编译中 / 干净 / 仓库总数，已排除的仓不进任何一格计数）+ 自动更新调度信息 + 仓库状态列表；列表按 `rankOf` 排序（待确认 > 有变更 > 其他 > 干净 > 出错 > 已排除，同档按最近有任务优先），行带 `data-rank`；支持排除 / 取消排除、确认首次编译、手动「更新」 |
+| `SessionView` | React 组件 | 「会话」视图：并发池里每一次 LLM 请求的列表（5s 轮询）+ 点开看 prompt / 模型输出全文；支持 job 级单任务视图与 `job=null` 全局聚合视图，`embedded=true` 时嵌在面板标签页内不套 page 容器；全局视图按工作区（`cwdOf` 取 `s.cwd ?? job?.cwd`）在 `data-dscw-p-sessgroups` 容器内分组成 `<details data-dscw-p-sessgroup>` 折叠（按组内最新一条时间倒序、第一组默认展开，组头显示仓库名与「{n} 条请求」计数），单任务视图不分组 |
 | `PanelIcon` | React 组件 | 16×16 摊开的书 SVG，供 `sidebar.panellist` 渲染出入口 |
 | `Spark` | React 组件 | 纯 SVG polyline 微趋势线（默认 56×16），用于吞吐徽标里的 tok/s 趋势与进度行的总进度趋势（48×14） |
 | `Skeleton` | React 组件 | 加载骨架占位（默认 `rows = [100, 72, 46]`）：首轮数据未回包时渲染 `data-dscw-p-skel` 容器与三条不同宽度的 `i` 占位条，取代旧的单行「…」文本，用于任务列表、会话列表与会话详情三处 loading 态 |
 | `byUpdated` | 函数 | 任务排序比较器（按 `updatedAt ?? createdAt` 倒序）：进行中任务按它排序全部展开；无进行中任务时由它挑最近更新的一张当门面卡 |
-| `save` / `discard` | 函数（位于 `CodewikiCard` 内） | 设置草稿的保存（校验 + `form.mutate` 差分 ops）与放弃（回滚草稿） |
+| `flush` / `scheduleSave` | 函数（位于 `CodewikiCard` 内） | 设置草稿的自动保存：`scheduleSave` 草稿改动后排 500ms 防抖（`unref` 防止 Node 测试环境吊住进程），`flush` 串行提交（校验 + `form.mutate` 差分 ops，pendingRef 保留最新草稿、保存期间又改动则再排一次）；旧的手动 `save` / `discard` 与「放弃 / 保存」按钮已删除 |
 | `line` | 函数（位于 `engineLogBlock` 内） | 引擎日志条目渲染器：把 NDJSON 事件拼成 `[phase] kind detail` 单行 |
 | `zh` / `en` | 函数 | 中 / 英词典工厂（值必须为字符串，否则 `t()` 回退返回键名） |
 | `mount` | 函数 | `plugins.item` 插槽的注册闭包 |
@@ -94,9 +94,9 @@ flowchart TB
 flowchart LR
   Panel["CodewikiPanel"] --> Head["标题栏<br/>编译任务 · N 个进行中"]
   Panel --> TabBar["标签条<br/>overview / tasks / sessions / settings"]
-  TabBar --> T1["ReposTab 总览<br/>调度卡片 + 仓库状态列表"]
+  TabBar --> T1["ReposTab 总览<br/>五格统计条 + 调度卡片 + 仓库列表"]
   TabBar --> T2["Tasks 任务<br/>进行中区（全部展开 + 并发总览）+ 历史折叠（外层 + 按仓库嵌套）"]
-  TabBar --> T3["SessionView 会话<br/>全局 LLM 请求日志 (embedded)"]
+  TabBar --> T3["SessionView 会话<br/>全局 LLM 请求日志 (embedded)，按工作区分组"]
   TabBar --> T4["settings<br/>内嵌 CodewikiCard"]
   Panel -. "任务行「会话」按钮" .-> SV1["SessionView 单任务模式<br/>占满面板整页"]
 ```
@@ -198,23 +198,25 @@ sequenceDiagram
   F-->>C: 快照（revision 变更才覆盖草稿）
   C->>C: draft = structuredClone(snap.value)
   Note over C: 用户编辑草稿（换 provider 清空 model/effort）
-  Note over C: save() 提交前校验
+  C->>C: 草稿与快照 JSON 不等#59 scheduleSave 排 500ms 防抖
+  Note over C: flush() 提交前校验
   C->>C: maxConcurrency 1-8 整数<br/>bigConcurrency 0 或 1-8<br/>requestLimit 1-1000
   C->>F: mutate(ops, revision)
-  F->>H: 差分 ops（仅 dirty 的键）
+  F->>H: 差分 ops（仅变化的键）
   H-->>F: accepted 或冲突
   alt 冲突
     F-->>C: false
-    C-->>C: 显示「保存冲突：设置已被他处修改，请重试」
+    C-->>C: 状态行 error：「保存失败，稍后会重试」
   else 成功
     F-->>C: true（订阅触发回读新 revision）
-    C-->>C: 显示「已保存。」
+    C-->>C: 状态行 saving → saved「已保存」
   end
 ```
 
 要点：
 
-- **草稿隔离**：`snapshot`（服务端值）与 `draft`（编辑态）分离，`dirty` 由两者 `JSON.stringify` 比对得出，只有 dirty 时「放弃 / 保存」按钮才可点；
+- **草稿隔离与自动保存**：`snapshot`（服务端值）与 `draft`（编辑态）分离；草稿与快照 `JSON.stringify` 不等即经 `scheduleSave` 排一次 500ms 防抖提交——界面上不再有「保存 / 放弃更改」按钮，状态行常显 idle「改动会自动保存」/ saving「保存中…」/ saved「已保存」/ error「保存失败，稍后会重试」（校验失败时附「立即重试」，`writable=false` 时附「当前配置只读，改动不会落盘」）；
+- **串行防抖提交**：`flush` 串行执行（`savingRef` 未完成不并发），`pendingRef` 保留最新草稿，保存期间又改动则 `finally` 里再排一次；组件卸载前补提交一次未落盘的草稿，切走面板不丢值；
 - **乐观并发**：`mutate(ops, snapshot.revision)` 携带 revision，他处改过则返回 false 报冲突，不强制覆盖；
 - **差分提交**：只把 `draft[key] !== base[key]` 的键生成 `{ op: 'set', path: [key], value }` 操作，覆盖 enabled / 并发 / 模型 / 大档 / 原生引擎 / 调度 / 排除清单等 27 个键（此前只能改配置文件的 `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs` 四项已纳入表单，原「兜底档位 `sessionTier`」输入框已移除）；
 - **模型目录联动**：拉不到 `/api/codewiki/models` 时（`catalogError`）整体退回「手填 provider / model id」形态，不阻断保存；已配置但目录里消失的 provider 保留为 `__custom` 选项，避免静默丢配置；换 provider 时自动清空 model 与 effort；

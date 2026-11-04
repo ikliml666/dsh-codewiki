@@ -236,7 +236,7 @@ sequenceDiagram
 协调机制一览：
 
 - **实例身份**：每个 `createJobService` 拿到随机 `instanceId`；tick 只推进本实例作业，外实例作业靠 `planForeignJob` 决定「接管（adoptOrphan）/ 作废（排队项从未真正开始）/ 离开」。
-- **脏标记 + dirtyIds**：只有状态变更过的 job 才进落盘合并集合，防止无事可做的旧实例用过期快照覆盖新实例现场。
+- **脏标记 + dirtyIds**：只有状态变更过的 job 才进落盘合并集合，防止无事可做的旧实例用过期快照覆盖新实例现场。合并后的落盘统一走 `createJobsStore.save`（临时文件 + fsync + rename 的原子写，序列化时拦截凭证与函数值），`flush` 与 `saveJobs` 不再各自直接写 `JOBS_FILE`。
 - **取消终态化**：取消到达时若原生结果已落地，按真实结果收尾而不丢弃产物；否则 abort 进程树并置 `cancelled`。
 - **停止即失效**：`stop()` 后入口与 flush 双重让路，防止飞行中的旧 tick 把已终态任务「复活」。
 

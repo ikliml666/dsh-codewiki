@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "95f67f64afd01fa0d64d11ef4c98a9f90a38629e"
+    "headCommit": "befac126c21d1517664bc39d5e6cc76a888bbf9e"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
-    "headCommit": "95f67f64afd01fa0d64d11ef4c98a9f90a38629e",
+    "headCommit": "befac126c21d1517664bc39d5e6cc76a888bbf9e",
     "committed": [],
     "staged": [],
     "unstaged": [
@@ -35,8 +35,6 @@
       "test-engine-quality-gate.mjs"
     ],
     "untracked": [
-      ".tmp-keys.mjs",
-      ".tmp-probe-tabs.mjs",
       "lib/engine/wiki-links.js"
     ],
     "deleted": [],
@@ -78,8 +76,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit e78edfa06fb6（24 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1w9rrg-t-native（28 个文件）"
+    "工作区未提交改动已合成临时 commit 9b8b27063de3（22 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1xi4oy-10-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-04T09:17:05.931Z"
+  "updatedAt": "2026-11-04T09:51:42.637Z"
 }
