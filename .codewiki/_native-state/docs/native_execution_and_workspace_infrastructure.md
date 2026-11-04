@@ -108,7 +108,7 @@ flowchart LR
 
 **依赖注入设计：** 所有实现都可通过 `deps` 注入（`deps.doctor` / `deps.runEngine` / `deps.gate` / `deps.apply` / `deps.bridge` / `deps.collectChangeSet` / `deps.snapshot` …）。测试可以用假 `runEngine` + 真实 gate/apply，既覆盖接线又覆盖裁决。
 
-**统一出口 `settle()`：** 所有分支（取消、环境失败、引擎失败、成功）都经过同一函数构造 `EngineResult`，保证 outcome 合法（done 不许带 blockers、partial 必须带 blockers、failed 必须有 error），并携带现场证据：`incremental`（决议现场）、`gate` / `apply` / `engineLock` / `artifacts`（含 `rawTree` 留档目录）、`notes`。三个基线与计数事实**分开记、各有来源**：`baselineEligible` 是质量门许可（`report.baselineEligible === true && !stateIncomplete`）；`baselineAdvanced` 是落地器事实（`applyRes.baseline.advanced === true`），兼容字段 `canAdvanceBaseline` 读它——此前没有任何业务分支传过 `baselineAdvanced`，JobService 落账的 `canAdvanceBaseline` 恒为 false，与「基线其实已经推进」的事实相反；`writtenCount` 只认落地器的实际写入数（0 就是 0），不再回退引擎自报值——曾写成 `written || 引擎自报值`，于是整批回滚的一轮在账上仍是「写入了 N 篇」，取消/失败的结果被引擎的意图数洗白。
+**统一出口 `settle()`：** 所有分支（取消、环境失败、引擎失败、成功）都经过同一函数构造 `EngineResult`，保证 outcome 合法（done 不许带 blockers、partial 必须带 blockers、failed 必须有 error），并携带现场证据：`incremental`（决议现场）、`gate` / `apply` / `engineLock` / `artifacts`（含 `rawTree` 留档目录）、`notes`。三个基线与计数事实**分开记、各有来源**：`baselineEligible` 是质量门许可（`report.baselineEligible === true && !stateIncomplete`）；`baselineAdvanced` 是落地器事实（`applyRes.baseline.advanced === true`），兼容字段 `canAdvanceBaseline` 读它——此前没有任何业务分支传过 `baselineAdvanced`，JobService 落账的 `canAdvanceBaseline` 恒为 false，与「基线其实已经推进」的事实相反；`writtenCount` 只认落地器的实际写入数（0 就是 0），不再回退引擎自报值——曾写成 `written || 引擎自报值`，于是整批回滚的一轮在账上仍是「写入了 N 篇」，取消/失败的结果被引擎的意图数洗白。最后，若质量门报告了 `report.baseline.consumedInput`（产物 commit 与本轮合成快照一致、即「这轮把工作区未提交改动也写进了文章」），settle 前先把它压进 `notes`——基线推进过去靠「工作区必须干净」把关，现在改为认快照一致性，那「吞了哪些未提交改动」就必须让人看得见。
 
 ### 2. 增量决议（runNativeJob 1.5 段 + native-state.js）
 
@@ -185,7 +185,7 @@ flowchart LR
 
 - 用户的分支、HEAD、工作区、真实 index **一个字节都不动**（`GIT_INDEX_FILE` 指向独立临时文件）；
 - 得到的 sha 是真实可达 commit（`snapshotExists()` 用 `cat-file -t` 校验为 `commit`），引擎写进 `metadata.generation_info.commit_id` 后，下一轮能拿它做 old_commit；
-- 它不挂在任何 ref 上，**不能当前移的基线**（gc 后自然消失）——这是对的，质量门仍可对「工作区有未提交改动」如实判 partial；
+- 它不挂在任何 ref 上，**不能当前移的基线**（gc 后自然消失）——这是对的，基线仍由 cw 记成 HEAD，未提交改动的连续性靠 native-state 的 `unconsumed` 携带，不靠基线自指；产物 commit 等于快照时，质量门不再把这批未提交改动判成 `uncommitted-input` 缺陷，而是记成 `report.baseline.consumedInput`（快照 commit + 路径清单），由 `runNativeJob` 在终态 notes 里如实报出「这轮吞了哪几个未提交源码改动」；
 - `shortSha(sha)` 取前 12 位供日志/note 显示。
 
 **失败语义：** 造不出快照**不算编译失败**（git 太旧/对象只读时退回用 HEAD 记账并记 note）——快照是对齐精度的改进，不是编译成立的前提。
@@ -246,6 +246,7 @@ sequenceDiagram
 | 终态由谁裁决 | 三段（引擎/门/落地器）最弱环，`runNativeJob` 统一 `settle()`，不允许任何一步被洗白 |
 | 全量 vs 增量 | 证据决议：受管状态齐全 + 版本兼容 + 基线可达 + 独立 docsDir → `update`（rung 3），否则显式 `full` 并记 `incremental-fallback` |
 | 未提交改动怎么对齐 | 临时 commit 快照（独立 index、不挂 ref）作 `commitId`；失败退回 HEAD 记账 |
+| 吞了哪些未提交改动 | 产物 commit 与快照一致 → 门记 `baseline.consumedInput`，`runNativeJob` 在终态 notes 里报出路径清单与快照短 sha |
 | 未提交改动的账 | `state.json` 的 `unconsumed` 每轮并入变化集，出现在 `git diff base..HEAD` 才移出 |
 | 状态为什么放 `_native-state` | `cw index` 只跳过 `_` 前缀；否则持久化文章被收成第二份索引 |
 | 无变化轮 | 不重写状态（指纹比对）、不裁旧状态、不推进基线/提交 |

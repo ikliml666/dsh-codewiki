@@ -199,7 +199,7 @@ sequenceDiagram
 
 **为什么必须读「已提交」基线**（`git show HEAD:.codewiki/_meta.yaml`，而不是工作区文件）：本仓库的自动提交是插件侧异步做的，存在「已写入、未提交」窗口。把工作区的 `_meta.yaml` 当基线，等于把一堆未提交的产物宣布成「已消化」——下次编译的 base 会指向 git 里根本不存在的状态，变化要么重复消费、要么永久失明。
 
-**为什么快照 commit 不算 `commit-mismatch`**：本轮若已把工作区改动合成临时 commit（native-run 的快照段，不挂 ref），产物对应那棵「含工作区内容」的树。它不等于 HEAD 不是「对不上代码」，而是「对上了比 HEAD 更完整的代码」；基线推进仍由 `uncommitted-input` 拦住——快照不挂 ref，把它记成已提交基线是不可逆的「变化悄悄丢」。
+**为什么快照 commit 不算 `commit-mismatch`**：本轮若已把工作区改动合成临时 commit（native-run 的快照段，不挂 ref），产物对应那棵「含工作区内容」的树。它不等于 HEAD 不是「对不上代码」，而是「对上了比 HEAD 更完整的代码」；此时脏工作区不再判 `uncommitted-input` 缺陷，而是记成 `baseline.consumedInput`（快照 commit + 未提交路径清单）作为证据——「这轮吞了哪几个未提交改动」由 native-run 在终态 notes 里如实报出。基线仍不拿快照当账：cw 记 HEAD，未提交路径的连续性靠 native-state 的 `unconsumed` 携带，不靠基线自指。
 
 ---
 
@@ -227,7 +227,7 @@ sequenceDiagram
 | `baselineEligible` / `canAdvanceBaseline` | 是否允许推进编译基线（后者是兼容字段，语义完全一致） |
 | `articles` / `rendered` | 逐篇裁决结果（`action: write/skip`、缺陷计数）与渲染全文 |
 | `defects` / `degradations` / `stale` / `blockers` | 三类问题清单；`blockers` = defects + degradations + 阻塞性 stale（`baseline-uncommitted`） |
-| `counts` / `baseline` | 页数、可写/跳过/未映射计数；headCommit 与 artifactCommit 对照 |
+| `counts` / `baseline` | 页数、可写/跳过/未映射计数；headCommit 与 artifactCommit 对照，外加 `consumedInput`（产物 commit 等于本轮快照时的快照 commit 与被吞掉的未提交路径清单，否则为 null） |
 
 ### `toQualityIssues(report) → Array<{name, issue}>`
 

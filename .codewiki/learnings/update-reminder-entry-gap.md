@@ -10,11 +10,11 @@ tags: [reminder, gating, invariant, bugfix, hook]
 
 会话系统提示里的 CodeWiki 维护提醒有一道硬门控：只有会话仓库根存在 wiki 入口 `CodeWiki.md` 时才注入——`systemPrompt` section 的 `text` 回调里 `fs.existsSync(path.join(cwd, 'CodeWiki.md'))` 为假即返回空串（index.js:148-149）。门控刻意不看 `.codewiki/` 目录是否存在：半途建出的空骨架（只有空子目录）会骗过目录存在性检查，而提醒却指向一个读不到的入口；无 `CodeWiki.md` 即视为「没有可维护的 wiki」（设计说明见 index.js:148-150 的注释）。
 
-这套门控带来一个不变量缺口：流水线里原本没有任何环节负责创建该入口文件，于是「编译过、但仓库根没有 `CodeWiki.md`」的仓库永远收不到收尾提醒——提醒链路本身是通的，只是它的准入前提无人维护。缺口的注释写在入口生成器 `ensureWikiEntry` 前的注释（index.js:286-288）。
+这套门控带来一个不变量缺口：流水线里原本没有任何环节负责创建该入口文件，于是「编译过、但仓库根没有 `CodeWiki.md`」的仓库永远收不到收尾提醒——提醒链路本身是通的，只是它的准入前提无人维护。缺口的注释写在入口生成器 `ensureWikiEntry` 前的注释与定义（index.js:418-422）。
 
 本条目记录三件事：
 
-1. **创建者补齐**：`ensureWikiEntry`（index.js:286-319）在编译收尾阶段检查仓库根，缺失就按文章语言写一份 `CodeWiki.md` 模板；已有入口（人工/模型速查手册）绝不覆盖。
+1. **创建者补齐**：`ensureWikiEntry`（index.js:422-455）在编译收尾阶段检查仓库根，缺失就按文章语言写一份 `CodeWiki.md` 模板；已有入口（人工/模型速查手册）绝不覆盖。
 2. **提醒本身的两段式结构**：同一个 section 拼装 `reminderText`（index.js:3990-3999，静态维护指令）与 `commitHintText`（index.js:3990-4021，动态「产物待提交」提醒）。后者由「最近一次成功编译的完成时刻」与「`.codewiki/` + `CodeWiki.md` 最后一次 git 提交时刻」比较派生，零持久状态，提交后时间戳反超即自动静默。
 3. **两条通知链并存**：系统提示 section 是「每次组装系统提示都求值」的兜底（由 `installUpdateReminder` 注入，index.js:1757-1789），编译终态还有一条 `wakeCompileSession` 主动 steer 进发起会话（index.js:3157-3172），后者只对有 `sessionId` 的 job 生效，且 0.10.9 起仅当自动提交未成功时才打扰会话（门控见 index.js:3157）。
 
@@ -23,9 +23,9 @@ tags: [reminder, gating, invariant, bugfix, hook]
 ### 配置项
 
 - `Config.updateReminder`（index.js:61）：布尔，默认 `true`。描述即门控语义——「会话系统提示注入 CodeWiki 维护提醒（仅当会话仓库根存在 wiki 入口 CodeWiki.md 时出现，收尾时提醒更新 wiki）」。关闭时提醒回调在 index.js:61 直读并返回空串。
-- `Config.articleLanguage`（index.js:2124）：字符串，默认 `'中文'`。编译任务的 `job.language` 从这里回落，最终决定 `ensureWikiEntry` 写中文还是英文模板。
+- `Config.articleLanguage`（index.js:88）：字符串，默认 `'中文'`。编译任务的 `job.language` 从这里回落，最终决定 `ensureWikiEntry` 写中文还是英文模板。
 - `Config.autoUpdate`（index.js:4068）与 `Config.autoUpdateMin`（index.js:4068）：自动更新开关与扫描间隔（默认 30 分钟、最小 5）。自动调度走内部直调（`apply` 的 `autoScan`，index.js:4082-4109，其中 index.js:3341 以空 exec `{}` 调用 `generateDef.execute` 提交编译），不带 `sessionId`，因此这类编译完成后只能靠 `commitHintText` 兜底。
-- `val(x)`（index.js:88-90）：配置读取辅助，兼容 Zod 代理对象的 `.get()` 与裸值。提醒回调正是靠它在每次求值时读到**实时**开关，而不是 apply 时的配置快照。
+- `val(x)`（index.js:101-103）：配置读取辅助，兼容 Zod 代理对象的 `.get()` 与裸值。提醒回调正是靠它在每次求值时读到**实时**开关，而不是 apply 时的配置快照。
 - `liveConfig(config)`（index.js:92-134）：把配置快照成普通对象（含并发钳制与默认值兜底）。注意它**不含** `updateReminder` 字段——提醒开关只在 `val(config?.updateReminder)` 处直读（位于 `installUpdateReminder` 的 `text` 回调，index.js:646）。
 
 ### 入口生成（缺口修补点）
@@ -39,7 +39,7 @@ tags: [reminder, gating, invariant, bugfix, hook]
 
 ### 提醒文本构造
 
-- `reminderText(cwd)`（index.js:4023-4031）：拼接静态维护指令的字符串数组并 `join('\n')`，共 5 条：
+- `reminderText(cwd)`（index.js:4922-4931）：拼接静态维护指令的字符串数组并 `join('\n')`，共 5 条：
   - 声明本仓库存在 wiki（入口 `CodeWiki.md`），涉及代码改动的任务收尾必须调用 `codewiki_generate`（scope=auto 即可），learnings/、decisions/ 补文章与索引刷新由流水线完成，不要手工写 `.codewiki/` 下的文章（手改不进流水线、不被面板记录、会被下次编译覆盖）（index.js:4）；
   - `codewiki_generate` 是后台编译，调用即返回，不要等待，需要进度时用 `codewiki_progress`；编译完成的产物由插件自己提交入库（autoCommit 开，默认开：主题分支提交后合并回原分支），无需跑 git（index.js:7）；
   - 用模板串插入 `cwd`：入口与 `.codewiki/` 全部内容位于 `${cwd}`，在仓库根之外读写一律用绝对路径（index.js:1283）；
@@ -52,11 +52,11 @@ tags: [reminder, gating, invariant, bugfix, hook]
   - 取提交时刻：`spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', ...WIKI_PATHS], { encoding: 'utf8', timeout: 5000, windowsHide: true })`（index.js:45），`WIKI_PATHS` 为 `['.codewiki', 'CodeWiki.md']`（index.js:45），只覆盖这两个路径，5s 超时。
   - 判定：前置条件仅当 `autoCommitState(latest) === 'pending'`（调用见 index.js:4003，函数定义见 index.js:4003-4008）才进入 git 检查；`commitSec` 由 `git log` 的 `%ct` 解析（index.js:4003），`jobSec = Math.floor(Date.parse(finishedAt) / 1000)`（index.js:4003），当 `jobSec > commitSec`、或 git 没给出有限时间戳（这两个路径尚未提交过）时输出提醒（index.js:4003）。
   - 文案（index.js:81-85）：「【CodeWiki 产物待提交·一次性】…（任务 id，写入 N 篇文章），插件自动提交未执行（原因）或编译产物尚未提交 git」，并给出操作约束——只 add `.codewiki/` 与 `CodeWiki.md` 两个路径、建议 `docs(wiki)` 前缀、不要 `git add -A`、不需要提交就忽略本提醒；不要为了本提醒中断当前任务或轮询编译进度。
-  - 非 git 仓库、`git` 不在 PATH、jobs 读取失败：整个 try 块吞掉异常（index.js:81），返回空串即不提醒。
+  - 非 git 仓库、`git` 不在 PATH、jobs 读取失败：整个 try 块吞掉异常（index.js:4917），返回空串即不提醒。
 
 - `samePath(a, b)`（index.js:3991-3994）：路径归一（`path.normalize` + 去尾部分隔符 + 小写）后比较，Windows 大小写不敏感地定位任务 cwd。`commitHintText` 用它判断 job 是否属于本仓库（index.js:3990）。
 
-- `autoCommitState(job)`（index.js:1750-1755）：从 job.autoCommit 字段判定 `'committed'` / `'no-changes'` / `'pending'`，供 `commitHintText` 与 `wakeCompileSession` 共用同一结论。
+- `autoCommitState(job)`（index.js:2094-2100）：从 job.autoCommit 字段判定 `'committed'` / `'no-changes'` / `'pending'`，供 `commitHintText` 与 `wakeCompileSession` 共用同一结论。
 
 ### 系统提示注入
 
@@ -65,15 +65,15 @@ tags: [reminder, gating, invariant, bugfix, hook]
   - 幂等：函数内 `WeakSet`（index.js:4036）记录已装过的 agent，`seen.has(agent)` 即跳过（index.js:3683），同一个 agent 只装一次。
   - 注入点：`agent.ctx?.inject?.(['systemPrompt'], ...)`（index.js:4040），回调里取 `rc2?.systemPrompt ?? rc2`（index.js:4041），缺 `section` 方法则跳过（index.js:4042）。
   - section 声明（index.js:680-682）：`name: 'codewiki:update-reminder'`（index.js:680）；`order` 取 `sp.getSectionOrder('TOOL_REPORT') + 1`，服务没有该方法时回退 `2900 + 1`（index.js:680），即紧接工具报告段之后。
-  - `text` 回调（index.js:646-652）每次组装系统提示都重新求值，因此开关、cwd、入口文件存在性全是实时值，切项目/删 wiki/关开关都无需重启：
+  - `text` 回调（index.js:4945-4952）每次组装系统提示都重新求值，因此开关、cwd、入口文件存在性全是实时值，切项目/删 wiki/关开关都无需重启：
     1. `val(config?.updateReminder) === false` → 返回空串（index.js:4023）；
     2. `agent.session?.header?.cwd` 为空、或该目录下没有 `CodeWiki.md` → 返回空串（index.js:1283-1284）；
-    3. 否则 `commitHintText(cwd)` 有内容就拼成 `reminderText + 两空行 + hint`，没有就只返回 `reminderText`（index.js:4023-4024）。
+    3. 否则 `commitHintText(cwd)` 有内容就拼成 `reminderText + 两空行 + hint`，没有就只返回 `reminderText`（index.js:4922-4923）。
   - 存量会话补齐：`ctx.inject(['agents'], ...)` 遍历 `agents.list()` 逐个 install（index.js:4062-4067）——注释指出 cordis 下访问未声明 inject 的服务属性本身即抛，必须经 inject 取服务；新会话由 `ctx.on('agent/created')` 兜住（index.js:4062）。
 
 ### 收尾与终态唤醒
 
-- `tickIndex(job)`（index.js:2774-2841）：index 阶段的处理器，串起「收尾命令 → 入口补齐 → 终态唤醒（或转 commit 阶段）」。
+- `tickIndex(job)`（index.js:3254-3386）：index 阶段的处理器，串起「收尾命令 → 入口补齐 → 终态唤醒（或转 commit 阶段）」。
   - 仅当 `job.writtenCount > 0` 才执行收尾命令（index.js:162）：`runCw(binary, job.cwd, ['index'], 120000)`（index.js:162）与 `['meta', 'update']`（index.js:203），两个 exit code 记进一条 note（index.js:203）；index 成功后还要 `normalizeIndexLinks(job.cwd)` 把 `_index.md` 链接头的 `\` 规范化为 `/`（index.js:203）。
   - 入口补齐被单独的 try/catch 包住（index.js:286-288）：`ensureWikiEntry(job.cwd, job.language)` 返回 true 时记 note「仓库根缺 CodeWiki.md 入口，已自动生成（已有入口不覆盖）」（index.js:286）；抛错只记「CodeWiki.md 入口生成失败（忽略）」（index.js:286），不让编译任务失败——入口存在性不配决定编译成败。
   - 一篇都没写成功时记「跳过 index/meta update」（index.js:2805），仍然推进到 done 或 commit。
@@ -134,7 +134,7 @@ tags: [reminder, gating, invariant, bugfix, hook]
 ## Connections
 
 - [[core-logic]]：`apply` 装配链（index.js:1774-1838）与 `createJobService` 的阶段机（index.js:1774 起）是本提醒链路的宿主。
-- [[compile-pipeline]]：`commitHintText` 读取的 jobs 记录由编译流水线写入——`stage`、`writtenCount`、`finishedAt` 三个字段（index.js:1487-1489）就是提醒的判定依据。
+- [[compile-pipeline]]：`commitHintText` 读取的 jobs 记录由编译流水线写入——`stage`、`writtenCount`、`finishedAt` 三个字段（index.js:2023-2026）就是提醒的判定依据。
 - [[article-index-and-meta]]：`cw index` / `cw meta update` 与 `_index.md` 路径规范化（index.js:2754-2758）同属收尾动作，提醒指向的产物由它们生成。
 - [[testing-suite]]：`ensureWikiEntry`（index.js:3990）与 `commitHintText`（index.js:3990）都是 export 形态，`commitHintText` 还把 `jobs` 做成可注入的默认参数，便于测试直调而不碰真实 `JOBS_FILE`；本次源码清单未包含测试文件，故不在此标注其行号。
 - [[cw-binary-source-lost]]：同模块的另一条学习记录，讲 `cw` 二进制来源与路径规范化的历史缺口（注释见 index.js:199-201 与 .codewiki/learnings/cw-binary-source-lost.md）；本条是「入口文件存在性」这一侧的不变量缺口。

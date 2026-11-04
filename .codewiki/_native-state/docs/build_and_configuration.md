@@ -17,7 +17,7 @@
 ```mermaid
 flowchart TB
     subgraph PKG["包清单层"]
-        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.38<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
+        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.39<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
         DSHMETA["dsh 元数据<br/>client.platform = web<br/>bundle.patch = ./cordis.patch.yml"]
     end
 
@@ -54,7 +54,7 @@ flowchart TB
 
 `package.json` 是插件被宿主识别的入口契约，关键字段：
 
-- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.38"`，`"private": true`（本地 link 包，不发布）。
+- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.39"`，`"private": true`（本地 link 包，不发布）。
 - **模块形态**：`"type": "module"`（纯 ESM），`"main": "index.js"`，`"exports"` 暴露两个面：`.` → `index.js`（插件主半边），`./client` → `client.js`（侧边栏面板半边，见 [client_panel_ui](client_panel_ui.md)）。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——宿主版本不够时直接拒绝装载。
 - **运行时依赖**：仅 `@deepseek-ai/schemastery`（配置 schema 校验），其余全部是宿主自带能力，刻意保持零重依赖。

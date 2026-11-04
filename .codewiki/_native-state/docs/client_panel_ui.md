@@ -212,6 +212,8 @@ sequenceDiagram
 - **差分提交**：只把 `draft[key] !== base[key]` 的键生成 `{ op: 'set', path: [key], value }` 操作，覆盖 enabled / 并发 / 模型 / 大档 / 原生引擎 / 调度 / 排除清单等 27 个键（此前只能改配置文件的 `nativeEngine` / `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs` 四项已纳入表单，原「兜底档位 `sessionTier`」输入框已移除）；
 - **模型目录联动**：拉不到 `/api/codewiki/models` 时（`catalogError`）整体退回「手填 provider / model id」形态，不阻断保存；已配置但目录里消失的 provider 保留为 `__custom` 选项，避免静默丢配置；换 provider 时自动清空 model 与 effort；
 - **思考程度档位**：优先取 `/api/codewiki/model-efforts` 返回的 `efforts` 列表；目录未声明时退回通用档位 `GENERIC_EFFORTS = ['off','low','medium','high','xhigh','max']`，选了模型不支持的值由服务端 `llmChat` 兜底剥档重试。
+- **大档的通道边界**：大档 section 的提示语 `secBigHint`（`zh` / `en` 两份词典同文）写明——超过普通 110k 单请求预算的模块换大档模型，这一行为只对 Node 兼容通道生效（关闭「使用原生引擎」时）；原生通道的输入预算由引擎在内部按模块切分，不经这一档。
+- **`requestLimit` 预填默认**：草稿中没有该键时输入框预填 `100`（提交前校验边界仍是 1–1000）。
 
 ---
 

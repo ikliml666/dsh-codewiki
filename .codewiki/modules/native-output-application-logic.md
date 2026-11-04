@@ -74,7 +74,7 @@ flowchart TD
 | `applyNativeOutput` | `apply-plan.js` | 阶段 3 主入口：完整执行四步事务流水线 |
 | `defaultRunCw` | `apply-plan.js` | 默认 `cw` CLI 通道（同步 spawn 包装成统一接口） |
 | `findOrphanPages` | `apply-plan.js` | 扫描孤儿页：`source_files` 全部失效的存量模块页 |
-| `findStaleModulePages` | `apply-plan.js` | 扫描聚类重构残骸：slug 已不在当前模块树的引擎产出页 |
+| `findStaleModulePages` | `apply-plan.js` | 扫描聚类重构残骸：slug 已不在当前模块树的引擎产出页；并回收无 `fsoft_page` 标记的旧通道（0.16.0 之前）模块页，结果项带 `legacy` 标记 |
 | `auditExistingArticles` | `apply-plan.js` | 存量体检：扫 `.codewiki/` 下非 `_` 前缀的存量文章，error 级坏页记 `existing-bad-article`（不回滚、挡基线） |
 | `checkWriteTargets` | `apply-plan.js` | 写集白名单校验（纯函数） |
 | `checkDeleteTargets` | `apply-plan.js` | 删除集白名单校验（与写集共用 `checkTargetPath` 同一把尺子） |
@@ -241,15 +241,23 @@ sequenceDiagram
 
 ### `findStaleModulePages`
 
-判据：页有 `fsoft_page` 字段（证明是本引擎产出）、且页名 slug **不在当前 module_tree 的任一模块**里 → 聚类重构后被改名 / 合并的旧模块页。
+分两类残骸，结果项统一带 `legacy` 标记（旧通道页为 `true`，原生产出页为 `false`）：
 
-它解决 `findOrphanPages` 覆盖不到的情况：聚类重构让模块改名后，旧页的 `source_files` 指向的文件**全都还在**，只是不再归属任何模块。判据必须有 `fsoft_page` 才动，人工页一律不碰。
+1. **本引擎产出页**（frontmatter 有 `fsoft_page` 字段）：页名 slug **不在当前 module_tree 的任一模块**里 → 聚类重构后被改名 / 合并的旧模块页。
+2. **0.16.0 之前 Node 通道生成的旧页**（无 `fsoft_page` 标记）：命中两条可证特征之一——① `title` 恒等于自己的文件名 slug（旧通道 frontmatter 模板是 `title: <模块名>`）；② 落在 `modules/` 的子目录里（原生通道的模块页永远 flat，映射只产出 `modules/<slug>.md`）——再叠加两道闸（`type: module`、`source_files` 非空）才当成旧页回收。
+
+它解决 `findOrphanPages` 覆盖不到的情况：聚类重构让模块改名后，旧页的 `source_files` 指向的文件**全都还在**，只是不再归属任何模块。
+
+两条刻意的保守修正：
+
+- **嵌套页不靠 slug 豁免**：原生页永远是 flat，落在子目录里只可能来自旧通道；旧树按子模块命名目录，重构后那篇页的 basename 很可能与新模块的 slug 撞上（真机上就这么漏掉过一篇）。所以嵌套页即使 slug 对得上当前树也不豁免。
+- **没有 `fsoft_page` 不等于人工页**：旧通道页就是没有这个标记。但「没有标记就一律不动」对人工页的保护不能丢——两道闸（`type=module`、`source_files` 非空）就是对人的让步：宁可漏掉一篇写得像旧页的人工页，也不凭页名删人写的内容。旧页若把 title 写成「apply_plan（阶段 3 落地器）」这种描述性标题，① 抓不到、但②（嵌套位置）兜底，于是一篇 739 行的过期页不会在 1335 行的源码旁边永远留着。
 
 ```mermaid
 flowchart LR
     subgraph "两类残骸"
         O["孤儿页<br/>source_files 全部失效"]
-        S["残留模块页<br/>slug 不在当前树"]
+        S["残留模块页<br/>slug 不在当前树<br/>或旧通道无 fsoft_page 标记的嵌套/同名页"]
     end
     O --> DEL["deleteFiles 入本轮写集的对立集<br/>同事务、可回滚、同次提交"]
     S --> DEL

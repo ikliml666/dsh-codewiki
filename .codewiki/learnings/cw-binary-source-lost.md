@@ -30,7 +30,7 @@ tags: [cw-cli, binary, path-separator, windows, lesson, defense]
 
 ### 插件侧：二进制定位与进程封装
 
-- **`resolveBinary`**（`index.js:140-160`）：决定调用哪个 `cw`。优先级为 `cfg.binaryPath`（`index.js:141`）→ PATH 探测（Windows 用 `where` `index.js:146`、POSIX 用 `which` `index.js:152`）→ 插件自带 `bin/cw(.exe)` 兜底（`index.js:157-158`）→ 裸字符串 `cw`（`index.js:159`）。`index.js:142-143` 的注释写明 **PATH 优先**的理由：用户安装的 `cw` 与其 codewiki 源码同步演进，捆绑副本只在 PATH 找不到时兜底。⚠️ 由于 `vendor/codewiki` 已不在工作树，PATH 上装的 `cw` 当前**无法用仓库源码验证**其架构/修复版本——这是本学习页的危险点。
+- **`resolveBinary`**（`index.js:185-200`）：决定调用哪个 `cw`。优先级为 `cfg.binaryPath`（`index.js:141`）→ PATH 探测（Windows 用 `where` `index.js:146`、POSIX 用 `which` `index.js:152`）→ 插件自带 `bin/cw(.exe)` 兜底（`index.js:157-158`）→ 裸字符串 `cw`（`index.js:159`）。`index.js:142-143` 的注释写明 **PATH 优先**的理由：用户安装的 `cw` 与其 codewiki 源码同步演进，捆绑副本只在 PATH 找不到时兜底。⚠️ 由于 `vendor/codewiki` 已不在工作树，PATH 上装的 `cw` 当前**无法用仓库源码验证**其架构/修复版本——这是本学习页的危险点。
 - **`runCw`**（`index.js:162-187`）：`spawn` 封装（`index.js:12` 引入 `spawn`/`spawnSync`），收集 stdout/stderr；超时（默认 120s，`index.js:162` 形参 `timeoutMs`、定时器 `index.js:164-167`）与 abort（`index.js:29-30`）都走 `child.kill('SIGKILL')`，统一 resolve 成 `{ exitCode, stdout, stderr, timedOut }`（error 分支 `index.js:140-144`、close 分支 `index.js:181-185`）。所有 `cw` 子命令（init / status / index / meta update / path / projects）都经它；`cw` 工具暴露的子命令白名单是 `CW_SUBCOMMANDS`（`index.js:29`），工具 execute 校验链在 `index.js:1562-1583`（启用开关 `index.js:1564`、cwd 归一化与存在性 `index.js:1565-1566`、args 非空 `index.js:1567-1568`、白名单 `index.js:1569-1571`），实际执行在 `index.js:1572-1573`（`resolveBinary` + 120s `runCw`）。
 - **`wikiPathFor`**（`index.js:1633-1638`）：跑 `cw path`（30s 超时 `index.js:1634`）取 wiki 目录；失败时回退到仓库内 `.codewiki`，`index.js:1637` 注释注明「与 wiki_path() 一致：wiki 在仓库内」——这条「仓库内化」契约正是 0.5.0.2 fork 的魔改点，现在只能靠二进制行为与这段注释保证。
 - **`readSourceFiles`**（`index.js:1613-1621`）：读文章 frontmatter 的 `source_files`；stale 逐篇更新时用它决定给模型喂哪些源码（解析细节拆在 `parseSourceFiles` `index.js:1599-1611`，同时支持行内数组 `[a,b]` 与缩进列表 `- a` 两种写法；无 `source_files` 的文章返回空数组）。stale 任务的 mission 文案来自 `batchArticleComposePrompt`（`index.js:1434`）与其他 prompt 构造器——“更新过期文章 … 以当前代码为准重写其内容，保留章节结构与 title/type/tags”——本文正是这条流水线的产物。
@@ -38,14 +38,14 @@ tags: [cw-cli, binary, path-separator, windows, lesson, defense]
 ### 插件侧：路径规范化的两层防线（0.5.0.1 遗产，当前唯一确定性防线）
 
 - **契约注释**（`index.js:189-198`）：把 `cw` 的三态输出与逐行清单固化成契约——`No wiki found. Run \`cw init\` first.` / `Wiki has not been compiled yet.` / `Wiki is up to date.` / `Changed since last compile (<hash>):` 加 `  M <file>` / `Stale articles:` 加 `  ! <article>`。注释首行（`index.js:189`）仍声明「本地 fork，源码 vendor/codewiki，行为基线上游 main 64323823」，历史段（`index.js:196-198`）仍写「见 vendor/codewiki/FORK.md 与 .codewiki/learnings/cw-binary-source-lost.md」——**FORK.md 已不在工作树，这段注释本身是漂移点，但保留作历史记录**。
-- **`normalizeArticlePath`**（`index.js:199`）：单行纯函数，把反斜杠统一替换为正斜杠；对 `undefined` 安全返回空串。是 `parseStatus` 和 stale 清单进插件后第一道规范化。
+- **`normalizeArticlePath`**（`index.js:321`）：单行纯函数，把反斜杠统一替换为正斜杠；对 `undefined` 安全返回空串。是 `parseStatus` 和 stale 清单进插件后第一道规范化。
 - **`parseStatus`**（`index.js:213-226`）：先用子串判定 `missing` / `uncompiled` / `clean` 三态（对应 `index.js:215-217`）；其余一律 stale，再用 `matchAll(/^\s+[M!]\s+(.+)$/gm)` 逐行分流（`index.js:220`）：`M` 走 changedFiles、`!` 走 staleArticles（两者都过 `normalizeArticlePath`，`index.js:222-223`）。
-- **`normalizeIndexLinks`**（`index.js:203-211`）：`cw index` 直接写盘 `_index.md`，本函数事后只修链接头（动机注释 `index.js:3049-3050`）——只替换 `[[` 到 `|` 之间那段的反斜杠（正则在 `index.js:207`），正文里的 `E:\ik\repo` 之类不受影响；文件不存在静默返回 `false`（`index.js:206`），无改动也返回 `false`（`index.js:208`），写回在 `index.js:209`，天然幂等。由 `tickIndex` 在 `cw index` 成功后调用（`index.js:3074`），命中时记 note「_index.md 链接路径已规范化（\ → /）」。
+- **`normalizeIndexLinks`**（`index.js:325-333`）：`cw index` 直接写盘 `_index.md`，本函数事后只修链接头（动机注释 `index.js:3049-3050`）——只替换 `[[` 到 `|` 之间那段的反斜杠（正则在 `index.js:207`），正文里的 `E:\ik\repo` 之类不受影响；文件不存在静默返回 `false`（`index.js:206`），无改动也返回 `false`（`index.js:208`），写回在 `index.js:209`，天然幂等。由 `tickIndex` 在 `cw index` 成功后调用（`index.js:3074`），命中时记 note「_index.md 链接路径已规范化（\ → /）」。
 - **`countWikiArticles`**（`index.js:229-241`）：递归统计 `.codewiki/` 下 `.md` 篇数（含 `_index`），总览卡展示用（注释 `index.js:228`）。
 
 ### 插件侧：索引收尾、入口补建与产物提交
 
-- **`tickIndex`**（`index.js:3049-3121`）：编译流水线的 index 阶段。仅当 `job.writtenCount > 0` 才动手（`index.js:261`）；先清孤儿模块文章（`index.js:203`，实现 `pruneOrphanModules` 在 `index.js:291-316`），取二进制（`index.js:4226`）后依次跑 `cw index` 与 `cw meta update`（`index.js:3070-3071`），退出码写进 note（`index.js:3072`），任一非 0 再补「编译基线可能未刷新」提示（`index.js:3073`）；`cw index` 成功后再调 `normalizeIndexLinks`（`index.js:3074`）。随后按 `symbolIncremental` 开关写符号快照（`index.js:3081-3102`，供下次 stale 做组件级比对），再 `ensureWikiEntry` 补建入口（调用点 `index.js:3104`，失败只记 note `index.js:3105-3107`）。收尾不再直接置终态：有产物且 `autoCommit` 开启时切到独立 `commit` 阶段（`index.js:3114-3116`，0.10.11 起），否则直接 `done` + 唤醒（`index.js:3118-3120`）。若一篇都没写成功，走「跳过 index/meta update」分支（`index.js:3108-3110`）。
+- **`tickIndex`**（`index.js:3049-3121`）：编译流水线的 index 阶段。仅当 `job.writtenCount > 0` 才动手（`index.js:261`）；先清孤儿模块文章（`index.js:203`，实现 `pruneOrphanModules` 在 `index.js:291-316`），取二进制（`index.js:4226`）后依次跑 `cw index` 与 `cw meta update`（`index.js:3070-3071`），退出码写进 note（`index.js:3072`），任一非 0 再补「编译基线可能未刷新」提示（`index.js:3073`）；`cw index` 成功后再调 `normalizeIndexLinks`（`index.js:3333`）。随后按 `symbolIncremental` 开关写符号快照（`index.js:3081-3102`，供下次 stale 做组件级比对），再 `ensureWikiEntry` 补建入口（调用点 `index.js:3104`，失败只记 note `index.js:3105-3107`）。收尾不再直接置终态：有产物且 `autoCommit` 开启时切到独立 `commit` 阶段（`index.js:3114-3116`，0.10.11 起），否则直接 `done` + 唤醒（`index.js:3118-3120`）。若一篇都没写成功，走「跳过 index/meta update」分支（`index.js:3108-3110`）。
 - **`tickCommit`**（`index.js:3123-3139`）：0.10.11 新增的提交阶段。调 `autoCommitWiki`（`index.js:3128`）并按三态记 note——成功（分支合并式 `index.js:3130-3131`、直接提交 `index.js:3132` 两种文案）、无改动（`index.js:3133`）、失败（`index.js:3134`）；然后 `done` + `finishedAt` + `onSettled` 唤醒发起会话（`index.js:3136-3138`）。中途死在本阶段的任务重启后重跑，`autoCommitWiki` 对已入库产物报 noChanges，幂等。
 - **`autoCommitWiki`**（`index.js:4186-4268`）：产物提交的唯一实现。完整安全边界注释在 `index.js:45-53`。pathspec 由 `WIKI_PATHS` 唯一定义（`index.js:4217`），磁盘存在性筛选在 `index.js:4193`。前置安全检查全部在分支切换之前：非 git 仓库（`index.js:4197`）、无 HEAD（`index.js:4198`）、merge/rebase/cherry-pick 进行中（`index.js:4200-4201`）、未解决冲突（`index.js:4203`）、路径被 ignore（`index.js:4207-4210`）、无改动（`index.js:4211`）、缺 git 身份（`index.js:4212-4213`）。提交信息在 `index.js:4216`（`docs(wiki): 更新 CodeWiki 编译产物`），`commitOn` 闭包在 `index.js:4217-4229`（`git add -- <paths>` `index.js:4219`、暂存核对 `index.js:4222`、git commit --no-verify `index.js:4226`）。随后走分支合并式：detached HEAD 或建分支失败降级为直接提交（`index.js:4232-4241`）；进入主题分支 `codewiki/wiki-<jobId>`（`index.js:4237`）后任何失败先切回原分支（`index.js:4242-4248`）；合并回原分支（`index.js:4253`），失败则中止合并、保留主题分支（`index.js:4254-4261`）；成功后 `git branch -d` 删主题分支（`index.js:4263`）。
 - **`ensureWikiEntry`**（`index.js:291-324`）：仓库根缺 `CodeWiki.md` 则生成入口，已有入口绝不覆盖（`index.js:3435`）；空 cwd 安全返回 false（`index.js:292`）。入口文案分两套：中文模板 `index.js:297-308`、英文模板 `index.js:310-320`；语言判定在 `index.js:296`（`/中文|zh/i`），调用点传 `job.language`（`index.js:3104`）。动机注释在 `index.js:288-290`：收尾提醒门控被收紧到仓库根入口文件（139052c），但流水线此前从不创建它，形成「编译过但无入口 → 永远收不到收尾提醒」的不变量缺口（另见 [[learnings/update-reminder-entry-gap|update-reminder-entry-gap]]）。
@@ -65,16 +65,16 @@ tags: [cw-cli, binary, path-separator, windows, lesson, defense]
 `Config`（`index.js:60-86`）由 `@deepseek-ai/schemastery` 定义，全部字段 `volatile()`；`liveConfig`（`index.js:92-134`）负责取默认值与夹取范围：
 
 - `binaryPath`（`index.js:62`）：`cw` 可执行文件路径；留空则 PATH 优先、再落插件自带 `bin/cw(.exe)`（见 `resolveBinary`；liveConfig 的 trim 在 `index.js:140`）。⚠️ 因 `vendor/codewiki` 缺失，PATH 上的 `cw` 不可验证来源。
-- `enabled`（`index.js:61`）：停用后工具立即报错。
+- `enabled`（`index.js:72`）：停用后工具立即报错。
 - `autoCommit`（`index.js:81`，liveConfig 在 `index.js:3123`）：编译完成后由插件自己提交产物（0.10.11 起走 `tickCommit`/`autoCommitWiki` 分支合并式）；关掉则 `tickIndex` 直接终态（`index.js:3049`）。
-- `symbolIncremental`（`index.js:79`）：stale 增量按符号级判定（直接改变本文关心的 stale 更新路径，CHANGELOG 0.13.x 多节记录）。
+- `symbolIncremental`（0.17.x 已删除：符号级增量随 Node 通道退役，原生通道由 FSoft updater rung3 接管）：stale 增量按符号级判定（直接改变本文关心的 stale 更新路径，CHANGELOG 0.13.x 多节记录）。
 - `updateReminder`（`index.js:80`）：会话系统提示注入维护提醒（仅当仓库根存在 `CodeWiki.md`，判定在 `installUpdateReminder` `index.js:4314`）。
 
 其余与本主题相关常量：`WIKI_PATHS`（`index.js:45`，自动提交只认的产物 pathspec）、`ORPHAN_TAKEOVER_MS`（`index.js:1848`，孤儿接管阈值，默认 5 分钟）、`JOBS_FILE`（`index.js:1655`，默认在 `os.tmpdir()`，可用 `DSH_CODEWIKI_JOBS_FILE` 隔离）、`TICK_MS`（`index.js:1656`，默认 10000）、`SESSION_TASK_DIR`（`index.js:1661`）、`REPOS_FILE`（`index.js:1854`）、`BATCH_TOKEN_BUDGET`（`index.js:586`，默认 110000）、`BATCH_TOKEN_HARD_LIMIT`（`index.js:591`，默认 128000）、`isDeadCompileTarget`（`index.js:423-431`）。
 
 ### 行号锚点校正（同源守卫，避免本页自身行号漂移）
 
-- **`numberLines`**（`index.js:602-604`）：内联源码每行加 `行号| ` 前缀，模型引用行号有据可依。
+- **`numberLines`**（`index.js:832-834`）：内联源码每行加 `行号| ` 前缀，模型引用行号有据可依。
 - **`fixAnchors`**（`index.js:779-996` 区间，含 `repairUnclosedFrontmatter` `index.js:757-777`、`changelogSections` `index.js:622-630`、`fixChangelogAnchors` `index.js:632-748`）：文章落盘前把 `file:NN(-MM)` 锚点对照 `source_files` 源码确定性校正（符号绑定规则 `index.js:77-81` 注释，与 `test-wiki-anchors.mjs` 同源，见 Connections）。本页所有行号须以 `read_code` 返回前缀为准——这正是 0.5.0.3 立规、本页被点名的场景（CHANGELOG.md 0.13.6/0.13.7 段详述）。
 
 ## Architecture
@@ -133,9 +133,9 @@ normalizeIndexLinks（index.js:203-211，仅 cw index exit 0 后由 tickIndex �
 ### 编译收尾的 index → commit 阶段（0.10.11 起）
 
 1. `writtenCount === 0`？直接跳过 `cw index` / `cw meta update`，记 note 后不进 commit（`index.js:3108-3110`）。
-2. `resolveBinary` 取二进制（`index.js:3068`）——注意这里用**运行时配置**，面板改 `binaryPath` 立即生效。⚠️ 见 Overview：PATH 优先让"不同 cw 版本"风险在插件层重新出现。
+2. `resolveBinary` 取二进制（`index.js:3303`）——注意这里用**运行时配置**，面板改 `binaryPath` 立即生效。⚠️ 见 Overview：PATH 优先让"不同 cw 版本"风险在插件层重新出现。
 3. 两次 `runCw`：`cw index` 与 `cw meta update`（`index.js:3070-3071`），退出码写进 note（`index.js:3072`）。
-4. `cw index` 成功后调 `normalizeIndexLinks`（`index.js:3074`）。
+4. `cw index` 成功后调 `normalizeIndexLinks`（`index.js:3333`）。
 5. 符号快照：`symbolIncremental` 开启时 `extractCurrentGraph`（`index.js:1924`）+ `slimGraph` 写入 `.codewiki/temp/`（快照位置经 `lib/incremental.js` 的 `saveSnapshot`），内容未变则跳过以免「只改时间戳」的空转提交污染 autoCommit（`index.js:3089-3090`）。
 6. `ensureWikiEntry` 补建入口（调用点 `index.js:3104`；函数本体 `index.js:291-324`）：缺 `CodeWiki.md` 则生成，失败只记 note 不让任务失败。
 7. 切 `commit` 阶段（`index.js:3114-3116`，`autoCommit` 关闭时直接 done）；下个 tick 的 `tickCommit`（`index.js:3123-3139`）执行分支合并式自动提交后才置 `done` + 写 `finishedAt` + `onSettled` 唤醒（`index.js:3136-3138`）——终态最多晚一个 tick（默认 `TICK_MS` 10s，`index.js:1656`）。唤醒是否打扰会话由 `autoCommitState`（`index.js:2032-2037`）统一判定：`committed`/`no-changes` 静默（`index.js:2043` 守卫），仅 `failed`/`pending` 才 steer。
@@ -159,7 +159,7 @@ normalizeIndexLinks（index.js:203-211，仅 cw index exit 0 后由 tickIndex �
 
 1. **插件层规范化现在是唯一确定性防线，且不能删**：`vendor/codewiki` 已不在工作树，`rel_path_string` 的 Rust 层根治无法从仓库源码重建或验证；当前 `bin/cw.exe` 是否带该修复、PATH 上装的 `cw` 是哪个版本都不可考。因此 `normalizeArticlePath`/`parseStatus`/`normalizeIndexLinks` 成为确定性的唯一防线（由 `test-wiki-entry.mjs:56-72` 固化）。删除会让 Windows 下 stale 清单与 `_index.md` 链接重新被 `\` 污染——与「脚本里 `E:\ik\repo` 反斜杠」混在一起会污染 wiki 链接解析。
 
-2. **二进制来源已无法从仓库重建**：唯一耐久产物是 `bin/cw.exe`，安全网是 `bin/cw.exe.bak-20261010`（`.gitignore:5-6` 的 `bin/*.bak-*`）。`vendor/codewiki`（含 FORK.md 与 `config.rs`/`main.rs` 魔改）当前缺失，意味着 0.5.0.2 的「改源码 → 重编译 → 同步两处二进制 + 跑回归」安全流程已无法执行。若 `bin/cw.exe` 损坏或被错误二进制覆盖，回退手段只剩该 `.bak` 与 PATH 上用户自装的 `cw`。`resolveBinary` 的 PATH 优先（`index.js:140-160`）会把「bash 里 `cw` 正常、插件包装层行为不同」的分叉风险放回来——正是 0.5.0.1 注释要避免的场景。
+2. **二进制来源已无法从仓库重建**：唯一耐久产物是 `bin/cw.exe`，安全网是 `bin/cw.exe.bak-20261010`（`.gitignore:5-6` 的 `bin/*.bak-*`）。`vendor/codewiki`（含 FORK.md 与 `config.rs`/`main.rs` 魔改）当前缺失，意味着 0.5.0.2 的「改源码 → 重编译 → 同步两处二进制 + 跑回归」安全流程已无法执行。若 `bin/cw.exe` 损坏或被错误二进制覆盖，回退手段只剩该 `.bak` 与 PATH 上用户自装的 `cw`。`resolveBinary` 的 PATH 优先（`index.js:185-200`）会把「bash 里 `cw` 正常、插件包装层行为不同」的分叉风险放回来——正是 0.5.0.1 注释要避免的场景。
 
 3. **README 开发节仍指向已消失的 `vendor/codewiki`**：`README.md:85-87` 写「`vendor/codewiki/ 上游源码（去除 .git）` / `改了 vendor 记得重编`」，与现状不符（仓库根无 `vendor/`）。本页解释的就是这个漂移；修 README 不在本次范围。
 
