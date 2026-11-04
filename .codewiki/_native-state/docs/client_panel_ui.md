@@ -67,12 +67,12 @@ flowchart TB
 | 组件 | 类型 | 职责 |
 | --- | --- | --- |
 | `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 section + 保存条） |
-| `CodewikiPanel` | React 组件 | 侧边栏面板容器：四个标签页（总览 / 任务 / 会话 / 设置），jobs 轮询与差分统计，焦点任务 + 历史折叠区，取消任务、复制 wiki 路径 |
+| `CodewikiPanel` | React 组件 | 侧边栏面板容器：四个标签页（总览 / 任务 / 会话 / 设置），jobs 轮询与差分统计，进行中任务全部展开（无进行中时留最近一个当门面）+ 历史折叠区，取消任务、复制 wiki 路径 |
 | `ReposTab` | React 组件 | 「总览」标签页：所有已编译仓库的 wiki 状态卡片 + 自动更新调度信息，支持排除 / 取消排除、确认首次编译、手动「更新」 |
 | `SessionView` | React 组件 | 「会话」视图：并发池里每一次 LLM 请求的列表（5s 轮询）+ 点开看 prompt / 模型输出全文；支持 job 级单任务视图与 `job=null` 全局聚合视图，`embedded=true` 时嵌在面板标签页内不套 page 容器 |
 | `PanelIcon` | React 组件 | 16×16 摊开的书 SVG，供 `sidebar.panellist` 渲染出入口 |
 | `Spark` | React 组件 | 纯 SVG polyline 微趋势线（默认 56×16），用于吞吐徽标里的 tok/s 趋势 |
-| `byUpdated` | 函数 | 任务排序比较器（按 `updatedAt ?? createdAt` 倒序），用于挑焦点任务 |
+| `byUpdated` | 函数 | 任务排序比较器（按 `updatedAt ?? createdAt` 倒序）：进行中任务按它排序全部展开；无进行中任务时由它挑最近更新的一张当门面卡 |
 | `save` / `discard` | 函数（位于 `CodewikiCard` 内） | 设置草稿的保存（校验 + `form.mutate` 差分 ops）与放弃（回滚草稿） |
 | `line` | 函数（位于 `engineLogBlock` 内） | 引擎日志条目渲染器：把 NDJSON 事件拼成 `[phase] kind detail` 单行 |
 | `zh` / `en` | 函数 | 中 / 英词典工厂（值必须为字符串，否则 `t()` 回退返回键名） |
@@ -85,7 +85,7 @@ flowchart LR
   Panel["CodewikiPanel"] --> Head["标题栏<br/>编译任务 · N 个进行中"]
   Panel --> TabBar["标签条<br/>overview / tasks / sessions / settings"]
   TabBar --> T1["ReposTab 总览<br/>调度卡片 + 仓库状态列表"]
-  TabBar --> T2["Tasks 任务<br/>焦点任务卡 + 历史折叠分组"]
+  TabBar --> T2["Tasks 任务<br/>进行中区（全部展开）+ 历史折叠分组"]
   TabBar --> T3["SessionView 会话<br/>全局 LLM 请求日志 (embedded)"]
   TabBar --> T4["settings<br/>内嵌 CodewikiCard"]
   Panel -. "任务行「会话」按钮" .-> SV1["SessionView 单任务模式<br/>占满面板整页"]
@@ -93,10 +93,11 @@ flowchart LR
 
 ### 任务卡片（`jobCard`）渲染要素
 
-- **头部行**：类型标签（全量 / 增量 / 续查）、所属仓库（`repoName` 取父目录/目录名两段）、阶段状态、吞吐徽标、「会话」按钮、（活动任务的）「取消」按钮；
-- **七步步骤条** `stageBar`：排队 + 准备 + 文章 + 校对 + 校验 + 索引 + 提交，已完成绿点、当前阶段实心脉冲、失败标红、取消标黄；
-- **进度条** `overallPct`：按 `STAGE_WEIGHTS` 定权线性推进，阶段内按 `taskList` 完成数折算，封顶 99%，终态才 100%；
-- **元信息行**：已写 / 失败篇数、原生引擎阶段（`nativeStage` + 百分比）、质量门 / 落地结果、批次进度、排队 / 执行用时拆分、自动提交结果（短 sha 或失败原因）；
+- **头部行**：类型标签（全量 / 增量 / 续查）、所属仓库（`repoName` 取父目录/目录名两段）、阶段状态、吞吐徽标、「会话」按钮、（活动任务的）「取消」按钮——动作集中在右侧 `data-dscw-p-actions` 容器内；仓库名只在「进行中区的卡片」（`showCwd=true`）上显示，历史卡由分组头报目录，不重复；
+- **总进度读数** `overallPct`：按 `STAGE_WEIGHTS` 定权，逐行累加各阶段 `frac × 权重`（进行中阶段的 frac 取 `taskList` 完成占比，原生通道取引擎自报的 `nativePercent`），封顶 99%、终态（`done` / `partial`）才 100%；进度不可知时整段不渲染，不编数字；
+- **进度行 + 进度条**：左侧大数字百分比 + 右侧当前阶段读数（当前步骤名 + 该步已用时；原生通道再附「引擎阶段名 + 引擎自报百分比」，以 ` · ` 连接）；其下是 `data-dscw-p-bar` 总进度条（填充宽度 = 百分比，`data-tone` 随阶段着色）；
+- **分阶段百分比** `stageBreakdown`：七行阶段名 + 行内小进度条 + 百分比，**只在活动卡片展开**——终态任务七行全是 100%，纯噪声；
+- **元信息行**：已写 / 失败篇数、原生引擎阶段（`nativeStage` + 百分比）、质量门 / 落地结果、批次进度、排队 / 执行用时拆分、自动提交结果（短 sha 或失败原因）；
 - **排队可见性**：`queueAhead` 列出「在等谁」；
 - **用量行** `usageLine`：输入 / 输出 token（`fmtTok` 缩写）、请求数（批量 + 实时拆分）、超单请求预算的请求数红字警示；
 - **活动流 / 引擎日志** `engineLogBlock`：折叠区，引擎日志只渲染内存里最近 40 条（完整文件可能上 MB，2s 轮询不直接读大文件）；
@@ -143,11 +144,11 @@ sequenceDiagram
 
 ## 阶段模型：七步视图 vs 原生引擎八段契约
 
-面板的步骤条是**粗粒度七步**，与引擎自报的细粒度阶段是两套体系：
+面板的七步视图（`ACTIVE_STAGES`）与引擎自报的细粒度阶段是两套体系；七步同时是词典里 `step*` 短名、进度权重与分阶段百分比（`stageBreakdown`）行结构的来源：
 
 ```mermaid
 flowchart LR
-  subgraph Seven["面板七步步骤条 ACTIVE_STAGES"]
+  subgraph Seven["面板七步视图 ACTIVE_STAGES"]
     S0["queued 排队"] --> S1["prepare 准备"] --> S2["articles 写文章"] --> S3["review 校对"] --> S4["validate 校验"] --> S5["index 建索引"] --> S6["commit 提交"]
   end
   subgraph Eight["原生引擎八段契约 nativeStage（engine_runtime_and_codewiki_kernel）"]
@@ -156,10 +157,10 @@ flowchart LR
   end
 ```
 
-- **退役阶段名映射**：`LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }`——历史任务里残留旧阶段名时，`stageOf(job)` 先映射再查步骤条，否则失败 / 取消时步骤条会整条熄灭、看不出卡在哪一步；阶段耗时 `stageTimings` 同样经 `timingsOf` 归一。
-- **细粒度展示**：同名的 `articles / index / commit` 直接映射回步骤条标签，其余阶段经 `NATIVE_STAGE_KEYS`（env / graph / cluster / proofread / validate / baseline）以「引擎阶段：xxx」另起一行显示，不混入步骤条序号。
-- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, review: 0.14, validate: 0.07, index: 0.05, commit: 0.04 }`：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。
-- **终态语义**：`done` 步骤条全绿；`partial`（部分完成）也按 100% 显示——活干完了，由终态标签 + `blockers` 悬停说明「为什么没算完整成功」；只有 `failed / cancelled` 才在最后计时段标红 / 标黄（`lastTimedStage`）。
+- **退役阶段名映射**：`LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }`——历史任务里残留旧阶段名时，`stageOf(job)` 先映射再查七步，否则失败 / 取消时分阶段百分比会找不到当前行；阶段耗时 `stageTimings` 同样经 `timingsOf` 归一。
+- **细粒度展示**：同名的 `articles / index / commit` 直接映射回七步行标签，其余阶段经 `NATIVE_STAGE_KEYS`（env / graph / cluster / proofread / validate / baseline）以「引擎阶段：xxx」另起一行显示，不混入七步行序号。
+- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, review: 0.14, validate: 0.07, index: 0.05, commit: 0.04 }`：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。`overallPct` 对 `stageRows(job)` 的每行（已完成阶段 frac=1、进行中阶段 frac 按 `taskList` / `nativePercent` 折算）求 `frac × 权重` 之和。
+- **终态语义**：`done` 七行全 100%；`partial`（部分完成）也按 100% 显示——活干完了，由终态标签 + `blockers` 悬停说明「为什么没算完整成功」；只有 `failed / cancelled` 才在最后计时段标红 / 标黄（`lastTimedStage`）。
 
 ---
 

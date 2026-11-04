@@ -17,7 +17,7 @@
 ```mermaid
 flowchart TB
     subgraph PKG["包清单层"]
-        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.33<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
+        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.35<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
         DSHMETA["dsh 元数据<br/>client.platform = web<br/>bundle.patch = ./cordis.patch.yml"]
     end
 
@@ -54,13 +54,13 @@ flowchart TB
 
 `package.json` 是插件被宿主识别的入口契约，关键字段：
 
-- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.33"`，`"private": true`（本地 link 包，不发布）。
+- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.35"`，`"private": true`（本地 link 包，不发布）。
 - **模块形态**：`"type": "module"`（纯 ESM），`"main": "index.js"`，`"exports"` 暴露两个面：`.` → `index.js`（插件主半边），`./client` → `client.js`（侧边栏面板半边，见 [client_panel_ui](client_panel_ui.md)）。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——宿主版本不够时直接拒绝装载。
 - **运行时依赖**：仅 `@deepseek-ai/schemastery`（配置 schema 校验），其余全部是宿主自带能力，刻意保持零重依赖。
 - **`dsh` 元数据**：`client.platform: web` 声明 UI 半边跑在 web 端；`bundle.patch: ./cordis.patch.yml` 声明本包携带随包自动合并的 patch 文件——这是“装法 A（bundle 依赖）”能省去手工 profile 条目的关键。
 
-`description` 字段本身就是一份版本演进备忘：0.16.0 起默认通道切换为原生 Python 引擎（`nativeEngine: true`），插件内 Node 兼容通道降级为最小兜底（仅顶层目录分组 + 文件级 source_files 归属）；Node 侧重写的 FSoft 算法（symbols/cluster/graph-diff/incremental/update-planner）已在 0.16.0 阶段 7 删除；默认模型在 0.16.13 切换为 `volces-ark/glm-5.3-flash` 512k（旧的 192k 窗口装不下本仓库源码而被弃用）。
+`description` 字段本身就是一份版本演进备忘：0.16.0 起默认通道切换为原生 Python 引擎（`nativeEngine: true`），插件内 Node 兼容通道降级为最小兜底（仅顶层目录分组 + 文件级 source_files 归属）；Node 侧重写的 FSoft 算法（symbols/cluster/graph-diff/incremental/update-planner）已在 0.16.0 阶段 7 删除；0.17.34 起**取消编译默认模型**——provider/model 必须在插件设置里显式选定，未选就提交的任务以明确报错失败，而不是悄悄跑在某个被猜的模型上；大档模型（超长输入 tier）同样自 0.17.34 起默认关闭。
 
 ## 插件装配：`cordis.patch.yml`
 
@@ -98,10 +98,10 @@ flowchart TB
 | 设置项 | 默认 | 含义 |
 | --- | --- | --- |
 | `binaryPath` | 空 | `cw` 可执行文件路径；留空优先用 PATH 里的 `cw`，找不到再用插件自带 `bin/cw.exe` |
-| `batchProvider` | `volces-ark` | 编译模型提供商（必须是模型设置里已注册的 provider；留空 = 提交失败） |
-| `batchModel` | `glm-5.3-flash` | 编译模型 id（512k 上下文） |
+| `batchProvider` | 空 | 编译模型提供商（必须是模型设置里已注册的 provider；0.17.34 起无默认，留空 = 提交任务时显式报错失败） |
+| `batchModel` | 空 | 编译模型 id（0.17.34 起无默认；须与 `batchProvider` 一起在插件设置里选定） |
 | `batchReasoningEffort` | 模型默认档 | 思考程度档位（取值来自模型目录 `reasoning.efforts`） |
-| `bigEnabled` | 关 | 大档模型（超长输入）开关：关闭后超过普通预算的请求不换大上下文模型，按大档预算兜底或退回会话通道；模型与预算配置保留，重开无需重填 |
+| `bigEnabled` | 关（0.17.34 起默认关） | 大档模型（超长输入）开关：关闭后超过普通预算的请求不换大上下文模型，按大档预算兜底或退回会话通道；模型与预算配置保留，重开无需重填 |
 | `bigProvider` | 空 | 大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）；`bigEnabled` 关闭时不生效 |
 | `bigModel` | 空 | 大档模型 id（该 provider 下） |
 | `bigReasoningEffort` | 模型默认档 | 大档模型思考程度档位（取值来自模型目录 `reasoning.efforts`）；留空 = 模型默认档 |
