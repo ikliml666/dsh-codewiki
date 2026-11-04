@@ -14,7 +14,8 @@
             "client.js::line",
             "client.js::mount",
             "client.js::save",
-            "client.js::zh"
+            "client.js::zh",
+            "client.js::Skeleton"
         ],
         "children": {}
     },

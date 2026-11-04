@@ -66,12 +66,13 @@ flowchart TB
 
 | 组件 | 类型 | 职责 |
 | --- | --- | --- |
-| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 section + 保存条） |
+| `CodewikiCard` | React 组件 | 设置表单：`view='summary'` 时渲染一行简介；`view='page'` 时渲染完整表单（运行 / 原生引擎 / 编译模型 / 大档模型 / 调度与排除五个 `data-dscw-sec` section + 保存条；每个 section 由 `data-dscw-head` 标题行与 `data-dscw-grid` 字段网格组成，字段本身仍包在 `data-dscw-field` 内，字段下可挂 `data-dscw-hint` 说明——如「文章语言」字段新增 `articleLanguageHint`：留空跟随当前会话语言） |
 | `CodewikiPanel` | React 组件 | 侧边栏面板容器：四个标签页（总览 / 任务 / 会话 / 设置），jobs 轮询差分采样（tps 30 点窗口、吞吐 EWMA、总进度 24 点趋势窗），进行中任务全部展开（无进行中时留最近一个当门面）、进行中头部附并发总览 `poolSummary`，历史区按仓库各自折叠，取消任务、复制 wiki 路径 |
 | `ReposTab` | React 组件 | 「总览」标签页：所有已编译仓库的 wiki 状态卡片 + 自动更新调度信息，支持排除 / 取消排除、确认首次编译、手动「更新」 |
 | `SessionView` | React 组件 | 「会话」视图：并发池里每一次 LLM 请求的列表（5s 轮询）+ 点开看 prompt / 模型输出全文；支持 job 级单任务视图与 `job=null` 全局聚合视图，`embedded=true` 时嵌在面板标签页内不套 page 容器 |
 | `PanelIcon` | React 组件 | 16×16 摊开的书 SVG，供 `sidebar.panellist` 渲染出入口 |
 | `Spark` | React 组件 | 纯 SVG polyline 微趋势线（默认 56×16），用于吞吐徽标里的 tok/s 趋势与进度行的总进度趋势（48×14） |
+| `Skeleton` | React 组件 | 加载骨架占位（默认 `rows = [100, 72, 46]`）：首轮数据未回包时渲染 `data-dscw-p-skel` 容器与三条不同宽度的 `i` 占位条，取代旧的单行「…」文本，用于任务列表、会话列表与会话详情三处 loading 态 |
 | `byUpdated` | 函数 | 任务排序比较器（按 `updatedAt ?? createdAt` 倒序）：进行中任务按它排序全部展开；无进行中任务时由它挑最近更新的一张当门面卡 |
 | `save` / `discard` | 函数（位于 `CodewikiCard` 内） | 设置草稿的保存（校验 + `form.mutate` 差分 ops）与放弃（回滚草稿） |
 | `line` | 函数（位于 `engineLogBlock` 内） | 引擎日志条目渲染器：把 NDJSON 事件拼成 `[phase] kind detail` 单行 |
@@ -91,6 +92,8 @@ flowchart LR
   Panel -. "任务行「会话」按钮" .-> SV1["SessionView 单任务模式<br/>占满面板整页"]
 ```
 
+列表加载与空态：任务列表、会话列表与会话详情首轮未回包时渲染 `Skeleton` 骨架屏（取代旧的单行「…」占位）；三个列表为空时，空态由单行说明改为「标题 + 说明」双层结构（`data-dscw-p-empty` 内 `<strong>` 标题 + `<span>` 说明）——仓库列表标题 `emptyReposTitle` / 说明 `reposEmpty`，任务列表标题 `emptyTasksTitle` / 说明 `panelEmpty`，会话列表标题 `emptySessionsTitle` / 说明 `sessEmpty`（有进行中任务时不显示空态）；仓库列表整体包裹在 `data-dscw-p-repolist` 容器内。
+
 ### 任务区组织（`CodewikiPanel`）
 
 - **进行中区**：所有活动任务卡片全部展开；多于一个活动任务时，分区头部附并发总览 `poolSummary`——只统计真正在跑的任务（排队中的进度恒为 0，算进平均会让「最慢」永远是没开始的仓库），输出「平均进度% · 最慢 <仓库> <最慢进度>%（· 排队 N）」，全部排队时显示「N 个排队中」；
@@ -102,13 +105,13 @@ flowchart LR
 - **总进度读数** `overallPct`：按 `STAGE_WEIGHTS` 定权，逐行累加各阶段 `frac × 权重`（进行中阶段的 frac 取 `taskList` 完成占比，原生通道取引擎自报的 `nativePercent`），封顶 99%、终态（`done` / `partial`）才 100%；进度不可知时整段不渲染，不编数字；
 - **进度行**：大数字百分比、主进度条与当前阶段读数压成单行 `data-dscw-p-progress`——左侧大数字 + 内嵌 `data-dscw-p-bar` 总进度条（填充宽度 = 百分比，`data-tone` 随阶段着色）+ 进度趋势 spark + 右侧当前阶段读数（当前步骤名 + 该步已用时；原生通道再附「引擎阶段名 + 引擎自报百分比」，以 ` · ` 连接）；
 - **进度趋势**：每轮轮询把 `overallPct` 推入 24 点窗口（与上轮相同则跳过），窗口多于一个点时在进度行内画 `data-dscw-p-trend` 微趋势线（悬停提示「最近若干次采样的总进度」）——数字告诉你在哪，斜率告诉你还动不动；
-- **分段带与图例** `stageSegments` / `stageLegend`：取代原七行 `stageBreakdown` 明细表（已删除），改为一条紧凑的分段带 + 图例，**只在活动且真有进度（pct > 0）时出现**——终态全是 100%、排队全是 0%，两者都是噪声；
+- **分段带与图例** `stageSegments` / `stageLegend`：取代原七行 `stageBreakdown` 明细表（已删除），改为一条紧凑的分段带 + 图例，**只在活动且真有进度（pct > 0）时出现**——终态全是 100%、排队全是 0%，两者都是噪声；图例整体带 `legendHint` 悬停提示（颜色 = 阶段状态：绿=已完成 / 蓝=进行中 / 灰=未开始 / 红=失败，段宽 = 该步占总进度的比例），每行图例由「色块 `data-swatch`（颜色与上方分段带里同色段一致）+ 阶段名 + 百分比」组成，行悬停 `title` 显示「阶段名 · 状态（`legendState_*` 词典）· 百分比」；
 - **次要信息流水线** `data-dscw-p-subline`：元信息、用量、最新一条备注压成一行（放不下自动换行），取代原先各占一行的排布；
 - **元信息**：已写 / 失败篇数、原生引擎阶段（`nativeStage` + 百分比）、质量门 / 落地结果、批次进度、排队 / 执行用时拆分、自动提交结果（短 sha 或失败原因）；
 - **排队可见性**：`queueAhead` 列出「在等谁」；
 - **用量** `usageLine`（现为 `span` 元素）：输入 / 输出 token（`fmtTok` 缩写）、请求数（批量 + 实时拆分）、超单请求预算的请求数红字警示；
 - **最新备注**：`job.notes` 只常显最后一条（`data-dscw-p-note`，悬停看全文），历史备注进活动流折叠且**排除最后一条**避免重复；
-- **活动流 / 引擎日志** `engineLogBlock`：活动流（`data-dscw-p-activity`）与引擎日志都是折叠区，引擎日志只渲染内存里最近 40 条（完整文件可能上 MB，2s 轮询不直接读大文件）；
+- **活动流 / 引擎日志** `engineLogBlock`：活动流（`data-dscw-p-activity`）与引擎日志都是折叠区，引擎日志只渲染内存里最近 40 条（完整文件可能上 MB，2s 轮询不直接读大文件）；活动流折叠标题显示「活动流 (展开条数/总条数)」（最新一条已常显，计数按实际展开数写），悬停提示 `activityHint`；折叠内每条活动经 `activityRow(n)` 拆成「状态点 `data-dot` + 阶段标签 `data-stage` + 正文 `data-text`」三列的 `data-dscw-p-actrow` 行（`data-tone` 表达该条状态），不再整段文字平铺；
 - **逐篇清单**：由平铺列表改为折叠 `data-dscw-p-tasklist`，标题显示「逐篇 (ok/总)」，仅活动卡片出现；
 - wiki 路径 + 「复制路径」按钮。
 
