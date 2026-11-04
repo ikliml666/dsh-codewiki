@@ -3,41 +3,34 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
-    "headCommit": "08674b6c5e2f743d5a7f58e636308ab082923077"
+    "headCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "cb83fce1cc49a113a33df6f38a56577065412468",
-    "headCommit": "08674b6c5e2f743d5a7f58e636308ab082923077",
-    "committed": [],
-    "staged": [],
-    "unstaged": [
+    "headCommit": "17c43b7b8ffacbe1e48bb0190f1cf37bedbf1254",
+    "committed": [
       "lib/engine/apply-plan.js",
       "lib/engine/output.js",
       "test-engine-apply-plan.mjs",
       "test-engine-output.mjs"
     ],
+    "staged": [],
+    "unstaged": [],
     "untracked": [],
     "deleted": [],
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [
-    "lib/engine/apply-plan.js",
-    "lib/engine/output.js",
-    "test-engine-apply-plan.mjs",
-    "test-engine-output.mjs"
-  ],
+  "unconsumed": [],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 e191756 与本次 cw 基线 cb83fce 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "工作区未提交改动已合成临时 commit 48d032361244（4 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1h0uk2-5-native（30 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw1hox2x-b-native（30 个文件）"
   ],
-  "updatedAt": "2026-11-04T02:11:52.239Z"
+  "updatedAt": "2026-11-04T02:31:31.627Z"
 }
