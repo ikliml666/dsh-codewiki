@@ -103,6 +103,7 @@ console.log('\n== repairArticle：正文是模型提示泄漏 → 删 ==')
     ['我注意到你提供的“当前内容”是基于旧版代码的。\n\n## Overview\n', '中文元话语'],
     ['I will now update the article based on the provided source.\n', '英文施工说明'],
     ['TASK AS OF THIS BLOCK: ...\n', '任务块标记'],
+    ['压缩对话范围：m01175–m01238 (CodeWiki Update)\n\n## Overview\n\n正文。\n', '压缩块标题（中文）'],
   ]
   for (const [src, label] of leaks) {
     const r = repairArticle(src, 'learnings/leak.md')

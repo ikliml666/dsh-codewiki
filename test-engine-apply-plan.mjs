@@ -267,11 +267,13 @@ await checkAsync('存量坏文章：格式坏掉的自动修好，不拖累终�
   assert.equal(r.baseline.advanced, true, '可修的存量页不该拦住基线')
 })
 
-await checkAsync('存量坏文章：内容不可救的记阻塞，但绝不回滚本轮产物', async () => {
+await checkAsync('存量坏文章：内容不可救的直接删掉，不阻塞终态', async () => {
   const root = makeRepo()
   const docs = makeDocs()
   writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
   // 正文本身就是模型提示泄漏：改写没有意义，也不该被当成一篇「文章」留在库里。
+  // 旧行为是「记阻塞 → partial → 基线永不推进」，代价是这些仓库永远卡住（真机最长
+  // 落后 71 个提交）。用户明确要的是自动清理，不要待办清单。
   writeFile(
     root,
     '.codewiki/learnings/leaked.md',
@@ -279,17 +281,14 @@ await checkAsync('存量坏文章：内容不可救的记阻塞，但绝不回�
   )
   const { deps, calls } = recordingDeps()
   const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
-  assert.equal(r.outcome, 'partial', '不可救的存量页必须把终态拉成 partial')
-  assert.equal(r.applied, true, '不可救的存量页不阻止本轮落盘')
-  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
-  assert.ok(r.blockers.some((b) => b.kind === 'quality-gate'), '经 toApplyBlockers 映射成 quality-gate')
-  // 回滚是错的处置：它会把刚写好的 core.md / CodeWiki.md 一起撤掉，用一个既存缺陷
-  // 否掉一批好产物。
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.equal(r.applied, true)
+  assert.ok(!r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
+  assert.ok(!exists(root, '.codewiki/learnings/leaked.md'), '泄漏页应被删除')
   assert.equal(r.rolledBack, false)
   assert.ok(exists(root, '.codewiki/modules/core.md'), '本轮产物必须留在磁盘上')
-  assert.equal(r.baseline.advanced, false, '基线绝不推进')
-  assert.equal(r.canAdvanceBaseline, false)
-  assert.ok(!calls.some((c) => c.args === 'meta update'), `不该跑 meta update：${JSON.stringify(seq(calls))}`)
+  assert.equal(r.baseline.advanced, true, '清掉坏页之后基线该推进')
+  assert.ok(calls.some((c) => c.args === 'meta update'), `该跑 meta update：${JSON.stringify(seq(calls))}`)
 })
 
 await checkAsync('存量体检不重复上报本轮裁决里的页（同一缺陷不记两遍）', async () => {
@@ -338,7 +337,7 @@ await checkAsync('无变化轮同样要体检存量：内容不可救时报 part
   assert.deepEqual(seq(calls), [], '无需写盘时仍不该跑任何 cw 子命令')
 })
 
-await checkAsync('无变化轮：内容不可救的存量页照样把终态拉成 partial', async () => {
+await checkAsync('无变化轮：内容不可救的存量页照样被删掉，基线不动', async () => {
   const root = makeRepo()
   const docs = makeDocs()
   writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
@@ -350,9 +349,11 @@ await checkAsync('无变化轮：内容不可救的存量页照样把终态拉�
   )
   const { deps, calls } = recordingDeps()
   const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
-  assert.equal(r.outcome, 'partial', '无变化轮里库是脏的，终态不许报 done')
-  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
-  assert.deepEqual(seq(calls), [], '无需写盘时仍不该跑任何 cw 子命令')
+  // 只剩泄漏页要清 → 本轮是 delete-only：删 + 索引，不写文章、不推进基线。
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(!exists(root, '.codewiki/decisions/leaked.md'), '泄漏页应被删除')
+  assert.equal(r.baseline.advanced, false, 'delete-only 轮不推进基线')
+  assert.deepEqual(seq(calls), ['index'], `只该跑 index：${JSON.stringify(seq(calls))}`)
 })
 
 await checkAsync('入口写的是 docs 里那份的正文（frontmatter 被剥掉）', async () => {
