@@ -1,11 +1,11 @@
 {
   "generation_info": {
-    "timestamp": "2026-11-05T17:42:33.894433+00:00",
+    "timestamp": "2026-11-05T18:42:33.700118+00:00",
     "provider": "openai-compatible",
     "main_model": "doubao-seed-2.1-lite",
     "generator_version": "2.0.0",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
-    "commit_id": "9627090c99f6dee4e4119589cf4aeb79aba116ae",
+    "commit_id": "fef229d745a5b7b6a75e33ca62e479baeee306c9",
     "language": "中文",
     "layout": "hierarchical"
   },
@@ -71,14 +71,14 @@
     "calls": []
   },
   "last_update": {
-    "run_id": "d1c36df2-2b60-4972-be38-d499f8cf4c92",
-    "started_at": "2026-11-06T01:42:33+0800",
+    "run_id": "64d9f077-d353-4651-9814-1ff3f80fa406",
+    "started_at": "2026-11-06T02:42:33+0800",
     "outcome": "no_change",
-    "finished_at": "2026-11-06T01:42:33+0800",
+    "finished_at": "2026-11-06T02:42:33+0800",
     "rung": "3",
     "revision": {
-      "old_commit": "4e73a9675da33c013ea64d4e39746a317c34ce62",
-      "new_commit": "9627090c99f6dee4e4119589cf4aeb79aba116ae",
+      "old_commit": "9627090c99f6dee4e4119589cf4aeb79aba116ae",
+      "new_commit": "fef229d745a5b7b6a75e33ca62e479baeee306c9",
       "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
     },
     "diff_counts": {
@@ -127,6 +127,53 @@
       "revision": {
         "old_commit": "4e73a9675da33c013ea64d4e39746a317c34ce62",
         "new_commit": "9627090c99f6dee4e4119589cf4aeb79aba116ae",
+        "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
+      },
+      "diff_counts": {
+        "added": 0,
+        "deleted": 0,
+        "interface": 0,
+        "body": 0,
+        "edge": 0,
+        "renamed": 0
+      },
+      "n_active": 0,
+      "n_adopted": 0,
+      "n_adopted_by_agent": 0,
+      "fallback": {},
+      "n_calls": 0,
+      "usage_total": {
+        "cost_usd": 0.0
+      },
+      "usage": {
+        "schema_version": 2,
+        "scope": "this run only (modules resumed from disk cost nothing)",
+        "currency": "USD",
+        "cost_status": "complete",
+        "incomplete": false,
+        "unknown_usage_calls": 0,
+        "n_calls": 0,
+        "totals": {
+          "cost_usd": 0.0
+        },
+        "by_phase": {},
+        "by_model": {},
+        "unpriced_models": [],
+        "calls": []
+      },
+      "pages_written": [],
+      "pages_removed": [],
+      "wall_seconds": 0.07
+    },
+    {
+      "run_id": "64d9f077-d353-4651-9814-1ff3f80fa406",
+      "started_at": "2026-11-06T02:42:33+0800",
+      "outcome": "no_change",
+      "finished_at": "2026-11-06T02:42:33+0800",
+      "rung": "3",
+      "revision": {
+        "old_commit": "9627090c99f6dee4e4119589cf4aeb79aba116ae",
+        "new_commit": "fef229d745a5b7b6a75e33ca62e479baeee306c9",
         "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
       },
       "diff_counts": {
