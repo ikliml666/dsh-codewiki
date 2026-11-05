@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "a0276ec63d60add7fdd1cb4f927c9fbf4c65144f"
+    "headCommit": "bdca4514a7fd10ea35060aae1d1a6149e885a826"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "a0276ec63d60add7fdd1cb4f927c9fbf4c65144f",
+    "headCommit": "bdca4514a7fd10ea35060aae1d1a6149e885a826",
     "committed": [],
     "staged": [
       "lib/wiki-notes.js",
@@ -64,9 +64,9 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 81e73733c205（14 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3hbg15-q-native（29 个文件）",
-    "本轮把 14 个未提交源码改动一并写进产物（快照 81e73733c205）：CHANGELOG.md、README.md、bin/cw.exe、index.js、lib/article-contract.js 等"
+    "工作区未提交改动已合成临时 commit 739bae357c79（14 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3jgm3a-w-native（29 个文件）",
+    "本轮把 14 个未提交源码改动一并写进产物（快照 739bae357c79）：CHANGELOG.md、README.md、bin/cw.exe、index.js、lib/article-contract.js 等"
   ],
-  "updatedAt": "2026-11-05T11:49:03.046Z"
+  "updatedAt": "2026-11-05T12:49:01.086Z"
 }
