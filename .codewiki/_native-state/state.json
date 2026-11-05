@@ -2,13 +2,13 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "b072446061022dacb318303b283e86437b6a7e4f",
-    "headCommit": "c9d22edc3320ac4e6f5a5a89339b48b3fd09a308"
+    "baseCommit": "c9d22edc3320ac4e6f5a5a89339b48b3fd09a308",
+    "headCommit": "baf04388e4ccfa1e2d6e6a031742c48211a9b313"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "b072446061022dacb318303b283e86437b6a7e4f",
-    "headCommit": "c9d22edc3320ac4e6f5a5a89339b48b3fd09a308",
+    "baseCommit": "c9d22edc3320ac4e6f5a5a89339b48b3fd09a308",
+    "headCommit": "baf04388e4ccfa1e2d6e6a031742c48211a9b313",
     "committed": [],
     "staged": [
       "lib/wiki-notes.js",
@@ -37,10 +37,7 @@
       "vendor/codewiki/skills/codewiki-session.md",
       "vendor/codewiki/src/setup.rs"
     ],
-    "untracked": [
-      "_ext2.cjs",
-      "_probe-settings.mjs"
-    ],
+    "untracked": [],
     "deleted": [
       "lib/wiki-notes.js",
       "test-wiki-notes.mjs"
@@ -83,34 +80,15 @@
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
-  "effectiveScope": "full",
+  "effectiveScope": "stale",
   "updateOutcome": "no_change",
   "fallbackReason": "",
-  "missingRepair": {
-    "baseCommit": "b072446061022dacb318303b283e86437b6a7e4f",
-    "modules": [
-      "Change_Set",
-      "Engine_LLM_Bridge",
-      "Engine_Manifest",
-      "Engine_Mapping",
-      "Engine_Native_Run",
-      "Engine_Native_State",
-      "Engine_OpenAI_Bridge",
-      "Engine_Output",
-      "Engine_Process_Tree"
-    ],
-    "overviewLinks": [
-      "Engine_Native_Run.md"
-    ],
-    "attempts": 1,
-    "at": "2026-11-05T16:42:51.923Z"
-  },
+  "missingRepair": null,
   "notes": [
-    "产物缺页 9 个模块（Change_Set、Engine_LLM_Bridge、Engine_Manifest 等），转全量修复（复用已有页面）",
-    "overview 有 1 条指向已消失页面的链接（Engine_Native_Run.md），删除后转全量重建",
-    "工作区未提交改动已合成临时 commit 4e73a9675da3（25 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3rr0xr-2-native（44 个文件）",
-    "本轮把 23 个未提交源码改动一并写进产物（快照 4e73a9675da3）：CHANGELOG.md、README.md、bin/cw.exe、client.js、index.js 等"
+    "持久化基线 b072446 与本次 cw 基线 c9d22ed 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit 9627090c99f6（23 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3txu3k-6-native（44 个文件）",
+    "本轮把 23 个未提交源码改动一并写进产物（快照 9627090c99f6）：CHANGELOG.md、README.md、bin/cw.exe、client.js、index.js 等"
   ],
-  "updatedAt": "2026-11-05T16:55:21.294Z"
+  "updatedAt": "2026-11-05T17:42:34.588Z"
 }
