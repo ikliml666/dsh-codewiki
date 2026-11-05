@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-05T19:14:32+0800",
-  "finished_at": "2026-11-05T19:15:22+0800",
-  "outcome": "incremental",
+  "started_at": "2026-11-05T19:49:02+0800",
+  "finished_at": "2026-11-05T19:49:02+0800",
+  "outcome": "no_change",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -24,8 +24,8 @@
     }
   },
   "revision": {
-    "old_commit": "118e0c25562be73f3443ee4b6a712ff2dc37d0ac",
-    "new_commit": "d59445dd55b0c0643ab14134b78fc9a9494b14a4",
+    "old_commit": "d59445dd55b0c0643ab14134b78fc9a9494b14a4",
+    "new_commit": "81e73733c205725a0c014a84d077e277cf0c51ec",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,291 +33,48 @@
       "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 1,
+      "body": 0,
       "edge": 0,
       "renamed": 0
     },
     "added": [],
     "deleted": [],
     "interface": [],
-    "body": [
-      "package.json::package.json"
-    ],
+    "body": [],
     "edge": [],
     "renamed": {}
   },
-  "repair": {
-    "renamed": {},
-    "removed": [],
-    "routing": [],
-    "orphans": [],
-    "deleted_nodes": [],
-    "created_leaves": [],
-    "growth": {},
-    "growth_flagged": []
-  },
+  "repair": {},
   "reclustered": [],
-  "reports": {
-    "Build,_Configuration___Environment_Setup": {
-      "leaf_path": [
-        "Build,_Configuration___Environment_Setup"
-      ],
-      "mode": "edit",
-      "own": [
-        "package.json::package.json"
-      ],
-      "adopted": {},
-      "up": [],
-      "context": [],
-      "refch": [],
-      "entered": [],
-      "left": [],
-      "children_added": [],
-      "children_removed": [],
-      "reclustered": false,
-      "page": "Build,_Configuration___Environment_Setup"
-    }
-  },
+  "reports": {},
   "ownership": [],
-  "active": [
-    {
-      "leaf": "Build,_Configuration___Environment_Setup",
-      "page": "Build,_Configuration___Environment_Setup",
-      "mode": "edit",
-      "order": 0
-    }
-  ],
-  "write_sets": {
-    "Build,_Configuration___Environment_Setup": [
-      "Browser_UI_Client",
-      "Build,_Configuration___Environment_Setup",
-      "Core_Engine_Public_API___Result_Validation",
-      "Native_Runtime_State___Concurrency_Governance",
-      "Python_Parallel_Agent_Execution_Runtime",
-      "Test_Fixtures___Diagnostic_Tooling",
-      "Vendored_CodeWiki_Rust_Implementation",
-      "overview"
-    ]
-  },
-  "fallback": {
-    "r_leaf": 0.058823529411764705,
-    "r_tree": 0.0,
-    "n_active": 1,
-    "n_leaves": 17,
-    "n_structural": 0,
-    "tau_full": 0.5,
-    "tau_tree": 0.3,
-    "fired": false
-  },
-  "verdicts": [
-    {
-      "page": "Build,_Configuration___Environment_Setup",
-      "verdict": "patch",
-      "reason": "package.json version cell updated from 0.17.49 to 0.17.50; description text unchanged so milestone statements stay valid",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": true
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "no package version mentioned; 0.16.0 is a historical milestone, leaf module row still accurate",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Browser_UI_Client",
-      "verdict": "no-op",
-      "reason": "no package version; name/id registration conventions unchanged",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Core_Engine_Public_API___Result_Validation",
-      "verdict": "no-op",
-      "reason": "only links to setup-env.sh; contract/protocol versions and milestones unaffected",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Native_Runtime_State___Concurrency_Governance",
-      "verdict": "no-op",
-      "reason": "references setup-env.sh as environment repair path; no package version",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Python_Parallel_Agent_Execution_Runtime",
-      "verdict": "no-op",
-      "reason": "CONTRACT_VERSION and historical milestones only; no package version",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Test_Fixtures___Diagnostic_Tooling",
-      "verdict": "no-op",
-      "reason": "0.16.0 retirement note is historical; setup-env.sh description unchanged",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Vendored_CodeWiki_Rust_Implementation",
-      "verdict": "no-op",
-      "reason": "binaryPath/cordis.patch.yml conventions unchanged; no package version",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    }
-  ],
-  "pages_written": [
-    "Build,_Configuration___Environment_Setup"
-  ],
+  "active": [],
+  "write_sets": {},
+  "fallback": {},
+  "verdicts": [],
+  "pages_written": [],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {
-    "scanned": 20,
-    "pages_with_hits": {},
-    "fixed": []
-  },
-  "calls": [
-    {
-      "kind": "leaf_agent",
-      "target": "Build,_Configuration___Environment_Setup",
-      "seconds": 50.352028369903564,
-      "usage": {
-        "input_tokens": 110102,
-        "output_tokens": 3294,
-        "cache_read_tokens": 8760,
-        "cache_write_tokens": 0,
-        "total_tokens": 113396,
-        "requests": 4
-      },
-      "error": null
-    },
-    {
-      "kind": "missing_pages",
-      "target": "-",
-      "seconds": 0.01913142204284668,
-      "usage": null,
-      "error": null
-    }
-  ],
-  "detector_notes": [
-    "[Build,_Configuration___Environment_Setup] agent notes: The change is a pure patch-level version bump (0.17.49 -> 0.17.50); the package.json description string is byte-identical, so all milestone-based documentation (0.16.0 native-engine default, 0.17.34 no-default-model) remains correct. No other pages needed edits."
-  ],
+  "stale_scan": {},
+  "calls": [],
+  "detector_notes": [],
   "errors": [],
-  "wall_seconds": 50.79,
+  "wall_seconds": 0.08,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "unknown",
+    "cost_status": "complete",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 4,
+    "n_calls": 0,
     "totals": {
-      "input_tokens": 110102,
-      "output_tokens": 3294,
-      "cache_read_tokens": 8760,
-      "cache_write_tokens": 0,
-      "requests": 4,
-      "total_tokens": 113396
+      "cost_usd": 0.0
     },
-    "by_phase": {
-      "update": {
-        "calls": 4,
-        "input_tokens": 110102,
-        "output_tokens": 3294,
-        "cache_read_tokens": 8760,
-        "cache_write_tokens": 0,
-        "requests": 4,
-        "total_tokens": 113396,
-        "unpriced_calls": 4
-      }
-    },
-    "by_model": {
-      "doubao-seed-2.1-lite": {
-        "calls": 4,
-        "input_tokens": 110102,
-        "output_tokens": 3294,
-        "cache_read_tokens": 8760,
-        "cache_write_tokens": 0,
-        "requests": 4,
-        "total_tokens": 113396,
-        "unpriced_calls": 4
-      }
-    },
-    "unpriced_models": [
-      "doubao-seed-2.1-lite"
-    ],
-    "calls": [
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 8.08,
-        "input_tokens": 8941,
-        "output_tokens": 762,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 9703,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 5.56,
-        "input_tokens": 16971,
-        "output_tokens": 521,
-        "cache_read_tokens": 8760,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 17492,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 3.34,
-        "input_tokens": 37337,
-        "output_tokens": 208,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 37545,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 21.02,
-        "input_tokens": 46853,
-        "output_tokens": 1803,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 48656,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      }
-    ]
+    "by_phase": {},
+    "by_model": {},
+    "unpriced_models": [],
+    "calls": []
   },
-  "run_id": "a472b299-8578-41af-82d6-6f4607b41d7d"
+  "run_id": "49d75c39-34aa-4d10-80aa-7828f52298a3"
 }
