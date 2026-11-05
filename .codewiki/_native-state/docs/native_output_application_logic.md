@@ -66,7 +66,7 @@ flowchart TD
 | `defaultRunCw` | `apply-plan.js` | 默认 `cw` CLI 通道（同步 spawn 包装成统一接口） |
 | `findOrphanPages` | `apply-plan.js` | 扫描孤儿页：`source_files` 全部失效的存量模块页 |
 | `findStaleModulePages` | `apply-plan.js` | 扫描聚类重构残骸：slug 已不在当前模块树的引擎产出页；并回收无 `fsoft_page` 标记的旧通道（0.16.0 之前）模块页，结果项带 `legacy` 标记 |
-| `findSupersededLegacyPages` | `apply-plan.js` | 被取代旧页报告：无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块、且至少一个 `source_files` 已被当前树别的模块认领（结果项带 `coveredSource`）；只报告，不自动删除 |
+| `findSupersededLegacyPages` | `apply-plan.js` | 被取代旧页清理：无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块、且至少一个 `source_files` 已被当前树别的模块认领（结果项带 `coveredSource`）；并入调用方 `deleteFiles` 随落地同事务删除、同次回滚，逐篇在 notes 点名（带接手它的源码路径），原文可按路径从 git 历史捞回 |
 | `auditExistingArticles` | `apply-plan.js` | 存量体检：扫 `.codewiki/` 下非 `_` 前缀的存量文章，error 级坏页记 `existing-bad-article`（不回滚、挡基线） |
 | `checkWriteTargets` | `apply-plan.js` | 写集白名单校验（纯函数） |
 | `checkDeleteTargets` | `apply-plan.js` | 删除集白名单校验（与写集共用 `checkTargetPath` 同一把尺子） |
@@ -220,9 +220,9 @@ sequenceDiagram
 
 ## 孤儿页与残留模块页扫描
 
-这两个函数是本模块相对其他阶段最独特的能力——**删除**而不只是写入（另有 `findSupersededLegacyPages` 只报告、不自动删，见下）。
+这三个函数是本模块相对其他阶段最独特的能力——**删除**而不只是写入。调用方（`runNativeJob` 3.7 段）把三者结果统一并入 `deleteFiles`，交回本模块随落地同事务删除、同次回滚、同次提交。
 
-（注：本节介绍三个扫描函数，其中 `findSupersededLegacyPages` 只报告、不自动删除；前两个负责实际的删除清理。）
+（注：本节介绍三个扫描函数，三者都入删除清理集；其中 `findSupersededLegacyPages` 的判据最宽，单独成一类被取代旧页。）
 
 
 ### `findOrphanPages`
@@ -243,11 +243,13 @@ sequenceDiagram
 
 它解决 `findOrphanPages` 覆盖不到的情况：聚类重构让模块改名后，旧页的 `source_files` 指向的文件**全都还在**，只是不再归属任何模块。
 
-### `findSupersededLegacyPages`（只报告、不自动删）
+### `findSupersededLegacyPages`
 
-除上述两类自动回收的残骸，还有一条**不自动删**的线索：旧页声明的 `source_files` 已被当前模块树里的**别的**模块认领（`findSupersededLegacyPages` 收集当前树全部组件声明的源文件归一成覆盖集，逐篇比对旧页 frontmatter 的 `source_files`）。命中条件与 `findStaleModulePages` 的旧页判据一脉相承——无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块——结果项带 `coveredSource`（被认领的那个源文件路径）。
+除上述两类残骸，还有一条判据**最宽**的旧页线索：旧页声明的 `source_files` 已被当前模块树里的**别的**模块认领（`findSupersededLegacyPages` 收集当前树全部组件声明的源文件归一成覆盖集，逐篇比对旧页 frontmatter 的 `source_files`，取「任一命中」）。命中条件——无 `fsoft_page` 标记、`type: module`、slug 不命中当前活模块——结果项带 `coveredSource`（被认领的那个源文件路径）。
 
-刻意只报告、不自动删除：真机 Wxxy-CampusHub 的 11 篇页全中这条线索，而它们各有 4~20 次人工提交（正文里是人工补的迁移警告与 decisions 链接）。这条线索走报告通道，删除权留给人。
+它是唯一能覆盖「title 是描述性名字、还平铺在 modules/ 根下」那批页的判据：真机 Wxxy-CampusHub 的 11 篇旧页（`CAS 协议核心（campus-auth）`、`接线层（campus-hub src-tauri）`…）三条窄判据（① `title===slug`、② 嵌套位置）全不中，而它们描述的代码确实已被新树接手。这条判据比 `findStaleModulePages` 的 ①② 宽得多，混进去会让那个函数的语义难以解释，所以单独由本函数承担。
+
+**与前两类一样并入调用方 `deleteFiles` 自动删除**（用户明确要求「不要让我手动删除」）：代价是这些页里人工补过的内容（迁移警告、行号更正、`[[decisions/...]]` 交叉链接）只剩 git 历史一份——删之前每个被删页都在终态 notes 里点名，并带上接手它的源码路径，事后可按路径从历史里捞回。
 
 两条刻意的保守修正：
 
@@ -256,12 +258,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph "两类残骸"
+    subgraph "三类残骸"
         O["孤儿页<br/>source_files 全部失效"]
         S["残留模块页<br/>slug 不在当前树<br/>或旧通道无 fsoft_page 标记的嵌套/同名页"]
+        L["被取代旧页<br/>source_files 已被别的模块认领"]
     end
-    O --> DEL["deleteFiles 入本轮写集的对立集<br/>同事务、可回滚、同次提交"]
+    O --> DEL["deleteFiles<br/>同事务、可回滚、同次提交"]
     S --> DEL
+    L --> DEL
 ```
 
 ---

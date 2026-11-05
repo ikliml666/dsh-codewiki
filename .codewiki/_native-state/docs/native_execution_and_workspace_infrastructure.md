@@ -75,7 +75,7 @@ env(doctor + engine-lock) → 增量决议(change-set + 受管状态) → 工作
 → 受管状态采集 → 首次落锁 → 孤儿/残留页清理 → 落地器(写盘→index→基线→提交) → 合成终态
 ```
 
-**「孤儿/残留页清理」的第三类判据——只报告不删（3.7 段）：** 该步骤同时跑三类存量页扫描。孤儿页（`source_files` 全部失效）与残留页（页名已不属于当前模块树）入 `deleteFiles`，随落地器同事务删除、同次回滚；但还有一类旧页——**源码确实已被当前模块树接手、页内却含大量人工维护内容**（真机上单篇 4~20 次人工提交）——凭 slug 撞车自动删就是毁人手写的东西。这类页由 `findSupersededLegacyPages`（可经 `deps.findSupersededLegacyPages` 注入）判定后只在终态 notes 里如实列出（前 5 篇路径 +「等」），不自动删除，合并或移除留给人工决定。
+**「孤儿/残留页清理」的第三类判据——并入删除集自动清（3.7 段）：** 该步骤同时跑三类存量页扫描。孤儿页（`source_files` 全部失效）、残留页（页名已不属于当前模块树）与第三类旧页（**源码确实已被当前模块树接手**、但页名对不上任何模块、无 `fsoft_page`、`type: module`）全部并入 `deleteFiles`，随落地器同事务删除、同次回滚、同次提交。第三类判据最宽（不看 title、不看嵌套，只看「它描述的代码现在归别人了」），由 `findSupersededLegacyPages`（可经 `deps.findSupersededLegacyPages` 注入）判定——真机 Wxxy-CampusHub 的 11 篇旧页三条窄判据全不中。源码注释写明了这次改判的理由：旧实现对这类页「只报告不删」（怕删掉页内人工维护的迁移警告 / 行号更正 / `[[decisions/...]]` 交叉链接），但用户要的是索引干净、不是每次编译后收到一份待办清单；这类页因此与孤儿页、残留页一样自动删，代价是人工补过的内容只剩 git 历史一份——删之前每个被删页都在终态 notes 里点名，并带上接手它的源码路径（`coveredSource`，note 形如「旧模块页（源码已被当前模块树接手）…`（→ coveredSource）`；原文见 git 历史」），事后可按路径从历史里捞回。
 
 **五条硬不变量：**
 
@@ -227,8 +227,8 @@ sequenceDiagram
     end
     Run->>St: captureDocsDir + buildStatePayload
     St-->>Run: stateFiles（写集项）+ missing?
-    Run->>Ap: applyNativeOutput(extraFiles=stateFiles, deleteFiles=孤儿/残留页)
-    Note over Run: 被新树接手但含人工维护内容的旧页只记 note，不入 deleteFiles
+    Run->>Ap: applyNativeOutput(extraFiles=stateFiles, deleteFiles=孤儿/残留/被取代旧页)
+    Note over Run: 三类残骸页（孤儿/残留/被取代）统一入 deleteFiles，删前逐篇在 notes 点名、原文见 git 历史
     Ap->>Git: 写盘 → cw index（+存量体检）→ 基线 → 自动提交（写盘/索引/基线失败整体回滚）
     Ap-->>Run: applyRes（applied / rolledBack / baseline）
     Run->>Run: weakest(engine, gate, apply) 合成终态
@@ -254,4 +254,4 @@ sequenceDiagram
 | 状态为什么放 `_native-state` | `cw index` 只跳过 `_` 前缀；否则持久化文章被收成第二份索引 |
 | 无变化轮 | 不重写状态（指纹比对）、不裁旧状态、不推进基线/提交 |
 | 原始产物可追溯 | `archiveDocsTree` 在被加工前整棵留档到仓库外（`rawTree` 字段），失败不影响终态 |
-| 被新树接手但含人工内容的旧页 | `findSupersededLegacyPages` 只在 notes 列出、不自动删除（合并/移除留人工） |
+| 被新树接手但含人工内容的旧页 | `findSupersededLegacyPages` 并入 `deleteFiles` 自动删除：逐篇在 notes 点名（带 `coveredSource`），原文可按路径从 git 历史捞回 |
