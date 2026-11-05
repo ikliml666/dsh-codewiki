@@ -67,7 +67,7 @@ flowchart TB
 | 字段 | 值 | 说明 |
 | --- | --- | --- |
 | `name` | `@local/dsh-codewiki` | 本地插件包名（私有发布） |
-| `version` | `0.17.47` | 当前版本 |
+| `version` | `0.17.48` | 当前版本 |
 | `private` | `true` | 不发布到 npm registry |
 | `type` | `module` | ESM 模块 |
 | `main` / `exports` | `./index.js` 与 `./client.js` | 双入口：`index.js` 为宿主侧，`client.js` 为浏览器侧 |

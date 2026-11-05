@@ -2,42 +2,16 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "1e2cb382406e1128bd661a53db66df2601ba5753"
+    "baseCommit": "0a8c73687566397d31eb5f0f90a3cae1b61a86f6",
+    "headCommit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "1e2cb382406e1128bd661a53db66df2601ba5753",
-    "committed": [
-      "CHANGELOG.md",
-      "CodeWiki.md",
-      "README.md",
-      "client.js",
-      "index.js",
-      "lib/article-repair.js",
-      "lib/engine/apply-plan.js",
-      "lib/engine/native-run.js",
-      "lib/engine/output.js",
-      "lib/engine/proofread.js",
-      "lib/wiki-notes.js",
-      "package.json",
-      "test-article-repair.mjs",
-      "test-client-panel.mjs",
-      "test-config.mjs",
-      "test-engine-apply-plan.mjs",
-      "test-engine-native-incremental.mjs",
-      "test-engine-output.mjs",
-      "test-engine-proofread-e2e.mjs",
-      "test-engine-proofread.mjs",
-      "test-fixtures/fake-native-engine.mjs",
-      "test-wiki-notes.mjs"
-    ],
+    "baseCommit": "0a8c73687566397d31eb5f0f90a3cae1b61a86f6",
+    "headCommit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21",
+    "committed": [],
     "staged": [],
-    "unstaged": [
-      "index.js",
-      "test-orchestration.mjs"
-    ],
+    "unstaged": [],
     "untracked": [],
     "deleted": [],
     "renamed": [],
@@ -58,8 +32,8 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 9b23ef755085（2 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw38cz6e-6-native（29 个文件）"
+    "持久化基线 a6a71c2 与本次 cw 基线 0a8c736 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3ai58v-d-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-05T08:12:36.423Z"
+  "updatedAt": "2026-11-05T08:39:27.552Z"
 }
