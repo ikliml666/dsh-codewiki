@@ -3,24 +3,31 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "c7327d9cd233c2f703c66f9fd511d45c90fea814"
+    "headCommit": "2d597c8170e78f6dfb493aa51fe8188251b93935"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "c7327d9cd233c2f703c66f9fd511d45c90fea814",
+    "headCommit": "2d597c8170e78f6dfb493aa51fe8188251b93935",
     "committed": [
       "CHANGELOG.md",
       "CodeWiki.md",
       "README.md",
       "client.js",
       "index.js",
+      "lib/article-repair.js",
+      "lib/engine/apply-plan.js",
       "lib/engine/native-run.js",
+      "lib/engine/output.js",
       "lib/engine/proofread.js",
       "lib/wiki-notes.js",
       "package.json",
+      "test-article-repair.mjs",
+      "test-client-panel.mjs",
       "test-config.mjs",
+      "test-engine-apply-plan.mjs",
       "test-engine-native-incremental.mjs",
+      "test-engine-output.mjs",
       "test-engine-proofread-e2e.mjs",
       "test-engine-proofread.mjs",
       "test-fixtures/fake-native-engine.mjs",
@@ -41,12 +48,40 @@
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
-  "effectiveScope": "stale",
+  "effectiveScope": "full",
   "updateOutcome": "incremental",
   "fallbackReason": "",
-  "missingRepair": null,
+  "missingRepair": {
+    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
+    "modules": [
+      "CodeWiki_Engine_Subsystem",
+      "Core_Engine_Public_API___Result_Validation",
+      "LLM_Provider_Bridge_Integration",
+      "Native_CodeWiki_Runtime_Lifecycle_Management",
+      "Native_Output_Quality_Gating",
+      "Native_Runtime_Process_Execution___Monitoring",
+      "Native_Runtime_State___Concurrency_Governance",
+      "Python_Parallel_Agent_Execution_Runtime",
+      "Wiki_Content_Health_Scanning___Plan_Application",
+      "Workspace_Snapshot_Management"
+    ],
+    "overviewLinks": [
+      "build_configuration_and_test_verification_tooling.md",
+      "build_configuration_and_test_verification_tooling.md",
+      "client_panel_ui.md",
+      "engine_runtime_and_codewiki_kernel.md",
+      "job_orchestration_and_agentic_article_pipeline.md"
+    ],
+    "attempts": 1,
+    "at": "2026-11-05T06:38:14.357Z"
+  },
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw32wsci-h-native（28 个文件）"
+    "清理 19 个不属于当前模块树的旧页（agentic_article_workflow.md、article_validation_and_contract.md、build_and_configuration.md 等）",
+    "产物缺页 10 个模块（CodeWiki_Engine_Subsystem、Wiki_Content_Health_Scanning___Plan_Application、Core_Engine_Public_API___Result_Validation 等），转全量修复（复用已有页面）",
+    "overview 有 5 条指向已消失页面的链接（client_panel_ui.md、job_orchestration_and_agentic_article_pipeline.md、engine_runtime_and_codewiki_kernel.md 等），删除后转全量重建",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw359e1s-2-native（29 个文件）",
+    "CodeWiki_Engine_Subsystem/Native_CodeWiki_Runtime_Lifecycle_Management/Native_Output_Quality_Gating.md：校对改写 2 处失效链接（剩余 0 处）",
+    "语义校对改写了 1 篇（CodeWiki_Engine_Subsystem/Native_CodeWiki_Runtime_Lifecycle_Management/Native_Output_Quality_Gating.md），改后重新判门"
   ],
-  "updatedAt": "2026-11-05T05:24:04.461Z"
+  "updatedAt": "2026-11-05T07:06:32.932Z"
 }
