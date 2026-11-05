@@ -22,6 +22,7 @@ import {
   describeOutcome, isTerminalStage, TERMINAL, UPDATE_RECORD_REL,
 } from './lib/update-record.js'
 import { inspectArticle, hasBlockingIssue, issueSummary } from './lib/article-contract.js'
+import { NOTE_KINDS, buildNote, checkNote } from './lib/wiki-notes.js'
 // 阶段 4：原生引擎（FSoft Python）通道。整条裁决链在 native-run.js 里固定，
 // 这里只负责「起进程 / 收进度 / 按结果判终态」——绝不在 tick 里重写裁决。
 import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from './lib/engine/native-run.js'
@@ -96,10 +97,50 @@ export const Config = z.object({
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
   nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 180 分钟（真机全量实测约 174 分钟）；超时由进程树终止兜底，已写文章按 partial 抢救'),
+  updateRung: z.string().default('').volatile().description('增量档位（上游 ablation rung）：3=组件级增量（默认，全部能力）；3b=同 3 但依赖跟两跳（k_hop=2，影响面更大）；2=只重写受影响的叶子页、不原地打补丁；1=纯规则失效、不开路由/增长重聚类/依赖扩散/陈旧扫描；0=放弃组件级增量、退化成按文件失效的全量重写（每轮都重写全部文章，最慢）。留空=上游默认 3'),
+  updateTauNb: z.string().default('').volatile().description('增量阈值 tau_nb（0–1，路由判据）：一个叶子里聚集了多少比例的新增组件邻居才把图 diff 路由到该叶子。留空=上游默认 0.5'),
+  updateTauGrow: z.string().default('').volatile().description('增量阈值 tau_grow（0–1）：新增组件占多少比例会触发整体重聚类。留空=上游默认 0.33'),
+  updateTauFull: z.string().default('').volatile().description('增量阈值 tau_full（0–1）：活跃叶子占全部叶子的比例超过它就整仓重写而不是增量。留空=上游默认 0.5；调大=更倾向增量（更快但可能漏改），调小=更倾向重写（更准但更慢）'),
+  updateTauTree: z.string().default('').volatile().description('增量阈值 tau_tree（0–1）：新建+删除+重聚类的叶子占比超过它就整仓重写。留空=上游默认 0.3'),
 })
 
 function val(x) {
   return x && typeof x === 'object' && typeof x.get === 'function' ? x.get() : x
+}
+
+// 上游增量档位（ablation rung）：0/1/2/3/3b。空串 = 不传给引擎，用上游默认值。
+// 档位语义写在 Config 的 description 里，与上下游保持一致。
+const VALID_UPDATE_RUNGS = ['0', '1', '2', '3', '3b']
+
+// 阈值一律按「留空 = 用上游默认」处理，所以空串/NaN/越界都返回 undefined，
+// 交给 native-run 决定要不要写进 updateOptions。
+// 为什么不在这里兜底成默认值：上游改默认时插件会跟着漂移，而档位语义本来就是上游的。
+function ratioOf(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return undefined
+  const n = Number(s)
+  if (!Number.isFinite(n) || n < 0 || n > 1) return undefined
+  return n
+}
+
+// 增量参数。只有增量轮（RESOLUTION.UPDATE）才会被 native-run 下发，
+// 但档位本身要能被全量轮读到：rung=0 的含义是「放弃组件级增量」，
+// 那就不该再被评为 UPDATE —— 详见 nativeChannelFor 之后的 resolution 决议。
+export function updateOptionsOf(cfg) {
+  const rung = String(cfg?.updateRung ?? '').trim()
+  if (rung && !VALID_UPDATE_RUNGS.includes(rung)) {
+    throw new Error(`updateRung=${rung} 不合法，可选值：${VALID_UPDATE_RUNGS.join(' / ')}`)
+  }
+  const opts = {}
+  if (rung) opts.rung = rung
+  const ratios = {
+    tau_nb: ratioOf(cfg?.updateTauNb),
+    tau_grow: ratioOf(cfg?.updateTauGrow),
+    tau_full: ratioOf(cfg?.updateTauFull),
+    tau_tree: ratioOf(cfg?.updateTauTree),
+  }
+  for (const [k, v] of Object.entries(ratios)) if (v !== undefined) opts[k] = v
+  return opts
 }
 
 // 配置 → 内部运行参数。大档开关在这里一次性收口：下游有五六处按「bigProvider 非空」
@@ -159,6 +200,13 @@ export function liveConfig(config) {
     nativeEnginePython: String(val(c.nativeEnginePython) ?? '').trim(),
     nativeEngineEntry: String(val(c.nativeEngineEntry) ?? '').trim(),
     nativeEngineTimeoutMs: Number(val(c.nativeEngineTimeoutMs)) || 0,
+    // 增量档位与阈值：原样透出（空串=用上游默认）。合法性在提交时由
+    // updateOptionsOf 显式校验——配置边界只校验一次，下游不再逐层判空。
+    updateRung: String(val(c.updateRung) ?? '').trim(),
+    updateTauNb: String(val(c.updateTauNb) ?? '').trim(),
+    updateTauGrow: String(val(c.updateTauGrow) ?? '').trim(),
+    updateTauFull: String(val(c.updateTauFull) ?? '').trim(),
+    updateTauTree: String(val(c.updateTauTree) ?? '').trim(),
   }
 }
 
@@ -2543,6 +2591,9 @@ function createJobService(config, onSettled) {
             ...c,
             engineRoot: '',
           },
+          // 增量档位与阈值：留空的键不出现，引擎用自己的默认值。
+          // 只有增量轮会被 native-run 下发；rung=0 的「放弃增量」语义在那边处理。
+          updateOptions: updateOptionsOf(c),
           llm: llmRef,
           // 语义校对的单轮通道：用与写作同一个编译模型，不再单独配一套。
           // 校对发生在质量门之前，只改「链到不存在页面」的链接，改完重新判门。
@@ -3691,6 +3742,9 @@ function createJobService(config, onSettled) {
         const bad = effortError(effortsOf.efforts, c.batchReasoningEffort)
         if (bad) throw new Error(bad)
       }
+      // 增量档位只在这一处校验：非法值不该等到引擎子进程起来才以 engine-protocol 报错，
+      // 那时一轮预算已经开始花了。updateOptionsOf 在这里抛，job 直接进 failed。
+      updateOptionsOf(c)
     } catch (err) {
       fail(job, String(err?.message ?? err))
       flush()
@@ -4174,7 +4228,7 @@ function progressToolDefinition(cfg, svc) {
     description: [
       '查询 CodeWiki 编译任务进度（只读，立即返回，不等待编译完成）。',
       'codewiki_generate 是提交制：调用即返回，编译由宿主后台服务推进——提交后直接继续手头工作，需要进度时再调用本工具（数据与侧边栏 CodeWiki 面板同源）。',
-      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（articles/crosscut/review/index/commit/done/partial/failed/cancelled）、outcome（done=完整成功、partial=部分完成且有未消化变化、failed=无成果）、blockers（未消化的具体原因）、canAdvanceBaseline（是否已推进编译基线）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
+      '可选按 cwd（仓库路径）或 jobId 过滤；都不传则列出全部任务。输出含 stage（进行中：queued / prepare / articles / crosscut / review / validate / index / commit；终态：done / partial / failed / cancelled）、outcome（done=完整成功、partial=部分完成且有未消化变化、failed=无成果）、blockers（未消化的具体原因）、canAdvanceBaseline（是否已推进编译基线）、完成百分比、已写/失败篇数、任务明细、批量进度、阶段耗时、token 用量、notes 与错误。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -4206,7 +4260,7 @@ function progressToolDefinition(cfg, svc) {
                 batchProgress: { oneOf: [{ type: 'object' }, { type: 'null' }] },
                 stageTimings: { type: 'object' },
                 usage: { type: 'object' },
-                nativeStage: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎自报的八段契约阶段（env/graph/cluster/articles/validate/index/baseline/commit），与面板粗粒度 stage 不是一回事' },
+                nativeStage: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎自报的九段契约阶段（env/graph/cluster/articles/proofread/validate/index/baseline/commit），与面板粗粒度 stage 不是一回事。proofread 段只在「有失效跨页链接的页」存在时才出现' },
                 nativePercent: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '引擎自报百分比；长阶段（写文章）按真实篇数插值，不再冻结' },
                 nativeMessage: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '引擎当前正在做什么（含正在写的模块名）' },
                 nativeLogs: { type: 'array', items: { type: 'object' }, description: '引擎事件日志最近若干条（完整 NDJSON 在 logFile，可用 /api/codewiki/logs 翻全量）' },
@@ -4280,6 +4334,101 @@ function progressToolDefinition(cfg, svc) {
         if (cwd) list = list.filter((j) => samePath(j.cwd, cwd))
       }
       return { jobs: list.map(progressView) }
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 工具 4：codewiki_note（把一次修复/一个设计决策写进 learnings / decisions）
+// 为什么要它：mraza007/codewiki 的技能约定「After Every Completed Task」要求修完 bug
+// 写 learning、定了设计写 decision，而原生通道只产 modules/ 与 CodeWiki.md。0.17.39
+// 把提醒里的假承诺删了，本工具是那条承诺的真实现——写文章这件事交回给知道「刚才
+// 到底修了什么」的模型，而不是让 FSoft 引擎去猜。
+// ---------------------------------------------------------------------------
+
+function noteToolDefinition(cfg) {
+  return {
+    name: 'codewiki_note',
+    description: [
+      '把一次已完成的修复或一个已定的设计决策记成 wiki 文章：kind=learning 写 .codewiki/learnings/<slug>.md（踩过的坑、根因、以后别再犯），kind=decision 写 .codewiki/decisions/<slug>.md（选了什么、为什么不选另一个）。',
+      '什么时候用：本轮真的修完了一个 bug（不是「顺手改了一行」），或本轮做了一个会影响后续的设计取舍。两者都不满足就不要写——learnings 目录塞满流水账之后没人会读它。',
+      '正文自己写完整：`## Overview` 必须非空（这是必需章节），然后按需要写根因、验证方式、被否掉的方案。工具会用与编译流水线同一套契约校验，不通过就报错且不落盘。',
+      '写完自动跑 cw index 刷新 _index.md，并在编辑起点同时刷新 CodeWiki.md 入口。与模块文章不同：这是**手工维护页**，之后的编译不会覆盖它。',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: '仓库绝对路径（git 仓库根；Windows 支持 C:/... 与 /c/... 形式）' },
+        kind: { type: 'string', enum: ['learning', 'decision'], description: 'learning=经验教训（learnings/），decision=设计决策（decisions/）' },
+        title: { type: 'string', description: '文章标题（写进 frontmatter 的 title，可含中文与空格）' },
+        slug: { type: 'string', description: '可选：文件名（不含 .md）。省略时由 title 转成 kebab-slug。同名页会被覆盖' },
+        body: { type: 'string', description: '正文 Markdown，必须以 `## Overview` 开头（该节不得为空）' },
+        source_files: { type: 'array', items: { type: 'string' }, description: '可选：与本条相关的仓库相对文件路径。会校验存在性，写不存在的路径直接报错' },
+        tags: { type: 'array', items: { type: 'string' }, description: '可选：标签' },
+      },
+      required: ['cwd', 'kind', 'title', 'body'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          cwd: { type: 'string' },
+          rel: { type: 'string' },
+          overwritten: { type: 'boolean' },
+          indexed: { type: 'boolean' },
+          notes: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['cwd', 'rel', 'overwritten', 'indexed', 'notes'],
+      },
+      render(args, value) {
+        const lines = [`codewiki_note（${value.cwd}）`, `${value.overwritten ? '覆盖' : '新建'}：.codewiki/${value.rel}`]
+        for (const n of value.notes) lines.push(`· ${n}`)
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    execute: async (args, exec) => {
+      const c = liveConfig(cfg)
+      if (!c.enabled) throw new Error('codewiki_note：插件已在设置中停用（codewiki → enabled）')
+      const cwd = normalizeCwd(args.cwd)
+      if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_note：cwd 不存在：${args.cwd ?? ''}`)
+      const kind = String(args.kind ?? '').trim()
+      if (!NOTE_KINDS[kind]) throw new Error(`codewiki_note：kind 只能是 learning / decision，收到 "${kind}"`)
+      const title = String(args.title ?? '').trim()
+      if (!title) throw new Error('codewiki_note：title 不能为空')
+      const body = String(args.body ?? '')
+      if (!body.trim()) throw new Error('codewiki_note：body 不能为空')
+      const wikiDir = path.join(cwd, '.codewiki')
+      if (!fs.existsSync(path.join(cwd, 'CodeWiki.md')) && !fs.existsSync(wikiDir)) {
+        throw new Error('codewiki_note：这个仓库还没有 wiki（既没有 CodeWiki.md 也没有 .codewiki/）——先用 codewiki_generate 建一次')
+      }
+      const { rel, text } = buildNote({
+        kind,
+        title,
+        slug: args.slug,
+        sourceFiles: Array.isArray(args.source_files) ? args.source_files : [],
+        tags: Array.isArray(args.tags) ? args.tags : [],
+        body,
+      })
+      const blocking = checkNote({ text, rel, repoRoot: cwd, wikiDir })
+      if (blocking.length) {
+        throw new Error(`codewiki_note：文章未过契约，未落盘——${blocking.slice(0, 4).map((i) => `[${i.kind}] ${i.detail}`).join('；')}`)
+      }
+      const abs = path.join(wikiDir, ...rel.split('/'))
+      const overwritten = fs.existsSync(abs)
+      fs.mkdirSync(path.dirname(abs), { recursive: true })
+      fs.writeFileSync(abs, text, 'utf8')
+      const notes = [`已写入 ${rel}（${text.length} 字节）`]
+      // 索引由 cw 独占重建（本插件其它地方同样只让 cw index 写 _index.md）。
+      // 失败不吞：索引没跟上等于这篇页在任何入口都找不到。
+      const binary = resolveBinary(c)
+      const idx = await runCw(binary, cwd, ['index'], 120000, exec?.signal)
+      if (idx.exitCode !== 0) {
+        throw new Error(`codewiki_note：文章已写入 .codewiki/${rel}，但 cw index 失败（exit ${idx.exitCode}）：${(idx.stderr || idx.stdout || '').trim().slice(0, 200)}`)
+      }
+      notes.push(`索引已刷新（${(idx.stdout ?? '').trim().split(/\r?\n/).filter(Boolean).pop() ?? 'cw index'}）`)
+      if (ensureWikiEntry(cwd, c.language)) notes.push('仓库根 CodeWiki.md 入口已生成（原本不存在）')
+      return { cwd, rel, overwritten, indexed: true, notes }
     },
   }
 }
@@ -4926,6 +5075,7 @@ function reminderText(cwd) {
   return [
     '【CodeWiki 维护】本仓库存在 wiki（入口 CodeWiki.md），涉及代码改动的任务收尾时必须：',
     '- 调用 codewiki_generate 工具（scope=auto 即可）更新受影响文章——模块文章、入口 CodeWiki.md 与索引刷新均由流水线完成；不要手工编写或修改 .codewiki/ 下的文章（手改不进流水线、不被面板记录，还会被下次编译覆盖）；',
+    '- 例外：本轮真修完了一个 bug 就用 codewiki_note（kind=learning）记下根因与验证方式，做了影响后续的设计取舍就用 kind=decision 记下选了什么、为什么不选另一个。这两类是手工维护页，编译不会覆盖；只是顺手改一行代码、没有可复用的结论就不要写。',
     '- codewiki_generate 是后台编译：调用即返回提交回执，编译由宿主服务推进——调用后本步就此结束，不要等待、不要轮询、不要为了看进度而反复调 codewiki_progress；继续你的其他工作，编译完成的产物由插件自己提交入库（autoCommit 默认开：主题分支提交后合并回原分支），无需你跑 git；',
     `- wiki 入口 CodeWiki.md 与 .codewiki/ 全部内容都在仓库根 ${cwd}，在本目录之外读写它们时一律用绝对路径；`,
     '- 若收到「产物待提交」提醒，说明插件自动提交没成功（非 git 仓库/被忽略/冲突等），此时才需要你代为提交一次；没有该提醒就不要动 .codewiki/ 的 git 状态（插件已提交或产物无改动时不会有提醒）；',
@@ -5081,7 +5231,7 @@ export function apply(ctx, config) {
   ctx.inject?.(['tools'], (rc) => {
     const tools = rc?.tools ?? rc
     if (!tools?.register) return
-    for (const definition of [cwToolDefinition(config), generateDef, updateDef, progressToolDefinition(config, service)]) {
+    for (const definition of [cwToolDefinition(config), generateDef, updateDef, progressToolDefinition(config, service), noteToolDefinition(config)]) {
       // 单工具 schema 违规只丢该工具：宿主 register 校验（assertSupportedJsonSchema）抛错时
       // 不能让它炸掉回调——cordis 会把 apply 回调失败视为 fiber FAILED 并回滚已注册的全部工具
       try {

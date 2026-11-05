@@ -101,6 +101,22 @@ check(liveConfig(defaults).bigEnabled === false, '大档默认关闭（0.17.34�
   check(markedOpen.every((t) => t.bigTier && t.provider === 'volces-ark'), '大档开启后超预算任务仍走大档')
 }
 
+// ── 增量档位与阈值（0.17.43）────────────────────────────────────────────────
+// 留空 = 用上游默认值，所以解析结果里不许出现任何补偿性的默认值——
+// 那会让上游改默认时插件静默漂移。
+{
+  const { updateOptionsOf } = await import('./index.js')
+  check(JSON.stringify(updateOptionsOf({})) === '{}', '增量参数全部留空 → 不下发任何键，引擎用自己的默认')
+  check(updateOptionsOf({ updateRung: '3b' }).rung === '3b', '档位原样透传（3b = k_hop 2）')
+  check(updateOptionsOf({ updateRung: '0' }).rung === '0', '档位 0 透传（放弃组件级增量，退全量）')
+  check(updateOptionsOf({ updateTauNb: '0.7' }).tau_nb === 0.7, '阈值字符串转数字')
+  check(!('tau_grow' in updateOptionsOf({ updateTauGrow: '1.5' })), '阈值越界（>1）不写进参数，交给上游默认')
+  check(!('tau_tree' in updateOptionsOf({ updateTauTree: 'abc' })), '阈值非数字不写进参数')
+  let threw = null
+  try { updateOptionsOf({ updateRung: '9' }) } catch (e) { threw = e }
+  check(threw !== null && /3b/.test(threw.message), '非法档位在提交时显式报错并列出可选值')
+}
+
 fs.rmSync(process.env.DSH_CODEWIKI_JOBS_FILE, { force: true })
 console.log(failures ? `FAIL：${failures} 项失败` : 'PASS：设置项契约全部通过')
 process.exit(failures ? 1 : 0)

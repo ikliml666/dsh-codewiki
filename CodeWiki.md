@@ -49,7 +49,7 @@
                               │（宿主后台 tick）
                               ▼
   原生通道（默认）                              旧 Node 通道（nativeEngine:false）
-  env：判定态 + 装载 Python venv/引擎            queued → articles → crosscut → review → index
+  env：判定态 + 装载 Python venv/引擎            queued → articles → crosscut → review → index → commit
   graph：FSoft 依赖图（16+ 语言 analyzer）                    │
   cluster：模块树（含 artifact 节点）                          │
   articles：FSoft 写文章 ◄──回环桥──► 宿主 llm.stream()       │

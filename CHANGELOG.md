@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.17.43 — 2026-11-05
+
+### 增量档位与阈值可配
+
+原生通道把「增量怎么做」整条交给 FSoft updater，插件侧只写死 `rung: '3'`。上游五个档位（`0`/`1`/`2`/`3`/`3b`）与十几个阈值因此一个都碰不到：怀疑增量判错、想退回全量、想放宽 growth 门槛，都只能改源码。
+
+新增设置项（面板「增量策略」section）：
+
+| 设置 | 取值 | 说明 |
+| --- | --- | --- |
+| `updateRung` | 空（上游默认 3）/ `3` / `3b` / `2` / `1` / `0` | `3b` 多跳一层（`k_hop=2`）；`2` 关掉叶子页自改；`1` 关掉路由/重聚类/UP/叶子补丁/关联补丁/陈旧扫描/归属闭包；**`0` 不是最弱的增量，是放弃增量——上游见到 0 直接跳过整条增量分支，本轮按全量重写** |
+| `updateTauNb` | 0–1 | 新边界采纳阈值（上游默认 0.5） |
+| `updateTauGrow` | 0–1 | 增长重聚类阈值（上游默认 0.33） |
+| `updateTauFull` | 0–1 | 全量重建判定（上游默认 0.5） |
+| `updateTauTree` | 0–1 | 树级重建判定（上游默认 0.3） |
+
+四处接线：`Config` 增字段 → `liveConfig` 透出 → `updateOptionsOf(cfg)` 在 `submit` 时就校验（非法档位在提交时抛错，不等引擎子进程起来）→ `startNativeRun` 的 `deps.updateOptions` 交给 `native-run.js` 合进引擎请求的 `updateOptions`。
+
+`rung=0` 在 `native-run.js` 决议阶段就翻译成 `RESOLUTION.FULL`，并记一条 note。**不挂 `incremental-fallback` blocker**——那是「增量判失败退回全量」的记账，用户主动选的全量不该算降级。
+
+`test-config.mjs` 新增 7 条（空配置不下发任何键 / 3b 透传 / 0 透传 / 阈值字符串转数字 / 越界不写入 / 非数字不写入 / 非法档位报错且消息含可选值）；`test-engine-native-incremental.mjs` 新增用例 18（`rung=0` 时 `resolution === 'full'`、引擎侧 `update` 动作出现 0 次、blockers 不含 `incremental-fallback`）。163/163 通过。
+
+### learnings / decisions 终于有写入路径
+
+mraza007/codewiki 的技能约定「After Every Completed Task」要求修完 bug 写 learning、定了设计写 decision。原生通道只产模块页与入口 `CodeWiki.md`，这两类目录一直没有生产者——0.17.39 把系统提示里的假承诺删掉了（原先写着「由流水线完成」），但没有补上真实现。
+
+新增工具 `codewiki_note`（`lib/wiki-notes.js` 承载拼装与校验）：
+
+- `kind=learning` → `.codewiki/learnings/<slug>.md`；`kind=decision` → `.codewiki/decisions/<slug>.md`
+- 落盘前用与编译流水线**同一套**契约校验（`inspectArticle`），不通过直接报错且不写盘
+- 写完自动 `cw index` 刷新索引；仓库没有入口时顺带生成 `CodeWiki.md`
+- 章节口径：正文必须含非空的 `## Overview`（`REQUIRED_SECTIONS.learning/decision`）
+- **`allowEmptySourceFiles: true`**：空的 `source_files` 对这两类页是合法形态（「选了 A 不选 B」不必然指向某个文件），且存量体检本来就放行——写入闸门若拒，就会出现「写的时候拒、下一轮体检放行」的自相矛盾
+
+这两类页由模型手动维护，编译不覆盖；孤儿页清理的三个判据（`findOrphanPages` / `findStaleModulePages` / `findSupersededLegacyPages`）都只扫 `modules/`，不会误删。`reminderText` 里补了对应例外条款。
+
+新建 `test-wiki-notes.mjs`（21 条）：slug 保留 CJK、frontmatter 字段形态、空数组显式写出、Overview 空判 `empty-section`、source_files 不存在判 `missing-source`、内部链接死链、type 与目录不符、`listWikiPages` 只列 `.md`。
+
+真机验证：对本仓库各写一篇（`learnings/update-rung-hardcoded.md`、`decisions/artifact-page-threshold.md`），`cw index` 从 21 篇涨到 23 篇，`## Decision` / `## Learning` 两段都正确收录。
+
+### artifact 独立页：不是未接入，是占比门槛未触发
+
+审计里把「19 篇模块页没有一篇独立 artifact 页」记成缺口，实测后纠正：`ensure_artifact_module` 的门槛是 `ARTIFACT_MIN_SHARE = 0.8`——聚类 LLM 漏掉不到 20% 就原样返回。本仓库 3 个 artifact 节点（`package.json`、`cordis.patch.yml`、`tools/fsoft-engine/setup-env.sh`）全被正确归类，share=100%，函数在第二个判断就 return 了。依赖图节点、`artifact_index.json`（200k 预算 / 3083 用量 / 3 节点 20 边）都在正常工作。
+
+用真实入口函数实跑三个分岔确认：漏得多且 token ≥ `DEFAULT_MIN_TOKEN_PER_MODULE`（1000）→ 插顶层模块 `Build, Deployment and Configuration`；漏得多但 token 不够 → 并进最近叶子；没漏 → 原样返回。结论写进 `decisions/artifact-page-threshold.md`，改代码是错的。
+
+### 文档残留
+
+- `CodeWiki.md:52` 旧 Node 通道分支补上 `→ commit`（原写 `queued → articles → crosscut → review → index`，漏了最后一个阶段）
+- `codewiki_progress` 的 stage 枚举改为「进行中：`queued`/`prepare`/`articles`/`crosscut`/`review`/`validate`/`index`/`commit`；终态：`done`/`partial`/`failed`/`cancelled`」（原只列终态与部分进行态，漏 `prepare`/`validate`）
+- `nativeStage` 描述从「八段契约阶段」改为九段并补 `proofread`，注明该段只在有失效跨页链接时才出现
+
 ## 0.17.42 — 2026-11-05
 
 ### 面板：任务结束后显示各阶段真实耗时

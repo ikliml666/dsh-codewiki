@@ -789,6 +789,33 @@ if (want(11)) { console.log('== 用例 11：resume 水合不覆盖崩溃现场�
   check(update?.updateOptions?.extra?.moduleConcurrency === 4, '引擎收到增量叶子并行度')
 }
 
+// ============================ 用例 18：rung=0 在本机就判成全量 ============================
+// 上游 _update_options()（doc_generator.py:421-422）见到 rung="0" 直接返回 None，
+// 整条增量分支被跳过、退回全量生成。若插件照发 action=update，引擎会走进全量路径，
+// 而 updateOutcome 拿不到 incremental/no_change —— 一次正常的全量会被误报成
+// incremental-fallback，终态被拖成 partial。所以决议必须在本机先判全量。
+if (want(18)) { console.log('== 用例 18：增量档位 rung=0 → 本机判全量，不误报增量降级 ==')
+  const { base, repo } = makeRepo('rungzero', { mode: 'done' })
+  await runJob(repo, { scope: 'full' })
+
+  // 造一个真实的源码改动，确保「本来会走增量」
+  fs.writeFileSync(path.join(repo, 'core', 'core.py'), '# rung0 change\n' + fs.readFileSync(path.join(repo, 'core', 'core.py'), 'utf8'), 'utf8')
+  execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' })
+  execFileSync('git', ['commit', '-q', '-m', '源码改动'], { cwd: repo, stdio: 'pipe' })
+
+  const r = await runNativeJob({
+    repoRoot: repo, scope: 'stale', docsDir: freshDocs('rungzero'),
+    deps: baseDeps({ updateOptions: { rung: '0' } }),
+  })
+  check(r.incremental?.resolution === 'full', `rung=0 时决议 full（实际 ${r.incremental?.resolution}）`)
+  const notes = [...(r.notes ?? []), ...(r.incremental?.notes ?? [])].join(' | ')
+  check(/rung=0/.test(notes), `notes 点名档位（${notes.slice(0, 160)}）`)
+  const calls = readCalls(base, 'rungzero').filter((c) => c.action === 'update')
+  check(calls.length === 0, `引擎没有收到 update 动作（实际 ${calls.length} 次）`)
+  check((r.blockers ?? []).every((b) => b.kind !== 'incremental-fallback'),
+    `用户显式选的档位不挂增量降级 blocker（${JSON.stringify((r.blockers ?? []).map((b) => b.kind))}）`)
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 占用留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }
