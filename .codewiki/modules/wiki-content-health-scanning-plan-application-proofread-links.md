@@ -15,7 +15,7 @@ fsoft_page: CodeWiki_Engine_Subsystem/Wiki_Content_Health_Scanning___Plan_Applic
 本模块是 [Wiki 内容健康扫描与计划应用](wiki-content-health-scanning-plan-application.md) 的子模块，由两个文件组成：
 
 - `lib/engine/proofread.js`：**链接校对器**——在质量门判定出「正文链到不存在的页面」之后，用单轮模型请求把这些死链当场改掉（改成真实页名，或降级为纯文字），而不是让仓库每轮都停在「部分完成」。
-- `lib/engine/wiki-links.js`：**跨页链接扫描规则的唯一出处**——`[文字](x.md)` 与 `[[x]]` 两种链接语法的正则、外部协议判定，供 article-contract、proofread、quality-gate 三处共用，避免判据分叉。
+- `lib/engine/wiki-links.js`：**跨页链接扫描规则的唯一出处**——`[文字](<目标>.md)` 与 `[[x]]` 两种链接语法的正则、外部协议判定，供 article-contract、proofread、quality-gate 三处共用，避免判据分叉。
 
 ### 要解决的问题
 
@@ -117,7 +117,7 @@ flowchart TD
 
 | 形态 | 例子 | 处理 |
 | --- | --- | --- |
-| 相对链接 | `[文字](x.md)` | 直接由 `scanPageLinks` 捕获 |
+| 相对链接 | `[文字](<目标>.md)` | 直接由 `scanPageLinks` 捕获 |
 | wiki 索引语法 | `[[x]]` / `[[x|文字]]` | 词条层 article-contract 照样当引用；不带 `.md` 时补一次后缀再判（`core` 与 `core.md` 指同一篇，任一写法命中 knownSet 即算有效） |
 
 判定细节：

@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "2d597c8170e78f6dfb493aa51fe8188251b93935"
+    "headCommit": "1e2cb382406e1128bd661a53db66df2601ba5753"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "2d597c8170e78f6dfb493aa51fe8188251b93935",
+    "headCommit": "1e2cb382406e1128bd661a53db66df2601ba5753",
     "committed": [
       "CHANGELOG.md",
       "CodeWiki.md",
@@ -34,7 +34,10 @@
       "test-wiki-notes.mjs"
     ],
     "staged": [],
-    "unstaged": [],
+    "unstaged": [
+      "index.js",
+      "test-orchestration.mjs"
+    ],
     "untracked": [],
     "deleted": [],
     "renamed": [],
@@ -44,44 +47,19 @@
     ".tmp-keys.mjs",
     ".tmp-probe-tabs.mjs",
     ".tmp-type.mjs",
-    ".tmp-verify-cov.mjs"
+    ".tmp-verify-cov.mjs",
+    "index.js",
+    "test-orchestration.mjs"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
-  "effectiveScope": "full",
+  "effectiveScope": "stale",
   "updateOutcome": "incremental",
   "fallbackReason": "",
-  "missingRepair": {
-    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "modules": [
-      "CodeWiki_Engine_Subsystem",
-      "Core_Engine_Public_API___Result_Validation",
-      "LLM_Provider_Bridge_Integration",
-      "Native_CodeWiki_Runtime_Lifecycle_Management",
-      "Native_Output_Quality_Gating",
-      "Native_Runtime_Process_Execution___Monitoring",
-      "Native_Runtime_State___Concurrency_Governance",
-      "Python_Parallel_Agent_Execution_Runtime",
-      "Wiki_Content_Health_Scanning___Plan_Application",
-      "Workspace_Snapshot_Management"
-    ],
-    "overviewLinks": [
-      "build_configuration_and_test_verification_tooling.md",
-      "build_configuration_and_test_verification_tooling.md",
-      "client_panel_ui.md",
-      "engine_runtime_and_codewiki_kernel.md",
-      "job_orchestration_and_agentic_article_pipeline.md"
-    ],
-    "attempts": 1,
-    "at": "2026-11-05T06:38:14.357Z"
-  },
+  "missingRepair": null,
   "notes": [
-    "清理 19 个不属于当前模块树的旧页（agentic_article_workflow.md、article_validation_and_contract.md、build_and_configuration.md 等）",
-    "产物缺页 10 个模块（CodeWiki_Engine_Subsystem、Wiki_Content_Health_Scanning___Plan_Application、Core_Engine_Public_API___Result_Validation 等），转全量修复（复用已有页面）",
-    "overview 有 5 条指向已消失页面的链接（client_panel_ui.md、job_orchestration_and_agentic_article_pipeline.md、engine_runtime_and_codewiki_kernel.md 等），删除后转全量重建",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw359e1s-2-native（29 个文件）",
-    "CodeWiki_Engine_Subsystem/Native_CodeWiki_Runtime_Lifecycle_Management/Native_Output_Quality_Gating.md：校对改写 2 处失效链接（剩余 0 处）",
-    "语义校对改写了 1 篇（CodeWiki_Engine_Subsystem/Native_CodeWiki_Runtime_Lifecycle_Management/Native_Output_Quality_Gating.md），改后重新判门"
+    "工作区未提交改动已合成临时 commit 9b23ef755085（2 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw38cz6e-6-native（29 个文件）"
   ],
-  "updatedAt": "2026-11-05T07:06:32.932Z"
+  "updatedAt": "2026-11-05T08:12:36.423Z"
 }

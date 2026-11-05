@@ -195,7 +195,7 @@ flowchart TD
 ### 死链判定的精确规则（本模块最易误报处）
 
 - **只查 `.md` 相对链接**：外链（`http:` / `mailto:` / `data:`）、纯锚点、指向仓库源文件的 `../src/x.py` 都跳过——后者交给下游目标格式闸门（阶段 3）。
-- **先 `stripCode` 再抽链接**：代码示例 `` `[文字](x.md)` `` 不是引用（真机 `job-mw32wsci-h` 曾因此把整轮从 `done` 误判成 `partial`）。
+- **先 `stripCode` 再抽链接**：代码示例里的 `` `[文字](../../overview.md)` `` 形态（markdown 链接写法）不是引用（真机 `job-mw32wsci-h` 曾因此把整轮从 `done` 误判成 `partial`）。
 - **计划页 vs 落地页双口径**：正文可能写引擎原始页名（渲染期被重写成落地名），也可能已直接写成 slug 落地名——两种都合法，都判一次。只认「本次真的会落地」的页；曾经额外认 `collected.pages`，导致「页在产物里但没被映射进落地方案」被当成命中放过，放过的正是真死链。
 - **页名别名解析（`pageAliases`）**：三条固定命名约定——① 带扩展名页名 `X.ts.md` ↔ 正文写 `X.md`；② 子模块页 `<dir>/<dir>_Y.md` ↔ `<dir>/Y.md`；③ kebab-case 落地名 `llama-and-llm-management.md` ↔ 正文写下划线原名。**只在唯一命中时给别名**：同目录同时存在 `X.ts.md` 与 `X.js.md` 时无法判定，猜一个比报死链更糟；名字只是相近不构成别名。
 - **根页别名豁免**：上游入口页叫 `README.md` / `overview.md`，本仓库叫 `CodeWiki.md`。只豁免**根目录下**这两个名字（真机 `job-mvzbcw87-0` 的 `testing_fixtures.md` 引用同属父模块的 `./README.md` 曾被误判）；子目录里的 `sub/README.md` 仍按真实目标校验。
@@ -215,7 +215,7 @@ sequenceDiagram
     participant CALLER["调用方#58;applyNativeOutput / runPool#59;"]
     participant OUT["output.js"]
     participant MAP["mapping.js"]
-    participant FS["node:fs"]
+    participant FS["node#58;fs"]
 
     CALLER->>OUT: validateOutput(docsDir, repoRoot, componentFiles)
     OUT->>OUT: buildWritePlan(docsDir, componentFiles)

@@ -67,7 +67,7 @@ flowchart TB
     SVC --> COMMIT
     SVC -->|终态 steer| AGENTSVC
     REMIND --> AGENT
-    SCHED -->|scope=auto 判态提交| TOOLS
+    SCHED -->|scope=auto 判态提交（带 confirmed）| TOOLS
     APPLY -.注入.-> LLMSVC
     APPLY -.注入.-> AGENTSVC
     APPLY -.注入.-> WREG
@@ -123,7 +123,7 @@ flowchart TB
 | 工具 | 语义 | 关键行为 |
 | --- | --- | --- |
 | `cw` | 薄封装 Rust CLI | 限 `init/status/index/meta/path/projects/setup/uninstall` 八个子命令；`resolveBinary` 优先 PATH 里的 `cw`，兜底插件自带 `bin/cw(.exe)`。 |
-| `codewiki_generate` | 提交制编译入口 | `cw status` 判态 → 原生通道接管增量（决议权归引擎）→ 兼容通道走文件级归属判定 → 立即返回 `jobId`，明确要求模型「不要等待、不要轮询」。 |
+| `codewiki_generate` | 提交制编译入口 | `cw status` 判态 → 排除清单命中不再抛错，而是返回 `state: 'excluded'` 终态（notes 明示这是用户主动排除的，指示模型不要重试、不要排障、不要换 scope）→ 首次编译闸门（0.17.48）：仓库尚无 CodeWiki（missing/uncompiled）且 `scope≠full` 且未带 `confirmed` 时不提交任务，返回 notes 引导模型先问用户「要为这个仓库建 CodeWiki 吗」，得到同意后显式传 `scope="full"` 再调 → 原生通道接管增量（决议权归引擎）→ 兼容通道走文件级归属判定 → 立即返回 `jobId`，明确要求模型「不要等待、不要轮询」。 |
 | `codewiki_update` | 日常维护快捷入口 | 固定 `scope=auto` 复用 `generateDef.execute`，文案引导模型「本步收尾、继续下一项」。 |
 | `codewiki_progress` | 只读进度查询 | 按 `cwd`/`jobId` 过滤返回 `progressView(jobSummary)`，输出 stage/百分比/篇数/引擎阶段/日志文件/自动提交结果。 |
 | `codewiki_note` | 手工页写入 | 把修复经验（`learnings/`）或设计决策（`decisions/`）写成手工维护页（编译不会覆盖）；过同一套文章契约闸门后落盘并跑 `cw index`。 |
@@ -175,8 +175,11 @@ stateDiagram-v2
 flowchart LR
     A["codewiki_generate.execute"] --> B["cw status 判态<br/>parseStatus"]
     B --> G{"提交闸门"}
-    G -->|排除清单/worktree/空壳| X["拒绝或 auto 静默跳过"]
-    G -->|通过| H{"nativeChannelFor?"}
+    G -->|排除清单| X1["返回 state=excluded 终态：用户主动排除，模型不要重试/排障/换 scope"]
+    G -->|worktree/空壳| X2["拒绝或 auto 静默跳过"]
+    G -->|通过| FG{"首次编译闸门（0.17.48）<br/>missing/uncompiled 且 scope≠full 且未带 confirmed?"}
+    FG -->|是| PN["不提交任务，返回 notes<br/>先问用户「要为这个仓库建 CodeWiki 吗」<br/>同意后显式传 scope=full 再调"]
+    FG -->|否| H{"nativeChannelFor?"}
     H -->|开关开且 scope 受支持| N["job.channel = native<br/>tickNative"]
     H -->|否则| L["兼容通道"]
 
@@ -234,11 +237,11 @@ flowchart TB
 | `GET /api/codewiki/sessions` / `/sessions/item` | 并发池 LLM 请求的 prompt/输出记录（24h TTL），面板「会话」视图数据底座；`activeSessionJobs` 列出在跑但尚未发请求的任务。 |
 | `GET /api/codewiki/logs` | 引擎事件日志翻页（内存只留最近 40 条，完整 NDJSON 在仓库外临时目录）。 |
 | `GET /api/codewiki/models` / `/model-efforts` | 设置页级联下拉数据源：与宿主模型目录同源（`llm.listProviders` + `resolveModelInfo`）。 |
-| `POST /api/codewiki/control` | 动作：`cancel`（取消任务）、`compile`（面板手动编译）、`confirm`（首次编译待确认）、`refresh`（清总览缓存）。 |
+| `POST /api/codewiki/control` | 动作：`cancel`（取消任务）、`compile`（面板手动编译——按下即用户确认，入口自带 `confirmed: true`，首次编译不被闸门拦）、`confirm`（首次编译待确认）、`refresh`（清总览缓存）。 |
 
 ## 自动化与提醒
 
-- **自动增量调度器**（`autoScan`，60s 心跳）：对「已知仓库清单 ∪ job 历史」逐个 `scope=auto` 判态提交；首次编译的仓库（无任务历史 + 无 wiki）只登记 `pendingConfirm`，等用户在面板点确认，**不替用户决定要不要生成 wiki**。
+- **自动增量调度器**（`autoScan`，60s 心跳）：对「已知仓库清单 ∪ job 历史」逐个 `scope=auto` 判态提交；首次编译的仓库（无任务历史 + 无 wiki）只登记 `pendingConfirm`，等用户在面板点确认，**不替用户决定要不要生成 wiki**。对放行的仓库以 `confirmed: true` 调用 `codewiki_generate`——走到这一步的仓库已过确认（有编译历史，或不在「无历史 + 无 wiki」交集里），首次编译闸门不再拦截。
 - **更新提醒**（`installUpdateReminder`）：会话系统提示注入 `codewiki:update-reminder` section，仅当会话仓库根存在 `CodeWiki.md` 时出现；`commitHintText` 在「最近成功编译的完成时间晚于 wiki 产物最后一次 git 提交」时追加一次性的「产物待提交」提醒（60s TTL 缓存）。
 - **自动提交**（`autoCommitWiki`）：主题分支 `codewiki/wiki-<jobId>` 提交（只 `git add -- .codewiki CodeWiki.md` 两个 pathspec）→ ff 合并回原分支 → 删主题分支；detached HEAD/建分支失败降级 `direct`；merge 冲突一律 `merge --abort` 保留主题分支，绝不强合。
 

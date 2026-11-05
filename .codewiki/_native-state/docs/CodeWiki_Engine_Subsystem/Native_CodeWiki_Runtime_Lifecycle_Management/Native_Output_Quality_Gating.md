@@ -6,7 +6,7 @@
 
 它存在的核心理由来自 0.14.0 的教训：「1 篇成功 + 19 篇失败也报 done」。本模块把缺陷按**责任归属**分成三类（defect / degradation / stale），让运维能一眼看清「谁来修、修什么」，而不是把一切混进一个 blockers 数组导致「引擎被归咎于不是它的问题」或「wiki 的陈旧状态被当成产品缺陷」。终态仍然严格：**只有三类皆空才是 done**。
 
-本模块属于 [原生运行时生命周期管理](../Native_CodeWiki_Runtime_Lifecycle_Management.md)，上游依赖 [产物自洽校验](../Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_mapping_output.md)，下游接 [计划应用器](../Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_native_apply.md)，由 [原生编译编排](../Native_CodeWiki_Runtime_Lifecycle_Management/Native_Runtime_Process_Execution___Monitoring.md)（`native-run.js`）驱动。
+本模块属于 [原生运行时生命周期管理](../Native_CodeWiki_Runtime_Lifecycle_Management.md)，上游依赖 [产物自洽校验](../Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_mapping_output.md)，下游接 [计划应用器](../Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_native_apply.md)，由 [原生编译编排](Native_Runtime_Process_Execution___Monitoring.md)（`native-run.js`）驱动。
 
 ---
 
