@@ -23,7 +23,7 @@
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `cw` | 工具 | CLI 薄封装：`status` / `init` / `index` / `meta update` / `path` / `projects` / `setup` / `uninstall` |
-| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 准备 → 文章 → 校对 → 校验 → 索引 → 提交 推进（侧边栏 CodeWiki 面板可见；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；0.17.5 起写作只剩 agentic 工具循环一条通道（按需 `read_code` 读源码，不再整包内联），单篇体积不再触发观察→合成分割 |
+| `codewiki_generate` | 工具 | 提交制编译：cw status 判态 → 提交后台 job 立即返回 → 宿主常驻服务按 准备 → 文章 → 校验 → 索引 → 提交 推进（侧边栏 CodeWiki 面板可见；0.17.41 起语义校对不再单列一步，它是质量门死链检查的修复动作，归在「校验」里；0.13.0 起规划阶段默认走 AST 符号聚类，写作默认走 agentic 工具循环），全部模型环节在插件内完成（0.16.13 起默认 `volces-ark`/`glm-5.3-flash`，512k 上下文，单请求输入预算 110k；110k–420k 输入自动升大档单请求，0.10.8），常规路径不派子代理、不委托发起会话的主模型（0.10.0）；0.17.5 起写作只剩 agentic 工具循环一条通道（按需 `read_code` 读源码，不再整包内联），单篇体积不再触发观察→合成分割 |
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
 | `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled`。0.17.0 起另带 `baselineEligible`（质量门是否许可推进基线）与 `baselineAdvanced`（本轮基线**事实上**是否已前移）——提交失败时会看到 `baselineAdvanced:true` 而 `deliveryComplete:false`，两者口径不同 |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |

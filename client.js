@@ -164,7 +164,7 @@ window.__ModuleLoader__.load({
       stagePartial: '部分完成',
       stageFailed: '失败',
       stageCancelled: '已取消',
-      // 原生引擎（阶段 4）八段契约的真实阶段名：面板阶段条仍是粗粒度七步，
+      // 原生引擎（阶段 4）八段契约的真实阶段名：面板阶段条仍是粗粒度六步，
       // 引擎自报的阶段另显示一行——两者不是一回事，混着显示会让人以为步骤条错了。
       nativeStageLabel: '引擎阶段',
       channelNative: '原生引擎',
@@ -1399,7 +1399,7 @@ window.__ModuleLoader__.load({
         // -------------------------------------------------------------------
 
         const stageLabel = (stage) => tBound(`stage${String(stage).charAt(0).toUpperCase()}${String(stage).slice(1)}`)
-        // 原生引擎阶段名（八段契约）。与面板七步阶段同名的那几个（articles/index/commit）
+        // 原生引擎阶段名（八段契约）。与面板六步阶段同名的那几个（articles/index/commit）
         // 直接映射回步骤条标签，避免同一阶段出现两种说法。
         const NATIVE_STAGE_KEYS = {
           env: 'nativeEnv', graph: 'nativeGraph', cluster: 'nativeCluster',
@@ -1481,7 +1481,7 @@ window.__ModuleLoader__.load({
             el('path', { d, fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }))
         }
 
-        // 七步步骤条（排队 + 六个真实阶段）：已完成绿点（title 带各阶段耗时）、
+        // 六步步骤条（排队 + 五个真实阶段）：已完成绿点（title 带各阶段耗时）、
         // 当前阶段实心点+实时计时、失败/取消在最后计时段标红/黄。终态 done 全绿。
         const stepName = (s) => tBound(`step${s.charAt(0).toUpperCase()}${s.slice(1)}`)
         // 阶段耗时按「当前阶段名」取：历史任务里的键可能是已退役的 plan/crosscut。
@@ -1506,7 +1506,7 @@ window.__ModuleLoader__.load({
         // 总进度：各阶段定权线性推进，阶段内按真实完成度折算；封顶 99，done/partial 才 100。
         // 权重对应五步里除排队外的四个真实阶段，总和为 1——漏一步或比例错，百分比就会在
         // 相邻两步之间凭空跳点。准备阶段（环境+代码图+聚类）在大仓库上最费时间，给到 0.24；
-        // 校验段含死链校对（模型改写正文），在大仓上也不便宜，留 0.14。
+        // 校验段含死链校对（模型改写正文），在大仓上也不便宜，留 0.21。
         const STAGE_WEIGHTS = { queued: 0, prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }
         // 单个阶段自己的完成度（0..1）。这是「每个阶段显示自己的百分比」的唯一来源：
         // 已跑过=1，当前阶段优先用引擎自报的 nativePercent（同一段内最细的读数），
@@ -1540,7 +1540,7 @@ window.__ModuleLoader__.load({
         // 分阶段百分比：每行「阶段名 / 细轨 / 数字」。轨道用 transform 缩放而不是改宽度，
         // 2s 轮询下不会把布局反复推倒。
         // 阶段可视化：一条按权重分段的带子，段宽=该阶段在总进度里的占比，
-        // 段内填充=该阶段自己的完成度。早先是七行独立轨道，一张卡就吃掉 300px 高度，
+        // 段内填充=该阶段自己的完成度。早先是每阶段一行独立轨道，一张卡就吃掉 300px 高度，
         // 同一个信息用分段带表达只占 8px，且「哪一步慢」一眼能看出宽度差异。
         const stageSegments = (job) => {
           const rows = stageRows(job)
@@ -1558,8 +1558,8 @@ window.__ModuleLoader__.load({
                 el('div', { 'data-dscw-p-segfill': '', style: { width: `${pct}%` } }))
             }))
         }
-        // 图例：七个小标签，只写「阶段名 百分比」，当前阶段加粗。
-        // 一行放得下就一行，放不下就换行——比七条轨道省一个数量级的高度。
+        // 图例：每个阶段一个小标签，只写「阶段名 百分比」，当前阶段加粗。
+        // 一行放得下就一行，放不下就换行——比逐行轨道省一个数量级的高度。
         const stageLegend = (job) => {
           const rows = stageRows(job).filter((r) => (STAGE_WEIGHTS[r.stage] ?? 0) > 0)
           // 色块是颜色与阶段之间唯一的绑定：色块颜色与上方分段带里那一段完全一致，
@@ -2167,7 +2167,7 @@ window.__ModuleLoader__.load({
             if (total) meta.push(`${t('writtenLabel')} ${okCount}/${total} ${t('unitArticle')}`)
             else if (typeof job.writtenCount === 'number') meta.push(`${t('writtenLabel')} ${job.writtenCount} ${t('unitArticle')}`)
             if (job.failedCount) meta.push(`${t('failedLabel')} ${job.failedCount}`)
-            // 原生通道（阶段 4）：步骤条是粗粒度七步，引擎自报的是八段契约——粒度不同，
+            // 原生通道（阶段 4）：步骤条是粗粒度六步，引擎自报的是八段契约——粒度不同，
             // 所以真实引擎阶段另起一项显示，不能拿它去改步骤条的序号（那会让旧任务错位）。
             if (job.channel === 'native') {
               const ns = nativeStageName(job.nativeStage)
