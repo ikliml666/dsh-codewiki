@@ -25,6 +25,12 @@
 
 `findStaleModulePages` 此前有三条可证特征（`title` 等于 slug / 落在 `modules/` 子目录 / `source_files` 部分幸存），每加一条就多一类旧页能绕过：真机上先后漏掉三批（描述性 title 如 `apply_plan（阶段 3 落地器）`、平铺在 `modules/` 根下的 11 篇、`source_files` 只剩附属文件没被覆盖）。现在反过来：`modules/` 是引擎的专属产物目录，**只要页名对不上当前模块树就删**，不逐条证明「它像旧页」。嵌套目录里的页即便 slug 与 live 模块同名也删（原生页永远 flat，旧树按子模块命名目录会撞 slug）。`findSupersededLegacyPages` 保留，职责收窄为「标注这篇页的代码现在归谁」，供运维决定要不要从 git 历史里捞回来。
 
+### 代码块里的链接示例不再判死链
+
+`lib/engine/output.js` 的 `relativeLinks` 直接在原文上跑 `\[..\](目标)` 正则，没有掩蔽代码。本仓库的文章讲「扫两种链接形态」时把 `[文字](x.md)` 写进行内代码当示例，于是被当成真链接去解析，目标页不存在 → `dead-link` → 整轮从 done 掉成 partial（真机 `job-mw32wsci-h`：`[dead-link/product] article_validation_and_contract.md 链接到 x.md，但该页不在本次产出里`）。
+
+改成先 `stripCode` 再取链接。`stripCode` 是等长替换，匹配偏移与原文一一对应，不影响同一条链路上 `rewritePageLinks` 的原位改写；文章里贴真实链接仍照常校验。
+
 ### 验证
 
 - 新增 `test-article-repair.mjs`，48 条断言：六种可修形态各自修完必须过同一套契约（`inspectArticle` 零 error）、六类泄漏标记必须 `drop`、代码块内的施工文本不判泄漏、合规页 `keep` 时一字不改、目录推不出 type 时不动。

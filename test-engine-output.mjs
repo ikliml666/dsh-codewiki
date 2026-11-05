@@ -79,6 +79,14 @@ await check('relativeLinks：抽相对链接，跳过外链/锚点/图片 data U
   assert.deepEqual(links, ['A.md', '../src/x.py'])
 })
 
+await check('relativeLinks：代码里的链接形态是示例，不算引用', async () => {
+  // 真机 job-mw32wsci-h：文章讲「扫两种链接形态」时把 `[文字](x.md)` 写在行内代码里，
+  // 被当成死链判了 partial。围栏和行内代码都要掩蔽。
+  assert.deepEqual(relativeLinks('扫 `[文字](x.md)` 这种形态'), [])
+  assert.deepEqual(relativeLinks('扫 `[[裸名]]` 这种形态'), [])
+  assert.deepEqual(relativeLinks('```md\n[示例](gone.md)\n```\n真链接 [a](A.md)'), ['A.md'])
+})
+
 await check('collectOutput：正常 docs 树被完整读出，无 problems', async () => {
   const dir = makeDocs('ok')
   const c = collectOutput({ docsDir: dir })
