@@ -563,5 +563,83 @@ await check('设置页：保存按钮换成自动保存状态行', async () => {
   }
 })
 
+// 终态只显示一条绿色满格进度条，等于把「时间花在哪」整个丢掉了——而 stageTimings
+// 从 0.5.0 起就一直落盘。这条用例锁住：任务结束后分段带的段宽改成真实耗时，
+// 图例直接写耗时读数，且排队不计入（排队是等别人，真机上常比整个编译还长）。
+await check('任务页：已完成任务的分段带按真实耗时给出各阶段读数', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs')
+        ? { jobs: [{ ...JOB, stageTimings: { queued: 300000, prepare: 5000, articles: 60000, validate: 41, index: 8879, commit: 500 } }] }
+        : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `终态渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-legend/.test(html), '终态缺少阶段图例')
+    assert.ok(/«stepArticles» 01:00/.test(html), `文章阶段应显示 01:00：${html.slice(0, 600)}`)
+    assert.ok(/«stepCommit» 500ms/.test(html), '亚秒阶段应显示毫秒而不是 00:00')
+    assert.ok(!/«stepQueued»/.test(html), '排队不该进耗时带（它是等别人，不是编译做了什么）')
+    // 段数 = 有耗时的阶段数（prepare/articles/validate/index/commit 五项）
+    assert.equal((html.match(/data-dscw-p-seg=""/g) ?? []).length, 5, '分段数应等于有耗时的阶段数')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 0.5.0 之前的任务没有 stageTimings，终态画一条全是 0 的空白带只是噪声。
+await check('任务页：没有 stageTimings 的老任务不画耗时带', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs') ? { jobs: [{ ...JOB, stageTimings: null }] } : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(!/data-dscw-p-segbar/.test(html), '无耗时的老任务不该出现空的分段带')
+    assert.ok(!/data-dscw-p-legend/.test(html), '无耗时的老任务不该出现空图例')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 进行中的带子仍是进度语义：段宽=权重、读数=百分比。改终态不能把这条带偏。
+await check('任务页：进行中的分段带仍按进度百分比读数', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs')
+        ? {
+          jobs: [{
+            ...JOB, stage: 'articles', finishedAt: null, nativeStage: 'articles', nativePercent: 40,
+            stageStartedAt: '2026-11-02T00:01:00.000Z', notes: [],
+          }],
+        }
+        : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `进行中渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(/data-dscw-p-legend/.test(html), '进行中缺少阶段图例')
+    assert.ok(/«stepArticles» \d+%/.test(html), '进行中的读数应为百分比')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
 console.log(`\n${pass} passed, ${fails.length} failed`)
 process.exit(fails.length ? 1 : 0)

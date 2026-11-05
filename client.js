@@ -242,6 +242,7 @@ window.__ModuleLoader__.load({
       activityLabel: '活动流',
       taskListLabel: '逐篇',
       legendHint: '颜色是阶段状态：绿=已完成，蓝=进行中，灰=未开始，红=失败；段宽是这一步在总进度里占多少。',
+      legendHintDone: '颜色是阶段状态；段宽是该阶段真实耗时，一眼看出时间花在哪一步。',
       emptyReposTitle: '还没有可编译的仓库',
       emptyTasksTitle: '还没有编译记录',
       emptySessionsTitle: '还没有模型请求',
@@ -472,6 +473,7 @@ window.__ModuleLoader__.load({
       activityLabel: 'Activity',
       taskListLabel: 'Per page',
       legendHint: 'Color is stage state: green=done, blue=running, grey=pending, red=failed. Segment width is the share of total progress.',
+      legendHintDone: 'Color is stage state; segment width is that stage\'s wall time — see at a glance where the time went.',
       emptyReposTitle: 'No repos to compile yet',
       emptyTasksTitle: 'Nothing compiled yet',
       emptySessionsTitle: 'No model requests yet',
@@ -1419,7 +1421,10 @@ window.__ModuleLoader__.load({
           return parts.slice(-2).join('/') || cwd // 父目录/目录名两段，Temp 沙箱残留一眼可辨
         }
         const fmtMs = (ms) => {
-          const s = Math.max(0, Math.floor(ms / 1000))
+          const v = Math.max(0, Math.floor(ms))
+          // 亚秒不折算成 00:00：索引、提交这类阶段常常几百毫秒，写成 00:00 等于没有读数。
+          if (v < 1000) return `${v}ms`
+          const s = Math.floor(v / 1000)
           const h = Math.floor(s / 3600)
           const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
           const ss = String(s % 60).padStart(2, '0')
@@ -1537,47 +1542,67 @@ window.__ModuleLoader__.load({
             return { stage: s, frac, done, running, failedStep, dur }
           })
         }
-        // 分阶段百分比：每行「阶段名 / 细轨 / 数字」。轨道用 transform 缩放而不是改宽度，
-        // 2s 轮询下不会把布局反复推倒。
-        // 阶段可视化：一条按权重分段的带子，段宽=该阶段在总进度里的占比，
-        // 段内填充=该阶段自己的完成度。早先是每阶段一行独立轨道，一张卡就吃掉 300px 高度，
-        // 同一个信息用分段带表达只占 8px，且「哪一步慢」一眼能看出宽度差异。
-        const stageSegments = (job) => {
+        // 段宽的口径随任务状态切换，这是两条带子唯一的分歧点：
+        //   进行中 → 进度权重（这一步占总进度的多少，和上面的总进度条同口径）；
+        //   终态   → 该阶段真实耗时（占比就是「时间花在哪」，此时进度恒为 100% 毫无信息量）。
+        // 走的是同一份 stageTimings，所以不存在「两套数字对不上」。
+        // 排队不进带子：它是等别人，不是编译干了什么，且真机上常比整个编译还长——
+        // 画进去会把真正的阶段全压成细线。排队时长在上面的用时行里单独报。
+        const stageWeight = (job, stage, running) => {
+          if (stage === 'queued') return 0
+          if (running) return STAGE_WEIGHTS[stage] ?? 0
+          const ms = timingsOf(job)[stage]
+          return Number.isFinite(ms) && ms > 0 ? ms : 0
+        }
+        // 老任务没有 stageTimings（0.5.0 之前的记录），终态就别画一条全是 0 的空白带。
+        const hasTimings = (job) => ACTIVE_STAGES.some((s) => s !== 'queued' && stageWeight(job, s, false) > 0)
+        // 阶段可视化：一条分段的带子，段宽的含义见 stageWeight，段内填充=该阶段自己的完成度。
+        // 早先是每阶段一行独立轨道，一张卡就吃掉 300px 高度，同一个信息用分段带表达只占
+        // 8px，且「哪一步慢」一眼能看出宽度差异——这正是终态也要保留它的原因。
+        const stageSegments = (job, running) => {
           const rows = stageRows(job)
           return el('div', { 'data-dscw-p-segbar': '' },
             rows.map((r) => {
-              const w = STAGE_WEIGHTS[r.stage] ?? 0
+              const w = stageWeight(job, r.stage, running)
               if (w <= 0) return null
               const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
               const pct = Math.round(r.frac * 100)
               return el('div', {
                 key: r.stage, 'data-dscw-p-seg': '', 'data-state': state,
                 style: { flex: `${w} 0 0` },
-                title: `${stageLabel(r.stage)} · ${pct}%${r.dur ? ` · ${fmtMs(r.dur)}` : ''}`,
+                title: running
+                  ? `${stageLabel(r.stage)} · ${pct}%${r.dur ? ` · ${fmtMs(r.dur)}` : ''}`
+                  : `${stageLabel(r.stage)} · ${fmtMs(w)}`,
               },
                 el('div', { 'data-dscw-p-segfill': '', style: { width: `${pct}%` } }))
             }))
         }
-        // 图例：每个阶段一个小标签，只写「阶段名 百分比」，当前阶段加粗。
+        // 图例：每个阶段一个小标签，只写「阶段名 读数」，当前阶段加粗。
         // 一行放得下就一行，放不下就换行——比逐行轨道省一个数量级的高度。
-        const stageLegend = (job) => {
-          const rows = stageRows(job).filter((r) => (STAGE_WEIGHTS[r.stage] ?? 0) > 0)
+        // 读数进行中是完成百分比，终态是该阶段耗时：「跑完了」这件事看一次就够，
+        // 真正无法从别处得到的信息是「时间花在哪一步」。
+        const stageLegend = (job, running) => {
+          const rows = stageRows(job).filter((r) => stageWeight(job, r.stage, running) > 0)
           // 色块是颜色与阶段之间唯一的绑定：色块颜色与上方分段带里那一段完全一致，
           // 所以「哪段是什么」不用去猜——照着色块找同色的段即可。颜色表达状态
           // （绿=完成·蓝=进行中·灰=未开始·红=失败），不是阶段身份。
           return el('div', {
             'data-dscw-p-legend': '',
-            title: tBound('legendHint'),
+            title: running ? tBound('legendHint') : tBound('legendHintDone'),
           },
             rows.map((r) => {
               const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
               const pct = Math.round(r.frac * 100)
+              const dur = timingsOf(job)[r.stage]
               return el('span', {
                 key: r.stage, 'data-state': state,
-                title: `${stageLabel(r.stage)} · ${tBound(`legendState_${state}`)} · ${pct}%`,
+                // 终态把百分比降级到悬停：终态全 100%，写出来只是重复。
+                title: running
+                  ? `${stageLabel(r.stage)} · ${tBound(`legendState_${state}`)} · ${pct}%`
+                  : `${stageLabel(r.stage)} · ${fmtMs(dur ?? 0)}`,
               },
                 el('i', { 'data-swatch': '' }),
-                `${stepName(r.stage)} ${pct}%`)
+                `${stepName(r.stage)} ${running ? `${pct}%` : fmtMs(dur ?? 0)}`)
             }))
         }
         const overallPct = (job) => {
@@ -2272,9 +2297,15 @@ window.__ModuleLoader__.load({
                   headMeta.length
                     ? el('span', { 'data-dscw-p-pctmeta': '' }, headMeta.join(' · '))
                     : null),
-              // 分段带与图例只在真有进度时出现：终态全是 100%、排队全是 0%，两者都是噪声。
-              active && pct > 0 ? stageSegments(job) : null,
-              active && pct > 0 ? stageLegend(job) : null,
+              // 分段带与图例只在真有信息时出现：进行中要能看到进度，终态要能看到耗时分布。
+              // 终态不依赖 pct——失败/取消的任务总进度是 null，而「时间花在哪一步」恰恰
+              // 是这类任务最该看的东西。老任务没有 stageTimings 就不画，免得出一条空带。
+              active && pct > 0
+                ? stageSegments(job, true)
+                : (!active && hasTimings(job) ? stageSegments(job, false) : null),
+              active && pct > 0
+                ? stageLegend(job, true)
+                : (!active && hasTimings(job) ? stageLegend(job, false) : null),
               // 次要信息压成一条流水线：数字、用量、最新一条备注合成一行，放不下就换行。
               // 各占一行时，光这些「补充说明」就能吃掉 80px，而它们没有一条比进度更该先看。
               (meta.length || job.usage || lastNote)
