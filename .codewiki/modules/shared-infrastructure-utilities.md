@@ -6,7 +6,6 @@ source_files:
   - lib/job-logs.js
   - lib/job-store.js
   - lib/update-record.js
-  - lib/wiki-notes.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Shared_Infrastructure_Utilities.md
