@@ -150,6 +150,38 @@ console.log('== 用例 3：模型没修对时保留原文，still partial ==')
   check(overview.includes('gone-module.md'), '未改对时保留原始正文（不写入更坏的版本）')
 }
 
+// ── 用例 4：`[[词条]]` 死链（契约层判出、被门改名）也能进校对 ────────────────
+// 真机上 FSoft 产物很少写 `[文字](x.md)`，但常写 `[[词条]]`；后者由 article-contract
+// 判定、被 quality-gate 压成 kind='article-contract'。校对若只认 kind==='dead-link'，
+// 这条唯一能自救的路就被切断——用例锁住它。
+console.log('== 用例 4：契约层判出的 [[词条]] 死链也能被校对接手 ==')
+{
+  const { base, repo } = makeRepo('wikilink-chat')
+  // makeRepo 默认写 deadlink；这里换成 wikilink 模式（正文用 [[词条]] 形态链死页）。
+  fs.writeFileSync(path.join(base, '.native-mode-wikilink-chat'), 'wikilink', 'utf8')
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-proof-docs4-'))
+  madeDirs.push(docs)
+  let promptSeen = ''
+  const res = await runNativeJob({
+    repoRoot: repo,
+    scope: 'full',
+    docsDir: docs,
+    deps: baseDeps(docs, async (prompt) => {
+      promptSeen = prompt
+      return '<PAGE>\n# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段，细节见 [[core]]。\n</PAGE>'
+    }),
+  })
+  check(promptSeen.includes('ghost-entry'), `校对提示里点出了 [[词条]] 形态的死链（seen=${promptSeen.slice(0, 80)}）`)
+  const core = fs.readFileSync(path.join(docs, 'core.md'), 'utf8')
+  check(core.includes('[[core]]'), `[[词条]] 死链被改写成真实词条（实际 ${JSON.stringify(core)}）`)
+  check(!core.includes('ghost-entry'), '失效词条不再残留')
+  check(
+    (res.notes ?? []).some((n) => /语义校对改写了|校对改写了/.test(n)),
+    `notes 记录校对改写了页（实际 ${JSON.stringify((res.notes ?? []).filter((n) => n.includes('校对')))}）`,
+  )
+  fs.rmSync(path.join(base, '.native-mode-wikilink-chat'), { force: true })
+}
+
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 占用留给系统 */ } }
 try { fs.rmSync(process.env.DSH_CODEWIKI_JOBS_FILE, { force: true }) } catch { /* ignore */ }
 

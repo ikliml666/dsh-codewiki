@@ -75,6 +75,34 @@ await check('missingLinksOf：按源页目录解析相对路径，指向不存�
   assert.deepEqual(missingLinksOf(text, 'sub/a.md', known), ['sub/gone.md', 'sub/top.md'])
 })
 
+await check('deadLinkSources：契约层判出的死链也要认（门把它改名成 article-contract）', async () => {
+  // quality-gate.js:619 把 article-contract 的每条 issue 统一压成 kind='article-contract'，
+  // 真实类别只留在 issue 字段里。只认 kind==='dead-link' 会让「落地后 wiki 页链接断了」
+  // 这条唯一的 `[[...]]` 兜底永远进不了校对。
+  const sources = deadLinkSources([
+    { kind: 'dead-link', source: 'b.md', target: 'x.md' },
+    { kind: 'article-contract', source: 'a.md', target: 'y.md', issue: 'dead-link' },
+    { kind: 'article-contract', source: 'c.md', target: 'z.md', issue: 'empty-body' },
+    { kind: 'article-contract', source: 'd.md', target: 'w.md', issue: 'missing-section' },
+  ])
+  assert.deepEqual(sources, ['a.md', 'b.md'])
+})
+
+await check('missingLinksOf：[[词条]] 与 [文字](x.md) 两种形态都判', async () => {
+  const known = new Set(['core.md', 'sub/leaf.md'])
+  assert.deepEqual(missingLinksOf('[[core]]', 'p.md', known), [])
+  assert.deepEqual(missingLinksOf('[[core.md]]', 'p.md', known), [])
+  assert.deepEqual(missingLinksOf('[[ghost]]', 'p.md', known), ['ghost.md'])
+  assert.deepEqual(missingLinksOf('[[ghost|显示文字]]', 'p.md', known), ['ghost.md'])
+  assert.deepEqual(missingLinksOf('[[sub/leaf]]', 'p.md', known), [])
+})
+
+await check('missingLinksOf：代码块里的 [[词条]] 是语法示例，不算引用', async () => {
+  const known = new Set(['core.md'])
+  assert.deepEqual(missingLinksOf('```\n[[ghost]]\n```', 'p.md', known), [])
+  assert.deepEqual(missingLinksOf('讲词条写法 `[[ghost]]` 时不该判违规', 'p.md', known), [])
+})
+
 await check('listPageNames：跳过隐藏目录与 temp/', async () => {
   const dir = makeDocs('list', {
     'overview.md': '# 概览',

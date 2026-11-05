@@ -162,12 +162,18 @@ function writeDocs(docsDir, repoPath, { action = 'generate', commitId = '' } = {
     if (action === 'update' && fs.existsSync(abs)) return
     fs.writeFileSync(abs, body, 'utf8')
   }
-  // deadlink：正文链到一个模块树里不存在的页。真机上这是 partial 的主因（模型照旧
-  // 聚类记忆编造页名），用来验证「语义校对改对后重判门」这条链路。
-  keep('overview.md', MODE === 'deadlink'
+  // deadlink / wikilink 两档都用来验证「语义校对改对后重判门」这条链路：
+  // - deadlink：正文写 `[文字](x.md)` 指向不存在的页，这是**引擎层**的 dead-link，
+  //   真机上它是 partial 的主因（模型照聚类记忆编造页名）。
+  // - wikilink：正文写 `[[词条]]` 指向不存在的词条，这是**契约层**判出的死链，
+  //   quality-gate 会把它改名成 kind='article-contract'，专测校对认不认这条路。
+  const overviewBody = MODE === 'deadlink'
     ? '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](gone-module.md)。\n'
-    : '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n')
-  keep('core.md', '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
+    : '# 项目概览\n\n演示项目的整体结构说明。\n\n## 组成\n\n见 [核心](core.md)。\n'
+  keep('overview.md', overviewBody)
+  keep('core.md', MODE === 'wikilink'
+    ? '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段，细节见 [[ghost-entry]]。\n'
+    : '# 核心\n\n## 职责\n\n核心引擎负责构建依赖图并调度各阶段。\n')
   // missing-page：这一页**怎么都不写**（既不新建也不重写）。用来模拟「全量修复
   // 也补不齐」的真实形态（provider 空响应 / 模块树与产物不符），从而验证调用方
   // 不会把同样的缺页一轮又一轮地拿去重跑全量。

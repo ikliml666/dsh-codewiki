@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.17.44 — 2026-11-05
+
+### 语义校对：从「从不触发」到真能触发
+
+审计时查了 30 个任务的 `stageTimings`，**没有任何一个任务有 `proofread` 计时**；notes 里搜「校对」「死链」也是零命中。0.17.41 把校对从面板上并进了校验，说明它是「质量门死链检查的修复动作」——但这个动作在真机上从未发生过。
+
+第一层原因看着像「判据太严」，实测后是另一个：本仓库 19 篇模块页有 128 条跨页链接（18/19 篇都有），逐页算失效链接数是 **0**。Wxxy-CampusHub（46 页）、Wxxy-CampusLogin（57 页）同样是 0。FSoft 写的链接全部有效，`deadLinkSources` 返回空是正确结果。
+
+真正的断点在链路中间，两处：
+
+1. **契约层判出的死链认不出来。** 引擎原始页走 `lib/engine/output.js` 报 `kind: 'dead-link'`；落地后的 wiki 页走 `lib/article-contract.js` 报 `dead-link`，但 `lib/engine/quality-gate.js:619` 把它统一压成 `kind: 'article-contract'`，真实类别只留在 `issue` 字段。`deadLinkSources` 只认 `p.kind === 'dead-link'`，于是这条路永远进不了校对。
+
+2. **`[[词条]]` 形态的死链根本不算引用。** 渲染期的 `rewritePageLinks(..., { dropUnresolved: true })` 只降级 `[文字](x.md)`，`[[ghost]]` 原样保留。实跑验证：`正文引用 [[ghost]] 与 [链接](gone.md) 与 [正常](core.md)` 渲染后是 `正文引用 [[ghost]] 与 链接 与 [正常](core.md)` —— `[链接]` 被降级成纯文字，`[[ghost]]` 留着。而 `article-contract` 的 `collectWikiLinks` 认 `[[...]]`，于是它被判成死链、改名成 `article-contract`、然后被第 1 条挡住。
+
+两处都修：
+
+- `deadLinkSources` 判据改为 `p?.kind === 'dead-link' || (p?.kind === 'article-contract' && p?.issue === 'dead-link')`，JSDoc 写明为什么有两个来源。
+- `missingLinksOf` 重写：先 `stripCode` 剥掉代码块（围栏里的 `[[词条]]` 是语法示例，不是引用），再用 `scanPageLinks` 收 `[文字](x.md)`、用 `\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]` 收 `[[词条]]`。词条形态按 wiki 约定省略 `.md` 后缀，所以裸目标和 `目标.md` 都算命中已知页。
+
+补测试：
+
+- `test-engine-proofread.mjs` 新增 3 条（契约层死链要认、`[[词条]]` 与 `[文字](x.md)` 双形态、代码块里的词条不算引用）→ **16 passed / 0 failed**（基线 13）。
+- `test-engine-proofread-e2e.mjs` 新增用例 4，假引擎加 `wikilink` 模式（`overview.md` 正常链向 `core.md`，`core.md` 正文用 `[[ghost-entry]]` 链到不存在的词条），断言校对提示里点出 `ghost-entry`、改写后 `[[core]]` 落盘、`ghost-entry` 不残留、notes 有记录 → **17/17 通过**。
+
+顺带确认：这份端到端用例不能把死链放在 `overview.md` 里。入口页不走 `mapped.articles` 循环，只做 `bodyLength` 与围栏配对两项检查（`quality-gate.js:555-563`），它的死链根本不参与契约判定。第一版就栽在这里——断言全红，而产物确实没被检查过。
+
+### 验证
+
+- `node test-engine-proofread.mjs` → 16 passed / 0 failed
+- `node test-engine-proofread-e2e.mjs` → 17/17 通过
+- 40 个测试全量回归全绿（含 6 个需要 `.probe-fsoft/venv` 的）
+
 ## 0.17.43 — 2026-11-05
 
 ### 增量档位与阈值可配

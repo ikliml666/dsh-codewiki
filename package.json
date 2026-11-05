@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-codewiki",
-  "version": "0.17.43",
+  "version": "0.17.44",
   "description": "CodeWiki for DeepSeek Harness: cw CLI + whole-repo wiki compilation pipeline with a sidebar panel. Default channel since 0.16.0 is the native engine (nativeEngine: true) which drives the upstream FSoft-AI4Code/CodeWiki Python engine as a subprocess and requires a local Python 3.10+ venv with closed deps; the in-plugin Node pipeline remains as a minimal compatibility channel (nativeEngine: false, top-level directory grouping + file-level source_files attribution only, no new features). The Node-side reimplementation of FSoft algorithms (symbols/cluster/graph-diff/incremental/update-planner) was retired and deleted in 0.16.0 phase 7. No default compile model since 0.17.34: provider/model must be picked in plugin settings, and a task submitted without them fails with an explicit error instead of silently running against a guessed model. The large-input tier is off by default since 0.17.34. Zero subagents, single-project serial.",
   "private": true,
   "type": "module",
