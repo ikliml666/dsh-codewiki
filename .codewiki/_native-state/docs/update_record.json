@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-05T18:08:45+0800",
-  "finished_at": "2026-11-05T18:11:13+0800",
+  "started_at": "2026-11-05T18:49:10+0800",
+  "finished_at": "2026-11-05T18:49:57+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -24,8 +24,8 @@
     }
   },
   "revision": {
-    "old_commit": "0b74cf43943e40355c5f8c3af6f6146ff6766805",
-    "new_commit": "75c8c4938a67c1c6a0794053833fb925d7b5953a",
+    "old_commit": "75c8c4938a67c1c6a0794053833fb925d7b5953a",
+    "new_commit": "118e0c25562be73f3443ee4b6a712ff2dc37d0ac",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,7 +33,7 @@
       "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 2,
+      "body": 1,
       "edge": 0,
       "renamed": 0
     },
@@ -41,8 +41,7 @@
     "deleted": [],
     "interface": [],
     "body": [
-      "index.js::fixAnchors",
-      "lib\\engine\\apply-plan.js::findStaleModulePages"
+      "package.json::package.json"
     ],
     "edge": [],
     "renamed": {}
@@ -59,36 +58,13 @@
   },
   "reclustered": [],
   "reports": {
-    "Core_Application_Runtime_Entry": {
+    "Build,_Configuration___Environment_Setup": {
       "leaf_path": [
-        "Core_Application_Runtime_Entry"
+        "Build,_Configuration___Environment_Setup"
       ],
       "mode": "edit",
       "own": [
-        "index.js::fixAnchors"
-      ],
-      "adopted": {
-        "index.js::fixAnchors": "1:same_file"
-      },
-      "up": [],
-      "context": [],
-      "refch": [],
-      "entered": [],
-      "left": [],
-      "children_added": [],
-      "children_removed": [],
-      "reclustered": false,
-      "page": "Core_Application_Runtime_Entry"
-    },
-    "CodeWiki_Engine_Subsystem/Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_native_apply": {
-      "leaf_path": [
-        "CodeWiki_Engine_Subsystem",
-        "Wiki_Content_Health_Scanning___Plan_Application",
-        "Wiki_Content_Health_Scanning___Plan_Application_native_apply"
-      ],
-      "mode": "edit",
-      "own": [
-        "lib\\engine\\apply-plan.js::findStaleModulePages"
+        "package.json::package.json"
       ],
       "adopted": {},
       "up": [],
@@ -99,63 +75,34 @@
       "children_added": [],
       "children_removed": [],
       "reclustered": false,
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_native_apply"
+      "page": "Build,_Configuration___Environment_Setup"
     }
   },
-  "ownership": [
-    {
-      "component_id": "index.js::fixAnchors",
-      "rule": "1:same_file",
-      "leaf_path": [
-        "Core_Application_Runtime_Entry"
-      ],
-      "detail": "19 tracked components in file",
-      "deleted": false
-    }
-  ],
+  "ownership": [],
   "active": [
     {
-      "leaf": "Core_Application_Runtime_Entry",
-      "page": "Core_Application_Runtime_Entry",
+      "leaf": "Build,_Configuration___Environment_Setup",
+      "page": "Build,_Configuration___Environment_Setup",
       "mode": "edit",
       "order": 0
-    },
-    {
-      "leaf": "CodeWiki_Engine_Subsystem/Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "mode": "edit",
-      "order": 1
     }
   ],
   "write_sets": {
-    "Core_Application_Runtime_Entry": [
-      "Agentic_Article_Processing_Library",
+    "Build,_Configuration___Environment_Setup": [
       "Browser_UI_Client",
       "Build,_Configuration___Environment_Setup",
-      "Core_Application_Runtime_Entry",
       "Core_Engine_Public_API___Result_Validation",
-      "Native_Runtime_Process_Execution___Monitoring",
       "Native_Runtime_State___Concurrency_Governance",
       "Python_Parallel_Agent_Execution_Runtime",
+      "Test_Fixtures___Diagnostic_Tooling",
       "Vendored_CodeWiki_Rust_Implementation",
-      "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
-      "overview"
-    ],
-    "Wiki_Content_Health_Scanning___Plan_Application_native_apply": [
-      "CodeWiki_Engine_Subsystem",
-      "Native_Output_Quality_Gating",
-      "Wiki_Content_Health_Scanning___Plan_Application",
-      "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
-      "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
       "overview"
     ]
   },
   "fallback": {
-    "r_leaf": 0.11764705882352941,
+    "r_leaf": 0.058823529411764705,
     "r_tree": 0.0,
-    "n_active": 2,
+    "n_active": 1,
     "n_leaves": 17,
     "n_structural": 0,
     "tau_full": 0.5,
@@ -164,141 +111,64 @@
   },
   "verdicts": [
     {
-      "page": "Core_Application_Runtime_Entry",
-      "verdict": "no-op",
-      "reason": "纯注释删除（fixAnchors 内两句历史轶事）；页面未列 fixAnchors，对 symbolsOnLine 的描述（与 test-wiki-anchors.mjs 同源）在新代码中仍成立。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
+      "page": "Build,_Configuration___Environment_Setup",
+      "verdict": "patch",
+      "reason": "Updated the engines.node row in the 基础身份 table from >=20 to >=24.9.0 to match the new package.json engines field.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": true
     },
     {
       "page": "overview",
       "verdict": "no-op",
-      "reason": "仅汇总模块职责，未涉及锚点修复行为。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Build,_Configuration___Environment_Setup",
-      "verdict": "no-op",
-      "reason": "打包/配置/venv 主题，与注释改动无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Agentic_Article_Processing_Library",
-      "verdict": "no-op",
-      "reason": "提到的 frontmatter 修复属于 article-repair.js（另一文件），不受 index.js 注释删除影响。",
-      "by_leaf": "Core_Application_Runtime_Entry",
+      "reason": "Summarizes the build module generically (npm manifest, dsh bundle patch, venv setup script); never states a Node version, so the engines.node bump does not make it wrong.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Browser_UI_Client",
       "verdict": "no-op",
-      "reason": "前端面板，无锚点修复内容。",
-      "by_leaf": "Core_Application_Runtime_Entry",
+      "reason": "References package.json only for name/client-modules registration conventions and cordis.patch.yml id=codewiki; no Node version claim.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Core_Engine_Public_API___Result_Validation",
       "verdict": "no-op",
-      "reason": "引擎契约/协议层，与本次注释改动无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Native_Runtime_Process_Execution___Monitoring",
-      "verdict": "no-op",
-      "reason": "原生进程编排，无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
+      "reason": "Points to setup-env.sh for env prep; the engines.node change does not affect this module's contract or knob descriptions.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Native_Runtime_State___Concurrency_Governance",
       "verdict": "no-op",
-      "reason": "引擎状态/锁治理，无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
+      "reason": "Cites setup-env.sh as the repair path for drift/unhealthy states; no Node version statement.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Python_Parallel_Agent_Execution_Runtime",
       "verdict": "no-op",
-      "reason": "Python 侧运行时，无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
+      "reason": "Links to setup-env.sh for venv setup; engines.node bump does not touch its protocol/parallelism content.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Test_Fixtures___Diagnostic_Tooling",
+      "verdict": "no-op",
+      "reason": "References setup-env.sh and package.json's retirement note; no Node version claim requiring update.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Vendored_CodeWiki_Rust_Implementation",
       "verdict": "no-op",
-      "reason": "Rust cw CLI，无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "verdict": "no-op",
-      "reason": "落地器逻辑，无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
-      "verdict": "no-op",
-      "reason": "引擎侧死链校对，与 Node 端 fixAnchors 无关。",
-      "by_leaf": "Core_Application_Runtime_Entry",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "verdict": "patch",
-      "reason": "Removed the stale '手工维护页/learnings/decisions 避难所目录自 0.17.49 已下线' tail from the 设计哲学 blockquote to match the trimmed source comment in findStaleModulePages; all other prose remains true.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": true
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application",
-      "verdict": "no-op",
-      "reason": "Section 5 summarizes findStaleModulePages at criterion level (页名对不上当前模块树 slug); it never cited the removed comment and no behavior changed.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": false
-    },
-    {
-      "page": "CodeWiki_Engine_Subsystem",
-      "verdict": "no-op",
-      "reason": "Generic subsystem overview; no mention of the removed comment or stale-page maintenance directories.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": false
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "Top-level repo architecture page; does not describe findStaleModulePages internals.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Native_Output_Quality_Gating",
-      "verdict": "no-op",
-      "reason": "Describes the gate→applyNativeOutput contract; the comment-only diff does not alter any signature or call.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
-      "verdict": "no-op",
-      "reason": "References applyNativeOutput only as a downstream consumer; unchanged by this comment edit.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
-      "verdict": "no-op",
-      "reason": "References applyNativeOutput only as the writer of defect-free pages; unchanged by this comment edit.",
-      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
+      "reason": "References binaryPath config and cordis.patch.yml; the engines.node field change is outside its described contract.",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     }
   ],
   "pages_written": [
-    "Wiki_Content_Health_Scanning___Plan_Application_native_apply"
+    "Build,_Configuration___Environment_Setup"
   ],
   "pages_removed": [],
   "write_set_violations": [],
@@ -310,46 +180,31 @@
   "calls": [
     {
       "kind": "leaf_agent",
-      "target": "Core_Application_Runtime_Entry",
-      "seconds": 104.70138001441956,
+      "target": "Build,_Configuration___Environment_Setup",
+      "seconds": 46.55233669281006,
       "usage": {
-        "input_tokens": 192794,
-        "output_tokens": 8118,
-        "cache_read_tokens": 41584,
+        "input_tokens": 166183,
+        "output_tokens": 3174,
+        "cache_read_tokens": 16696,
         "cache_write_tokens": 0,
-        "total_tokens": 200912,
+        "total_tokens": 169357,
         "requests": 5
-      },
-      "error": null
-    },
-    {
-      "kind": "leaf_agent",
-      "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-      "seconds": 147.21220326423645,
-      "usage": {
-        "input_tokens": 210313,
-        "output_tokens": 8887,
-        "cache_read_tokens": 73128,
-        "cache_write_tokens": 0,
-        "total_tokens": 219200,
-        "requests": 7
       },
       "error": null
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.05044841766357422,
+      "seconds": 0.02097344398498535,
       "usage": null,
       "error": null
     }
   ],
   "detector_notes": [
-    "[Core_Application_Runtime_Entry] agent notes: 唯一改动是从 index.js::fixAnchors 的注释中删去两句历史轶事（曾有一篇页闭合 --- 被写成空行、积了 19 处失效锚点）。函数行为零变化，所有页面均未记载该轶事，叶子页甚至未列出 fixAnchors 组件。无需任何文档编辑。",
-    "[Wiki_Content_Health_Scanning___Plan_Application_native_apply] agent notes: The source change is a comment-only cleanup in lib/engine/apply-plan.js::findStaleModulePages (deleted the parenthetical '(手工维护页 0.17.49 已下线，没有避难所目录)'). No runtime behavior, signature, or detection criterion changed, so only the leaf page's duplicated comment text needed trimming."
+    "[Build,_Configuration___Environment_Setup] agent notes: The leaf page was the only page in the write set that stated the previous Node requirement (>=20). One surgical table-cell edit applied; all referrer/ancestor pages are already consistent with the new engines.node >=24.9.0 value."
   ],
   "errors": [],
-  "wall_seconds": 148.21,
+  "wall_seconds": 47.03,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -357,37 +212,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 12,
+    "n_calls": 5,
     "totals": {
-      "input_tokens": 403107,
-      "output_tokens": 17005,
-      "cache_read_tokens": 114712,
+      "input_tokens": 166183,
+      "output_tokens": 3174,
+      "cache_read_tokens": 16696,
       "cache_write_tokens": 0,
-      "requests": 12,
-      "total_tokens": 420112
+      "requests": 5,
+      "total_tokens": 169357
     },
     "by_phase": {
       "update": {
-        "calls": 12,
-        "input_tokens": 403107,
-        "output_tokens": 17005,
-        "cache_read_tokens": 114712,
+        "calls": 5,
+        "input_tokens": 166183,
+        "output_tokens": 3174,
+        "cache_read_tokens": 16696,
         "cache_write_tokens": 0,
-        "requests": 12,
-        "total_tokens": 420112,
-        "unpriced_calls": 12
+        "requests": 5,
+        "total_tokens": 169357,
+        "unpriced_calls": 5
       }
     },
     "by_model": {
       "doubao-seed-2.1-lite": {
-        "calls": 12,
-        "input_tokens": 403107,
-        "output_tokens": 17005,
-        "cache_read_tokens": 114712,
+        "calls": 5,
+        "input_tokens": 166183,
+        "output_tokens": 3174,
+        "cache_read_tokens": 16696,
         "cache_write_tokens": 0,
-        "requests": 12,
-        "total_tokens": 420112,
-        "unpriced_calls": 12
+        "requests": 5,
+        "total_tokens": 169357,
+        "unpriced_calls": 5
       }
     },
     "unpriced_models": [
@@ -397,15 +252,15 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "Core_Application_Runtime_Entry",
+        "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 20.24,
-        "input_tokens": 9765,
-        "output_tokens": 1598,
+        "seconds": 4.31,
+        "input_tokens": 8494,
+        "output_tokens": 269,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 11363,
+        "total_tokens": 8763,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -414,32 +269,15 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "Core_Application_Runtime_Entry",
+        "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 16.31,
-        "input_tokens": 20997,
-        "output_tokens": 1137,
-        "cache_read_tokens": 9528,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 22134,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 38.19,
-        "input_tokens": 10988,
-        "output_tokens": 3164,
+        "seconds": 3.44,
+        "input_tokens": 16725,
+        "output_tokens": 313,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 14152,
+        "total_tokens": 17038,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -448,15 +286,15 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
+        "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 4.36,
-        "input_tokens": 17087,
-        "output_tokens": 167,
+        "seconds": 4.26,
+        "input_tokens": 37187,
+        "output_tokens": 330,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 17254,
+        "total_tokens": 37517,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -465,15 +303,15 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
+        "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 3.84,
-        "input_tokens": 26495,
-        "output_tokens": 201,
-        "cache_read_tokens": 16952,
+        "seconds": 14.19,
+        "input_tokens": 51577,
+        "output_tokens": 1175,
+        "cache_read_tokens": 16696,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 26696,
+        "total_tokens": 52752,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -482,117 +320,15 @@
       {
         "phase": "update",
         "kind": "update_agent",
-        "target": "Core_Application_Runtime_Entry",
+        "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 14.05,
-        "input_tokens": 32067,
-        "output_tokens": 1070,
+        "seconds": 13.33,
+        "input_tokens": 52200,
+        "output_tokens": 1087,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 33137,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Core_Application_Runtime_Entry",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 21.2,
-        "input_tokens": 51914,
-        "output_tokens": 1784,
-        "cache_read_tokens": 32056,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 53698,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 38.17,
-        "input_tokens": 37171,
-        "output_tokens": 3243,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 40414,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Core_Application_Runtime_Entry",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 32.55,
-        "input_tokens": 78051,
-        "output_tokens": 2529,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 80580,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 9.28,
-        "input_tokens": 38089,
-        "output_tokens": 488,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 38577,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 9.75,
-        "input_tokens": 39417,
-        "output_tokens": 538,
-        "cache_read_tokens": 16952,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 39955,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 16.14,
-        "input_tokens": 41066,
-        "output_tokens": 1086,
-        "cache_read_tokens": 39224,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 42152,
+        "total_tokens": 53287,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -600,5 +336,5 @@
       }
     ]
   },
-  "run_id": "f6226fd1-57e1-4dd7-a61d-97effbbf21da"
+  "run_id": "dcf11ada-44c4-410a-8086-bfb97fce9ac9"
 }

@@ -60,7 +60,7 @@ flowchart TB
 | `private` | `true` | 不发布到 npm registry |
 | `type` | `module` | ESM 模块 |
 | `main` / `exports` | `./index.js` 与 `./client.js` | 双入口：`index.js` 为宿主侧，`client.js` 为浏览器侧 |
-| `engines.node` | `>=20` | Node.js 版本要求 |
+| `engines.node` | `>=24.9.0` | Node.js 版本要求 |
 | `engines.dsh` | `>=0.2.0-rc.0` | 宿主 dsh 平台版本要求 |
 | `dependencies` | `@deepseek-ai/schemastery ^3.18.4` | 唯一运行时依赖：Config schema 校验库 |
 
