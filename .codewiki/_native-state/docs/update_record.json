@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-05T21:10:42+0800",
-  "finished_at": "2026-11-05T21:10:42+0800",
-  "outcome": "no_change",
+  "started_at": "2026-11-05T21:44:24+0800",
+  "finished_at": "2026-11-05T21:50:14+0800",
+  "outcome": "incremental",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -24,8 +24,8 @@
     }
   },
   "revision": {
-    "old_commit": "739bae357c793e71aecea2b95671a387b7909ebd",
-    "new_commit": "b928f2ac4abfeec0bc24010bd676e27c8da6b594",
+    "old_commit": "b928f2ac4abfeec0bc24010bd676e27c8da6b594",
+    "new_commit": "87d5dfe54f8e754a948395a8f1ec606dfb261ba2",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,48 +33,772 @@
       "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 0,
+      "body": 5,
       "edge": 0,
       "renamed": 0
     },
     "added": [],
     "deleted": [],
     "interface": [],
-    "body": [],
+    "body": [
+      "lib\\engine\\mapping.js::mapFsoftOutput",
+      "lib\\engine\\mapping.js::sourceFilesOf",
+      "lib\\engine\\output.js::buildWritePlan",
+      "lib\\engine\\output.js::validateOutput",
+      "package.json::package.json"
+    ],
     "edge": [],
     "renamed": {}
   },
-  "repair": {},
+  "repair": {
+    "renamed": {},
+    "removed": [],
+    "routing": [],
+    "orphans": [],
+    "deleted_nodes": [],
+    "created_leaves": [],
+    "growth": {},
+    "growth_flagged": []
+  },
   "reclustered": [],
-  "reports": {},
-  "ownership": [],
-  "active": [],
-  "write_sets": {},
-  "fallback": {},
-  "verdicts": [],
-  "pages_written": [],
+  "reports": {
+    "Build,_Configuration___Environment_Setup": {
+      "leaf_path": [
+        "Build,_Configuration___Environment_Setup"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "Build,_Configuration___Environment_Setup"
+    },
+    "CodeWiki_Engine_Subsystem/Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_mapping_output": {
+      "leaf_path": [
+        "CodeWiki_Engine_Subsystem",
+        "Wiki_Content_Health_Scanning___Plan_Application",
+        "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+      ],
+      "mode": "edit",
+      "own": [
+        "lib\\engine\\mapping.js::mapFsoftOutput",
+        "lib\\engine\\output.js::validateOutput",
+        "lib\\engine\\output.js::buildWritePlan",
+        "lib\\engine\\mapping.js::sourceFilesOf"
+      ],
+      "adopted": {
+        "lib\\engine\\mapping.js::mapFsoftOutput": "1:same_file",
+        "lib\\engine\\output.js::validateOutput": "1:same_file",
+        "lib\\engine\\output.js::buildWritePlan": "1:same_file",
+        "lib\\engine\\mapping.js::sourceFilesOf": "1:same_file"
+      },
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+    }
+  },
+  "ownership": [
+    {
+      "component_id": "lib\\engine\\mapping.js::mapFsoftOutput",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "CodeWiki_Engine_Subsystem",
+        "Wiki_Content_Health_Scanning___Plan_Application",
+        "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\mapping.js::sourceFilesOf",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "CodeWiki_Engine_Subsystem",
+        "Wiki_Content_Health_Scanning___Plan_Application",
+        "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\output.js::buildWritePlan",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "CodeWiki_Engine_Subsystem",
+        "Wiki_Content_Health_Scanning___Plan_Application",
+        "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "lib\\engine\\output.js::validateOutput",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "CodeWiki_Engine_Subsystem",
+        "Wiki_Content_Health_Scanning___Plan_Application",
+        "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+      ],
+      "detail": "1 tracked components in file",
+      "deleted": false
+    }
+  ],
+  "active": [
+    {
+      "leaf": "Build,_Configuration___Environment_Setup",
+      "page": "Build,_Configuration___Environment_Setup",
+      "mode": "edit",
+      "order": 0
+    },
+    {
+      "leaf": "CodeWiki_Engine_Subsystem/Wiki_Content_Health_Scanning___Plan_Application/Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "page": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "mode": "edit",
+      "order": 1
+    }
+  ],
+  "write_sets": {
+    "Build,_Configuration___Environment_Setup": [
+      "Browser_UI_Client",
+      "Build,_Configuration___Environment_Setup",
+      "Core_Engine_Public_API___Result_Validation",
+      "Native_Runtime_State___Concurrency_Governance",
+      "Python_Parallel_Agent_Execution_Runtime",
+      "Test_Fixtures___Diagnostic_Tooling",
+      "Vendored_CodeWiki_Rust_Implementation",
+      "overview"
+    ],
+    "Wiki_Content_Health_Scanning___Plan_Application_mapping_output": [
+      "CodeWiki_Engine_Subsystem",
+      "Native_Output_Quality_Gating",
+      "Wiki_Content_Health_Scanning___Plan_Application",
+      "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
+      "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
+      "overview"
+    ]
+  },
+  "fallback": {
+    "r_leaf": 0.11764705882352941,
+    "r_tree": 0.0,
+    "n_active": 2,
+    "n_leaves": 17,
+    "n_structural": 0,
+    "tau_full": 0.5,
+    "tau_tree": 0.3,
+    "fired": false
+  },
+  "verdicts": [
+    {
+      "page": "Build,_Configuration___Environment_Setup",
+      "verdict": "patch",
+      "reason": "package.json 版本号 0.17.50 → 0.17.51，仅更新基础身份表中的 version 一行；description 未变，版本语义章节无需改动",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": true
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "只引用历史版本节点（0.16.0），未钉当前包版本",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Browser_UI_Client",
+      "verdict": "no-op",
+      "reason": "未引用包版本号（仅有 client.js 内部 v0.4.1）",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Core_Engine_Public_API___Result_Validation",
+      "verdict": "no-op",
+      "reason": "钉的是引擎契约版本（0.17.38/0.17.32）等历史事件版本，与本次包号无关",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Native_Runtime_State___Concurrency_Governance",
+      "verdict": "no-op",
+      "reason": "未引用插件包版本号",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Python_Parallel_Agent_Execution_Runtime",
+      "verdict": "no-op",
+      "reason": "仅历史事故注释（0.16.x），不涉及当前包版本",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Test_Fixtures___Diagnostic_Tooling",
+      "verdict": "no-op",
+      "reason": "只提到 0.16.0 退役历史，未钉当前版本",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Vendored_CodeWiki_Rust_Implementation",
+      "verdict": "no-op",
+      "reason": "未引用插件包版本号",
+      "by_leaf": "Build,_Configuration___Environment_Setup",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "verdict": "patch",
+      "reason": "repoRoot 现在经 buildWritePlan 透传为 mapFsoftOutput 的 fileExists，推断出的 :: 路径在映射期即按磁盘存在性过滤，source-missing 收窄为仅显式 componentFiles 映射；已同步硬规则1、数据流图、问题类别表、校验管线图与时序图",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": true
+    },
+    {
+      "page": "Wiki_Content_Health_Scanning___Plan_Application",
+      "verdict": "no-op",
+      "reason": "仅以文件/组件清单与四条硬规则概述本叶，未描述 source_files 过滤语义的细节，改动未使其失真",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    },
+    {
+      "page": "CodeWiki_Engine_Subsystem",
+      "verdict": "no-op",
+      "reason": "子系统级概述，不含本叶的判据细节，无失实",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "仓库总览层，未提及本叶任何组件契约",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Native_Output_Quality_Gating",
+      "verdict": "no-op",
+      "reason": "source-missing 仍是其 defect 词表中的合法 kind，新过滤属上游内部实现，门的分流语义未变",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Wiki_Content_Health_Scanning___Plan_Application_native_apply",
+      "verdict": "no-op",
+      "reason": "只引用 mapping.js 的常量与 moduleSlug 映射，不受 fileExists 过滤影响",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Wiki_Content_Health_Scanning___Plan_Application_proofread_links",
+      "verdict": "no-op",
+      "reason": "死链校对链路不消费 source_files 判定，本改动与其契约无关",
+      "by_leaf": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "changed_on_disk": false
+    }
+  ],
+  "pages_written": [
+    "Build,_Configuration___Environment_Setup",
+    "Wiki_Content_Health_Scanning___Plan_Application_mapping_output"
+  ],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {},
-  "calls": [],
-  "detector_notes": [],
+  "stale_scan": {
+    "scanned": 19,
+    "pages_with_hits": {},
+    "fixed": []
+  },
+  "calls": [
+    {
+      "kind": "leaf_agent",
+      "target": "Build,_Configuration___Environment_Setup",
+      "seconds": 49.36737394332886,
+      "usage": {
+        "input_tokens": 191316,
+        "output_tokens": 2625,
+        "cache_read_tokens": 88744,
+        "cache_write_tokens": 0,
+        "total_tokens": 193941,
+        "requests": 6
+      },
+      "error": null
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+      "seconds": 349.42521381378174,
+      "usage": {
+        "input_tokens": 625937,
+        "output_tokens": 15635,
+        "cache_read_tokens": 216200,
+        "cache_write_tokens": 0,
+        "total_tokens": 641572,
+        "requests": 17
+      },
+      "error": null
+    },
+    {
+      "kind": "missing_pages",
+      "target": "-",
+      "seconds": 0.017768383026123047,
+      "usage": null,
+      "error": null
+    }
+  ],
+  "detector_notes": [
+    "[Build,_Configuration___Environment_Setup] agent notes: 本次变更为纯 patch 号递增（0.17.50→0.17.51），description 承诺文本（0.16.0/0.17.34 条款）完全未动，文档其余内容全部保持有效。",
+    "[Wiki_Content_Health_Scanning___Plan_Application_mapping_output] agent notes: 行为变化的影响面：此前「模块树引用已删除文件」会判 source-missing defect（整轮 partial），现在该模块落成空归属 + warning、由质量门按 no-source-evidence 降级；若后续质量门页需要体现这一缺陷分布收窄，可另行评估，本次未越权修改。"
+  ],
   "errors": [],
-  "wall_seconds": 0.12,
+  "wall_seconds": 350.01,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "complete",
+    "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 0,
+    "n_calls": 23,
     "totals": {
-      "cost_usd": 0.0
+      "input_tokens": 817253,
+      "output_tokens": 18260,
+      "cache_read_tokens": 304944,
+      "cache_write_tokens": 0,
+      "requests": 23,
+      "total_tokens": 835513
     },
-    "by_phase": {},
-    "by_model": {},
-    "unpriced_models": [],
-    "calls": []
+    "by_phase": {
+      "update": {
+        "calls": 23,
+        "input_tokens": 817253,
+        "output_tokens": 18260,
+        "cache_read_tokens": 304944,
+        "cache_write_tokens": 0,
+        "requests": 23,
+        "total_tokens": 835513,
+        "unpriced_calls": 23
+      }
+    },
+    "by_model": {
+      "doubao-seed-2.1-lite": {
+        "calls": 23,
+        "input_tokens": 817253,
+        "output_tokens": 18260,
+        "cache_read_tokens": 304944,
+        "cache_write_tokens": 0,
+        "requests": 23,
+        "total_tokens": 835513,
+        "unpriced_calls": 23
+      }
+    },
+    "unpriced_models": [
+      "doubao-seed-2.1-lite"
+    ],
+    "calls": [
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.03,
+        "input_tokens": 8941,
+        "output_tokens": 311,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 9252,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.14,
+        "input_tokens": 16464,
+        "output_tokens": 223,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 16687,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.89,
+        "input_tokens": 31880,
+        "output_tokens": 221,
+        "cache_read_tokens": 16440,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 32101,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.42,
+        "input_tokens": 40677,
+        "output_tokens": 93,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 40770,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 14.02,
+        "input_tokens": 9744,
+        "output_tokens": 1092,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 10836,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 1.88,
+        "input_tokens": 10006,
+        "output_tokens": 98,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 10104,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 9.61,
+        "input_tokens": 46289,
+        "output_tokens": 906,
+        "cache_read_tokens": 40504,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 47195,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Build,_Configuration___Environment_Setup",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 10.28,
+        "input_tokens": 47065,
+        "output_tokens": 871,
+        "cache_read_tokens": 31800,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 47936,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 43.97,
+        "input_tokens": 14038,
+        "output_tokens": 3424,
+        "cache_read_tokens": 9784,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 17462,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.52,
+        "input_tokens": 20214,
+        "output_tokens": 168,
+        "cache_read_tokens": 13880,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 20382,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.05,
+        "input_tokens": 29622,
+        "output_tokens": 205,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 29827,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.92,
+        "input_tokens": 41676,
+        "output_tokens": 101,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 41777,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 81.84,
+        "input_tokens": 41979,
+        "output_tokens": 6624,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 48603,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.19,
+        "input_tokens": 43155,
+        "output_tokens": 200,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 43355,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.08,
+        "input_tokens": 43687,
+        "output_tokens": 401,
+        "cache_read_tokens": 13880,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 44088,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.23,
+        "input_tokens": 44397,
+        "output_tokens": 214,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 44611,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.61,
+        "input_tokens": 44898,
+        "output_tokens": 294,
+        "cache_read_tokens": 43576,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 45192,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.41,
+        "input_tokens": 45233,
+        "output_tokens": 119,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 45352,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.72,
+        "input_tokens": 45818,
+        "output_tokens": 236,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 46054,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 21.25,
+        "input_tokens": 46385,
+        "output_tokens": 1299,
+        "cache_read_tokens": 41528,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 47684,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.22,
+        "input_tokens": 47484,
+        "output_tokens": 181,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 47665,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.17,
+        "input_tokens": 48066,
+        "output_tokens": 198,
+        "cache_read_tokens": 45624,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 48264,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Wiki_Content_Health_Scanning___Plan_Application_mapping_output",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 10.8,
+        "input_tokens": 49535,
+        "output_tokens": 781,
+        "cache_read_tokens": 47928,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 50316,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      }
+    ]
   },
-  "run_id": "cd9b2c27-9992-4234-9c0d-0135a95826da"
+  "run_id": "a9faef3b-b726-4c67-b247-138ac691f5b9"
 }

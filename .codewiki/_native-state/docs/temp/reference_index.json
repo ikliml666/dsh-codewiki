@@ -591,6 +591,7 @@
       "pageAliases",
       "push",
       "readJsonIfExists",
+      "sourceFilesOf",
       "staleDocPages",
       "stripCode",
       "toPosix",

@@ -110,7 +110,7 @@ flowchart TD
 
 `mapping.js` 头部以注释形式冻结了四条规则，本模块全部行为都围绕它们展开：
 
-1. **不臆造 source_files**。`source_files` 只能来自真实组件→文件证据（`componentFiles` / `module_tree.components`）。组件 id 形如 `src/a.py::Class.method`，取 `::` 前的文件部分；无 `::` 且无映射证据的组件直接跳过。拿不到就是空数组 + warning——0.14.0 的增量闸门正是靠 `source_files` 判定归属，编造它会让未消化的变化被静默基线化。
+1. **不臆造 source_files**。`source_files` 只能来自真实组件→文件证据（`componentFiles` / `module_tree.components`）。组件 id 形如 `src/a.py::Class.method`，取 `::` 前的文件部分；无 `::` 且无映射证据的组件直接跳过。当调用方给了 `repoRoot`（生产通道恒给）时，`mapFsoftOutput` 还会收一个 `fileExists` 谓词并传给 `sourceFilesOf`：推断出的 `::` 相对路径若在磁盘上不存在，该组件同样按「拿不到证据」跳过——不再先收进 `sourceFiles`、留待 `validateOutput` 判 `source-missing`。于是「树里引用了已删文件」的模块从此落成空归属 + warning（质量门按 `no-source-evidence` 降级，页照写），只有**显式 `componentFiles` 映射却不存在**的才仍报 `source-missing`。拿不到就是空数组 + warning——0.14.0 的增量闸门正是靠 `source_files` 判定归属，编造它会让未消化的变化被静默基线化。
 2. **不静默丢弃**。任何没被映射的页都进 `unmapped`，带可机读 `reason`，由上层决定 partial。滑掉的页等于 wiki 少一篇而没人知道。
 3. **不覆盖**。slug 冲突（`A_B` 与 `A-B` 都 → `a-b`）时两页都进 `unmapped`，并把已入写集的冲突页撤回——**不许后到的赢**，静默覆盖会丢内容且无法回溯。
 4. **不改技术内容**。只搬路径与类型，正文一字不动；规范化（链接重写）在引擎侧完成。
@@ -119,7 +119,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    IN["入参#58;pages 页路径列表 / moduleTree / componentFiles / metadata / updateRecord / overviewName"]
+    IN["入参#58;pages 页路径列表 / moduleTree / componentFiles / metadata / updateRecord / overviewName / fileExists#58;给了 repoRoot 才传#59;"]
     IN --> IDX["indexModuleTree#58;展开完整层级 modulePath#59;"]
     IDX --> LOOP{"逐页判定"}
 
@@ -162,7 +162,7 @@ flowchart TD
     E5 -- "有" --> P5["push unmapped-page"]
     P5 --> E6{"warnings 含未产出页?"}
     E6 -- "有" --> P6["push article-missing"]
-    P6 --> E7{"给了 repoRoot 且 source_files 指向不存在文件?"}
+    P6 --> E7{"给了 repoRoot 且 source_files 指向不存在文件?#58;仅限显式 componentFiles 映射#59;"}
     E7 -- "是" --> P7["push source-missing"]
     P7 --> E8{"正文 .md 相对链接不在计划页/落地页/别名内?"}
     E8 -- "是" --> P8["push dead-link"]
@@ -189,7 +189,7 @@ flowchart TD
 | `empty-body` | 页面除标题外没有正文 | `bodyLength` |
 | `article-missing` | 模块树里有模块，但没有对应页 | `validateOutput`（由 mapping 的 warning 升级） |
 | `unmapped-page` | 页在 docs 里，但映射不到 wiki 的任何位置 | `mapped.unmapped` |
-| `source-missing` | `source_files` 指向的文件在仓库里不存在（需给 `repoRoot`） | `validateOutput` |
+| `source-missing` | 只有**显式 `componentFiles` 映射**的文件在仓库里不存在才报；从组件 id `::` 推断出的路径在映射期已由 `fileExists` 过滤（需给 `repoRoot`） | `validateOutput` |
 | `dead-link` | 正文相对链接指向计划外的文件 | `validateOutput` |
 
 ### 死链判定的精确规则（本模块最易误报处）
@@ -218,12 +218,12 @@ sequenceDiagram
     participant FS["node#58;fs"]
 
     CALLER->>OUT: validateOutput(docsDir, repoRoot, componentFiles)
-    OUT->>OUT: buildWritePlan(docsDir, componentFiles)
+    OUT->>OUT: buildWritePlan(docsDir, componentFiles, repoRoot)
     OUT->>FS: readdirSync docsDir（递归，跳过 temp/ 与隐藏目录）
     FS-->>OUT: 页清单 pages
     OUT->>FS: readFileSync metadata/module_tree/update_record（可选）
     FS-->>OUT: 结构化 JSON（坏文件变 problems）
-    OUT->>MAP: mapFsoftOutput(pages, moduleTree, componentFiles, metadata, updateRecord)
+    OUT->>MAP: mapFsoftOutput(pages, moduleTree, componentFiles, metadata, updateRecord, fileExists)
     MAP->>MAP: indexModuleTree + slug 冲突检测 + sourceFilesOf
     MAP-->>OUT: {entry, articles, unmapped, meta, updateRecord, warnings}
     OUT->>FS: 逐篇 readFileSync 正文

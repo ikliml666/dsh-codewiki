@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "a1f0acf476e33d34d3a11cc1390e16700c2dea23"
+    "headCommit": "56c49ec6a9c034bb6b8451cfe2a10d7f868f1476"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "a1f0acf476e33d34d3a11cc1390e16700c2dea23",
+    "headCommit": "56c49ec6a9c034bb6b8451cfe2a10d7f868f1476",
     "committed": [],
     "staged": [
       "lib/wiki-notes.js",
@@ -21,8 +21,11 @@
       "index.js",
       "lib/article-contract.js",
       "lib/engine/apply-plan.js",
+      "lib/engine/mapping.js",
+      "lib/engine/output.js",
       "package.json",
       "test-engine-apply-plan.mjs",
+      "test-engine-output.mjs",
       "test-wiki-anchors.mjs",
       "vendor/codewiki/FORK.md",
       "vendor/codewiki/skills/codewiki-session.md",
@@ -47,9 +50,12 @@
     "index.js",
     "lib/article-contract.js",
     "lib/engine/apply-plan.js",
+    "lib/engine/mapping.js",
+    "lib/engine/output.js",
     "lib/wiki-notes.js",
     "package.json",
     "test-engine-apply-plan.mjs",
+    "test-engine-output.mjs",
     "test-orchestration.mjs",
     "test-wiki-anchors.mjs",
     "test-wiki-notes.mjs",
@@ -60,13 +66,13 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit b928f2ac4abf（14 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3k8cul-0-native（29 个文件）",
-    "本轮把 14 个未提交源码改动一并写进产物（快照 b928f2ac4abf）：CHANGELOG.md、README.md、bin/cw.exe、index.js、lib/article-contract.js 等"
+    "工作区未提交改动已合成临时 commit 87d5dfe54f8e（17 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3lfv5i-7-native（29 个文件）",
+    "本轮把 17 个未提交源码改动一并写进产物（快照 87d5dfe54f8e）：CHANGELOG.md、README.md、bin/cw.exe、index.js、lib/article-contract.js 等"
   ],
-  "updatedAt": "2026-11-05T13:10:43.143Z"
+  "updatedAt": "2026-11-05T13:50:15.357Z"
 }
