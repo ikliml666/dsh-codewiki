@@ -163,14 +163,14 @@ sequenceDiagram
 
 ---
 
-## 阶段模型：七步视图 vs 原生引擎八段契约
+## 阶段模型：六步视图 vs 原生引擎八段契约
 
-面板的七步视图（`ACTIVE_STAGES`）与引擎自报的细粒度阶段是两套体系；七步同时是词典里 `step*` 短名、进度权重与分段带 / 图例（`stageRows` → `stageSegments` / `stageLegend`）行结构的来源：
+面板的六步视图（`ACTIVE_STAGES`）与引擎自报的细粒度阶段是两套体系；六步同时是词典里 `step*` 短名、进度权重与分段带 / 图例（`stageRows` → `stageSegments` / `stageLegend`）行结构的来源：
 
 ```mermaid
 flowchart LR
-  subgraph Seven["面板七步视图 ACTIVE_STAGES"]
-    S0["queued 排队"] --> S1["prepare 准备"] --> S2["articles 写文章"] --> S3["review 校对"] --> S4["validate 校验"] --> S5["index 建索引"] --> S6["commit 提交"]
+  subgraph Six["面板六步视图 ACTIVE_STAGES"]
+    S0["queued 排队"] --> S1["prepare 准备"] --> S2["articles 写文章"] --> S3["validate 校验"] --> S4["index 建索引"] --> S5["commit 提交"]
   end
   subgraph Eight["原生引擎八段契约 nativeStage（engine_runtime_and_codewiki_kernel）"]
     E0["env 探测环境"] --> E1["graph 解析代码图"] --> E2["cluster 聚类模块"]
@@ -178,10 +178,10 @@ flowchart LR
   end
 ```
 
-- **退役阶段名映射**：`LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }`——历史任务里残留旧阶段名时，`stageOf(job)` 先映射再查七步，否则失败 / 取消时分段带行会找不到当前行；阶段耗时 `stageTimings` 同样经 `timingsOf` 归一。
-- **细粒度展示**：同名的 `articles / index / commit` 直接映射回七步行标签，其余阶段经 `NATIVE_STAGE_KEYS`（env / graph / cluster / proofread / validate / baseline）以「引擎阶段：xxx」另起一行显示，不混入七步行序号。
-- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, review: 0.14, validate: 0.07, index: 0.05, commit: 0.04 }`：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。`overallPct` 对 `stageRows(job)` 的每行（已完成阶段 frac=1、进行中阶段 frac 按 `taskList` / `nativePercent` 折算）求 `frac × 权重` 之和。
-- **终态语义**：`done` 七行全 100%；`partial`（部分完成）也按 100% 显示——活干完了，由终态标签 + `blockers` 悬停说明「为什么没算完整成功」；只有 `failed / cancelled` 才在最后计时段标红 / 标黄（`lastTimedStage`）。
+- **退役阶段名映射**：`LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }`——历史任务里残留旧阶段名时，`stageOf(job)` 先映射再查六步，否则失败 / 取消时分段带行会找不到当前行；阶段耗时 `stageTimings` 同样经 `timingsOf` 归一。
+- **细粒度展示**：同名的 `articles / index / commit` 直接映射回六步行标签，其余阶段经 `NATIVE_STAGE_KEYS`（env / graph / cluster / proofread / validate / baseline）以「引擎阶段：xxx」另起一行显示，不混入六步行序号。
+- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }`（原 `review` 校对步已并入 `validate` 校验步，步骤条由七步收敛为六步）：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。`overallPct` 对 `stageRows(job)` 的每行（已完成阶段 frac=1、进行中阶段 frac 按 `taskList` / `nativePercent` 折算）求 `frac × 权重` 之和。
+- **终态语义**：`done` 六行全 100%；`partial`（部分完成）也按 100% 显示——活干完了，由终态标签 + `blockers` 悬停说明「为什么没算完整成功」；只有 `failed / cancelled` 才在最后计时段标红 / 标黄（`lastTimedStage`）。
 
 ---
 
