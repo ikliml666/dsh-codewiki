@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "8b437f53361f3b8966454a03c0dd5b17a7e075ee"
+    "headCommit": "ab4ce6ee7ee87c71e840cd1abe5c4f6ddac73589"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
-    "headCommit": "8b437f53361f3b8966454a03c0dd5b17a7e075ee",
+    "headCommit": "ab4ce6ee7ee87c71e840cd1abe5c4f6ddac73589",
     "committed": [],
     "staged": [
       "lib/wiki-notes.js",
@@ -17,9 +17,16 @@
     "unstaged": [
       "CHANGELOG.md",
       "README.md",
+      "bin/cw.exe",
       "index.js",
+      "lib/article-contract.js",
       "lib/engine/apply-plan.js",
-      "package.json"
+      "package.json",
+      "test-engine-apply-plan.mjs",
+      "test-wiki-anchors.mjs",
+      "vendor/codewiki/FORK.md",
+      "vendor/codewiki/skills/codewiki-session.md",
+      "vendor/codewiki/src/setup.rs"
     ],
     "untracked": [],
     "deleted": [
@@ -36,23 +43,30 @@
     ".tmp-verify-cov.mjs",
     "CHANGELOG.md",
     "README.md",
+    "bin/cw.exe",
     "index.js",
+    "lib/article-contract.js",
     "lib/engine/apply-plan.js",
     "lib/wiki-notes.js",
     "package.json",
+    "test-engine-apply-plan.mjs",
     "test-orchestration.mjs",
-    "test-wiki-notes.mjs"
+    "test-wiki-anchors.mjs",
+    "test-wiki-notes.mjs",
+    "vendor/codewiki/FORK.md",
+    "vendor/codewiki/skills/codewiki-session.md",
+    "vendor/codewiki/src/setup.rs"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 0b74cf43943e（7 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3d13tv-9-native（29 个文件）",
-    "本轮把 7 个未提交源码改动一并写进产物（快照 0b74cf43943e）：CHANGELOG.md、README.md、index.js、lib/engine/apply-plan.js、lib/wiki-notes.js 等"
+    "工作区未提交改动已合成临时 commit 75c8c4938a67（14 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3dnqd4-f-native（29 个文件）",
+    "本轮把 14 个未提交源码改动一并写进产物（快照 75c8c4938a67）：CHANGELOG.md、README.md、bin/cw.exe、index.js、lib/article-contract.js 等"
   ],
-  "updatedAt": "2026-11-05T09:51:06.533Z"
+  "updatedAt": "2026-11-05T10:11:14.260Z"
 }
