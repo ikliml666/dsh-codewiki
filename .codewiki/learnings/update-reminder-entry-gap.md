@@ -47,12 +47,12 @@ tags: [reminder, gating, invariant, bugfix, hook]
   - 收尾未调用 `codewiki_generate` 视为任务未完成（index.js:4）。
 
 - `commitHintText(cwd, jobs = loadJobs())`（index.js:3990-4021，export 供测试直调）：动态「产物待提交」提醒，唯一真值是 jobs 记录 + git 时间戳，不写任何持久标记。
-  - 缓存：模块级 `commitHintCache`（index.js:3888）以 `path.normalize(String(cwd ?? ''))` 为键（index.js:3991），60s TTL 内命中即返回（index.js:3992-3993），末尾无论有没有提醒都写缓存（index.js:4019）。
+  - 缓存：模块级 `commitHintCache`（index.js:3888）以 `path.normalize(String(cwd ?? ''))` 为键（index.js:3991），60s TTL 内命中即返回（index.js:3992-3993），末尾无论有没有提醒都写缓存（index.js:4921）。
   - 取最近成功编译：从 `jobs` 筛 `stage === 'done'`、`writtenCount > 0`、有 `finishedAt`、且 `samePath(j.cwd, cwd)` 的记录（index.js:1487-1489），按 `finishedAt` 字符串倒序取第一条。
   - 取提交时刻：`spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', ...WIKI_PATHS], { encoding: 'utf8', timeout: 5000, windowsHide: true })`（index.js:45），`WIKI_PATHS` 为 `['.codewiki', 'CodeWiki.md']`（index.js:45），只覆盖这两个路径，5s 超时。
   - 判定：前置条件仅当 `autoCommitState(latest) === 'pending'`（调用见 index.js:4003，函数定义见 index.js:4003-4008）才进入 git 检查；`commitSec` 由 `git log` 的 `%ct` 解析（index.js:4003），`jobSec = Math.floor(Date.parse(finishedAt) / 1000)`（index.js:4003），当 `jobSec > commitSec`、或 git 没给出有限时间戳（这两个路径尚未提交过）时输出提醒（index.js:4003）。
   - 文案（index.js:81-85）：「【CodeWiki 产物待提交·一次性】…（任务 id，写入 N 篇文章），插件自动提交未执行（原因）或编译产物尚未提交 git」，并给出操作约束——只 add `.codewiki/` 与 `CodeWiki.md` 两个路径、建议 `docs(wiki)` 前缀、不要 `git add -A`、不需要提交就忽略本提醒；不要为了本提醒中断当前任务或轮询编译进度。
-  - 非 git 仓库、`git` 不在 PATH、jobs 读取失败：整个 try 块吞掉异常（index.js:4917），返回空串即不提醒。
+  - 非 git 仓库、`git` 不在 PATH、jobs 读取失败：整个 try 块吞掉异常（index.js:4920），返回空串即不提醒。
 
 - `samePath(a, b)`（index.js:3991-3994）：路径归一（`path.normalize` + 去尾部分隔符 + 小写）后比较，Windows 大小写不敏感地定位任务 cwd。`commitHintText` 用它判断 job 是否属于本仓库（index.js:3990）。
 
@@ -68,7 +68,7 @@ tags: [reminder, gating, invariant, bugfix, hook]
   - `text` 回调（index.js:4945-4952）每次组装系统提示都重新求值，因此开关、cwd、入口文件存在性全是实时值，切项目/删 wiki/关开关都无需重启：
     1. `val(config?.updateReminder) === false` → 返回空串（index.js:4023）；
     2. `agent.session?.header?.cwd` 为空、或该目录下没有 `CodeWiki.md` → 返回空串（index.js:1283-1284）；
-    3. 否则 `commitHintText(cwd)` 有内容就拼成 `reminderText + 两空行 + hint`，没有就只返回 `reminderText`（index.js:4922-4923）。
+    3. 否则 `commitHintText(cwd)` 有内容就拼成 `reminderText + 两空行 + hint`，没有就只返回 `reminderText`（index.js:4953）。
   - 存量会话补齐：`ctx.inject(['agents'], ...)` 遍历 `agents.list()` 逐个 install（index.js:4062-4067）——注释指出 cordis 下访问未声明 inject 的服务属性本身即抛，必须经 inject 取服务；新会话由 `ctx.on('agent/created')` 兜住（index.js:4062）。
 
 ### 收尾与终态唤醒
@@ -86,7 +86,7 @@ tags: [reminder, gating, invariant, bugfix, hook]
   - 失败文案「【CodeWiki 编译失败】…」（index.js:1765），成功但未自动提交文案「【CodeWiki 产物待提交】…检查 `.codewiki/` 与 `CodeWiki.md` 的未提交改动并提交（只 add 这两个路径，建议 docs(wiki) 前缀；不需要就忽略）」（index.js:1766）。
   - `agent.steer(...)` 抛错被吞掉，不影响编译任务本身（index.js:1765）。
 
-- `submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId })`（index.js:2958-3043）：job 的创建入口，`sessionId: sessionId ?? null`（index.js:2958）就是唤醒权的来源——面板与自动调度提交时为 null，注释明确「面板/自动调度为 null，不唤醒」（index.js:2958）。
+- `submit({ kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId })`（index.js:3601-3722）：job 的创建入口，`sessionId: sessionId ?? null`（index.js:3647）就是唤醒权的来源——面板与自动调度提交时为 null，注释明确「面板/自动调度为 null，不唤醒」（index.js:3647）。
 
 - `apply(ctx, config)`（index.js:4034-4098）：装配点。`installUpdateReminder(ctx, config)` 是最后一步（index.js:1774），此前已 `createJobService(config, wakeCompileSession)` 并 `service.start()`（index.js:4072-4073）、注册四个工具（index.js:4082-4098）、装好本地面板后端（index.js:4082）；`autoScan` 自动调度定义在 index.js:4082-4109，其中 index.js:3341 以空 exec `{}` 直调 `generateDef.execute` 提交编译。
 

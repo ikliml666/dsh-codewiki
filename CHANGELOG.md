@@ -30,6 +30,9 @@
 - `test-engine-apply-plan.mjs` 59 passed / 0 failed；用例改名并补断言，明确「进删除集 + 报出 coveredSource」是现在的契约。
 - `test-engine-native-incremental.mjs` **159/159**。用例 16 的人工页 fixture 改成 `source_files: notes/handbook.md`（存在但无模块认领）——保护它的是「没有别的模块接手它的源码」，而不是「title 看上去不像 slug」：真机上旧通道页的标题同样常带括号描述。
 - 39 个测试全绿（含 6 个需要 `.probe-fsoft/venv` 的）。`test-client-panel.mjs` 14 passed、`test-config.mjs` PASS。
+- `test-wiki-anchors.mjs`：**369 过 / 0 败 / 3 待重编译**。两篇 `learnings/` 的锚点随 `index.js` 增长（5098 → 5100 行）漂移 7 处，已逐条按符号当前位置对齐——learnings 是人工产出、`codewiki_generate` 不重写，只能手工修。
+
+真机复验（Wxxy-CampusHub，重启宿主后）：`job-mw2ymi71-6` 一轮删掉 11 篇旧页，提交 `efa8ccb` 恰好 12 个文件（1 个 `_index.md` + 11 个 `D`），索引里的模块条目从 102 降到 46，与磁盘 46 篇一致。`decisions/` 14 篇、`learnings/` 29 篇、`concepts/` 2 篇零变化。
 
 ## 0.17.40 — 2026-11-05
 

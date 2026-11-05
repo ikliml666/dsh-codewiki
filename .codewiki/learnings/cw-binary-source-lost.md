@@ -133,9 +133,9 @@ normalizeIndexLinks（index.js:203-211，仅 cw index exit 0 后由 tickIndex �
 ### 编译收尾的 index → commit 阶段（0.10.11 起）
 
 1. `writtenCount === 0`？直接跳过 `cw index` / `cw meta update`，记 note 后不进 commit（`index.js:3108-3110`）。
-2. `resolveBinary` 取二进制（`index.js:3303`）——注意这里用**运行时配置**，面板改 `binaryPath` 立即生效。⚠️ 见 Overview：PATH 优先让"不同 cw 版本"风险在插件层重新出现。
+2. `resolveBinary` 取二进制（`index.js:3306`）——注意这里用**运行时配置**，面板改 `binaryPath` 立即生效。⚠️ 见 Overview：PATH 优先让"不同 cw 版本"风险在插件层重新出现。
 3. 两次 `runCw`：`cw index` 与 `cw meta update`（`index.js:3070-3071`），退出码写进 note（`index.js:3072`）。
-4. `cw index` 成功后调 `normalizeIndexLinks`（`index.js:3333`）。
+4. `cw index` 成功后调 `normalizeIndexLinks`（`index.js:3336`）。
 5. 符号快照：`symbolIncremental` 开启时 `extractCurrentGraph`（`index.js:1924`）+ `slimGraph` 写入 `.codewiki/temp/`（快照位置经 `lib/incremental.js` 的 `saveSnapshot`），内容未变则跳过以免「只改时间戳」的空转提交污染 autoCommit（`index.js:3089-3090`）。
 6. `ensureWikiEntry` 补建入口（调用点 `index.js:3104`；函数本体 `index.js:291-324`）：缺 `CodeWiki.md` 则生成，失败只记 note 不让任务失败。
 7. 切 `commit` 阶段（`index.js:3114-3116`，`autoCommit` 关闭时直接 done）；下个 tick 的 `tickCommit`（`index.js:3123-3139`）执行分支合并式自动提交后才置 `done` + 写 `finishedAt` + `onSettled` 唤醒（`index.js:3136-3138`）——终态最多晚一个 tick（默认 `TICK_MS` 10s，`index.js:1656`）。唤醒是否打扰会话由 `autoCommitState`（`index.js:2032-2037`）统一判定：`committed`/`no-changes` 静默（`index.js:2043` 守卫），仅 `failed`/`pending` 才 steer。
