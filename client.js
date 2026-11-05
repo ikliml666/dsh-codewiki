@@ -37,6 +37,10 @@ window.__ModuleLoader__.load({
     // 本身是一件事的两半，分两格只会让人以为有两道重复检查。细分名称仍在活动流里可见
     // （NATIVE_STAGE_KEYS.proofread）。
     const ACTIVE_STAGES = ['queued', 'prepare', 'articles', 'validate', 'index', 'commit']
+    // 每个阶段一个固定色相，用来在同一条进度条里区分「时间花在哪一步」。
+    // 色相挑的是彼此相距 40° 上下、且在中低饱和下仍能分辨的几支：青→蓝→紫→琥珀→绿。
+    // 明度与饱和度写在 CSS（58% / 52%），两套主题下都不用改。
+    const STAGE_HUE = { queued: 210, prepare: 196, articles: 262, validate: 32, index: 152, commit: 220 }
     // 历史任务里还留着已退役的阶段名：不映射的话 indexOf 得 -1，步骤条在失败/取消时
     // 会整条熄灭、不标红，用户看不出卡在哪一步。review 在 0.17.41 并进 validate。
     const LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles', review: 'validate' }
@@ -255,8 +259,8 @@ window.__ModuleLoader__.load({
       overTierLabel: '个超单请求预算（按大档装填）',
       activityLabel: '活动流',
       taskListLabel: '逐篇',
-      legendHint: '颜色是阶段状态：绿=已完成，蓝=进行中，灰=未开始，红=失败；段宽是这一步在总进度里占多少。',
-      legendHintDone: '颜色是阶段状态；段宽是该阶段真实耗时，一眼看出时间花在哪一步。',
+      legendHint: '每段一个颜色代表一个阶段，段宽是这一步在总进度里占多少；当前阶段加粗，失败段标红。',
+      legendHintDone: '每段一个颜色代表一个阶段，段宽是该阶段真实耗时——一眼看出时间花在哪一步。',
       emptyReposTitle: '还没有可编译的仓库',
       emptyTasksTitle: '还没有编译记录',
       emptySessionsTitle: '还没有模型请求',
@@ -500,8 +504,8 @@ window.__ModuleLoader__.load({
       overTierLabel: 'over the single-request budget (large tier)',
       activityLabel: 'Activity',
       taskListLabel: 'Per page',
-      legendHint: 'Color is stage state: green=done, blue=running, grey=pending, red=failed. Segment width is the share of total progress.',
-      legendHintDone: 'Color is stage state; segment width is that stage\'s wall time — see at a glance where the time went.',
+      legendHint: 'Each colour is one stage; segment width is how much of the total progress it accounts for.',
+      legendHintDone: 'Each colour is one stage; segment width is that stage real wall time — see at a glance where the time went.',
       emptyReposTitle: 'No repos to compile yet',
       emptyTasksTitle: 'Nothing compiled yet',
       emptySessionsTitle: 'No model requests yet',
@@ -708,25 +712,24 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-task][data-state="failed"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-textarea] { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
       // 吞吐徽标：方角，读数用等宽数字对齐
-      // 分段带：一段一格，宽度就是该阶段在总进度里的权重。7 段加起来占满整条，
-      // 所以「文章那段最宽」这件事本身就在说「它最费时间」。
-      '[data-dscw-p-segbar] { display: flex; gap: 2px; height: 5px; margin-top: 2px; }',
-      '[data-dscw-p-seg] { position: relative; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--dsw-alias-border-l3) 55%, transparent); }',
-      '[data-dscw-p-segfill] { position: absolute; inset: 0 auto 0 0; background: var(--dsw-alias-label-tertiary); opacity: .45; transition: width .45s cubic-bezier(.22,.61,.36,1); }',
-      '[data-dscw-p-seg][data-state="done"] [data-dscw-p-segfill] { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-tertiary)); opacity: .85; }',
-      '[data-dscw-p-seg][data-state="running"] [data-dscw-p-segfill] { background: var(--dsw-alias-brand-primary); opacity: 1; }',
-      '[data-dscw-p-seg][data-state="failed"] [data-dscw-p-segfill] { background: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-tertiary)); opacity: .9; }',
-      // 图例：一行小字，当前阶段加粗高亮。窄到放不下就换行，不撑高度。
+      // 分段带就是进度条本体（0.17.46）：段宽=该阶段占总时间的比例，段色=阶段身份。
+      // 段色用固定色相而非主题色：五个阶段必须彼此可分辨，全用 brand-primary 就退化成一条纯色。
+      // 明度锁在 52%，深浅两套主题下都能读；未跑完的部分用同色低透明度打底，所以
+      // 「这段是什么」（色相）与「这段做到哪」（填充宽度）互不占用同一个通道。
+      '[data-dscw-p-segbar] { display: flex; gap: 2px; flex: 1 1 auto; min-width: 40px; height: 5px; }',
+      // 最小宽度 3px：真机上准备段常占 99%（06:54 对 790ms），不给小段保底宽度，
+      // 「校验 24ms」这类阶段会缩成亚像素直接看不见——而它们恰恰是「这几步都不慢」的证据。
+      '[data-dscw-p-seg] { position: relative; min-width: 3px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, hsl(var(--seg-hue) 58% 52%) 20%, transparent); }',
+      '[data-dscw-p-seg]::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--seg-done, 100%); background: hsl(var(--seg-hue) 58% 52%); transition: width .45s cubic-bezier(.22,.61,.36,1); }',
+      '[data-dscw-p-seg][data-state="failed"]::after { background: var(--dsw-alias-state-error-primary, hsl(var(--seg-hue) 58% 52%)); }',
+      '[data-dscw-p-seg][data-state="failed"] { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, hsl(var(--seg-hue) 58% 52%)) 20%, transparent); }',
+      // 图例：与分段带同色，把颜色和阶段绑起来。终态读耗时，进行中读百分比。
       '[data-dscw-p-legend] { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-legend] > span { display: inline-flex; align-items: center; gap: 4px; }',
-      // 色块：与上方分段带里对应那一段同色，是把颜色和阶段绑起来的唯一凭据。
-      '[data-dscw-p-legend] [data-swatch] { flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--dsw-alias-border-l3); }',
-      '[data-dscw-p-legend] > span[data-state="done"] [data-swatch] { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-tertiary)); }',
-      '[data-dscw-p-legend] > span[data-state="running"] [data-swatch] { background: var(--dsw-alias-brand-primary); }',
-      '[data-dscw-p-legend] > span[data-state="failed"] [data-swatch] { background: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-tertiary)); }',
-      '[data-dscw-p-legend] > span[data-state="done"] { color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-legend] [data-swatch] { flex: none; width: 7px; height: 7px; border-radius: 2px; background: hsl(var(--seg-hue) 58% 52%); }',
+      '[data-dscw-p-legend] > span[data-state="todo"] [data-swatch] { opacity: .35; }',
+      '[data-dscw-p-legend] > span[data-state="failed"] [data-swatch] { background: var(--dsw-alias-state-error-primary, hsl(var(--seg-hue) 58% 52%)); }',
       '[data-dscw-p-legend] > span[data-state="running"] { color: var(--dsw-alias-label-primary); font-weight: 600; }',
-      '[data-dscw-p-legend] > span[data-state="failed"] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-badge] { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--dsw-alias-label-tertiary) 10%, transparent); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }',
       '[data-dscw-p-badge][data-tone="live"] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, currentColor) 12%, transparent); }',
       '[data-dscw-p-badge] svg { display: block; }',
@@ -1619,39 +1622,42 @@ window.__ModuleLoader__.load({
         }
         // 老任务没有 stageTimings（0.5.0 之前的记录），终态就别画一条全是 0 的空白带。
         const hasTimings = (job) => ACTIVE_STAGES.some((s) => s !== 'queued' && stageWeight(job, s, false) > 0)
-        // 阶段可视化：一条分段的带子，段宽的含义见 stageWeight，段内填充=该阶段自己的完成度。
-        // 早先是每阶段一行独立轨道，一张卡就吃掉 300px 高度，同一个信息用分段带表达只占
-        // 8px，且「哪一步慢」一眼能看出宽度差异——这正是终态也要保留它的原因。
+        // 阶段可视化：一条分段带，段宽的含义见 stageWeight。早先是每阶段一行独立轨道，
+        // 一张卡就吃掉 300px 高度，同一个信息用分段带表达只占 5px。
+        // 0.17.46 起它不再另起一行——用户要的是「一条进度条，各截断按时间占比用不同颜色」，
+        // 所以这条带直接就是主进度条本身，上面的 [data-dscw-p-bar] 只在没有分段信息时兜底。
         const stageSegments = (job, running) => {
           const rows = stageRows(job)
-          return el('div', { 'data-dscw-p-segbar': '' },
-            rows.map((r) => {
+          const shown = rows.filter((r) => stageWeight(job, r.stage, running) > 0)
+          return el('div', {
+            'data-dscw-p-segbar': '', 'data-tone': job.stage,
+            title: legendHintOf(job, running),
+          },
+            shown.map((r) => {
               const w = stageWeight(job, r.stage, running)
-              if (w <= 0) return null
               const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
-              const pct = Math.round(r.frac * 100)
+              const dur = timingsOf(job)[r.stage]
               return el('div', {
                 key: r.stage, 'data-dscw-p-seg': '', 'data-state': state,
-                style: { flex: `${w} 0 0` },
+                style: { flex: `${w} 0 0`, '--seg-hue': String(STAGE_HUE[r.stage] ?? 210), '--seg-done': `${Math.round(r.frac * 100)}%` },
                 title: running
-                  ? `${stageLabel(r.stage)} · ${pct}%${r.dur ? ` · ${fmtMs(r.dur)}` : ''}`
+                  ? `${stageLabel(r.stage)} · ${Math.round(r.frac * 100)}%${dur ? ` · ${fmtMs(dur)}` : ''}`
                   : `${stageLabel(r.stage)} · ${fmtMs(w)}`,
-              },
-                el('div', { 'data-dscw-p-segfill': '', style: { width: `${pct}%` } }))
+              })
             }))
         }
+        const legendHintOf = (job, running) => (running ? tBound('legendHint') : tBound('legendHintDone'))
         // 图例：每个阶段一个小标签，只写「阶段名 读数」，当前阶段加粗。
         // 一行放得下就一行，放不下就换行——比逐行轨道省一个数量级的高度。
         // 读数进行中是完成百分比，终态是该阶段耗时：「跑完了」这件事看一次就够，
         // 真正无法从别处得到的信息是「时间花在哪一步」。
         const stageLegend = (job, running) => {
           const rows = stageRows(job).filter((r) => stageWeight(job, r.stage, running) > 0)
-          // 色块是颜色与阶段之间唯一的绑定：色块颜色与上方分段带里那一段完全一致，
-          // 所以「哪段是什么」不用去猜——照着色块找同色的段即可。颜色表达状态
-          // （绿=完成·蓝=进行中·灰=未开始·红=失败），不是阶段身份。
+          // 色块是颜色与阶段之间唯一的绑定：色块色相与上方进度条里那一段完全一致，
+          // 所以「哪段是什么」不用去猜——照着色块找同色的段即可。
           return el('div', {
             'data-dscw-p-legend': '',
-            title: running ? tBound('legendHint') : tBound('legendHintDone'),
+            title: legendHintOf(job, running),
           },
             rows.map((r) => {
               const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
@@ -1659,6 +1665,7 @@ window.__ModuleLoader__.load({
               const dur = timingsOf(job)[r.stage]
               return el('span', {
                 key: r.stage, 'data-state': state,
+                style: { '--seg-hue': String(STAGE_HUE[r.stage] ?? 210) },
                 // 终态把百分比降级到悬停：终态全 100%，写出来只是重复。
                 title: running
                   ? `${stageLabel(r.stage)} · ${tBound(`legendState_${state}`)} · ${pct}%`
@@ -2345,14 +2352,24 @@ window.__ModuleLoader__.load({
                     }, job.cancelRequested === true ? t('cancelRequestedLabel') : t('cancelJob'))
                     : null),
               ),
-              // 进度一行放完：大数字 · 主进度条 · 当前阶段说明。早先数字块和进度条各占一行，
+              // 进度一行放完：大数字 · 进度条 · 当前阶段说明。早先数字块和进度条各占一行，
               // 加上七行轨道，一张卡能吃掉半屏——信息量没变，高度翻了四倍。
-              pct == null
+              // 0.17.46 起只有一条进度条：分段带就是它。段宽=该阶段时间占比，色相=阶段身份。
+              // 阶段身份用颜色表达，完成度用填充宽度表达，互不抢占同一通道。
+              // 失败/取消的任务总进度是 null，但「时间花在哪一步」恰恰是它们最该看的，
+              // 所以这一行在 pct 为 null 时只要还有耗时数据就照画，只是不报百分比数字。
+              (pct == null && !(!active && hasTimings(job)))
                 ? null
                 : el('div', { 'data-dscw-p-progress': '' },
-                  el('div', { 'data-dscw-p-pct': '' }, String(pct), el('span', { 'data-unit': '' }, '%')),
-                  el('div', { 'data-dscw-p-bar': '', 'data-tone': job.stage },
-                    el('div', { 'data-dscw-p-barfill': '', style: { width: `${pct}%` } })),
+                  pct == null
+                    ? null
+                    : el('div', { 'data-dscw-p-pct': '' }, String(pct), el('span', { 'data-unit': '' }, '%')),
+                  // 一条条子的两种画法：有分段信息就用分段带，老任务（没有 stageTimings、
+                  // 也没进到可计时的阶段）退回纯色填充，免得整行空着。
+                  (active && pct > 0) || (!active && hasTimings(job))
+                    ? stageSegments(job, active)
+                    : el('div', { 'data-dscw-p-bar': '', 'data-tone': job.stage },
+                      el('div', { 'data-dscw-p-barfill': '', style: { width: `${pct ?? 0}%` } })),
                   // 趋势：数字告诉你在哪，斜率告诉你还动不动。
                   trendOf(job.id).length > 1
                     ? el('span', { 'data-dscw-p-trend': '', title: t('trendHint') }, el(Spark, { values: trendOf(job.id), width: 48, height: 14 }))
@@ -2360,15 +2377,10 @@ window.__ModuleLoader__.load({
                   headMeta.length
                     ? el('span', { 'data-dscw-p-pctmeta': '' }, headMeta.join(' · '))
                     : null),
-              // 分段带与图例只在真有信息时出现：进行中要能看到进度，终态要能看到耗时分布。
-              // 终态不依赖 pct——失败/取消的任务总进度是 null，而「时间花在哪一步」恰恰
-              // 是这类任务最该看的东西。老任务没有 stageTimings 就不画，免得出一条空带。
-              active && pct > 0
-                ? stageSegments(job, true)
-                : (!active && hasTimings(job) ? stageSegments(job, false) : null),
-              active && pct > 0
-                ? stageLegend(job, true)
-                : (!active && hasTimings(job) ? stageLegend(job, false) : null),
+              // 图例解释分段带上的颜色与读数：进行中读百分比，终态读耗时。
+              (active && pct > 0) || (!active && hasTimings(job))
+                ? stageLegend(job, active)
+                : null,
               // 次要信息压成一条流水线：数字、用量、最新一条备注合成一行，放不下就换行。
               // 各占一行时，光这些「补充说明」就能吃掉 80px，而它们没有一条比进度更该先看。
               (meta.length || job.usage || lastNote)

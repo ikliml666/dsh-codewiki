@@ -149,8 +149,14 @@ const render = (node, react) => {
     return render(react.renderComponent(node.type, props), react)
   }
   const attrs = Object.entries(node.props ?? {})
-    .filter(([k]) => k.startsWith('data-'))
-    .map(([k, v]) => ` ${k}="${String(v)}"`)
+    // style 也序列化：分段带的阶段色相只住在 style 里（--seg-hue），
+    // 不输出就断言不到「各段颜色互不相同」。
+    .filter(([k]) => k.startsWith('data-') || k === 'style')
+    .map(([k, v]) => {
+      if (k !== 'style') return ` ${k}="${String(v)}"`
+      const css = Object.entries(v ?? {}).map(([p, val]) => `${p}: ${val}`).join('; ')
+      return ` style="${css}"`
+    })
     .join('')
   return `<${node.type ?? 'div'}${attrs}>${render(node.children, react)}</${node.type ?? 'div'}>`
 }
@@ -586,6 +592,15 @@ await check('任务页：已完成任务的分段带按真实耗时给出各阶�
     assert.ok(!/«stepQueued»/.test(html), '排队不该进耗时带（它是等别人，不是编译做了什么）')
     // 段数 = 有耗时的阶段数（prepare/articles/validate/index/commit 五项）
     assert.equal((html.match(/data-dscw-p-seg=""/g) ?? []).length, 5, '分段数应等于有耗时的阶段数')
+    // 0.17.46：整张卡只有一条条子。分段带就是进度条本体，不能再并出第二条纯色填充条。
+    assert.equal((html.match(/data-dscw-p-progress=""/g) ?? []).length <= 1, true, '进度行最多一条')
+    assert.equal((html.match(/data-dscw-p-bar=""/g) ?? []).length, 0, '有分段信息时不该再画纯色填充条')
+    // 各段按阶段身份着色：色相必须互不相同，否则「时间花在哪」在图上分不出来。
+    // 分段带与图例各引用一次色相（同序），所以去重后应恰等于阶段数。
+    const hues = [...html.matchAll(/--seg-hue:\s*(\d+)/g)].map((m) => m[1])
+    assert.ok(hues.length >= 5, `分段应带 --seg-hue：${hues.join(',')}`)
+    assert.equal(new Set(hues).size, 5, `五个阶段的色相必须互不相同：${hues.join(',')}`)
+    assert.equal(hues.slice(0, 5).join(','), hues.slice(5, 10).join(','), '图例色相必须与分段带同序一致')
   } finally {
     globalThis.fetch = prev
     cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
