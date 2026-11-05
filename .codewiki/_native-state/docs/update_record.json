@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-11-05T18:49:10+0800",
-  "finished_at": "2026-11-05T18:49:57+0800",
+  "started_at": "2026-11-05T19:14:32+0800",
+  "finished_at": "2026-11-05T19:15:22+0800",
   "outcome": "incremental",
   "options": {
     "rung": "3",
@@ -24,8 +24,8 @@
     }
   },
   "revision": {
-    "old_commit": "75c8c4938a67c1c6a0794053833fb925d7b5953a",
-    "new_commit": "118e0c25562be73f3443ee4b6a712ff2dc37d0ac",
+    "old_commit": "118e0c25562be73f3443ee4b6a712ff2dc37d0ac",
+    "new_commit": "d59445dd55b0c0643ab14134b78fc9a9494b14a4",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -113,56 +113,56 @@
     {
       "page": "Build,_Configuration___Environment_Setup",
       "verdict": "patch",
-      "reason": "Updated the engines.node row in the 基础身份 table from >=20 to >=24.9.0 to match the new package.json engines field.",
+      "reason": "package.json version cell updated from 0.17.49 to 0.17.50; description text unchanged so milestone statements stay valid",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": true
     },
     {
       "page": "overview",
       "verdict": "no-op",
-      "reason": "Summarizes the build module generically (npm manifest, dsh bundle patch, venv setup script); never states a Node version, so the engines.node bump does not make it wrong.",
+      "reason": "no package version mentioned; 0.16.0 is a historical milestone, leaf module row still accurate",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Browser_UI_Client",
       "verdict": "no-op",
-      "reason": "References package.json only for name/client-modules registration conventions and cordis.patch.yml id=codewiki; no Node version claim.",
+      "reason": "no package version; name/id registration conventions unchanged",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Core_Engine_Public_API___Result_Validation",
       "verdict": "no-op",
-      "reason": "Points to setup-env.sh for env prep; the engines.node change does not affect this module's contract or knob descriptions.",
+      "reason": "only links to setup-env.sh; contract/protocol versions and milestones unaffected",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Native_Runtime_State___Concurrency_Governance",
       "verdict": "no-op",
-      "reason": "Cites setup-env.sh as the repair path for drift/unhealthy states; no Node version statement.",
+      "reason": "references setup-env.sh as environment repair path; no package version",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Python_Parallel_Agent_Execution_Runtime",
       "verdict": "no-op",
-      "reason": "Links to setup-env.sh for venv setup; engines.node bump does not touch its protocol/parallelism content.",
+      "reason": "CONTRACT_VERSION and historical milestones only; no package version",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Test_Fixtures___Diagnostic_Tooling",
       "verdict": "no-op",
-      "reason": "References setup-env.sh and package.json's retirement note; no Node version claim requiring update.",
+      "reason": "0.16.0 retirement note is historical; setup-env.sh description unchanged",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     },
     {
       "page": "Vendored_CodeWiki_Rust_Implementation",
       "verdict": "no-op",
-      "reason": "References binaryPath config and cordis.patch.yml; the engines.node field change is outside its described contract.",
+      "reason": "binaryPath/cordis.patch.yml conventions unchanged; no package version",
       "by_leaf": "Build,_Configuration___Environment_Setup",
       "changed_on_disk": false
     }
@@ -181,30 +181,30 @@
     {
       "kind": "leaf_agent",
       "target": "Build,_Configuration___Environment_Setup",
-      "seconds": 46.55233669281006,
+      "seconds": 50.352028369903564,
       "usage": {
-        "input_tokens": 166183,
-        "output_tokens": 3174,
-        "cache_read_tokens": 16696,
+        "input_tokens": 110102,
+        "output_tokens": 3294,
+        "cache_read_tokens": 8760,
         "cache_write_tokens": 0,
-        "total_tokens": 169357,
-        "requests": 5
+        "total_tokens": 113396,
+        "requests": 4
       },
       "error": null
     },
     {
       "kind": "missing_pages",
       "target": "-",
-      "seconds": 0.02097344398498535,
+      "seconds": 0.01913142204284668,
       "usage": null,
       "error": null
     }
   ],
   "detector_notes": [
-    "[Build,_Configuration___Environment_Setup] agent notes: The leaf page was the only page in the write set that stated the previous Node requirement (>=20). One surgical table-cell edit applied; all referrer/ancestor pages are already consistent with the new engines.node >=24.9.0 value."
+    "[Build,_Configuration___Environment_Setup] agent notes: The change is a pure patch-level version bump (0.17.49 -> 0.17.50); the package.json description string is byte-identical, so all milestone-based documentation (0.16.0 native-engine default, 0.17.34 no-default-model) remains correct. No other pages needed edits."
   ],
   "errors": [],
-  "wall_seconds": 47.03,
+  "wall_seconds": 50.79,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
@@ -212,37 +212,37 @@
     "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 5,
+    "n_calls": 4,
     "totals": {
-      "input_tokens": 166183,
-      "output_tokens": 3174,
-      "cache_read_tokens": 16696,
+      "input_tokens": 110102,
+      "output_tokens": 3294,
+      "cache_read_tokens": 8760,
       "cache_write_tokens": 0,
-      "requests": 5,
-      "total_tokens": 169357
+      "requests": 4,
+      "total_tokens": 113396
     },
     "by_phase": {
       "update": {
-        "calls": 5,
-        "input_tokens": 166183,
-        "output_tokens": 3174,
-        "cache_read_tokens": 16696,
+        "calls": 4,
+        "input_tokens": 110102,
+        "output_tokens": 3294,
+        "cache_read_tokens": 8760,
         "cache_write_tokens": 0,
-        "requests": 5,
-        "total_tokens": 169357,
-        "unpriced_calls": 5
+        "requests": 4,
+        "total_tokens": 113396,
+        "unpriced_calls": 4
       }
     },
     "by_model": {
       "doubao-seed-2.1-lite": {
-        "calls": 5,
-        "input_tokens": 166183,
-        "output_tokens": 3174,
-        "cache_read_tokens": 16696,
+        "calls": 4,
+        "input_tokens": 110102,
+        "output_tokens": 3294,
+        "cache_read_tokens": 8760,
         "cache_write_tokens": 0,
-        "requests": 5,
-        "total_tokens": 169357,
-        "unpriced_calls": 5
+        "requests": 4,
+        "total_tokens": 113396,
+        "unpriced_calls": 4
       }
     },
     "unpriced_models": [
@@ -254,13 +254,13 @@
         "kind": "update_agent",
         "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 4.31,
-        "input_tokens": 8494,
-        "output_tokens": 269,
+        "seconds": 8.08,
+        "input_tokens": 8941,
+        "output_tokens": 762,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 8763,
+        "total_tokens": 9703,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -271,13 +271,13 @@
         "kind": "update_agent",
         "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 3.44,
-        "input_tokens": 16725,
-        "output_tokens": 313,
-        "cache_read_tokens": 0,
+        "seconds": 5.56,
+        "input_tokens": 16971,
+        "output_tokens": 521,
+        "cache_read_tokens": 8760,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 17038,
+        "total_tokens": 17492,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -288,13 +288,13 @@
         "kind": "update_agent",
         "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 4.26,
-        "input_tokens": 37187,
-        "output_tokens": 330,
+        "seconds": 3.34,
+        "input_tokens": 37337,
+        "output_tokens": 208,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 37517,
+        "total_tokens": 37545,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -305,30 +305,13 @@
         "kind": "update_agent",
         "target": "Build,_Configuration___Environment_Setup",
         "model": "doubao-seed-2.1-lite",
-        "seconds": 14.19,
-        "input_tokens": 51577,
-        "output_tokens": 1175,
-        "cache_read_tokens": 16696,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 52752,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 13.33,
-        "input_tokens": 52200,
-        "output_tokens": 1087,
+        "seconds": 21.02,
+        "input_tokens": 46853,
+        "output_tokens": 1803,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "requests": 1,
-        "total_tokens": 53287,
+        "total_tokens": 48656,
         "usage_reported": true,
         "provider": "openai-compatible",
         "requested_model": "doubao-seed-2.1-lite",
@@ -336,5 +319,5 @@
       }
     ]
   },
-  "run_id": "dcf11ada-44c4-410a-8086-bfb97fce9ac9"
+  "run_id": "a472b299-8578-41af-82d6-6f4607b41d7d"
 }
