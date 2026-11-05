@@ -164,7 +164,7 @@ flowchart LR
     end
 
     subgraph NATIVE["原生引擎通道（默认）"]
-        B1["runNativeJob 子进程<br/>env → graph → cluster → articles → validate → index → baseline → commit"]
+        B1["runNativeJob 子进程<br/>env → graph → cluster → articles → proofread → validate → index → baseline → commit"]
         B2["onProgress 回调<br/>映射 nativeStage/nativePercent"]
         B3["EngineResult 收割<br/>gate / apply / usage / blockers"]
     end
@@ -188,6 +188,7 @@ flowchart LR
 3. **重放安全**：宿主重启后按持久化快照（`snapshotNativeRun` / `planNativeReplay`）重建，已落盘叶子按断点续跑。
 4. **证据留档**：引擎原始 docs 树在被映射/裁剪之前拷到仓库外临时目录（`nativeRawTreeDir`），作为「事实来源」；工作副本 `docsDir` 在 `finally` 中清理。
 5. **取消边界：落地事务不接 signal**：注入给落地器的 `runCw` **故意不传** `nativeAborters` 的 AbortController——落地事务（写盘→index→基线→提交）一旦开始就必须跑完（事务自身有 120s 超时兜底）。取消只终止引擎进程树：曾传 signal，取消会 kill 掉正在跑的 `cw meta update` 触发回滚，把「已落盘的文章」连同基线一起撤掉，而终态只报一句「已取消」——一次取消就吞掉一整轮编译成果。
+6. **面板格子合并**：引擎八段经 `NATIVE_STAGE_TO_PANEL` 折叠成面板现有格子（`env/graph/cluster → prepare`、`articles → articles`、`proofread/validate → validate`、`index/baseline → index`、`commit → commit`）。`proofread` 与 `validate` 共用「校验」一格——校对是质量门死链检查的修复动作（检测→改正文→复检），与质量门同属「校验产物」，分成两格会让面板出现两个都叫检查的步骤；细分阶段名仍由 `job.nativeStage` 单独携带，活动流里照样能看到「语义校对」。
 
 **legacy 通道的兜底网络**：
 
