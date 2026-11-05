@@ -202,7 +202,7 @@ flowchart LR
 | `findDeprecatedConceptPages` | `concepts/` 整目录（Node 通道遗留，原生通道从不写这里） | 横切层蒸馏出的「概念」与模块页大面积重复 |
 | `auditExistingArticles` / `healExistingArticles` | 复用 `NATIVE_ARTICLE_OPTS`（与质量门 `checkRendered` **逐字同口径**）判 error 级 → 先 `repairArticle` 修，判 drop 才删 | 61 篇判坏页里 50 篇只是格式坏（缺 frontmatter / 未闭合 / type 不符） |
 
-> **设计哲学**：判据每多一条「可证特征」，就多一类旧页能绕过它。真机先后漏掉过三批（描述性 title、平铺 modules/ 根、source_files 部分幸存），最终反过来——**不是本轮写的就删**。`modules/` 是引擎专属产物目录，人工内容请放 `learnings/` 或 `decisions/`（不在扫描范围）。
+> **设计哲学**：判据每多一条「可证特征」，就多一类旧页能绕过它。真机先后漏掉过三批（描述性 title、平铺 modules/ 根、source_files 部分幸存），最终反过来——**不是本轮写的就删**。`modules/` 是引擎专属产物目录，人工补过的内容这里一律不留：手工维护页（`learnings/`、`decisions/` 这两个避难所目录）自 0.17.49 已下线，库里再也没有能躲扫描的目录。
 
 ---
 

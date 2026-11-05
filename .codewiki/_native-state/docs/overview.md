@@ -18,7 +18,7 @@ flowchart TD
     end
 
     subgraph PLUGIN_ENTRY["插件核心运行入口（index.js）"]
-        E1["5 个模型可调用工具注册"]
+        E1["4 个模型可调用工具注册"]
         E2["编译任务状态机编排（10s 节拍）"]
         E3["/api/codewiki/* 回环 API"]
         E4["自动增量扫描调度器"]

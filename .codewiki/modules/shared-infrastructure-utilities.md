@@ -15,13 +15,13 @@ fsoft_page: Shared_Infrastructure_Utilities.md
 
 ## 引言
 
-`Shared_Infrastructure_Utilities` 是整个 dsh-codewiki 插件的**横向基础设施层**。它不产生业务语义、不驱动编译流程，而是把散落在各模块里反复出现、且一旦各自跑偏就会造成难以排查的分歧的五类公共能力收口为唯一实现：
+`Shared_Infrastructure_Utilities` 是整个 dsh-codewiki 插件的**横向基础设施层**。它不产生业务语义、不驱动编译流程，而是把散落在各模块里反复出现、且一旦各自跑偏就会造成难以排查的分歧的四类公共能力收口为唯一实现：
 
 1. **Git 路径归一与解码**（`lib/git-paths.js`）——让跨平台路径比较、白名单判定、中文文件名在任何模块里结果一致；
 2. **引擎事件日志落盘**（`lib/job-logs.js`）——把只活在内存里的引擎事件写成可复盘的 NDJSON 文件；
 3. **作业持久化与跨进程协调**（`lib/job-store.js`）——`jobs.json` 的原子读写、损坏隔离、多实例所有权裁决与原生通道重放；
 4. **编译更新记录**（`lib/update-record.js`）——一次编译"到底做了什么、为什么"的版本化机读记录与终态判定；
-5. **wiki 笔记页写入**（`lib/wiki-notes.js`）——`learnings/` 与 `decisions/` 两类技能约定页的拼装与契约自检。
+
 
 它们的共同设计原则是：**纯函数优先、IO 显式失败、硬不变量写在代码注释里**。Node 版本要求见 [package.json](../../../package.json)（`engines.node >= 20`）。
 
@@ -53,13 +53,14 @@ flowchart TB
         JL["job-logs.js<br/>appendLog / readLogTail"]
         JS["job-store.js<br/>createJobsStore / planNativeReplay"]
         UR["update-record.js<br/>judgeOutcome / saveUpdateRecord"]
-        WN["wiki-notes.js<br/>buildNote / checkNote"]
+
+
     end
 
     SVC --> JS
     SVC --> UR
     SVC --> JL
-    SVC --> WN
+    SVC --> WN2
     AP --> GP
     NS --> GP
     JS -. 同仓幂等 key .-> GP

@@ -4,7 +4,7 @@
 
 `Core_Application_Runtime_Entry` 是 **dsh-codewiki** 插件的运行时入口，对应唯一文件 `index.js`。它把一个 fork 的 Rust CLI `cw`（CodeWiki，源码见 [Vendored_CodeWiki_Rust_Implementation](Vendored_CodeWiki_Rust_Implementation.md)）接入 DeepSeek Harness（DSH）宿主，完成三件事：
 
-1. **工具面**：向宿主注册 5 个模型可调用工具（`cw` / `codewiki_generate` / `codewiki_update` / `codewiki_progress` / `codewiki_note`）。
+1. **工具面**：向宿主注册 4 个模型可调用工具（`cw` / `codewiki_generate` / `codewiki_update` / `codewiki_progress`）。
 2. **后台编译服务**：以 `createJobService` 为核心的常驻编排服务，用 ~10s 节拍（`TICK_MS`）驱动一条编译任务状态机，把「判态 → 提交 → 推进 → 收尾 → 入库」整条流水线跑在插件内，而不是塞进发起会话的主模型里。
 3. **面板与自动化后端**：一组仅回环可访问的 HTTP 端点（供侧边栏面板 [Browser_UI_Client](Browser_UI_Client.md) 轮询）、自动增量调度器（`autoScan`）、以及会话系统提示里的 wiki 维护提醒。
 
@@ -25,7 +25,7 @@ flowchart TB
 
     subgraph PLUGIN["index.js（本模块）"]
         APPLY["apply(ctx, config) 插件入口"]
-        TOOLS["5 个工具定义<br/>cw / codewiki_generate / codewiki_update / codewiki_progress / codewiki_note"]
+        TOOLS["4 个工具定义<br/>cw / codewiki_generate / codewiki_update / codewiki_progress"]
         SVC["createJobService 编译编排服务<br/>10s 节拍状态机"]
         API["installWebServer 回环端点"]
         SCHED["autoScan 自动调度器<br/>60s 心跳"]
@@ -72,7 +72,7 @@ flowchart TB
 
 | 组件 | 职责 |
 | --- | --- |
-| `apply` | 插件入口。经 `ctx.inject(['agents','llm','workspaceRegistry'])` 取得宿主服务引用；创建并启动 `createJobService`；注册 5 个工具；挂载回环 Web 端点；装自动调度器与更新提醒；注册 `ctx.effect` 清理函数（`service.stop()` / 清定时器）。 |
+| `apply` | 插件入口。经 `ctx.inject(['agents','llm','workspaceRegistry'])` 取得宿主服务引用；创建并启动 `createJobService`；注册 4 个工具；挂载回环 Web 端点；装自动调度器与更新提醒；注册 `ctx.effect` 清理函数（`service.stop()` / 清定时器）。 |
 | `Config` | `@deepseek-ai/schemastery` 描述的插件配置 schema（全部 `.volatile()`，热改即生效），覆盖通道选择、模型档位、并发、增量阈值、自动提交、排除清单等 30+ 项。 |
 | `liveConfig` / `updateOptionsOf` / `bigTierOf` | 配置归一化：把 volatile 原始值收口成运行参数（硬顶钳制、大档开关在关闭时清空 provider、增量参数只留空时透传上游默认）。 |
 
@@ -117,7 +117,6 @@ flowchart TB
 | `codewiki_generate` | 提交制编译入口 | `cw status` 判态 → 排除清单命中不再抛错，而是返回 `state: 'excluded'` 终态（notes 明示这是用户主动排除的，指示模型不要重试、不要排障、不要换 scope）→ 首次编译闸门（0.17.48）：仓库尚无 CodeWiki（missing/uncompiled）且 `scope≠full` 且未带 `confirmed` 时不提交任务，返回 notes 引导模型先问用户「要为这个仓库建 CodeWiki 吗」，得到同意后显式传 `scope="full"` 再调 → 原生通道接管增量（决议权归引擎）→ 兼容通道走文件级归属判定 → 立即返回 `jobId`，明确要求模型「不要等待、不要轮询」。 |
 | `codewiki_update` | 日常维护快捷入口 | 固定 `scope=auto` 复用 `generateDef.execute`，文案引导模型「本步收尾、继续下一项」。 |
 | `codewiki_progress` | 只读进度查询 | 按 `cwd`/`jobId` 过滤返回 `progressView(jobSummary)`，输出 stage/百分比/篇数/引擎阶段/日志文件/自动提交结果。 |
-| `codewiki_note` | 手工页写入 | 把修复经验（`learnings/`）或设计决策（`decisions/`）写成手工维护页（编译不会覆盖）；过同一套文章契约闸门后落盘并跑 `cw index`。 |
 
 ## 任务生命周期（状态机）
 

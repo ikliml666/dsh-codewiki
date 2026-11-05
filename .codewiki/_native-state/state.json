@@ -2,18 +2,30 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21",
-    "headCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74"
+    "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
+    "headCommit": "db4b1984c0af61592f56971114ed0c40a034a6a4"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21",
-    "headCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
+    "baseCommit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
+    "headCommit": "db4b1984c0af61592f56971114ed0c40a034a6a4",
     "committed": [],
-    "staged": [],
-    "unstaged": [],
+    "staged": [
+      "lib/wiki-notes.js",
+      "test-wiki-notes.mjs"
+    ],
+    "unstaged": [
+      "CHANGELOG.md",
+      "README.md",
+      "index.js",
+      "lib/engine/apply-plan.js",
+      "package.json"
+    ],
     "untracked": [],
-    "deleted": [],
+    "deleted": [
+      "lib/wiki-notes.js",
+      "test-wiki-notes.mjs"
+    ],
     "renamed": [],
     "reason": ""
   },
@@ -22,18 +34,26 @@
     ".tmp-probe-tabs.mjs",
     ".tmp-type.mjs",
     ".tmp-verify-cov.mjs",
+    "CHANGELOG.md",
+    "README.md",
     "index.js",
-    "test-orchestration.mjs"
+    "lib/engine/apply-plan.js",
+    "lib/wiki-notes.js",
+    "package.json",
+    "test-orchestration.mjs",
+    "test-wiki-notes.mjs"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 0a8c736 与本次 cw 基线 f6b90f6 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3avxti-0-native（29 个文件）"
+    "持久化基线 f6b90f6 与本次 cw 基线 23a0b17 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit 0390234d651b（12 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw3c4srl-6-native（29 个文件）",
+    "本轮把 7 个未提交源码改动一并写进产物（快照 0390234d651b）：CHANGELOG.md、README.md、index.js、lib/engine/apply-plan.js、lib/wiki-notes.js 等"
   ],
-  "updatedAt": "2026-11-05T08:49:35.490Z"
+  "updatedAt": "2026-11-05T09:40:20.057Z"
 }
