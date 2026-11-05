@@ -136,7 +136,7 @@ Step 2 的 repair 只处理本轮 `diff.added`，历史文件永远回不到树�
 - 失败只往 `record.detector_notes` 记一条 warning，**不会让整轮增量崩掉**。
 
 底层的 `adopt_unowned_files` / `file_owner` 来自
-Engine_Process_Tree 的 Python 侧 `tree_coverage.py`，
+[Engine_Process_Tree](engine-process-tree.md) 的 Python 侧 `tree_coverage.py`，
 本模块通过 `__all__` 直接 re-export。
 
 ### 断点（checkpoint）机制
@@ -195,7 +195,7 @@ flowchart LR
 - 上游符号：`P`、`T`、`LeafAgentRunner`、`IncrementalUpdater`、`UpdateRecord`、
   `active_set`、`order_active`、`inverse`、`MODULE_TREE_FILENAME`；
 - 同仓依赖：[Engine_Full_Parallel_Runtime](engine-full-parallel-runtime.md) 的
-  `write_tree_exclusive`、Engine_Process_Tree 的
+  `write_tree_exclusive`、[Engine_Process_Tree](engine-process-tree.md) 的
   `adopt_unowned_files` / `file_owner`；
 - 上游调用入口：由 [Engine_Python_Entry](engine-python-entry.md) 的
   `handle_request(action="update")` 间接触发（`install_incremental_runtime` 在进程启动时安装）。
@@ -226,6 +226,6 @@ flowchart LR
 
 - [Engine_Python_Entry](engine-python-entry.md) — Python 子进程入口与协议
 - [Engine_Full_Parallel_Runtime](engine-full-parallel-runtime.md) — 全量模块并行与共享树 IO
-- Engine_Process_Tree — 文件归属与覆盖校验的 Python 侧实现
-- Engine_Native_Run / Engine_Native_State — Node 侧原生引擎驱动与状态目录
+- [Engine_Process_Tree](engine-process-tree.md) — 文件归属与覆盖校验的 Python 侧实现
+- [Engine_Native_Run](engine-native-run.md) / [Engine_Native_State](engine-native-state.md) — Node 侧原生引擎驱动与状态目录
 - [Update_Record](update-record.md) — `UpdateRecord` 的终端阶段与加载语义

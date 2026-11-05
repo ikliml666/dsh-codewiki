@@ -1,187 +1,142 @@
 # dsh-codewiki 仓库总览
 
-## 仓库定位
-
-`dsh-codewiki`（npm 包名 `@local/dsh-codewiki`，当前版本 0.17.53）是 DeepSeek Harness（dsh）宿主的一个本地插件，把「为代码仓库生成并持续维护一份全仓 Wiki」这件事做成了**服务化的后台编译流水线 + 侧边栏可观测面板**。它同时提供：
-
-- 面向会话模型的工具（`cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress`）；
-- 面向浏览器的插件设置页与侧边栏编译面板（实时进度、LLM 请求会话、取消控制）；
-- 两条并列的编译通道：**原生引擎通道**（默认，`nativeEngine: true`，spawn 上游 FSoft-AI4Code/CodeWiki 的 Python 引擎子进程）与 **Node 兼容通道**（agentic 写作池 + 单轮批量请求）。
-
-仓库本体是 Node ESM 双入口（`index.js` 宿主侧 + `client.js` 前端侧），并 vendored 了一套 Rust 版 `cw` CLI（`vendor/codewiki/`）与上游 FSoft Python 引擎源码锚点（`lib/engine/python/`）。包身份、运行时约束（Node ≥ 24.9、dsh ≥ 0.2.0-rc.0）与 bundle patch 声明见 [Package_Manifest](Package_Manifest.md)；向 dsh 宿主注册自身的装配补丁见 [Cordis_Patch_Config](Cordis_Patch_Config.md)。
+## 仓库定位与核心目标
+`dsh-codewiki` 是 DeepSeek Harness（dsh）宿主环境下的本地代码文档插件，npm 包名为 `@local/dsh-codewiki`。它的核心目标是将任意代码仓库自动编译为结构化、可追溯的 Wiki 文档体系，替代手工维护文档的低效模式。
+核心能力包括：
+- 服务化编译流水线：将同步编译动作改造为后台有限阶段机驱动的任务流，覆盖排队、文章写作、横切校验、文本校对、索引构建、自动提交全流程，提供实时进度反馈；
+- 双编译通道：默认调用上游 FSoft Python 原生引擎完成依赖图分析、模块聚类与文章生成，同时内置可完全离线运行的 Node 兼容 agentic 写作通道，适配不同运行环境；
+- 严格质量保障：全链路统一的文章结构契约、写集边界防护、终态裁决机制，彻底避免"单篇成功、多篇失败却上报编译成功"的历史缺陷；
+- 增量记忆能力：通过跨轮持久化的受管状态实现组件级增量编译，避免每轮全量重算带来的时间与 token 成本；
+- 配套工具链：Rust 实现的 `cw` CLI 负责 Wiki 生命周期管理，侧边栏 Web 面板提供全流程交互，模型凭证全程不出宿主、由 loopback 桥接注入引擎。
 
 ## 端到端架构
-
-### 分层视图
-
-下图把整个仓库按「宿主装配 → 编排中枢 → 双通道执行 → 跨语言边界 → 产物落地」五层展开。
-
+仓库整体分为五层，交互层请求最终在中枢编排层被分流到两条编译通道，底座层提供装配、校验与工具支撑：
 ```mermaid
 flowchart TB
-    subgraph Assemble["装配层"]
-        PM["Package_Manifest<br/>package.json / stage_map / WikiMeta"]
-        CP["Cordis_Patch_Config<br/>cordis.patch.yml"]
+    subgraph Interaction["交互接入层"]
+        UI["Web_UI_Panel<br/>侧边栏面板 + 设置页"]
+        LLM_TOOL["会话模型工具<br/>cw / codewiki_generate / codewiki_update / codewiki_progress"]
+        CLI["cw 命令行工具<br/>Rust 实现"]
     end
 
-    subgraph Host["宿主交互层"]
-        UI["Web_UI_Panel<br/>client.js 设置页 + 侧边栏"]
-        ORCH["Job_Orchestration<br/>index.js createJobService"]
-        JS["Job_Store<br/>jobs.json 跨进程协调"]
-        JL["Job_Logs<br/>NDJSON 事件落盘"]
-        UR["Update_Record<br/>终态裁决 + 可复盘记录"]
+    subgraph Orchestration["中枢编排层"]
+        JOB_ORCH["Job_Orchestration<br/>有限阶段机驱动"]
+        JOB_STORE["Job_Store<br/>跨进程任务持久化"]
+        JOB_LOGS["Job_Logs<br/>NDJSON 事件日志"]
+        CHANGE_SET["Change_Set<br/>四路 Git 变更采集"]
+        UPDATE_REC["Update_Record<br/>终态裁决与记账"]
     end
 
-    subgraph NodeCh["Node 兼容通道"]
+    subgraph NodeChannel["Node 兼容编译通道"]
         POOL["Article_Agentic_Pool<br/>双池并发调度"]
-        AE["Agentic_Edit<br/>runAgenticArticle 工具循环"]
-        AH["Agentic_Host<br/>裸消息 ↔ 宿主 llm 适配"]
-        AR["Article_Repair<br/>存量坏页修复裁决"]
+        AGENTIC["Agentic_Edit<br/>工具循环写作"]
+        HOST["Agentic_Host<br/>宿主 LLM 适配"]
+        CONTRACT["Article_Contract<br/>结构质量闸门"]
+        REPAIR["Article_Repair<br/>存量坏页修复"]
     end
 
-    subgraph NativeCh["原生引擎通道"]
-        NR["Engine_Native_Run<br/>一次编译裁决链"]
-        ES["Engine_Workspace_Snapshot<br/>未提交改动临时 commit"]
-        EC["Engine_Client<br/>spawn + JSON-lines 协议"]
-        CT["Engine_Contract<br/>EngineResult 版本化契约"]
-        QG["Engine_Quality_Gate<br/>阶段 3 采用门"]
-        PR["Engine_Proofread<br/>死链正文校对"]
-        AP["Engine_Apply_Plan<br/>写盘 + index + 基线 + 提交"]
+    subgraph NativeChannel["原生 FSoft 引擎通道（默认）"]
+        NATIVE_RUN["Engine_Native_Run<br/>线性裁决链编排"]
+        MANIFEST["Engine_Manifest<br/>引擎环境校验"]
+        SNAPSHOT["Engine_Workspace_Snapshot<br/>未提交改动对齐"]
+        CLIENT["Engine_Client<br/>子进程协议适配"]
+        BRIDGE["Engine_LLM_Bridge / OpenAI_Bridge<br/>无凭证模型桥接"]
+        PY_ENTRY["Engine_Python_Entry<br/>JSON-lines 薄入口"]
+        PY_RUNTIME["Python 并行运行时<br/>全量/增量受控并行"]
+        OUTPUT["Engine_Output / Mapping<br/>产物解析与格式映射"]
+        GATE["Engine_Quality_Gate<br/>采用裁决"]
+        PROOFREAD["Engine_Proofread<br/>死链语义校对"]
+        APPLY["Engine_Apply_Plan<br/>原子落地与回滚"]
+        NATIVE_STATE["Engine_Native_State<br/>跨轮增量记忆"]
     end
 
-    subgraph PySide["Python 子进程侧"]
-        EP["Engine_Python_Entry<br/>entry.py 薄入口"]
-        FRT["Engine_Full_Parallel_Runtime<br/>全量兄弟模块并行"]
-        FSR["Engine_FSoft_Runtime<br/>增量 Step5 叶子并行 + 断点"]
+    subgraph Base["配置与底座层"]
+        CORDIS["Cordis_Patch_Config<br/>插件装配补丁"]
+        PKG["Package_Manifest<br/>包身份与契约口径"]
+        PROBE["测试/探针工具<br/>环境搭建/对拍 fixture"]
+        VENDOR["vendored Rust CodeWiki<br/>索引与元数据管理"]
     end
 
-    subgraph RustSide["Rust cw CLI（vendor）"]
-        CM["CodeWiki_Main<br/>init/status/index/meta/projects"]
-        CS["CodeWiki_Setup<br/>接入 Claude Code / Codex / QMD"]
-    end
+    UI -->|"REST 端点交互"| JOB_ORCH
+    LLM_TOOL -->|"工具调用"| JOB_ORCH
+    CLI -->|"索引/基线操作"| VENDOR
 
-    PM --> CP --> ORCH
-    UI <-->|"REST /api/codewiki/*"| ORCH
-    ORCH <--> JS
-    ORCH --> JL
-    ORCH --> UR
+    JOB_ORCH --> JOB_STORE
+    JOB_ORCH --> JOB_LOGS
+    JOB_ORCH --> CHANGE_SET
+    JOB_ORCH --> UPDATE_REC
 
-    ORCH -->|"nativeEngine=false"| POOL
-    POOL --> AE
-    AE <--> AH
-    AH --> AE
-    AE --> AR
+    JOB_ORCH -->|"Node 兼容模式"| POOL
+    POOL --> AGENTIC
+    AGENTIC --> HOST
+    POOL --> CONTRACT
+    POOL --> REPAIR
 
-    ORCH -->|"nativeEngine=true"| NR
-    ES --> NR
-    NR --> EC
-    EC --> CT
-    EC --> EP
-    EP --> FRT
-    EP --> FSR
-    NR --> QG
-    QG --> PR
-    PR --> QG
-    QG --> AP
+    JOB_ORCH -->|"默认原生模式"| NATIVE_RUN
+    NATIVE_RUN --> MANIFEST
+    NATIVE_RUN --> SNAPSHOT
+    NATIVE_RUN --> CLIENT
+    NATIVE_RUN --> NATIVE_STATE
+    CLIENT --> BRIDGE
+    CLIENT --> PY_ENTRY
+    PY_ENTRY --> PY_RUNTIME
+    PY_RUNTIME --> OUTPUT
+    OUTPUT --> GATE
+    GATE --> PROOFREAD
+    GATE --> APPLY
+    APPLY --> VENDOR
 
-    AP -->|"cw index / cw meta update"| CM
-    CM --> CS
+    CORDIS -->|"装配注入"| JOB_ORCH
+    PKG -->|"版本与引擎约束"| Base
+    PROBE -->|"环境验证"| NATIVE_RUN
 ```
 
-### 一次编译的端到端时序
+## 核心模块文档导航
+按功能域分组，可点击跳转至各模块的详细文档：
+### 交互与配置域
+- [Web_UI_Panel](Web_UI_Panel.md)：浏览器侧交互界面，提供编译进度展示、配置表单、LLM 请求会话查看能力
+- [Cordis_Patch_Config](Cordis_Patch_Config.md)：dsh 宿主的插件装配补丁，负责插件身份与配置命名空间挂载
+- [Package_Manifest](Package_Manifest.md)：包身份声明、Node/dsh 版本约束、跨语言阶段契约口径
+- [CodeWiki_Main](CodeWiki_Main.md)：Rust 实现的 `cw` CLI 入口，负责 Wiki 初始化、状态检查、索引重建
+- [CodeWiki_Setup](CodeWiki_Setup.md)：会话规约向 Claude Code / Codex / QMD 的安装与卸载
+### 中枢编排域
+- [Job_Orchestration](Job_Orchestration.md)：插件核心中枢，驱动有限阶段编译流水线、注册会话工具、暴露回环 API
+- [Job_Store](Job_Store.md)：跨进程任务持久化、tick 锁、宿主重启后的任务重放裁决
+- [Job_Logs](Job_Logs.md)：NDJSON 持久化事件日志、Wiki 链接扫描、Git 路径归一
+- [Change_Set](Change_Set.md)：四路 Git 变更采集（已提交/暂存/未暂存/未跟踪）
+- [Update_Record](Update_Record.md)：编译终态裁决、基线推进判定、可复盘的更新记录
+### Node 兼容编译通道
+- [Article_Agentic_Pool](Article_Agentic_Pool.md)：双池并发的 agentic 文章执行调度
+- [Agentic_Edit](Agentic_Edit.md)：单篇文章写作的多轮工具循环，支持读码、列文件、增量编辑
+- [Agentic_Host](Agentic_Host.md)：agentic 循环与宿主 LLM 服务的消息格式适配层
+- [Article_Contract](Article_Contract.md)：全通道共用的文章结构最低质量契约闸门
+- [Article_Repair](Article_Repair.md)：存量坏页的格式修复裁决，避免误删有价值内容
+### 原生 FSoft 引擎通道（默认）
+- [Engine_Native_Run](Engine_Native_Run.md)：原生通道的线性裁决链编排，产出严格不可洗白的编译终态
+- [Engine_Manifest](Engine_Manifest.md)：引擎环境指纹与锁校验，环境漂移时直接终止编译
+- [Engine_Workspace_Snapshot](Engine_Workspace_Snapshot.md)：未提交改动的临时 Git 快照，对齐引擎记账口径
+- [Engine_Client](Engine_Client.md)：Node 与 Python 子进程的 JSON-lines 协议适配层
+- [Engine_Contract](Engine_Contract.md)：跨进程引擎结果的版本化数据契约
+- [Engine_LLM_Bridge](Engine_LLM_Bridge.md)：loopback HTTP 桥，无凭证对接宿主 LLM 服务
+- [Engine_OpenAI_Bridge](Engine_OpenAI_Bridge.md)：OpenAI 协议与 DSH 模型流的纯函数转换层
+- [Engine_Python_Entry](Engine_Python_Entry.md)：Python 侧薄入口，负责协议翻译与进度桥接
+- [Engine_FSoft_Runtime](Engine_FSoft_Runtime.md)：增量更新路径的受控并行与断点运行时
+- [Engine_Full_Parallel_Runtime](Engine_Full_Parallel_Runtime.md)：全量生成路径的兄弟模块并行调度
+- [Engine_Mapping](Engine_Mapping.md)：FSoft 产物到 CodeWiki 布局的纯函数格式映射
+- [Engine_Output](Engine_Output.md)：引擎产物的结构化解析与自洽性校验
+- [Engine_Quality_Gate](Engine_Quality_Gate.md)：产物采用裁决，区分缺陷/降级/陈旧三类问题
+- [Engine_Proofread](Engine_Proofread.md)：死链问题的事后语义校对，仅修正链接不改动正文
+- [Engine_Apply_Plan](Engine_Apply_Plan.md)：产物原子落地，写盘/建索引/推基线/自动提交，失败可回滚
+- [Engine_Native_State](Engine_Native_State.md)：跨轮持久化的引擎增量记忆，避免每轮退化为全量编译
+- [Engine_Process_Tree](Engine_Process_Tree.md)：子进程树可靠终止、模块归属树自愈补丁
+### 测试与工具域
+- [Graphdiff_Golden_Generator](Graphdiff_Golden_Generator.md)：图差异算法的对拍基准生成工具
+- [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md)：独立 venv 的 FSoft 引擎环境搭建脚本
+- [No-LLM_Graph_Probe](No-LLM_Graph_Probe.md)：无 LLM 依赖图链路的验收探针
 
-下图跟踪一条任务从用户在侧边栏发起，到产物真正写盘并推进基线的全过程。
-
-```mermaid
-sequenceDiagram
-    actor U as 用户 / 会话模型
-    participant UI as Web_UI_Panel
-    participant ORCH as Job_Orchestration
-    participant JS as Job_Store
-    participant NR as Engine_Native_Run
-    participant EC as Engine_Client
-    participant PY as Python entry.py
-    participant QG as Engine_Quality_Gate
-    participant PR as Engine_Proofread
-    participant AP as Engine_Apply_Plan
-    participant CW as cw CLI (Rust)
-
-    U->>UI: 触发 codewiki_generate / 侧边栏按钮
-    UI->>ORCH: POST /api/codewiki/control
-    ORCH->>JS: 取 tick 锁 / 写入 jobs.json
-    ORCH->>NR: runNativeJob 驱动一次编译
-    NR->>EC: runEngine(spawn entry.py, stdin 一行 JSON)
-    EC->>PY: hello + generate/update 请求
-    PY-->>EC: progress / result (stdout JSON-lines)
-    EC-->>NR: EngineResult (契约校验)
-    NR->>QG: gateNativeOutput 第一次判门
-    QG-->>NR: GateReport (dead-link 等缺陷)
-    NR->>PR: proofreadPages 只改死链
-    alt 有改写
-        NR->>QG: 第二次判门
-    end
-    QG->>AP: writable=true + rendered
-    AP->>CW: cw index 重建 _index.md
-    AP->>CW: cw meta update 推进基线
-    AP-->>ORCH: done / partial / failed / cancelled
-    ORCH->>JS: 落盘终态 + 更新记录
-    UI-->>U: 2s 轮询 /jobs 看到实时阶段
-```
-
-## 核心模块索引
-
-按职责分组，下面把仓库的核心模块链接到各自的详细文档。
-
-### 装配与包身份
-- [Package_Manifest](Package_Manifest.md) — npm 包身份、双入口声明、Node/dsh 版本约束、跨语言阶段口径、Rust 侧 `WikiMeta`。
-- [Cordis_Patch_Config](Cordis_Patch_Config.md) — `cordis.patch.yml` 如何把 `id: codewiki` 的插件注册进 dsh 宿主，以及配置覆盖语义。
-
-### 宿主交互与编排中枢
-- [Job_Orchestration](Job_Orchestration.md) — 插件入口 `index.js`：工具注册、回环 REST API、10s 节拍有限阶段机、两条编译通道的开关。
-- [Job_Store](Job_Store.md) — `jobs.json` 原子读写、跨进程 tick 锁、多窗口现场合并、宿主重启后的重放裁决。
-- [Job_Logs](Job_Logs.md) — NDJSON 事件日志、wiki 链接扫描、git 路径归一、中文+空格 fixture。
-- [Update_Record](Update_Record.md) — 终态裁决（done/partial/failed/cancelled）与「能否推进基线」的可复盘 JSON 记录。
-- [Web_UI_Panel](Web_UI_Panel.md) — `client.js`：设置表单、侧边栏进度面板、LLM 请求会话视图。
-
-### Node 兼容通道（agentic 写作池）
-- [Article_Agentic_Pool](Article_Agentic_Pool.md) — `runPool` 双池并发调度，normal 池 + big 池独立限流。
-- [Agentic_Edit](Agentic_Edit.md) — 单篇文章的多轮工具循环（`read_code` / `list_files` / `edit_article` / `generate_sub_module`）。
-- [Agentic_Host](Agentic_Host.md) — 裸 `{role, content}` 消息 ↔ 宿主 `llm.stream` 正式 Message 的适配层与消息身份缓存。
-- [Article_Contract](Article_Contract.md) — Wiki 文章结构性最低质量契约（frontmatter / 必需章节 / source_files / 死链），三个写入通道共用。
-- [Article_Repair](Article_Repair.md) — 存量坏页「先修，修不动才删」的纯函数修复裁决层。
-
-### 原生引擎通道（Python 子进程）
-- [Engine_Native_Run](Engine_Native_Run.md) — 一次原生编译的完整裁决链（env/lock → 增量决议 → 引擎调用 → 判门 → 落地）。
-- [Engine_Workspace_Snapshot](Engine_Workspace_Snapshot.md) — 把未提交的四路改动合成一个不挂 ref 的临时 commit，对齐记账。
-- [Engine_Client](Engine_Client.md) — 跨语言薄适配层：spawn、stdin 一行 JSON、stdout JSON-lines、超时/取消/崩溃裁决。
-- [Engine_Contract](Engine_Contract.md) — 跨进程数据契约（`EngineResult` / `EngineProgress` / `EngineError`）的版本化、可校验纯函数。
-- [Engine_Quality_Gate](Engine_Quality_Gate.md) — 产物采用门：产物自洽、目标格式契约、基线可推进性，问题三分类（defect / degradation / stale）。
-- [Engine_Proofread](Engine_Proofread.md) — 判出 dead-link 后只改链接、不改别的，改完重跑判门。
-- [Engine_Apply_Plan](Engine_Apply_Plan.md) — 落地器三条硬不变量：写集封闭、索引/基线失败即回滚、提交失败不回滚。
-- [Engine_Python_Entry](Engine_Python_Entry.md) — `entry.py`：协议翻译、五段→八段进度映射、stdout 守卫、不读本机凭证库。
-- [Engine_Full_Parallel_Runtime](Engine_Full_Parallel_Runtime.md) — 替换 `_generate_modules_in_order`，兄弟模块并行且守住拓扑顺序等四条不变量。
-- [Engine_FSoft_Runtime](Engine_FSoft_Runtime.md) — 替换增量 Step 5：叶子独立临时副本并行 + 按序合并 + 冲突串行重跑 + 断点恢复。
-
-### Rust `cw` CLI（vendor）
-- [CodeWiki_Main](CodeWiki_Main.md) — `cw init / status / meta update / index / projects / path` 等子命令。
-- [CodeWiki_Setup](CodeWiki_Setup.md) — 把会话规约安装到 Claude Code / Codex / QMD。
-
-### 工具与测试
-- [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md) — `tools/fsoft-engine/setup-env.sh`：在仓库外造出依赖闭合的 Python venv。
-- [No-LLM_Graph_Probe](No-LLM_Graph_Probe.md) — `probe-no-llm-graph.py`：不依赖 LLM 的依赖图端到端验收探针。
-- [Graphdiff_Golden_Generator](Graphdiff_Golden_Generator.md) — 图差异算法 Node 移植版的对拍基准生成器。
-
-## 构建、运行与配置
-
-本仓库不自带独立的构建/打包流水线——它是一个被 dsh 宿主装载的本地插件。关键事实分散在三份工程产物里：
-
-- `package.json`（包身份、双入口、Node/dsh 引擎约束、bundle patch 指针）；
-- `cordis.patch.yml`（向宿主声明插件 id 与运行期配置命名空间）；
-- `tools/fsoft-engine/setup-env.sh`（原生引擎所依赖的 Python venv 环境）。
-
-它们的字段含义、装配方式与环境搭建步骤已在以下模块文档中完整说明，此处不再重复：
-
-- 包身份、入口与运行时约束 → [Package_Manifest](Package_Manifest.md)
-- 插件如何被 dsh 宿主装载、两种安装方式（bundle 依赖 / `file:///` 直挂）与配置覆盖优先级 → [Cordis_Patch_Config](Cordis_Patch_Config.md)
-- Python venv 依赖闭合、`pip check` 自证与快速失败约定 → [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md)
-
-简言之：`pnpm install` 把本仓库以 link 形式接入 dsh 的 profile，宿主启动时自动合并 `cordis.patch.yml` 完成注册；原生引擎通道在首次使用前需要运行 `setup-env.sh` 准备好独立的 Python venv，并在插件设置页显式选择 provider 与编译模型。
+## 构建、运行与部署
+本仓库的构建、配置与部署流程统一由包级元数据管理，核心要点如下：
+1. **构建要求**：插件为纯 ESM Node 项目，无复杂编译步骤，要求 Node.js ≥ 24.9.0、dsh 宿主版本 ≥ 0.2.0-rc.0，运行时唯一依赖为 schema 校验库，版本与入口定义详见 [Package_Manifest](Package_Manifest.md)。
+2. **插件装配**：通过 `cordis.patch.yml` 向 dsh 宿主注册插件身份，支持本地 bundle 依赖、file:/// 直挂两种安装方式，配置热生效无需手工修改宿主文件，装配机制详见 [Cordis_Patch_Config](Cordis_Patch_Config.md)。
+3. **原生引擎环境**：默认编译通道依赖独立部署的 FSoft Python 引擎，需通过 `tools/fsoft-engine/setup-env.sh` 在仓库外创建隔离虚拟环境，自动解决 pip 依赖冲突、完成依赖闭合校验，环境搭建与故障验证详见 [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md)、[No-LLM_Graph_Probe](No-LLM_Graph_Probe.md)。
+4. **运行与部署**：插件无需独立部署服务，安装到 dsh 宿主后自动注册会话工具、侧边栏面板与回环 REST API，编译任务以后台服务化方式运行；编译产物自动写入仓库 `.codewiki/` 目录，支持索引重建、基线推进与自动提交，无需额外配置。

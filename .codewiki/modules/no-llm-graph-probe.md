@@ -25,7 +25,7 @@ fsoft_page: No-LLM_Graph_Probe.md
 
 - [Engine_Python_Entry](engine-python-entry.md) —— Node 侧通过子进程调用 Python 引擎的入口（`lib/engine/python/entry.py`）。
 - [Engine_FSoft_Runtime](engine-fsoft-runtime.md) / [Engine_Full_Parallel_Runtime](engine-full-parallel-runtime.md) —— 引擎内部 Python 运行时（叶子 Agent 执行、全并行运行时）。
-- Engine_Native_Run —— 原生引擎运行封装（`noop` 占位与运行编排）。
+- [Engine_Native_Run](engine-native-run.md) —— 原生引擎运行封装（`noop` 占位与运行编排）。
 - [Engine_Workspace_Snapshot](engine-workspace-snapshot.md) —— 工作区快照（`component_index.json` / `leaf_nodes.json` / `summary.json` 等 artifact 的产出语义）。
 - [FSoft_Engine_Setup_Script](fsoft-engine-setup-script.md) —— 探针所依赖的 Python 运行环境的搭建脚本（`tools/fsoft-engine/setup-env.sh`）。
 

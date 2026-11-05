@@ -130,7 +130,7 @@ sequenceDiagram
 
 ### 3. Git 路径归一（`lib/git-paths.js`）
 
-负责铲平 git 路径输出的两层落差，供 [Job_Orchestration](job-orchestration.md)、Engine_Native_State、Engine_Output、Engine_Manifest 等所有比较路径的模块复用：
+负责铲平 git 路径输出的两层落差，供 [Job_Orchestration](job-orchestration.md)、[Engine_Native_State](engine-native-state.md)、[Engine_Output](engine-output.md)、[Engine_Manifest](engine-manifest.md) 等所有比较路径的模块复用：
 
 - **落差一：`core.quotepath`（默认 true）**——非 ASCII 路径在 `--name-only` / `--name-status` 输出里被写成 `"a/\344\270\255.md"`（八进制字节转义 + 双引号包裹），按字面量比较路径的代码（白名单、`startsWith('.codewiki/')`）当场失配。
 - **落差二：转义按字节做**——「解开转义」必须把字节重新拼成 Buffer 再按 UTF-8 解码（一个中文是三个 `\NNN`），不能逐字符还原。

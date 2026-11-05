@@ -138,7 +138,7 @@ flowchart LR
 
 要点：
 
-- 上游 Python 引擎（见 [Engine_Python_Entry](engine-python-entry.md)、Engine_Native_Run）持有**唯一权威**的图差异实现（`body_similarity` / `body_hash` / `unified_diff` 的原始语义）。
+- 上游 Python 引擎（见 [Engine_Python_Entry](engine-python-entry.md)、[Engine_Native_Run](engine-native-run.md)）持有**唯一权威**的图差异实现（`body_similarity` / `body_hash` / `unified_diff` 的原始语义）。
 - 本模块把这份权威语义"冻结"成 JSON，避免 Node 侧测试每次都要启动 Python venv 才能比对。
 - 一旦 Node 侧 `lib/graph-diff.js` 与上游发生漂移（例如 tokenizer 正则不一致、`autojunk` 被意外开启、unified diff 的 `n=2` 上下文行数写错），Node 单测会立刻在具体某条用例上 fail。
 

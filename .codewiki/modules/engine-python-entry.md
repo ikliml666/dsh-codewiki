@@ -20,7 +20,7 @@ fsoft_page: Engine_Python_Entry.md
    - **不读本机凭证库**——模型通道只从进程环境变量（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`）读取，绝不去碰 `~/.codewiki/config.json` 或 keyring；
    - **不让 FSoft 的打印污染协议流**——在导入任何 `codewiki` 模块之前就把 `sys.stdout` 换成只允许协议写出的守卫对象。
 
-调用关系上，Node 侧由 Engine_Native_Run 编排一次完整编译、由 [Engine_Client](engine-client.md) 的 `runEngine` spawn 出本进程并解析 JSON-lines；模型通道由 Engine_LLM_Bridge 以 loopback 桥的形式注入环境变量。
+调用关系上，Node 侧由 [Engine_Native_Run](engine-native-run.md) 编排一次完整编译、由 [Engine_Client](engine-client.md) 的 `runEngine` spawn 出本进程并解析 JSON-lines；模型通道由 [Engine_LLM_Bridge](engine-llm-bridge.md) 以 loopback 桥的形式注入环境变量。
 
 ## 架构定位
 
@@ -280,7 +280,7 @@ flowchart TB
 
 原生引擎一轮动辄几十上百分钟，失败点通常在阶段 3 中途。`_salvage` 的规则：
 
-- 已写出 ≥1 篇文章 → 降 `partial` 交付（保住已写文章与下一轮增量的状态），让 Engine_Native_Run 的裁决链有可能推进基线；
+- 已写出 ≥1 篇文章 → 降 `partial` 交付（保住已写文章与下一轮增量的状态），让 [Engine_Native_Run](engine-native-run.md) 的裁决链有可能推进基线；
 - 一篇都没写出来 → 仍然 `failed`——空产物冒充「部分完成」会让基线与面板失真。
 
 ### 终态事实字段
@@ -327,10 +327,10 @@ flowchart TB
 ## 环境与部署依赖
 
 - **运行环境**由 [FSoft_Engine_Setup_Script](fsoft-engine-setup-script.md) 的 `tools/fsoft-engine/setup-env.sh` 按冻结快照 `--no-deps` 安装，并以 `pip check` + import 冒烟验收；入口的 `doctor` 动作是这套门禁的运行时镜像。
-- **模型通道**由 Engine_LLM_Bridge 启动 loopback 服务后，把 `CODEWIKI_BASE_URL`（指向 `http://127.0.0.1:<随机端口>/v1`）、占位 `CODEWIKI_API_KEY`、主模型与聚类模型注入子进程环境；入口侧 `_model_config` 缺任何一项直接 `engine-model` 失败，绝不回退读本机配置。相关占位 key 校验逻辑见 Engine_OpenAI_Bridge。
+- **模型通道**由 [Engine_LLM_Bridge](engine-llm-bridge.md) 启动 loopback 服务后，把 `CODEWIKI_BASE_URL`（指向 `http://127.0.0.1:<随机端口>/v1`）、占位 `CODEWIKI_API_KEY`、主模型与聚类模型注入子进程环境；入口侧 `_model_config` 缺任何一项直接 `engine-model` 失败，绝不回退读本机配置。相关占位 key 校验逻辑见 [Engine_OpenAI_Bridge](engine-openai-bridge.md)。
 - **阶段映射口径**与 Node 侧 [Engine_Contract](engine-contract.md) 的 `ENGINE_STAGES` 由 `stage_map.py` 共享并测试双向对账。
-- **终止与取消**：取消由 Node 侧直接杀进程树完成（见 Engine_Process_Tree）；入口侧的 `cancel` 动作只立即应答 `{cancelled: true}`。
-- **产物采集与状态水合**：入口写出的 `docsDir` 与跨轮状态文件由 Engine_Native_State 与 Engine_Output 在上层采集、映射到 wiki 页（详见 [Engine_Apply_Plan](engine-apply-plan.md) 与 [Engine_Proofread](engine-proofread.md) 的落地裁决链）。
+- **终止与取消**：取消由 Node 侧直接杀进程树完成（见 [Engine_Process_Tree](engine-process-tree.md)）；入口侧的 `cancel` 动作只立即应答 `{cancelled: true}`。
+- **产物采集与状态水合**：入口写出的 `docsDir` 与跨轮状态文件由 [Engine_Native_State](engine-native-state.md) 与 [Engine_Output](engine-output.md) 在上层采集、映射到 wiki 页（详见 [Engine_Apply_Plan](engine-apply-plan.md) 与 [Engine_Proofread](engine-proofread.md) 的落地裁决链）。
 
 ## 关键常量速查
 

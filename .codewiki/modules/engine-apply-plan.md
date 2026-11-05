@@ -176,4 +176,4 @@ flowchart LR
 ## 上游与下游
 
 - **上游**：[Engine_Quality_Gate](engine-quality-gate.md) 的 `gateNativeOutput` 产出 report（`writable` / `outcome` / `rendered` / `canAdvanceBaseline`）；[Job_Orchestration](job-orchestration.md) 的 `apply` 在编译收尾阶段调用本模块，并传入 `extraFiles`（引擎原始状态）、`pruneRoots`、`deleteFiles`（孤儿页 / 残留页扫描结果）与注入依赖。
-- **下游影响**：基线是否真的推进（`baselineAdvanced`）直接决定下一轮 Change_Set 的增量起点；`ApplyResult.blockers` 经 [Engine_Contract](engine-contract.md) 的 `validateEngineResult` 校验后进入终态与面板展示（[Web_UI_Panel](web-ui-panel.md) 的步骤条按 `APPLY_STAGES` 对齐）。
+- **下游影响**：基线是否真的推进（`baselineAdvanced`）直接决定下一轮 [Change_Set](change-set.md) 的增量起点；`ApplyResult.blockers` 经 [Engine_Contract](engine-contract.md) 的 `validateEngineResult` 校验后进入终态与面板展示（[Web_UI_Panel](web-ui-panel.md) 的步骤条按 `APPLY_STAGES` 对齐）。

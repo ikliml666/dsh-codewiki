@@ -71,7 +71,7 @@ flowchart TB
 | [Job_Orchestration](job-orchestration.md) | 面板轮询的 `/api/codewiki/jobs` 数据源自其 `runPool` / `jobSummary`；取消按钮发 `POST /api/codewiki/control {action:'cancel'}` |
 | [Job_Store](job-store.md) | 任务卡片读取的 `stageTimings` / `taskList` / `notes` / `usage` 等字段由其持久化并回读 |
 | [Job_Logs](job-logs.md) | `engineLogBlock` 渲染的 `job.nativeLogs`（NDJSON 最近 40 条）来自其日志写入 |
-| [Engine_Python_Entry](engine-python-entry.md) / Engine_Native_State | `nativeStage` / `nativePercent` / `nativeResult.gate` 等字段反映八段引擎契约；设置页的「原生引擎」分组直接控制其启停 |
+| [Engine_Python_Entry](engine-python-entry.md) / [Engine_Native_State](engine-native-state.md) | `nativeStage` / `nativePercent` / `nativeResult.gate` 等字段反映八段引擎契约；设置页的「原生引擎」分组直接控制其启停 |
 | [Agentic_Host](agentic-host.md) | `SessionView` 展示的 LLM 请求记录由其 LLM 桥接层落盘 |
 | [Package_Manifest](package-manifest.md) | `package.json` 的 `dsh.client.platform: web` 声明本模块为 web 客户端；`exports['./client']` 指向本文件 |
 

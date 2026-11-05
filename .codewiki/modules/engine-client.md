@@ -52,10 +52,10 @@ flowchart LR
 **不做什么（防止本层长成第二个编译器）：**
 
 - 不实现聚类、图 diff、文章写作——那是引擎的活；
-- 不读凭证、不连模型——模型通道由 Engine_LLM_Bridge 的 loopback 桥单独提供，引擎侧只能拿到占位 key 与 `127.0.0.1` 随机端口；
-- 不写 `.codewiki`——产物落盘与模块映射在 Engine_Output / Engine_Mapping。
+- 不读凭证、不连模型——模型通道由 [Engine_LLM_Bridge](engine-llm-bridge.md) 的 loopback 桥单独提供，引擎侧只能拿到占位 key 与 `127.0.0.1` 随机端口；
+- 不写 `.codewiki`——产物落盘与模块映射在 [Engine_Output](engine-output.md) / [Engine_Mapping](engine-mapping.md)。
 
-**上游调用方**：生产环境唯一编排器是 Engine_Native_Run 的 `runNativeJob`，它先跑 Engine_Manifest 的 `doctor` 与引擎锁校验，再经本模块驱动引擎，最后由 [Engine_Quality_Gate](engine-quality-gate.md) 与 [Engine_Apply_Plan](engine-apply-plan.md) 裁决终态。
+**上游调用方**：生产环境唯一编排器是 [Engine_Native_Run](engine-native-run.md) 的 `runNativeJob`，它先跑 [Engine_Manifest](engine-manifest.md) 的 `doctor` 与引擎锁校验，再经本模块驱动引擎，最后由 [Engine_Quality_Gate](engine-quality-gate.md) 与 [Engine_Apply_Plan](engine-apply-plan.md) 裁决终态。
 
 ---
 
@@ -151,14 +151,14 @@ stateDiagram-v2
 
 | 计时 | 默认值 | 解决的问题 |
 | --- | --- | --- |
-| `timeoutMs` | 600000（上层 Engine_Native_Run 会覆盖为 180 分钟） | 兜「跑太久」。超时但已有进度（`writtenCount > 0`）时判 `partial` 交付，保住已写文章、允许基线推进打破死循环 |
+| `timeoutMs` | 600000（上层 [Engine_Native_Run](engine-native-run.md) 会覆盖为 180 分钟） | 兜「跑太久」。超时但已有进度（`writtenCount > 0`）时判 `partial` 交付，保住已写文章、允许基线推进打破死循环 |
 | `silenceMs` | `max(30s, 10 分钟)`，可用 `DSH_CODEWIKI_ENGINE_SILENCE_MS` 覆盖 | 兜「已经卡死」。静默阈值必须显著大于 Python 侧心跳间隔（`entry.py` 的 `_HEARTBEAT_SEC = 60s`），留约 10 倍余量才能区分「慢」与「死」。判据是「多久没收到任何协议帧」，与 timeout 分支同一口径决定 partial/failed |
 | `resultGraceMs` | 2000ms | result 已到后的进程自行收场窗口。引擎发出 `done` 后若卡在收尾（僵死线程、没关的 pipe），已确定成功的编译不会被 10 分钟静默/180 分钟超时改判——超时即杀，按已有 result 收尾 |
 | `maxLineBytes` | 4 MiB | 单行上限。引擎失控吐超长行（甚至一行 8MB）时拦住解析，防止内存暴涨；未终结的残留超限缓冲直接丢弃 |
 
 ### 为什么取消必须整树终止
 
-FSoft 进程自己也会派生子进程（flake8、git 调用、甚至 fork 模型后端）。只杀直接子进程的 pid，孙进程会变成孤儿继续烧 token。因此 `runEngine` 的所有终止路径都委托给 Engine_Process_Tree 的 `terminateProcessTree`：POSIX 上 `detached: true` 起的子进程自成进程组，先 `SIGTERM` 整组、宽限后 `SIGKILL`；Windows 走 `taskkill /T /F`。只有「我们主动终止过的进程」其退出码不会被记成 `nonzero-exit`——终止方式的产物不是引擎自己的语义。
+FSoft 进程自己也会派生子进程（flake8、git 调用、甚至 fork 模型后端）。只杀直接子进程的 pid，孙进程会变成孤儿继续烧 token。因此 `runEngine` 的所有终止路径都委托给 [Engine_Process_Tree](engine-process-tree.md) 的 `terminateProcessTree`：POSIX 上 `detached: true` 起的子进程自成进程组，先 `SIGTERM` 整组、宽限后 `SIGKILL`；Windows 走 `taskkill /T /F`。只有「我们主动终止过的进程」其退出码不会被记成 `nonzero-exit`——终止方式的产物不是引擎自己的语义。
 
 ---
 
@@ -210,7 +210,7 @@ sequenceDiagram
 
 ## 6. 环境与配置
 
-- **进程环境**：`spawnPlan` 把 `process.env`、`engine.env`、调用方 `env` 三层合并（后层覆盖前层）。模型相关变量（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` 等）由 Engine_Native_Run 在启动 LLM 桥后注入，密钥只活在子进程环境里。
+- **进程环境**：`spawnPlan` 把 `process.env`、`engine.env`、调用方 `env` 三层合并（后层覆盖前层）。模型相关变量（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` 等）由 [Engine_Native_Run](engine-native-run.md) 在启动 LLM 桥后注入，密钥只活在子进程环境里。
 - **静默阈值覆盖**：`DSH_CODEWIKI_ENGINE_SILENCE_MS`（主要供测试把 10 分钟压到秒级）。
 - **Node 版本**：`package.json` 要求 `node >= 24.9.0`；`ENGINE_STAGES` 阶段枚举的任何增删都属契约变更，必须与 Python 侧 `entry.py` 的 `CONTRACT_VERSION` 同步升版。
 - **协议版本**：`ENGINE_PROTOCOL_VERSION = 1` 与 `entry.py` 的 `PROTOCOL_VERSION` 一一对应；版本不符只记 `protocol-version` 违规而不中断——版本协商的责任在上层。

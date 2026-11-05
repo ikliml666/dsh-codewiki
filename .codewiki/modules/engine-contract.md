@@ -219,8 +219,8 @@ flowchart TB
 - [Engine_Client](engine-client.md)：`runEngine` 与 `createProtocolReader` 是契约的第一个消费者——负责进程生命周期、超时/静默/取消判定，并把 raw 协议帧加工成契约对象。
 - [Engine_Python_Entry](engine-python-entry.md)：Python 侧 `entry.py` 按同一协议写出 `hello / progress / result`，并用 `_ProtocolOnly` 把非协议输出全部改道 stderr，保证 stdout 流不被日志污染。
 - [Update_Record](update-record.md)：`update_record.json` 的 `outcome` 即本契约 `UPDATE_OUTCOMES` 的事实来源，`loadUpdateRecord` / `isTerminalStage` 与本模块共用同一口径的终态文案。
-- Engine_Manifest：`doctor` 产出的自检项填充本契约 `checks` 与 `engine.deps` 字段。
-- Engine_Native_State：引擎产物状态目录，对应契约 `artifacts.rawTree` / `rawTreeFiles`。
+- [Engine_Manifest](engine-manifest.md)：`doctor` 产出的自检项填充本契约 `checks` 与 `engine.deps` 字段。
+- [Engine_Native_State](engine-native-state.md)：引擎产物状态目录，对应契约 `artifacts.rawTree` / `rawTreeFiles`。
 - [Web_UI_Panel](web-ui-panel.md)：面板步骤条按 `ENGINE_STAGES` 对齐渲染。
 - [Job_Orchestration](job-orchestration.md)：任务编排按 `outcome` + `updateOutcome` 决定后续 tick 与是否推进基线。
 

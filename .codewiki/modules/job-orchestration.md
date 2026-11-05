@@ -16,7 +16,7 @@ fsoft_page: Job_Orchestration.md
 - 对会话模型暴露三个工具：`cw`（薄封装 Rust CLI）、`codewiki_generate` / `codewiki_update`（提交制编译入口）、`codewiki_progress`（只读查进度）；
 - 对宿主侧边栏暴露一组回环 HTTP API（`/api/codewiki/jobs`、`/api/codewiki/repos`、`/api/codewiki/sessions`、`/api/codewiki/logs`、`/api/codewiki/control`、`/api/codewiki/models` 等）；
 - 用一个常驻 `createJobService` 实例以 10s 节拍（`TICK_MS`）驱动一个有限阶段机：排队 → articles（写文章）→ crosscut（横切）→ review（校对）→ index（索引/基线）→ commit（自动提交）→ 终态（done / partial / failed / cancelled）；
-- 支持两条编译通道：**原生引擎通道**（默认，`nativeEngine=true`，调用上游 FSoft Python 引擎子进程，见 Engine_Native_Run.md）与**Node 兼容通道**（`nativeEngine=false`，插件内自跑 agentic 写作 + 单轮批量请求）。
+- 支持两条编译通道：**原生引擎通道**（默认，`nativeEngine=true`，调用上游 FSoft Python 引擎子进程，见 [Engine_Native_Run.md](engine-native-run.md)）与**Node 兼容通道**（`nativeEngine=false`，插件内自跑 agentic 写作 + 单轮批量请求）。
 
 配置 schema 由 `Config`（schemastery 对象）定义并通过 [Cordis_Patch_Config.md](cordis-patch-config.md) 的 `cordis.patch.yml` 装配；包身份与依赖见 [Package_Manifest.md](package-manifest.md)（`package.json`，`@local/dsh-codewiki`，Node ≥ 24.9）。
 
@@ -216,10 +216,10 @@ flowchart TB
 - 持久化与跨实例协调：[Job_Store.md](job-store.md)（`createJobsStore` / `mergeJobLists` / `findActiveJob` / `heartbeat` / `adoptOrphan` / `planForeignJob` / `snapshotNativeRun` / `planNativeReplay`）。原子写、损坏隔离（corrupt marker）、fail-closed 幂等、跨进程 tick 锁、函数值/凭证字段拒序列化。
 - 引擎事件日志：[Job_Logs.md](job-logs.md)（`appendLog` / `readLogTail` / `logStats` / `logFileOf`）。
 - 终态与更新记录：[Update_Record.md](update-record.md)（`judgeOutcome` / `buildUpdateRecord` / `saveUpdateRecord` / `TERMINAL` / `UPDATE_RECORD_REL`）。
-- 增量变更采集：Change_Set.md（`collectChangeSet`）。
+- 增量变更采集：[Change_Set.md](change-set.md)（`collectChangeSet`）。
 - 文章结构闸门：[Article_Contract.md](article-contract.md)（`inspectArticle` / `hasBlockingIssue` / `issueSummary`）。
 - Agentic 写作执行器：[Article_Agentic_Pool.md](article-agentic-pool.md)（`runPool` / `worker` / `markBigAgenticTasks`），底层工具见 [Agentic_Host.md](agentic-host.md) 与 [Agentic_Edit.md](agentic-edit.md)。
-- 原生引擎通道全套：从 Engine_Native_Run.md 开始，向下串 [Engine_Client.md](engine-client.md)、[Engine_Contract.md](engine-contract.md)、Engine_LLM_Bridge.md、Engine_Manifest.md、[Engine_Quality_Gate.md](engine-quality-gate.md)、[Engine_Apply_Plan.md](engine-apply-plan.md) 等。
+- 原生引擎通道全套：从 [Engine_Native_Run.md](engine-native-run.md) 开始，向下串 [Engine_Client.md](engine-client.md)、[Engine_Contract.md](engine-contract.md)、[Engine_LLM_Bridge.md](engine-llm-bridge.md)、[Engine_Manifest.md](engine-manifest.md)、[Engine_Quality_Gate.md](engine-quality-gate.md)、[Engine_Apply_Plan.md](engine-apply-plan.md) 等。
 - 配置装配：[Cordis_Patch_Config.md](cordis-patch-config.md)；包与运行时要求：[Package_Manifest.md](package-manifest.md)。
 - 面板前端：[Web_UI_Panel.md](web-ui-panel.md)（`client.js` 消费 `/api/codewiki/*`）。
 

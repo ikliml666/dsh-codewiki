@@ -13,7 +13,7 @@ fsoft_page: Engine_Quality_Gate.md
 
 `Engine_Quality_Gate` 是 CodeWiki 原生引擎通道（FSoft）编译流水线的**阶段 3 采用门**（quality gate），代码位于 `lib/engine/quality-gate.js`。它的职责是：引擎把一棵 docs 树交回来之后、产物真正写进 `.codewiki/` 与仓库根 `CodeWiki.md` 之前，对这批产物做出一份**可机读的采用裁决**（`GateReport`），回答三个问题——
 
-1. **产物自洽**：页在不在、正文空不空、链接指的东西在不在计划内（复用 Engine_Output 的 `validateOutput`，不重写任何判定）；
+1. **产物自洽**：页在不在、正文空不空、链接指的东西在不在计划内（复用 [Engine_Output](engine-output.md) 的 `validateOutput`，不重写任何判定）；
 2. **目标格式契约**：把映射结果渲染成真正的 wiki 文章（frontmatter + 正文），再过 [Article_Contract](article-contract.md) 的 `inspectArticle`（frontmatter 唯一闭合 / 围栏闭合 / 死链 / `source_files` 证据 / 类型与位置匹配）；
 3. **基线可推进性**：产物对应的 commit 必须是已提交的 HEAD（或本轮合成的工作区快照），且 `.codewiki/_meta.yaml` 的编译基线本身已入库——未提交的工作区内容不得被当成已提交基线固化下来。
 
@@ -36,7 +36,7 @@ flowchart LR
 
 闸门与上下游模块的关系：
 
-- 上游：Engine_Native_Run 产出 docs 树；Engine_Mapping 提供布局常量（`WIKI_ENTRY = 'CodeWiki.md'`、`WIKI_META_REL = '.codewiki/_meta.yaml'`）与映射结果 `mapped`；Engine_Output 提供 `validateOutput` / `bodyLength` / `pageAliases`。
+- 上游：[Engine_Native_Run](engine-native-run.md) 产出 docs 树；[Engine_Mapping](engine-mapping.md) 提供布局常量（`WIKI_ENTRY = 'CodeWiki.md'`、`WIKI_META_REL = '.codewiki/_meta.yaml'`）与映射结果 `mapped`；[Engine_Output](engine-output.md) 提供 `validateOutput` / `bodyLength` / `pageAliases`。
 - 下游：[Engine_Apply_Plan](engine-apply-plan.md) 只认 `report.writable`、`report.outcome`、`report.rendered`、`report.canAdvanceBaseline` 四个结论字段，**不重复判定**；[Engine_Contract](engine-contract.md) 与 [Update_Record](update-record.md) 通过 `toContractBlockers` / `toQualityIssues` 消费本模块的分类结论。
 
 ---
@@ -116,7 +116,7 @@ flowchart LR
 | degradation | `empty-module-tree`（whole-repository 模式下归属证据整体缺失）/ `no-source-evidence`（页照写但增量归属不可信）/ `missing-section` / `empty-section-optional` | 产物可用但证据不足 | 可以入库，但**不得推进基线** |
 | stale | `baseline-behind-head`（既有基线落后 HEAD，本轮编译正是为消化它）/ `baseline-uncommitted`（基线只在工作区未提交）/ `baseline-absent`（首次编译） | 不是本次产物的错（既有 wiki 的状态问题） | 如实报告；只有 `baseline-uncommitted` 阻塞推进 |
 
-设计要点：`empty-module-tree` 在 Engine_Output 里是 problem，但性质是「证据缺失」而非「产物坏了」——whole-repository 模式下 FSoft 本来就把 `module_tree` 留成 `{}`，所以在闸门里映射成 degradation。反过来，未来 output.js 新增未登记的问题类别时，闸门不许静默吞掉，一律当成 defect（`article-contract` 包装）报出来，逼这里补映射。
+设计要点：`empty-module-tree` 在 [Engine_Output](engine-output.md) 里是 problem，但性质是「证据缺失」而非「产物坏了」——whole-repository 模式下 FSoft 本来就把 `module_tree` 留成 `{}`，所以在闸门里映射成 degradation。反过来，未来 output.js 新增未登记的问题类别时，闸门不许静默吞掉，一律当成 defect（`article-contract` 包装）报出来，逼这里补映射。
 
 ---
 
@@ -166,7 +166,7 @@ flowchart LR
 
 - **解析基准是引擎源页所在目录**，不是落地目录（层级布局的页落地后被拍平到 `.codewiki/modules/` 单层，按落地目录解析一条都命不中）；
 - **只在非代码区域改写**：`stripCode` 把行内代码与围栏块等长掩码，演示链接写法是语法示例，改成真实路径反而破坏文档想表达的意思；
-- pageMap 还合入两类固定分歧：根页别名（`README.md` / `overview.md` → `CodeWiki.md`）与 Engine_Output 的 `pageAliases`（模块名带扩展名、子模块页加父前缀）；
+- pageMap 还合入两类固定分歧：根页别名（`README.md` / `overview.md` → `CodeWiki.md`）与 [Engine_Output](engine-output.md) 的 `pageAliases`（模块名带扩展名、子模块页加父前缀）；
 - 未命中的 `.md` 链接（引擎编造了树中不存在的页名）降级成纯文字保留作者文字——「引擎编造」这个事实仍由 output.js 的 `dead-link` 如实上报，不在渲染期静默丢弃。
 
 ### 4. YAML 标量序列化 `yamlScalar`

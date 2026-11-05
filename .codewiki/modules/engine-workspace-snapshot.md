@@ -13,7 +13,7 @@ fsoft_page: Engine_Workspace_Snapshot.md
 
 `lib/engine/workspace-snapshot.js` 是原生引擎通道的一个**记账对齐**模块：它把工作区里**未提交**的四路改动（staged / unstaged / untracked）合成一棵真实的 git 树对象、生成一个不挂任何 ref 的临时 commit，让引擎（FSoft）能以 `<old_commit>..<new_commit>` 的方式读到这些改动并记入账本。
 
-它解决的核心矛盾是：FSoft 只从两个 commit 之间取 diff，插件侧的 Change_Set 能采到未提交改动，但这些改动对引擎只是「工作区文件里的内容」，没有一个 commit 对象可以对齐。于是文章写的是工作区内容、metadata 里的 `commit_id` 却只能写 HEAD —— 下一轮拿 HEAD 当 old_commit，这些改动就会被当成已消化而丢失。快照正是给这批改动造一个**真实可达、但不进仓库历史**的临时 commit，让「产物对应的内容状态」与「记账指向的 commit」重新对齐。
+它解决的核心矛盾是：FSoft 只从两个 commit 之间取 diff，插件侧的 [Change_Set](change-set.md) 能采到未提交改动，但这些改动对引擎只是「工作区文件里的内容」，没有一个 commit 对象可以对齐。于是文章写的是工作区内容、metadata 里的 `commit_id` 却只能写 HEAD —— 下一轮拿 HEAD 当 old_commit，这些改动就会被当成已消化而丢失。快照正是给这批改动造一个**真实可达、但不进仓库历史**的临时 commit，让「产物对应的内容状态」与「记账指向的 commit」重新对齐。
 
 快照**不写任何 ref**：用户的分支、HEAD、真实 index、工作区一个字节都不动。tree 与 commit 对象落进 `.git/objects`，gc 后自然消失，因此永远不能当作已提交基线推进。
 
@@ -56,7 +56,7 @@ flowchart TB
     SNAP -.->|"测试/排障用"| SE["snapshotExists<br/>cat-file -t 校验"]
 ```
 
-快照夹在「变更采集」与「引擎调用」之间：它的上游是 Change_Set（只用来判断「有没有东西要快照」），下游是 Engine_Native_Run 的 1.9 段，产出的 `sha` 被当作 `consumedCommit` 传给引擎的 `commitId` 参数。同时 [Engine_Quality_Gate](engine-quality-gate.md) 通过 `consumedInputCommit` 参数识别「产物是照快照写的」，避免把「对上了比 HEAD 更完整的代码」误判为 `commit-mismatch` 缺陷。
+快照夹在「变更采集」与「引擎调用」之间：它的上游是 [Change_Set](change-set.md)（只用来判断「有没有东西要快照」），下游是 [Engine_Native_Run](engine-native-run.md) 的 1.9 段，产出的 `sha` 被当作 `consumedCommit` 传给引擎的 `commitId` 参数。同时 [Engine_Quality_Gate](engine-quality-gate.md) 通过 `consumedInputCommit` 参数识别「产物是照快照写的」，避免把「对上了比 HEAD 更完整的代码」误判为 `commit-mismatch` 缺陷。
 
 ---
 
@@ -169,7 +169,7 @@ flowchart TB
     end
 ```
 
-**为什么快照不能当基线推进**：快照对象虽然真实可达，但它不在任何 ref 上。一旦基线（`last_compiled_commit`）被写成快照 sha，后续 rebase / gc 会让它从对象库消失，下一轮的 `base..HEAD` diff 就无从谈起。因此基线仍然只能写 HEAD，未提交改动的连续性由 Engine_Native_State 的 `unconsumed` 字段跨轮携带 —— 快照负责「本轮产物对得上内容」，state 负责「未消化的改动下一轮还在」。
+**为什么快照不能当基线推进**：快照对象虽然真实可达，但它不在任何 ref 上。一旦基线（`last_compiled_commit`）被写成快照 sha，后续 rebase / gc 会让它从对象库消失，下一轮的 `base..HEAD` diff 就无从谈起。因此基线仍然只能写 HEAD，未提交改动的连续性由 [Engine_Native_State](engine-native-state.md) 的 `unconsumed` 字段跨轮携带 —— 快照负责「本轮产物对得上内容」，state 负责「未消化的改动下一轮还在」。
 
 ---
 
@@ -177,11 +177,11 @@ flowchart TB
 
 | 方向 | 模块 | 关系 |
 | --- | --- | --- |
-| 上游输入 | Change_Set | 接收四路变更清单，只用于判断是否需要快照及统计文件数 |
-| 调用方 | Engine_Native_Run | 在 1.9 段调用，产出 `consumedCommit` 作为引擎 `commitId` |
+| 上游输入 | [Change_Set](change-set.md) | 接收四路变更清单，只用于判断是否需要快照及统计文件数 |
+| 调用方 | [Engine_Native_Run](engine-native-run.md) | 在 1.9 段调用，产出 `consumedCommit` 作为引擎 `commitId` |
 | 下游消费 | [Engine_Client](engine-client.md) | `consumedCommit` 作为 payload 字段传给 Python 引擎 |
 | 配对裁决 | [Engine_Quality_Gate](engine-quality-gate.md) | 通过 `consumedInputCommit` 参数识别「产物照快照写」，不报 `commit-mismatch` |
-| 连续性携带 | Engine_Native_State | 未提交改动的跨轮未消化清单由 state.json 的 `unconsumed` 携带，快照不管这一层 |
+| 连续性携带 | [Engine_Native_State](engine-native-state.md) | 未提交改动的跨轮未消化清单由 state.json 的 `unconsumed` 携带，快照不管这一层 |
 | 路径工具 | [Job_Logs](job-logs.md) | `toPosix` 做路径分隔符归一（`shortSha`） |
 
 ---

@@ -22,7 +22,7 @@ fsoft_page: Engine_Proofread.md
 | **只管** | 跨页链接目标不存在：把失效链接改成真实页名，或降级成纯文字。这是模型幻觉里唯一「只看本页 + 页名清单就能修对」的问题。 |
 | **不管** | 正文事实错误（那要读源码，属于重写文章，不在校对范围）；不豁免质量门；不改 frontmatter、叙述、标题、代码块、表格、行号锚点。 |
 
-在原生编译流水线中的位置（详见 Engine_Native_Run）：
+在原生编译流水线中的位置（详见 [Engine_Native_Run](engine-native-run.md)）：
 
 ```
 env(doctor + lock) → 增量决议 → 水合 docs → 引擎 generate/update → 原始树留档
@@ -68,9 +68,9 @@ flowchart TD
 | `lib/engine/wiki-links.js` | `scanPageLinks` 扫正文里的 `[文字](x.md)` 相对链接；`isExternalTarget` 跳过 `http:`/`mailto:` 等外链 | [Job_Logs](job-logs.md)（该文件在模块树中的登记页） |
 | `lib/article-contract.js` | `stripCode`：把代码围栏与行内代码等长替换成空白，避免「文章在讲解链接语法」被误判成死链 | [Article_Contract](article-contract.md) |
 | `lib/git-paths.js` | `toPosix`：Windows 反斜杠统一成 POSIX，路径比对与门保持同一口径 | [Job_Logs](job-logs.md) |
-| 宿主 `chat(prompt, signal)` | 单轮文本生成（由 `native-run.js` 经 `deps.chat` 注入，最终走 Engine_LLM_Bridge 的宿主模型通道） | Engine_LLM_Bridge |
+| 宿主 `chat(prompt, signal)` | 单轮文本生成（由 `native-run.js` 经 `deps.chat` 注入，最终走 [Engine_LLM_Bridge](engine-llm-bridge.md) 的宿主模型通道） | [Engine_LLM_Bridge](engine-llm-bridge.md) |
 
-**上游调用方**：只有 Engine_Native_Run 一处（`native-run.js:60` 以具名导入引入 `deadLinkSources` 与 `proofreadPages`）。
+**上游调用方**：只有 [Engine_Native_Run](engine-native-run.md) 一处（`native-run.js:60` 以具名导入引入 `deadLinkSources` 与 `proofreadPages`）。
 
 ---
 
@@ -114,7 +114,7 @@ flowchart LR
 
 ### 3.2 `listPageNames(docsDir)` — 真实页名清单
 
-递归枚举 `docsDir` 下所有 `.md` 文件（POSIX、已排序）。跳过规则与 Engine_Output 的 `listMarkdownPages` 完全一致：
+递归枚举 `docsDir` 下所有 `.md` 文件（POSIX、已排序）。跳过规则与 [Engine_Output](engine-output.md) 的 `listMarkdownPages` 完全一致：
 - 隐藏目录（`.` 开头）不扫；
 - `temp/` 是引擎工作文件目录（依赖图、引用索引），**不是页**，不扫。
 
@@ -234,7 +234,7 @@ sequenceDiagram
     Note over NR,GATE: 门的终态判定不变：三类缺陷全空才 done#59 改不掉照旧 partial
 ```
 
-与 Engine_Native_Run 源码（`native-run.js` 约 791–862 行「2.6) 校对」段）的对应关系：
+与 [Engine_Native_Run](engine-native-run.md) 源码（`native-run.js` 约 791–862 行「2.6) 校对」段）的对应关系：
 - 先跑一次门只为拿「哪几篇有失效链接」——门是纯读 `docsDir` 的，跑两次没有副作用；
 - 校对只针对门报出的死链源页；门没报错就跳过，**不烧模型预算去逐页复查**（校对是修死链的一步，不是每轮都要走的例行检查）；
 - 校对自身抛异常时 `proof = null`，只记 note、**不影响本轮终态**（门会如实上报死链）；
@@ -245,7 +245,7 @@ sequenceDiagram
 ## 5. 设计立场与不变量（为什么不能放宽）
 
 1. **修正文，不修判据**。校对后的正文仍要重新过质量门；改不掉就照旧判 partial。绝不在渲染期或终态里豁免缺页/死链。
-2. **判据同源**。`missingLinksOf` 认的链接形态（相对链接 + `[[wiki]]`）、后缀补全、目录解析，必须与 Engine_Output 的 `validateOutput` 与 [Article_Contract](article-contract.md) 的 `collectWikiLinks` 一致——门判它是死链、改写器却认不出这条链接，两边结论对不上就是白跑一次门。
+2. **判据同源**。`missingLinksOf` 认的链接形态（相对链接 + `[[wiki]]`）、后缀补全、目录解析，必须与 [Engine_Output](engine-output.md) 的 `validateOutput` 与 [Article_Contract](article-contract.md) 的 `collectWikiLinks` 一致——门判它是死链、改写器却认不出这条链接，两边结论对不上就是白跑一次门。
 3. **只修能修对的问题**。只看「本页 + 页名清单」就能修的幻觉（编造的页名）才属于校对；正文事实错误需要读源码，那是重写文章，越界会让这层长成第二个引擎。
 4. **改写必须可证变好**。复算失效数严格减少才落盘；frontmatter 缺失即放弃。宁可少改，不可改坏。
 5. **预算封顶**。`DEFAULT_MAX_PAGES = 6` 防止校对退化成整轮重跑；调用方（native-run）可经 `deps.proofreadMaxPages` 覆盖。
@@ -265,7 +265,7 @@ sequenceDiagram
 }
 ```
 
-调用方（Engine_Native_Run）把 `notes` 与 `failed` 并入本轮编译的 notes，随结果出现在面板与 job 记录里；`changed` 非空时触发第二次判门。
+调用方（[Engine_Native_Run](engine-native-run.md)）把 `notes` 与 `failed` 并入本轮编译的 notes，随结果出现在面板与 job 记录里；`changed` 非空时触发第二次判门。
 
 ---
 
@@ -273,9 +273,9 @@ sequenceDiagram
 
 | 模块 | 关系 |
 | --- | --- |
-| Engine_Native_Run | 唯一调用方：编排「门 → 校对 → 再判门」的位置 |
+| [Engine_Native_Run](engine-native-run.md) | 唯一调用方：编排「门 → 校对 → 再判门」的位置 |
 | [Engine_Quality_Gate](engine-quality-gate.md) | 上游判门与改写后复判的同一道门；`article-contract` 缺陷改名规则的出处 |
-| Engine_Output | `dead-link` 问题的第一来源（产物自洽校验） |
+| [Engine_Output](engine-output.md) | `dead-link` 问题的第一来源（产物自洽校验） |
 | [Article_Contract](article-contract.md) | `stripCode` 等长剥代码；`dead-link` error 级判据 |
-| Engine_LLM_Bridge | 宿主模型通道（`deps.chat` 的最终承载） |
+| [Engine_LLM_Bridge](engine-llm-bridge.md) | 宿主模型通道（`deps.chat` 的最终承载） |
 | [Engine_Client](engine-client.md) / [Engine_Python_Entry](engine-python-entry.md) | 被校对的产物来自它们驱动的原生引擎 |

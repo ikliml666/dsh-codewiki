@@ -98,7 +98,7 @@ flowchart TD
 
 ## 架构与系统上下文
 
-脚本处于「先环境、后运行」链条的最前端。产出的 venv 被后续多个环节消费：Node 侧的 [Engine_Client](engine-client.md) 通过 spawn 调用 venv 内 Python 运行 [Engine_Python_Entry](engine-python-entry.md)；Engine_Manifest 的 `doctor` 只读诊断也跑在同一个 venv 上；验收探针 [No-LLM_Graph_Probe](no-llm-graph-probe.md) 在该环境内验证中文/空格路径下的依赖图。
+脚本处于「先环境、后运行」链条的最前端。产出的 venv 被后续多个环节消费：Node 侧的 [Engine_Client](engine-client.md) 通过 spawn 调用 venv 内 Python 运行 [Engine_Python_Entry](engine-python-entry.md)；[Engine_Manifest](engine-manifest.md) 的 `doctor` 只读诊断也跑在同一个 venv 上；验收探针 [No-LLM_Graph_Probe](no-llm-graph-probe.md) 在该环境内验证中文/空格路径下的依赖图。
 
 ```mermaid
 flowchart LR
@@ -141,8 +141,8 @@ flowchart LR
 
 ## 与其他模块的关系
 
-- **上游锁定的上游版本**：Engine_Manifest 以显式常量 `UPSTREAM_COMMIT` 锁定 FSoft 源码 commit（`1b4af43d...`），并强调「升级上游必须走改常量 + 契约测试」，而不是「pip install 到最新版然后祈祷」。本脚本的 step2 把 `$FSOFT_SRC` 装进 venv——因此**传进来的 FSoft 源码根应当是该 commit 对应的检出**，否则 venv 与引擎指纹会漂移。
-- **环境漂移的诊断侧**：Engine_Manifest 的 `doctor` 是**只读**的——它只报告「现在跑的是哪个引擎、哪个环境」，不装依赖、不修环境。脚本注释明确：「要不要重新 setup 是 1A 的 setup-env.sh 的职责」，即 doctor 报出不一致 → 人工重跑本脚本修环境。这两者分工为「诊断」与「修复」。
+- **上游锁定的上游版本**：[Engine_Manifest](engine-manifest.md) 以显式常量 `UPSTREAM_COMMIT` 锁定 FSoft 源码 commit（`1b4af43d...`），并强调「升级上游必须走改常量 + 契约测试」，而不是「pip install 到最新版然后祈祷」。本脚本的 step2 把 `$FSOFT_SRC` 装进 venv——因此**传进来的 FSoft 源码根应当是该 commit 对应的检出**，否则 venv 与引擎指纹会漂移。
+- **环境漂移的诊断侧**：[Engine_Manifest](engine-manifest.md) 的 `doctor` 是**只读**的——它只报告「现在跑的是哪个引擎、哪个环境」，不装依赖、不修环境。脚本注释明确：「要不要重新 setup 是 1A 的 setup-env.sh 的职责」，即 doctor 报出不一致 → 人工重跑本脚本修环境。这两者分工为「诊断」与「修复」。
 - **运行时协议**：装好的 venv 最终被 [Engine_Client](engine-client.md) 以子进程方式拉起，跑 [Engine_Python_Entry](engine-python-entry.md) 的 JSON-lines 协议入口；脚本本身**不参与**运行时协议，只保证解释器与依赖可用。
 - **验收探针**：[No-LLM_Graph_Probe](no-llm-graph-probe.md) 是阶段 1A 的「引擎侧验收」，可在任意 venv 上重跑，验证中文/空格路径下的无 LLM 依赖图；它与本脚本共同构成 1A 阶段的「搭建 + 验收」闭环。
 

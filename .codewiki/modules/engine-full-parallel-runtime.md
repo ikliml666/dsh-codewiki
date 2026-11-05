@@ -44,7 +44,7 @@ flowchart TD
     NR --> QG --> AP
 ```
 
-上游源码锚点由 引擎清单 的 `UPSTREAM_COMMIT`（`1b4af43…`）锁定；本模块对上游 `DocumentationGenerator._generate_modules_in_order` 的引用在锚点漂移时**直接失败**（拒装），不静默退回串行。环境本身的安装与依赖闭合由 [FSoft 引擎安装脚本](fsoft-engine-setup-script.md)（`tools/fsoft-engine/setup-env.sh`）负责，与本模块正交。
+上游源码锚点由 [引擎清单](engine-manifest.md) 的 `UPSTREAM_COMMIT`（`1b4af43…`）锁定；本模块对上游 `DocumentationGenerator._generate_modules_in_order` 的引用在锚点漂移时**直接失败**（拒装），不静默退回串行。环境本身的安装与依赖闭合由 [FSoft 引擎安装脚本](fsoft-engine-setup-script.md)（`tools/fsoft-engine/setup-env.sh`）负责，与本模块正交。
 
 ## 设计目标：四条不可破坏的不变量
 
@@ -211,11 +211,11 @@ sequenceDiagram
 
 ## 配置与运维要点
 
-- **并发度下发路径**：`runNativeJob({ moduleConcurrency })`（原生运行编排）→ 请求 payload → `entry.py` `config["module_concurrency"] = max(1, min(n, 8))` → `install_full_runtime`。默认 `1` = 上游串行，行为零变化。
+- **并发度下发路径**：`runNativeJob({ moduleConcurrency })`（[原生运行编排](engine-native-run.md)）→ 请求 payload → `entry.py` `config["module_concurrency"] = max(1, min(n, 8))` → `install_full_runtime`。默认 `1` = 上游串行，行为零变化。
 - **并发度的上限是 8**：这是 `entry.py` 里的硬顶，与增量叶子并行（`fsoft_runtime.py` 同样 `min(..., 8)`）对齐——并行度主要受模型通道的 RPM/成本约束，不是本地算力。
 - **安装幂等与防重**：`_INSTALLED` 保证一轮编译内只装一次；`DocumentationGenerator._generate_modules_in_order is not _ORIGINAL_RUN` 检查防止与其它适配器互相覆盖。
-- **上游锚点漂移**：引用 `DocumentationGenerator` / `file_manager` 的具体方法签名一旦与锁版本（`UPSTREAM_COMMIT`，见 引擎清单）不符，安装或运行直接抛错——这是刻意设计，宁可编译失败也不静默跑错算法。
-- **崩溃语义**：任意分支抛非 `CancelledError` 异常都被 `_run_module` 吞进 `failures`；只有 `CancelledError` 直接 re-raise，让取消信号（进程树终止）能真正中断整轮。
+- **上游锚点漂移**：引用 `DocumentationGenerator` / `file_manager` 的具体方法签名一旦与锁版本（`UPSTREAM_COMMIT`，见 [引擎清单](engine-manifest.md)）不符，安装或运行直接抛错——这是刻意设计，宁可编译失败也不静默跑错算法。
+- **崩溃语义**：任意分支抛非 `CancelledError` 异常都被 `_run_module` 吞进 `failures`；只有 `CancelledError` 直接 re-raise，让取消信号（[进程树终止](engine-process-tree.md)）能真正中断整轮。
 
 ## 相关模块索引
 
@@ -223,8 +223,8 @@ sequenceDiagram
 |------|------|
 | [Python 入口](engine-python-entry.md) | 调用方：`action_generate` 中安装本适配器、下发并发度、翻译失败异常 |
 | [增量并行运行时](engine-fsoft-runtime.md) | 增量 Step 5 的并行适配器；复用本模块的 `write_tree_exclusive` 与树覆盖协议 |
-| 进程树 | 取消/超时如何终止整个引擎子进程树 |
-| 引擎清单 | 上游源码锁 `UPSTREAM_COMMIT` 与环境漂移判定 |
+| [进程树](engine-process-tree.md) | 取消/超时如何终止整个引擎子进程树 |
+| [引擎清单](engine-manifest.md) | 上游源码锁 `UPSTREAM_COMMIT` 与环境漂移判定 |
 | [引擎客户端](engine-client.md) | Node↔Python 协议与静默/超时抢救（partial 交付） |
 | [质量门](engine-quality-gate.md) / [落地器](engine-apply-plan.md) | 终态裁决与产物入库，不在本模块职责内 |
 | [FSoft 引擎安装脚本](fsoft-engine-setup-script.md) | venv 与依赖闭合，本模块运行的环境前提 |

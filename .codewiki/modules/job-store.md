@@ -53,7 +53,7 @@ flowchart TB
     Disk --> Tmp
 ```
 
-上游业务编排（作业提交、tick 推进、取消）见 [Job_Orchestration.md](job-orchestration.md)；原生编译通道本身（Python 引擎子进程、临时工作区）见 Engine_Native_Run.md 与 [Engine_Workspace_Snapshot.md](engine-workspace-snapshot.md)。
+上游业务编排（作业提交、tick 推进、取消）见 [Job_Orchestration.md](job-orchestration.md)；原生编译通道本身（Python 引擎子进程、临时工作区）见 [Engine_Native_Run.md](engine-native-run.md) 与 [Engine_Workspace_Snapshot.md](engine-workspace-snapshot.md)。
 
 ## 核心概念
 
@@ -277,7 +277,7 @@ sequenceDiagram
 | 方向 | 模块 | 关系 |
 | --- | --- | --- |
 | 上游（本层的调用方） | [Job_Orchestration.md](job-orchestration.md) | `createJobService` 的 tick 循环在提交前走 `loadForIdempotency`、每 tick 前取锁、保存时整文件落盘；取消语义（`cancelRequested`）由上游写入 |
-| 上游（原生通道消费方） | Engine_Native_Run.md / Engine_Native_State.md | 启动子进程前写 `nativeChannel` 快照、重启后按 `planNativeReplay` 裁决重跑或续用 docsDir |
+| 上游（原生通道消费方） | [Engine_Native_Run.md](engine-native-run.md) / [Engine_Native_State.md](engine-native-state.md) | 启动子进程前写 `nativeChannel` 快照、重启后按 `planNativeReplay` 裁决重跑或续用 docsDir |
 | 上游（临时工作区） | [Engine_Workspace_Snapshot.md](engine-workspace-snapshot.md) | `resumeDocsDir` 引用的临时目录生命周期由其管理 |
 | 横向（日志） | [Job_Logs.md](job-logs.md) | 与 `jobs.json` 并列的日志文件清理（`removeLog`），不在本层范围内 |
 | 横向（更新记录） | [Update_Record.md](update-record.md) | 更新/阶段记录的持久化与终态判定，与本层 `TERMINAL_STAGES` 语义对齐 |
