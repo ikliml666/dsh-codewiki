@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-05T16:38:26+0800",
-  "finished_at": "2026-11-05T16:39:26+0800",
-  "outcome": "incremental",
+  "started_at": "2026-11-05T16:49:34+0800",
+  "finished_at": "2026-11-05T16:49:34+0800",
+  "outcome": "no_change",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -24,8 +24,8 @@
     }
   },
   "revision": {
-    "old_commit": "9b23ef755085dc08fc64b8a6d5773cc32cd5a214",
-    "new_commit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21",
+    "old_commit": "f6b90f6c9b7ffb5fd7d57a0c98574c84a2cddc21",
+    "new_commit": "23a0b17f9dc0329c454f84ce75e81117a337ae74",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
@@ -33,342 +33,48 @@
       "added": 0,
       "deleted": 0,
       "interface": 0,
-      "body": 1,
+      "body": 0,
       "edge": 0,
       "renamed": 0
     },
     "added": [],
     "deleted": [],
     "interface": [],
-    "body": [
-      "package.json::package.json"
-    ],
+    "body": [],
     "edge": [],
     "renamed": {}
   },
-  "repair": {
-    "renamed": {},
-    "removed": [],
-    "routing": [],
-    "orphans": [],
-    "deleted_nodes": [],
-    "created_leaves": [],
-    "growth": {},
-    "growth_flagged": []
-  },
+  "repair": {},
   "reclustered": [],
-  "reports": {
-    "Build,_Configuration___Environment_Setup": {
-      "leaf_path": [
-        "Build,_Configuration___Environment_Setup"
-      ],
-      "mode": "edit",
-      "own": [
-        "package.json::package.json"
-      ],
-      "adopted": {},
-      "up": [],
-      "context": [],
-      "refch": [],
-      "entered": [],
-      "left": [],
-      "children_added": [],
-      "children_removed": [],
-      "reclustered": false,
-      "page": "Build,_Configuration___Environment_Setup"
-    }
-  },
+  "reports": {},
   "ownership": [],
-  "active": [
-    {
-      "leaf": "Build,_Configuration___Environment_Setup",
-      "page": "Build,_Configuration___Environment_Setup",
-      "mode": "edit",
-      "order": 0
-    }
-  ],
-  "write_sets": {
-    "Build,_Configuration___Environment_Setup": [
-      "Browser_UI_Client",
-      "Build,_Configuration___Environment_Setup",
-      "Core_Engine_Public_API___Result_Validation",
-      "Native_Runtime_State___Concurrency_Governance",
-      "Python_Parallel_Agent_Execution_Runtime",
-      "Test_Fixtures___Diagnostic_Tooling",
-      "Vendored_CodeWiki_Rust_Implementation",
-      "overview"
-    ]
-  },
-  "fallback": {
-    "r_leaf": 0.058823529411764705,
-    "r_tree": 0.0,
-    "n_active": 1,
-    "n_leaves": 17,
-    "n_structural": 0,
-    "tau_full": 0.5,
-    "tau_tree": 0.3,
-    "fired": false
-  },
-  "verdicts": [
-    {
-      "page": "Build,_Configuration___Environment_Setup",
-      "verdict": "patch",
-      "reason": "版本号表格值由 0.17.47 更新为 0.17.48，与 package.json 最新版本一致",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": true
-    },
-    {
-      "page": "overview",
-      "verdict": "no-op",
-      "reason": "未引用具体包版本号，架构描述与 0.16.0 起原生通道默认等承诺仍然成立",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Browser_UI_Client",
-      "verdict": "no-op",
-      "reason": "仅引用 client.js v0.4.1 头注释与 name/id 注册约定，本次 package.json 版本号 bump 不影响该契约",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Core_Engine_Public_API___Result_Validation",
-      "verdict": "no-op",
-      "reason": "引用的是 ENGINE_CONTRACT_VERSION 3（0.17.38），与 package.json 版本号 bump 无关",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Native_Runtime_State___Concurrency_Governance",
-      "verdict": "no-op",
-      "reason": "无 package.json 版本号引用，环境治理语义未变",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Python_Parallel_Agent_Execution_Runtime",
-      "verdict": "no-op",
-      "reason": "无 package.json 版本号引用，引擎协议与契约版本未变",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Test_Fixtures___Diagnostic_Tooling",
-      "verdict": "no-op",
-      "reason": "引用的 0.16.0 阶段 7 退役说明与未改动的 description 字段逐字一致",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    },
-    {
-      "page": "Vendored_CodeWiki_Rust_Implementation",
-      "verdict": "no-op",
-      "reason": "无 package.json 版本号引用，cw CLI 与 binaryPath 约定未变",
-      "by_leaf": "Build,_Configuration___Environment_Setup",
-      "changed_on_disk": false
-    }
-  ],
-  "pages_written": [
-    "Build,_Configuration___Environment_Setup"
-  ],
+  "active": [],
+  "write_sets": {},
+  "fallback": {},
+  "verdicts": [],
+  "pages_written": [],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {
-    "scanned": 20,
-    "pages_with_hits": {},
-    "fixed": []
-  },
-  "calls": [
-    {
-      "kind": "leaf_agent",
-      "target": "Build,_Configuration___Environment_Setup",
-      "seconds": 60.30396604537964,
-      "usage": {
-        "input_tokens": 222390,
-        "output_tokens": 3851,
-        "cache_read_tokens": 120488,
-        "cache_write_tokens": 0,
-        "total_tokens": 226241,
-        "requests": 7
-      },
-      "error": null
-    },
-    {
-      "kind": "missing_pages",
-      "target": "-",
-      "seconds": 0.018120527267456055,
-      "usage": null,
-      "error": null
-    }
-  ],
-  "detector_notes": [
-    "[Build,_Configuration___Environment_Setup] agent notes: 本次变更仅为 package.json 版本号 0.17.47 → 0.17.48 的单调 bump，description 字段逐字未变，因此除叶页基础身份表外无需任何改动。"
-  ],
+  "stale_scan": {},
+  "calls": [],
+  "detector_notes": [],
   "errors": [],
-  "wall_seconds": 60.68,
+  "wall_seconds": 0.07,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "unknown",
+    "cost_status": "complete",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 7,
+    "n_calls": 0,
     "totals": {
-      "input_tokens": 222390,
-      "output_tokens": 3851,
-      "cache_read_tokens": 120488,
-      "cache_write_tokens": 0,
-      "requests": 7,
-      "total_tokens": 226241
+      "cost_usd": 0.0
     },
-    "by_phase": {
-      "update": {
-        "calls": 7,
-        "input_tokens": 222390,
-        "output_tokens": 3851,
-        "cache_read_tokens": 120488,
-        "cache_write_tokens": 0,
-        "requests": 7,
-        "total_tokens": 226241,
-        "unpriced_calls": 7
-      }
-    },
-    "by_model": {
-      "doubao-seed-2.1-lite": {
-        "calls": 7,
-        "input_tokens": 222390,
-        "output_tokens": 3851,
-        "cache_read_tokens": 120488,
-        "cache_write_tokens": 0,
-        "requests": 7,
-        "total_tokens": 226241,
-        "unpriced_calls": 7
-      }
-    },
-    "unpriced_models": [
-      "doubao-seed-2.1-lite"
-    ],
-    "calls": [
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 6.11,
-        "input_tokens": 8704,
-        "output_tokens": 503,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 9207,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 3.03,
-        "input_tokens": 11587,
-        "output_tokens": 197,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 11784,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 4.58,
-        "input_tokens": 23736,
-        "output_tokens": 307,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 24043,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 2.31,
-        "input_tokens": 37018,
-        "output_tokens": 166,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 37184,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 12.11,
-        "input_tokens": 46458,
-        "output_tokens": 1067,
-        "cache_read_tokens": 36920,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 47525,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 3.48,
-        "input_tokens": 46873,
-        "output_tokens": 235,
-        "cache_read_tokens": 36920,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 47108,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      },
-      {
-        "phase": "update",
-        "kind": "update_agent",
-        "target": "Build,_Configuration___Environment_Setup",
-        "model": "doubao-seed-2.1-lite",
-        "seconds": 16.48,
-        "input_tokens": 48014,
-        "output_tokens": 1376,
-        "cache_read_tokens": 46648,
-        "cache_write_tokens": 0,
-        "requests": 1,
-        "total_tokens": 49390,
-        "usage_reported": true,
-        "provider": "openai-compatible",
-        "requested_model": "doubao-seed-2.1-lite",
-        "cost_source": "unknown"
-      }
-    ]
+    "by_phase": {},
+    "by_model": {},
+    "unpriced_models": [],
+    "calls": []
   },
-  "run_id": "4cd548ae-2b81-46bb-ba31-82fc22314d5e"
+  "run_id": "72ca6b7f-3858-429a-8525-2d1389f187e1"
 }
