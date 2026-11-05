@@ -9,7 +9,7 @@
 | `lib/engine/contract.js` | 引擎跨进程结果契约：版本化的 `EngineResult` / `EngineProgress` / `EngineError` 构造、枚举注册、终态硬不变量校验 |
 | `lib/engine/mapping.js` | FSoft 产物 → CodeWiki 的格式翻译（docs 树 → `.codewiki/` 写集），缺页/陈旧页探测 |
 | `lib/engine/proofread.js` | 死链校对层：用单轮 LLM 把文章正文里指向「不存在页面」的跨页链接当场改对 |
-| `lib/engine/wiki-links.js` | 正文链接扫描的**唯一**正则来源，供门、校对、文章契约三处共用 |
+| `lib/engine/wiki-links.js` | 正文括号 `.md` 链接扫描的**唯一**正则来源，供门、校对、文章契约三处共用 |
 
 它存在的核心理由（文件头注释反复强调的历史教训）：0.14.0 之前「1 篇成功 + 19 篇失败也报 done」，终态语义含糊让每个消费方（JobService、面板、cw 基线、自动提交）各自猜测「引擎到底成功了没有」。本模块把**结果形态、终态不变量、页面归属、链接判据**全部收口为纯函数契约：
 
@@ -181,6 +181,14 @@ flowchart TB
 
 只管一类问题：跨页链接目标不存在。这是模型幻觉里唯一可以**只看本页 + 页名清单**就修对的问题（改成真实页名，或把链接降级成纯文字）。正文事实错误需要读源码，属于重写文章，不在校对范围。
 
+失效目标的判定口径（`missingLinksOf`）：
+
+- 先把代码区域经 `stripCode` 等长掩蔽（与质量门渲染后的契约检查同一把尺子），代码示例里的链接写法不当作真实链接；
+- 扫两种链接形态：`[文字](x.md)` 直接走共享的 `scanPageLinks`；`[[裸名]]`（可带 `|别名`、`#锚点`）剥掉别名/锚点后，按裸名与「裸名 + `.md`」两种候选一并解析——任一写法命中已知页就算有效（`core` 与 `core.md` 指同一篇）；
+- 外部协议链接（`https:` / `mailto:` 等）由 `isExternalTarget` 豁免；解析结果上跳逃出 docs 根（`../`）的也不算失效。
+
+死链源页清单（`deadLinkSources`）同时收两类问题：产物自洽校验的 `dead-link`，以及 `article-contract` 类问题里 `issue === 'dead-link'` 的那部分（渲染后契约检查判出的死链）——后一类页「产物自洽但过不了契约死链检查」，此前落不进校对队列。
+
 ```mermaid
 sequenceDiagram
     participant QG as 质量门 quality-gate
@@ -192,7 +200,7 @@ sequenceDiagram
     PR->>FS: listPageNames(docsDir) 列出全部真实页名
     loop 每个源页（上限 DEFAULT_MAX_PAGES=6）
         PR->>FS: 读 page 原文
-        PR->>PR: missingLinksOf() 算出该页失效目标
+        PR->>PR: missingLinksOf() 掩蔽代码后算出失效目标（[文字](x.md) 与 [[裸名]]）
         PR->>LLM: buildProofreadPrompt(原文 + 真实页清单 + 失效目标)
         LLM-->>PR: <PAGE>…</PAGE>（或 NO_CHANGE）
         alt 缺 frontmatter / 改写后失效链接没减少
@@ -245,6 +253,7 @@ flowchart LR
 | 依赖 | 用途 | 所属模块 |
 | --- | --- | --- |
 | `../git-paths.js` 的 `toPosix` | 路径 POSIX 归一（mapping、proofread、wiki-links 解析基准） | [job_and_repository_infrastructure](job_and_repository_infrastructure.md) |
+| `../article-contract.js` 的 `stripCode` | 掩蔽代码区域后再扫描正文链接（proofread 的失效目标判定），与质量门渲染后契约检查同一把尺子 | 插件层文章契约 |
 
 ### 导入本模块的（下游消费方）
 

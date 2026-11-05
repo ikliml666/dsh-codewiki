@@ -69,10 +69,12 @@
       "native_execution_and_workspace_infrastructure",
       "native_output_application_logic",
       "native_output_quality_gate",
-      "overview"
+      "overview",
+      "x"
     ],
     "names": [
       "apply",
+      "deadLinkSources",
       "describeEngineResult",
       "describeOutcome",
       "done",
@@ -84,6 +86,7 @@
       "indexModuleTree",
       "isExternalTarget",
       "isTerminalStage",
+      "missingLinksOf",
       "moduleDocRelPath",
       "moduleSlug",
       "normalizeBlocker",

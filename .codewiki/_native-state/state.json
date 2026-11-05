@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "fcf63b6e1b879e2443150759a5f60a613fe634b9"
+    "headCommit": "c7327d9cd233c2f703c66f9fd511d45c90fea814"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "headCommit": "fcf63b6e1b879e2443150759a5f60a613fe634b9",
+    "headCommit": "c7327d9cd233c2f703c66f9fd511d45c90fea814",
     "committed": [
       "CHANGELOG.md",
       "CodeWiki.md",
@@ -16,10 +16,14 @@
       "client.js",
       "index.js",
       "lib/engine/native-run.js",
+      "lib/engine/proofread.js",
       "lib/wiki-notes.js",
       "package.json",
       "test-config.mjs",
       "test-engine-native-incremental.mjs",
+      "test-engine-proofread-e2e.mjs",
+      "test-engine-proofread.mjs",
+      "test-fixtures/fake-native-engine.mjs",
       "test-wiki-notes.mjs"
     ],
     "staged": [],
@@ -42,8 +46,7 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 2b96160 与本次 cw 基线 a6a71c2 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw31vq65-g-native（28 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw32wsci-h-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-05T05:02:05.534Z"
+  "updatedAt": "2026-11-05T05:24:04.461Z"
 }
