@@ -27,6 +27,7 @@ source_files:
   - vendor/codewiki/src/main.rs
   - vendor/codewiki/src/meta.rs
   - vendor/codewiki/src/setup.rs
+  - lib/wiki-notes.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: engine_runtime_and_codewiki_kernel.md

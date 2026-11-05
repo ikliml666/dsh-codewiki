@@ -3,6 +3,7 @@ title: 原生产物落地器（native_output_application_logic）
 type: module
 source_files:
   - lib/engine/apply-plan.js
+  - lib/wiki-notes.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: native_output_application_logic.md

@@ -22,14 +22,14 @@ fsoft_page: job_orchestration_and_agentic_article_pipeline.md
 
 本模块是 CodeWiki 全仓 wiki 编译的**作业控制与文章产出层**。它把原本同步、长耗时的 wiki 编译过程改造成「提交即返回、后台推进、可观测、可取消、可跨实例接管」的作业系统：
 
-- 对会话模型暴露 `cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress` 等工具；
+- 对会话模型暴露 `cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress`、`codewiki_note`（手工维护经验教训/设计决策页）等工具；
 - 对侧边栏面板提供回环 HTTP API，用于任务列表、仓库总览、会话记录、引擎日志与控制动作；
 - 以 10 秒一拍的 tick 状态机推进每个编译作业；
 - 在首个 tick 锁定编译通道：默认走原生 Python 引擎通道，兼容时走 Node 内的 agentic 文章写作通道；
 - 负责作业持久化、跨实例接管、取消、自动提交产物、增量调度与终态唤醒；
 - 把编译结果裁决为 `done` / `partial` / `failed` / `cancelled`，并决定是否允许推进编译基线。
 
-本模块本身不重复实现原生引擎的八段流水线，而是把重活委托给外部 `engine_runtime_and_codewiki_kernel`；同时通过 `agentic_article_workflow` 提供可离线测试、可精确编辑、可并发派发的 Node 侧写作通道。
+本模块本身不重复实现原生引擎的九段流水线，而是把重活委托给外部 `engine_runtime_and_codewiki_kernel`；同时通过 `agentic_article_workflow` 提供可离线测试、可精确编辑、可并发派发的 Node 侧写作通道。
 
 ## 架构总览
 

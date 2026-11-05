@@ -7,6 +7,7 @@ source_files:
   - lib/engine/native-state.js
   - lib/engine/quality-gate.js
   - lib/engine/workspace-snapshot.js
+  - lib/wiki-notes.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: native_apply_and_quality_gate.md

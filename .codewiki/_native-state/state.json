@@ -2,14 +2,26 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "2b961600fa8a73e5521d67434ba577d8206afd74",
-    "headCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1"
+    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
+    "headCommit": "fcf63b6e1b879e2443150759a5f60a613fe634b9"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "2b961600fa8a73e5521d67434ba577d8206afd74",
-    "headCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
-    "committed": [],
+    "baseCommit": "a6a71c2c1c6933341ad803002dbbfd36277b7ef1",
+    "headCommit": "fcf63b6e1b879e2443150759a5f60a613fe634b9",
+    "committed": [
+      "CHANGELOG.md",
+      "CodeWiki.md",
+      "README.md",
+      "client.js",
+      "index.js",
+      "lib/engine/native-run.js",
+      "lib/wiki-notes.js",
+      "package.json",
+      "test-config.mjs",
+      "test-engine-native-incremental.mjs",
+      "test-wiki-notes.mjs"
+    ],
     "staged": [],
     "unstaged": [],
     "untracked": [],
@@ -26,12 +38,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 2015fbc 与本次 cw 基线 2b96160 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw30rm4s-9-native（28 个文件）"
+    "持久化基线 2b96160 与本次 cw 基线 a6a71c2 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw31vq65-g-native（28 个文件）"
   ],
-  "updatedAt": "2026-11-05T04:05:38.006Z"
+  "updatedAt": "2026-11-05T05:02:05.534Z"
 }

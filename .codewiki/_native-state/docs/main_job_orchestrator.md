@@ -4,7 +4,7 @@
 
 `main_job_orchestrator` 是 `dsh-codewiki` 插件的控制平面，即插件入口文件 `index.js` 中 `apply()` 建立起来的整套后台编排服务。它把「CodeWiki 全仓 wiki 编译」从一次同步模型调用，改造为一个**提交制（submit-and-forget）的后台作业系统**：
 
-- 对会话模型暴露四个工具：`cw`（CLI 薄封装）、`codewiki_generate`（编译入口）、`codewiki_update`（日常维护快捷入口）、`codewiki_progress`（只读进度查询）；
+- 对会话模型暴露五个工具：`cw`（CLI 薄封装）、`codewiki_generate`（编译入口）、`codewiki_update`（日常维护快捷入口）、`codewiki_progress`（只读进度查询）、`codewiki_note`（把一次已完成的修复或一个已定设计决策记成手工维护页：`kind=learning` 落 `.codewiki/learnings/<slug>.md`，`kind=decision` 落 `.codewiki/decisions/<slug>.md`——正文以 `## Overview` 开头并过与编译流水线同一套契约校验，写完自动刷新 `_index.md` 与 CodeWiki.md 入口，后续编译不覆盖这类页）；
 - 对侧边栏面板暴露一组只允许回环访问的 HTTP API（任务列表 / 仓库总览 / 会话记录 / 引擎日志 / 模型目录 / 控制动作）；
 - 以 10 秒一拍的 tick 状态机推进每个编译作业，内部存在两条并列编译通道——**原生引擎通道**（0.16.0 起默认，驱动 upstream FSoft Python 引擎子进程）与**内置 Node 兼容通道**（agentic 写作 + 横切 + 校对 + 索引的单轮文本生成流水线）；
 - 负责作业持久化、跨实例接管、取消、自动提交产物、自动增量调度与会话唤醒。
@@ -25,7 +25,7 @@ flowchart TD
 
     subgraph MODULE["main_job_orchestrator（index.js）"]
         APPLY["apply 插件入口<br/>注入 agents/llm/registry"]
-        TOOLS["工具定义工厂<br/>cw / codewiki_generate<br/>codewiki_update / codewiki_progress"]
+        TOOLS["工具定义工厂<br/>cw / codewiki_generate / codewiki_update<br/>codewiki_progress / codewiki_note"]
         SVC["createJobService 编排服务<br/>10s tick 状态机"]
         WEB["installWebServer<br/>回环 REST API"]
         SCHED["autoScan 自动调度器<br/>60s 心跳"]
@@ -66,8 +66,8 @@ flowchart TD
 
 | 组件 | 角色 | 说明 |
 | --- | --- | --- |
-| `apply` | 插件入口 | 注入 `agents`/`llm`/`workspaceRegistry` 服务引用；创建并启动编排服务；注册四个工具；安装 Web API、系统提示提醒与自动调度器；注册 cordis effect 清理 |
-| `submit`（service） | 作业创建 | 统一提交入口：排除清单 / worktree / 空壳目录三道闸门 → 幂等判定 → 项目闸门（串行或并行上限）→ 写入 `submitting` 占位 job → 校验模型通道 → 落入 `queued` 或直接 `articles` |
+| `apply` | 插件入口 | 注入 `agents`/`llm`/`workspaceRegistry` 服务引用；创建并启动编排服务；注册五个工具（cw / codewiki_generate / codewiki_update / codewiki_progress / codewiki_note；单工具 schema 违规只丢该工具，不炸回调整体）；安装 Web API、系统提示提醒（提醒模型「收尾必须调 codewiki_generate 更新受影响文章」，并给出 codewiki_note 的例外：真修完 bug 记 `kind=learning`、做过影响后续的设计取舍记 `kind=decision`，随手改一行则不写）与自动调度器；注册 cordis effect 清理 |
+| `submit`（service） | 作业创建 | 统一提交入口：排除清单 / worktree / 空壳目录三道闸门 → 幂等判定 → 项目闸门（串行或并行上限）→ 写入 `submitting` 占位 job → 校验模型通道与增量档位（`updateOptionsOf`：非法值在提交时直接抛、job 进 failed，不让引擎子进程起来后才以 engine-protocol 报错烧掉一轮预算）→ 落入 `queued` 或直接 `articles` |
 | `cancel` | 取消请求 | 只置 `cancelRequested=true` 并标脏落盘；真正的中断在 tick 中发生（abort 在飞请求、终止原生进程树） |
 | `list` / `jobSummary` | 读模型 | `jobSummary` 是面板、`codewiki_progress`、仓库总览**同源**的视图构造器；`progressView` 在其上追加完成百分比 |
 | `tickArticles` / `tickCrosscut` / `tickReview` / `tickIndex` / `tickCommit` | legacy 通道阶段机 | 内置 Node 通道的五段流水线 handler（native 通道不使用它们） |
@@ -188,7 +188,7 @@ flowchart LR
 3. **重放安全**：宿主重启后按持久化快照（`snapshotNativeRun` / `planNativeReplay`）重建，已落盘叶子按断点续跑。
 4. **证据留档**：引擎原始 docs 树在被映射/裁剪之前拷到仓库外临时目录（`nativeRawTreeDir`），作为「事实来源」；工作副本 `docsDir` 在 `finally` 中清理。
 5. **取消边界：落地事务不接 signal**：注入给落地器的 `runCw` **故意不传** `nativeAborters` 的 AbortController——落地事务（写盘→index→基线→提交）一旦开始就必须跑完（事务自身有 120s 超时兜底）。取消只终止引擎进程树：曾传 signal，取消会 kill 掉正在跑的 `cw meta update` 触发回滚，把「已落盘的文章」连同基线一起撤掉，而终态只报一句「已取消」——一次取消就吞掉一整轮编译成果。
-6. **面板格子合并**：引擎八段经 `NATIVE_STAGE_TO_PANEL` 折叠成面板现有格子（`env/graph/cluster → prepare`、`articles → articles`、`proofread/validate → validate`、`index/baseline → index`、`commit → commit`）。`proofread` 与 `validate` 共用「校验」一格——校对是质量门死链检查的修复动作（检测→改正文→复检），与质量门同属「校验产物」，分成两格会让面板出现两个都叫检查的步骤；细分阶段名仍由 `job.nativeStage` 单独携带，活动流里照样能看到「语义校对」。
+6. **面板格子合并**：引擎九段经 `NATIVE_STAGE_TO_PANEL` 折叠成面板现有格子（`env/graph/cluster → prepare`、`articles → articles`、`proofread/validate → validate`、`index/baseline → index`、`commit → commit`）。`proofread` 与 `validate` 共用「校验」一格——校对是质量门死链检查的修复动作（检测→改正文→复检），与质量门同属「校验产物」，分成两格会让面板出现两个都叫检查的步骤；`proofread` 段只在「有失效跨页链接的页」存在时才出现，细分阶段名仍由 `job.nativeStage` 单独携带，活动流里照样能看到「语义校对」。
 
 **legacy 通道的兜底网络**：
 
@@ -250,7 +250,7 @@ sequenceDiagram
 
 - **[agentic_article_workflow.md](agentic_article_workflow.md)**：legacy 通道的写作执行器 `runAgenticArticles`、`edit` 文章编辑、文章契约闸门 `inspectArticle`/`hasBlockingIssue`/`issueSummary`、以及变更集采集 `collectChangeSet`（增量判定的输入）。
 - **[job_and_repository_infrastructure.md](job_and_repository_infrastructure.md)**：作业现场的持久化原语 `createJobsStore`（含 tick 锁、幂等吸收、孤儿接管）、引擎事件日志 `job-logs`、终态判定 `judgeOutcome`/`isTerminalStage`/`TERMINAL`、以及 `git-paths` 的 quotepath 关闭包装。
-- **[engine_core.md](engine_core.md)**（更细：[native_execution_and_workspace_infrastructure.md](native_execution_and_workspace_infrastructure.md)）：原生通道的执行外壳 `runNativeJob`、引擎子进程入口与超时、工作区快照与重放支持。本模块只通过 `nativeEnginePlan` 组装环境变量（占位 key、UTF-8、禁 keyring），不干涉引擎内部八段流水线。
+- **[engine_core.md](engine_core.md)**（更细：[native_execution_and_workspace_infrastructure.md](native_execution_and_workspace_infrastructure.md)）：原生通道的执行外壳 `runNativeJob`、引擎子进程入口与超时、工作区快照与重放支持。本模块只通过 `nativeEnginePlan` 组装环境变量（占位 key、UTF-8、禁 keyring）并把 `updateOptionsOf(c)` 收口的增量档位与阈值透出给 `native-run`（留空的键不出现、引擎用自己的默认值），不干涉引擎内部九段流水线。
 - **[client_panel_ui.md](client_panel_ui.md)**：侧边栏面板是本模块 `/api/codewiki/*` 端点的唯一消费者——`jobSummary` 的字段形状（`taskList`/`nativeStage`/`nativeLogs`/`queueAhead` 等）即面板渲染契约，修改时需与该模块同步。
 
 构建与运行环境方面：原生通道依赖 `tools/fsoft-engine/setup-env.sh` 闭合的 Python 3.10+ venv（见 [build_configuration_and_test_verification_tooling.md](build_configuration_and_test_verification_tooling.md)），环境不闭合时以 `engine-deps` 明确失败，绝不悄悄降级到 Node 通道。
@@ -268,6 +268,7 @@ sequenceDiagram
 | 并发 | `maxConcurrency`（硬顶 8）、`bigConcurrency`（0=跟随默认档）、`moduleConcurrency`（原生引擎模块并行度） | 默认档与大档**各自独立限流、同时推进** |
 | 项目闸门 | `serialProjects`、`parallelProjects`（1–4） | 多仓库排队或并行 |
 | 原生通道 | `nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs` | 默认开启；解释器解析顺序：配置 > `DSH_CODEWIKI_PYTHON` > PATH |
+| 增量档位与阈值 | `updateRung`、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree` | `liveConfig` 原样透出（空串 = 不出现该键、引擎用自己的默认值）；只由增量轮经 `updateOptionsOf(c)` 下发给 native-run（`rung=0` 的「放弃增量」语义在 native-run 那边处理）；合法性只在 submit 入口校验一次，非法值直接抛错、job 进 failed，不等引擎子进程起来再以 engine-protocol 报错 |
 | 产物入库 | `autoCommit` | 主题分支 `codewiki/wiki-<jobId>` 提交 → 合并回原分支 → 删分支；冲突/非 git/未配 user 一律降级为「提醒会话提交」 |
 | 自动调度 | `autoUpdate`、`autoUpdateMin`、`workspaceOnly`、`excludePaths` | 定时扫描已知仓库；从未编译过的新仓库只登记 `pendingConfirm` 等用户在面板确认，不擅自首次生成 wiki |
 
@@ -275,7 +276,7 @@ sequenceDiagram
 
 ## 9. 可观测性出口
 
-- **`codewiki_progress` / `GET /api/codewiki/jobs`**：同一 `jobSummary`，含阶段、百分比、篇数、`blockers`、`canAdvanceBaseline`、`usage`（token 用量）、`tps`、最近 notes。
+- **`codewiki_progress` / `GET /api/codewiki/jobs`**：同一 `jobSummary`，含阶段、百分比、篇数、`blockers`、`canAdvanceBaseline`、`usage`（token 用量）、`tps`、最近 notes。面板粗粒度 `stage` 的取值：进行中 `queued` / `prepare` / `articles` / `crosscut` / `review` / `validate` / `index` / `commit`，终态 `done` / `partial` / `failed` / `cancelled`；引擎自报的九段细分（`env/graph/cluster/articles/proofread/validate/index/baseline/commit`）由 `job.nativeStage` 单独携带，`proofread` 段只在「有失效跨页链接的页」存在时出现。
 - **`GET /api/codewiki/repos`**：仓库总览（30s 缓存 + 工作区清单签名失效），带调度器心跳与待确认清单。
 - **`GET /api/codewiki/sessions[/*]`**：每个 LLM 请求的 prompt/流式输出落盘（24h TTL），面板「会话」视图可实时看到「codewiki 现在在跟模型说什么」。
 - **`GET /api/codewiki/logs?jobId=`**：引擎事件完整 NDJSON（内存只留最近 40 条），是长编译任务唯一的黑匣子。

@@ -17,7 +17,7 @@
 ```mermaid
 flowchart TB
     subgraph PKG["包清单层"]
-        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.42<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
+        PJ["package.json<br/>name: @local/dsh-codewiki v0.17.43<br/>main: index.js#59 exports: ./client<br/>engines: node>=20, dsh>=0.2.0-rc.0"]
         DSHMETA["dsh 元数据<br/>client.platform = web<br/>bundle.patch = ./cordis.patch.yml"]
     end
 
@@ -54,7 +54,7 @@ flowchart TB
 
 `package.json` 是插件被宿主识别的入口契约，关键字段：
 
-- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.42"`，`"private": true`（本地 link 包，不发布）。
+- **身份**：`"name": "@local/dsh-codewiki"`，`"version": "0.17.43"`，`"private": true`（本地 link 包，不发布）。
 - **模块形态**：`"type": "module"`（纯 ESM），`"main": "index.js"`，`"exports"` 暴露两个面：`.` → `index.js`（插件主半边），`./client` → `client.js`（侧边栏面板半边，见 [client_panel_ui](client_panel_ui.md)）。
 - **引擎约束**：`engines.node >= 20`、`engines.dsh >= 0.2.0-rc.0`——宿主版本不够时直接拒绝装载。
 - **运行时依赖**：仅 `@deepseek-ai/schemastery`（配置 schema 校验），其余全部是宿主自带能力，刻意保持零重依赖。
@@ -120,6 +120,11 @@ flowchart TB
 | `nativeEnginePython` | 空 → 环境变量 `DSH_CODEWIKI_PYTHON` → `python` | venv 解释器绝对路径；**不做“找一个能用的解释器”的启发式**（猜错会把环境不闭合伪装成引擎坏了） |
 | `nativeEngineEntry` | `lib/engine/python/entry.py` | 入口脚本路径，一般不用改 |
 | `nativeEngineTimeoutMs` | `2700000`（45 分钟） | 单次引擎调用上限 |
+| `updateRung` | 空 → 上游默认 `3` | 增量档位（原生通道，仅 scope=auto/stale 且已有编译基线的增量轮生效）：`3` = 组件级增量（全部能力）；`3b` = 同 3 但依赖跟两跳；`2` = 只重写受影响的叶子页、不原地打补丁；`1` = 纯规则失效（最保守最慢）；`0` = 每轮按文件失效重写全部文章 |
+| `updateTauNb` | 空 → 上游默认 `0.5` | 路由判据 0–1：一个叶子里聚集多少比例的新增组件邻居才把改动路由过去 |
+| `updateTauGrow` | 空 → 上游默认 `0.33` | 0–1：新增组件占多少比例触发整体重聚类 |
+| `updateTauFull` | 空 → 上游默认 `0.5` | 0–1：活跃叶子占全部叶子超过此比例就整仓重写；调大倾向增量（快、可能漏改），调小倾向重写（准、慢） |
+| `updateTauTree` | 空 → 上游默认 `0.3` | 0–1：新建+删除+重聚类的叶子占比超过此值就整仓重写 |
 
 两条通道**并存、互不回退**：原生通道环境不闭合时以 `engine-deps` 明确失败，不会悄悄改用 Node 通道。通道的实际消费方见 [engine_runtime_and_codewiki_kernel](engine_runtime_and_codewiki_kernel.md)，其中 [engine_python_runtime](engine_python_runtime.md) 直接受 `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs` 三项驱动。
 

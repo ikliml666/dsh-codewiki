@@ -426,6 +426,7 @@
       "progressView",
       "reposFileFor",
       "resolveModelEfforts",
+      "run",
       "runAgenticArticles",
       "runCw",
       "runNativeJob",
@@ -445,6 +446,7 @@
       "tickNative",
       "tickReview",
       "touch",
+      "updateOptionsOf",
       "wakeCompileSession",
       "worker"
     ]

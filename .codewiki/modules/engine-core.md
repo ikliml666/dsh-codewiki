@@ -17,6 +17,7 @@ source_files:
   - lib/engine/quality-gate.js
   - lib/engine/wiki-links.js
   - lib/engine/workspace-snapshot.js
+  - lib/wiki-notes.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: engine_core.md

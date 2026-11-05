@@ -149,7 +149,13 @@
             "vendor\\codewiki\\src\\main.rs::main",
             "vendor\\codewiki\\src\\meta.rs::WikiMeta",
             "vendor\\codewiki\\src\\setup.rs::claude_home",
-            "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+            "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+            "lib\\wiki-notes.js::noteSlug",
+            "lib\\wiki-notes.js::yamlScalar",
+            "lib\\wiki-notes.js::buildNote",
+            "lib\\wiki-notes.js::listWikiPages",
+            "lib\\wiki-notes.js::walk",
+            "lib\\wiki-notes.js::checkNote"
         ],
         "children": {
             "engine_core": {
@@ -179,7 +185,13 @@
                     "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                     "lib\\engine\\workspace-snapshot.js::shortSha",
                     "lib\\engine\\workspace-snapshot.js::snapshotExists",
-                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+                    "lib\\wiki-notes.js::noteSlug",
+                    "lib\\wiki-notes.js::yamlScalar",
+                    "lib\\wiki-notes.js::buildNote",
+                    "lib\\wiki-notes.js::listWikiPages",
+                    "lib\\wiki-notes.js::walk",
+                    "lib\\wiki-notes.js::checkNote"
                 ],
                 "children": {
                     "native_apply_and_quality_gate": {
@@ -195,7 +207,13 @@
                             "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
                             "lib\\engine\\workspace-snapshot.js::shortSha",
                             "lib\\engine\\workspace-snapshot.js::snapshotExists",
-                            "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+                            "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+                            "lib\\wiki-notes.js::noteSlug",
+                            "lib\\wiki-notes.js::yamlScalar",
+                            "lib\\wiki-notes.js::buildNote",
+                            "lib\\wiki-notes.js::listWikiPages",
+                            "lib\\wiki-notes.js::walk",
+                            "lib\\wiki-notes.js::checkNote"
                         ],
                         "children": {
                             "native_output_application_logic": {
@@ -204,7 +222,13 @@
                                     "lib\\engine\\apply-plan.js::defaultRunCw",
                                     "lib\\engine\\apply-plan.js::findOrphanPages",
                                     "lib\\engine\\apply-plan.js::findStaleModulePages",
-                                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+                                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+                                    "lib\\wiki-notes.js::noteSlug",
+                                    "lib\\wiki-notes.js::yamlScalar",
+                                    "lib\\wiki-notes.js::buildNote",
+                                    "lib\\wiki-notes.js::listWikiPages",
+                                    "lib\\wiki-notes.js::walk",
+                                    "lib\\wiki-notes.js::checkNote"
                                 ],
                                 "children": {}
                             },

@@ -114,14 +114,17 @@ flowchart LR
 
 ### 2. 增量决议（runNativeJob 1.5 段 + native-state.js）
 
-「这一轮全量还是增量」必须由**证据**决定，而不是调用方的 `kind` 字面量。决议回答三个问题：
+「这一轮全量还是增量」必须由**证据**决定，而不是调用方的 `kind` 字面量——唯一的非证据入口是用户显式把增量档位选成 `rung=0`（那是档位选择，不是「增量不可用」的失败降级）。决议回答三个问题：
 
 ```mermaid
 flowchart TD
     Q1{"1. 变化是什么？<br/>committed/staged/unstaged/<br/>untracked 四路<br/>+ 上轮 unconsumed 携带"}
+    RUNG{"增量档位？<br/>updateOptions.rung=0？<br/>（仅 wantsIncremental 轮）"}
     Q2{"2. 能不能增量？<br/>受管状态齐全？<br/>版本兼容？基线可达？<br/>docsDir 独立？"}
     Q3{"3. 水合后完整吗？<br/>缺页 / overview 陈链？<br/>同一缺口已修过？"}
-    Q1 --> Q2
+    Q1 --> RUNG
+    RUNG -->|rung=0：用户显式放弃组件级增量| FULL0["RESOLUTION.FULL<br/>只记 note，不挂 incremental-fallback"]
+    RUNG -->|rung≠0| Q2
     Q2 -->|任一不成立| FULL["RESOLUTION.FULL<br/>记 incremental-fallback"]
     Q2 -->|成立| Q3
     Q3 -->|缺页或陈链| REPAIR["转全量修复<br/>写 missingRepair 凭据"]
@@ -133,6 +136,7 @@ flowchart TD
 三个决议要点（源码注释强调）：
 
 - **「变化集为空」不是跳过引擎的理由**：FSoft 的「有没有变」由**图 diff** 判定，不是 git 路径集合（重命名/跨文件重构能让路径集非空而图不变）。change-set 只决定「增量可不可信」，「变没变」留给引擎的 `update_record`。
+- **档位选择 ≠ 失败降级（`rung=0`）**：`updateOptions.rung=0` 在上游（`doc_generator.py:421-422`）的含义是「放弃组件级增量、按文件失效重写全部页面」（`_update_options()` 返回 None 直接跳过增量分支）。裁决层必须同口径先判全量：若照发 `action=update`，引擎拿 None 走全量路径，而 `updateOutcome` 拿不到 `incremental`/`no_change`，一次正常全量会被插件误报成 `incremental-fallback`（终态 `partial`）。但它与其它 `fallbackReason` 有本质区别——这是用户显式选的档位，不是「增量不可用」，因此它走单独的 `rungLegacyFull` 标记从 `degradedToFull` 里摘出去：不写 `fallbackReason`、只在 notes 记「增量档位 rung=0：放弃组件级增量，本轮按文件失效全量重写」，否则每轮都会挂一条增量降级 blocker，而用户本来要的就是全量。
 - **水合后的缺页/陈链检测**：模块树里有从未写过页面的模块，或 overview 有指向已消失页面的陈链（聚类重构的残骸），必须转全量修复；但若同一棵树、同一批缺口上一轮已试过全量仍补不上（`missingRepair` 凭据比对 `baseCommit` + 缺口清单 + 无新变化），本轮不再重复全量浪费几十分钟，只如实报 partial。注意拿一棵解析不出来的 `module_tree.json` 去判缺页，判定结果必然不可信——因此 `module_tree.json` JSON 损坏（SyntaxError）时这一轮直接以 `failed`（stage=`graph`）收场，与 3.7 段孤儿页扫描「ENOENT 才吞、JSON 损坏必须抛」的口径一致；目录读不到、文件刚被别的进程挪走这类环境问题不阻塞增量，但**不能假装检查过**：notes 如实记「产物完整性检查未执行（带原始 errno）」而不是「检查失败」——「检查失败」与「没做检查」是两件事，后者必须让下游知道这一轮的增量决议未经缺页/陈页校验、少了一道证据。
 - **只有「引擎真做了组件级增量（`updateOutcome=incremental`）且 gate/apply 全 done」才推进基线**；引擎自退全量（`full_fallback`）、检测器失败、gate 判 partial，一律不推进基线——下一轮 change-set 仍从旧基线算起，变化不会丢。推进基线的许可也不接受调用方硬开：`advanceBaseline` 只由裁决决定，受管状态不完整（`stateIncomplete`）**或引擎自报非 done（一批叶子失败）**时一律给 `false`——质量门只看产物质量、不知道引擎有一批叶子没写完，曾只传 `stateIncomplete`，于是引擎 partial + 门 done 时基线照常前移而终态却是 partial，那批没写完的变化从新基线算变化集时永久失明。
 
@@ -247,7 +251,7 @@ sequenceDiagram
 | 主题 | 结论 |
 | --- | --- |
 | 终态由谁裁决 | 三段（引擎/门/落地器）最弱环，`runNativeJob` 统一 `settle()`，不允许任何一步被洗白 |
-| 全量 vs 增量 | 证据决议：受管状态齐全 + 版本兼容 + 基线可达 + 独立 docsDir → `update`（rung 3），否则显式 `full` 并记 `incremental-fallback` |
+| 全量 vs 增量 | 证据决议：受管状态齐全 + 版本兼容 + 基线可达 + 独立 docsDir → `update`（rung 3），否则显式 `full` 并记 `incremental-fallback`；用户显式选 `rung=0`（放弃组件级增量）也判全量，但只是档位选择，只记 note、不挂 `incremental-fallback` blocker |
 | 未提交改动怎么对齐 | 临时 commit 快照（独立 index、不挂 ref）作 `commitId`；失败退回 HEAD 记账 |
 | 吞了哪些未提交改动 | 产物 commit 与快照一致 → 门记 `baseline.consumedInput`，`runNativeJob` 在终态 notes 里报出路径清单与快照短 sha |
 | 未提交改动的账 | `state.json` 的 `unconsumed` 每轮并入变化集，出现在 `git diff base..HEAD` 才移出 |
