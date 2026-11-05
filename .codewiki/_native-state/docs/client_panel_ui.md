@@ -105,7 +105,7 @@ flowchart LR
 - **总进度读数** `overallPct`：按 `STAGE_WEIGHTS` 定权，逐行累加各阶段 `frac × 权重`（进行中阶段的 frac 取 `taskList` 完成占比，原生通道取引擎自报的 `nativePercent`），封顶 99%、终态（`done` / `partial`）才 100%；进度不可知时整段不渲染，不编数字；
 - **进度行**：大数字百分比、主进度条与当前阶段读数压成单行 `data-dscw-p-progress`——左侧大数字 + 内嵌 `data-dscw-p-bar` 总进度条（填充宽度 = 百分比，`data-tone` 随阶段着色）+ 进度趋势 spark + 右侧当前阶段读数（当前步骤名 + 该步已用时；原生通道再附「引擎阶段名 + 引擎自报百分比」，以 ` · ` 连接）；
 - **进度趋势**：每轮轮询把 `overallPct` 推入 24 点窗口（与上轮相同则跳过），窗口多于一个点时在进度行内画 `data-dscw-p-trend` 微趋势线（悬停提示「最近若干次采样的总进度」）——数字告诉你在哪，斜率告诉你还动不动；
-- **分段带与图例** `stageSegments` / `stageLegend`：取代原七行 `stageBreakdown` 明细表（已删除），改为一条紧凑的分段带 + 图例，**只在活动且真有进度（pct > 0）时出现**——终态全是 100%、排队全是 0%，两者都是噪声；图例整体带 `legendHint` 悬停提示（颜色 = 阶段状态：绿=已完成 / 蓝=进行中 / 灰=未开始 / 红=失败，段宽 = 该步占总进度的比例），每行图例由「色块 `data-swatch`（颜色与上方分段带里同色段一致）+ 阶段名 + 百分比」组成，行悬停 `title` 显示「阶段名 · 状态（`legendState_*` 词典）· 百分比」；
+- **分段带与图例** `stageSegments` / `stageLegend`：取代原七行 `stageBreakdown` 明细表（已删除），改为一条紧凑的分段带 + 图例，**按两种模式出现**——活动且真有进度（pct > 0）时以「进行中」模式绘制；非活动任务只要 `hasTimings(job)`（`stageTimings` 里存在非排队阶段的真实耗时）就以「终态耗时」模式绘制，失败 / 取消任务总进度是 null 也照样画——「时间花在哪一步」恰恰是这类任务最该看的东西；老任务没有 `stageTimings` 则不画，免得出一条空带。两种模式经 `stageWeight(job, stage, running)` 取段宽：进行中模式沿用 `STAGE_WEIGHTS` 阶段权重（段宽 = 该步占总进度的比例），终态模式改用 `timingsOf(job)[stage]` 的真实耗时（段宽 = 该阶段耗时）；图例整体悬停提示按模式切换：进行中用 `legendHint`（颜色 = 阶段状态：绿=已完成 / 蓝=进行中 / 灰=未开始 / 红=失败），终态用 `legendHintDone`（颜色仍是阶段状态，段宽是该阶段真实耗时）；每行图例由「色块 `data-swatch`（颜色与上方分段带里同色段一致）+ 阶段名 + 读数」组成——进行中模式读数为百分比、行悬停 `title` 显示「阶段名 · 状态（`legendState_*` 词典）· 百分比」，终态模式读数降级为 `fmtMs(dur)`（终态全 100%，百分比写出来只是重复）、行悬停显示「阶段名 · 耗时」；分段带色块悬停 `title` 同理：进行中为「阶段名 · 百分比 · 耗时」，终态为「阶段名 · 耗时」；
 - **次要信息流水线** `data-dscw-p-subline`：元信息、用量、最新一条备注压成一行（放不下自动换行），取代原先各占一行的排布；
 - **元信息**：已写 / 失败篇数、原生引擎阶段（`nativeStage` + 百分比）、质量门 / 落地结果、批次进度、排队 / 执行用时拆分、自动提交结果（短 sha 或失败原因）；
 - **排队可见性**：`queueAhead` 列出「在等谁」；
@@ -171,7 +171,7 @@ flowchart LR
 
 - **退役阶段名映射**：`LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }`——历史任务里残留旧阶段名时，`stageOf(job)` 先映射再查六步，否则失败 / 取消时分段带行会找不到当前行；阶段耗时 `stageTimings` 同样经 `timingsOf` 归一。
 - **细粒度展示**：同名的 `articles / index / commit` 直接映射回六步行标签，其余阶段经 `NATIVE_STAGE_KEYS`（env / graph / cluster / proofread / validate / baseline）以「引擎阶段：xxx」另起一行显示，不混入六步行序号。
-- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }`（原 `review` 校对步已并入 `validate` 校验步，步骤条由七步收敛为六步）：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。`overallPct` 对 `stageRows(job)` 的每行（已完成阶段 frac=1、进行中阶段 frac 按 `taskList` / `nativePercent` 折算）求 `frac × 权重` 之和。
+- **总进度权重** `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }`（原 `review` 校对步已并入 `validate` 校验步，步骤条由七步收敛为六步）：准备阶段（环境 + 代码图 + 聚类）在大仓库最耗时，给到最高权重 0.24，避免百分比在相邻步骤间凭空跳点。`overallPct` 对 `stageRows(job)` 的每行（已完成阶段 frac=1、进行中阶段 frac 按 `taskList` / `nativePercent` 折算）求 `frac × 权重` 之和。同一份 `STAGE_WEIGHTS` 也是分段带 / 图例「进行中」模式的段宽来源；终态模式段宽改由 `stageWeight(job, stage, false)` 取 `stageTimings` 真实耗时（`queued` 恒 0），`hasTimings(job)` 据此判断是否存在值得展示的耗时分布。
 - **终态语义**：`done` 六行全 100%；`partial`（部分完成）也按 100% 显示——活干完了，由终态标签 + `blockers` 悬停说明「为什么没算完整成功」；只有 `failed / cancelled` 才在最后计时段标红 / 标黄（`lastTimedStage`）。
 
 ---
