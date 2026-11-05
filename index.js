@@ -3867,7 +3867,23 @@ function generateToolDefinition(cfg, svc) {
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const exHit = excludedItem(cwd, c.excludePaths)
-      if (exHit) throw new Error(`该目录在 CodeWiki 排除清单中，不编译：${cwd}（命中排除项：${exHit}；在插件设置或面板「设置」页编辑排除清单）`)
+      // 排除清单**不是错误**：那是用户在面板上显式勾掉「这个仓库不要 CodeWiki」的表态。
+      // 抛错会让模型把它读成「编译失败」并去重试/排障，白烧一轮推理。
+      // 所以这里返回一个明确的终态（state=excluded + 指名原因），让模型直接放弃这个仓库。
+      if (exHit) {
+        return {
+          cwd,
+          scope: ['auto', 'full', 'stale'].includes(args.scope) ? args.scope : 'auto',
+          wikiPath: '',
+          state: 'excluded',
+          submitted: false,
+          notes: [
+            `此仓库不编译 CodeWiki：${cwd} 命中了用户设置的排除清单（条目 ${exHit}）。`,
+            '这是用户在面板上主动排除的，不是编译失败，也不是配置错误——不要重试、不要排障、不要换成其它 scope 再试。',
+            '需要为它建 wiki 时，请让用户到侧边栏 CodeWiki 面板的「设置」页把该目录移出排除清单。',
+          ],
+        }
+      }
       const auto0 = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
       // worktree 闸门（1.2.0）：在跑 cw status 之前就拦，报错直接给模型看（submit 里还有一道兜底）。
       // auto 调度（内部直调）不抛错——记一条 note 返回，扫描不因历史 worktree 任务中断。
@@ -3926,7 +3942,24 @@ function generateToolDefinition(cfg, svc) {
         effectiveScope = 'full'
         notes.push('scope=stale 但尚无 wiki，自动升为全量编译')
       }
+
       const needsFullCompile = effectiveScope === 'full' || status.state === 'missing' || status.state === 'uncompiled'
+
+      // 首次编译闸门（0.17.48）：仓库里原本没有 CodeWiki 时，要不要建它是一个需要用户
+      // 表态的决定——一次全量编译会在这个仓库里落下十几到几十篇文档，并自动提交一次。
+      // 模型顺手调一次 codewiki_generate 就替用户做了这个决定，这不是它该做的事。
+      // 判据用**用户原始 scope**而不是 effectiveScope：stale 遇到无 wiki 的仓库会在上面
+      // 被自动升成全量，看 effectiveScope 等于「凡是以 stale 调进来的都放行」，闸门形同虚设。
+      // 放行只有两种情形：scope=full（调用方显式要求全量重编）与 confirmed（面板按钮，
+      // 用户本人按下的就是确认）。自动调度不在此列——它在扫描阶段就把这类仓库放进
+      // pendingConfirm，根本走不到这里。
+      if ((status.state === 'missing' || status.state === 'uncompiled') && scope !== 'full' && args.confirmed !== true) {
+        notes.push(`此仓库尚无 CodeWiki（cw status：${status.state === 'missing' ? '没有 .codewiki 目录' : '.codewiki 存在但从未编译'}）`)
+        notes.push('首次编译会在仓库里生成整套文档并自动提交一次，需要用户点头，不能由工具代劳')
+        notes.push('先问用户「要为这个仓库建 CodeWiki 吗」；得到同意后再调用，并显式传 scope="full"')
+        notes.push('如果用户已经在侧边栏 CodeWiki 面板点过编译按钮，那条路径自带确认，不会再走到这里')
+        return result
+      }
 
       // 原生通道接管 stale/auto：不跑旧 planner 的 needsFull/unmapped 判定。
       // 旧 planner 见到「删除/改名导致文章归属缺失」一律推成全量，而原生引擎的组件级
@@ -5209,10 +5242,12 @@ export function apply(ctx, config) {
               schedState.pendingConfirm.push({ cwd, at: new Date().toISOString() })
             }
             continue
-          }
-        }
+          }        }
         try {
-          const r = await generateDef.execute({ cwd, scope: 'auto', auto: true }, {})
+          // confirmed：走到这里的仓库已经过一次确认——要么有编译历史（用户早就为它建过 wiki），
+          // 要么它不在「没历史 + 没 wiki」的交集里。真正需要确认的那批在上面的分支里已被
+          // pendingConfirm 拦下，不会到这里。
+          const r = await generateDef.execute({ cwd, scope: 'auto', auto: true, confirmed: true }, {})
           // 三个口径分开计：submitted=本轮真提交了编译；busy=已有活动任务（幂等命中，不是没扫到，
           // 也不该算作提交）；noop=判态干净/无变更可做。旧实现只认 submitted，面板上会出现
           // 「扫到 N 仓、提交 0」却看不出到底是在编译还是无事可做。
@@ -5245,6 +5280,8 @@ export function apply(ctx, config) {
       }
     }
   })
-  installWebServer(ctx, service, { config, schedState, compile: (args, exec) => generateDef.execute(args, exec) })
+  // 面板的编译入口只由用户按按钮触发——按下就是确认。带 confirmed 进去，
+  // 否则「仓库里还没有 CodeWiki」的首次编译会被自己的确认闸门拦住。
+  installWebServer(ctx, service, { config, schedState, compile: (args, exec) => generateDef.execute({ ...args, confirmed: true }, exec) })
   installUpdateReminder(ctx, config)
 }

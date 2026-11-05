@@ -245,12 +245,12 @@ async function waitJob(cwd, { timeout = 90000 } = {}) {
 }
 
 // 起一套服务 + 提交一个仓库，返回终态 job。
-async function runJob(repo, { cfg = nativeCfg(), scope = 'full', waitMs = 90000, llm = fakeLlm } = {}) {
+async function runJob(repo, { cfg = nativeCfg(), scope = 'full', waitMs = 90000, llm = fakeLlm, confirmed } = {}) {
   const m = makeCtx({ llm })
   apply(m.ctx, cfg)
   try {
     const gen = m.registered.get('codewiki_generate')
-    const submitted = await gen.execute({ cwd: repo, scope }, { agent: { id: 'sess-native' } })
+    const submitted = await gen.execute({ cwd: repo, scope, ...(confirmed ? { confirmed } : {}) }, { agent: { id: 'sess-native' } })
     const job = await waitJob(repo, { timeout: waitMs })
     return { job, submitted, m }
   } finally {
@@ -547,11 +547,14 @@ console.log('== 用例 14：stale 现在进原生通道，但无受管状态时�
   const chOff = nativeChannelFor({ nativeEngine: false }, { kind: 'full', scope: 'full' })
   check(chOff === null, 'nativeEngine=false 时通道为 null（保守默认）')
 
-  // 接线判据：scope=stale 但仓库还没有任何 wiki → 既有逻辑把 scope 升为 full，
-  // 于是它**合法地**进了原生通道（引擎收到的仍是 generate，不是 update）。
+  // 接线判据：scope=stale 但仓库还没有任何 wiki → 0.17.48 起首次编译闸门先拦下，
+  // 由用户点头后带 scope=full 再来。此时既有逻辑仍把 scope 升为 full，于是它**合法地**
+  // 进了原生通道（引擎收到的仍是 generate，不是 update）。
   const { repo, calls } = makeRepo('stalebound', { mode: 'done', preInit: true })
-  const { submitted } = await runJob(repo, { scope: 'stale' })
-  check(submitted.submitted === true, 'stale 在无编译产物时被升为全量并提交（既有 scope 修正逻辑）')
+  const gated = await runJob(repo, { scope: 'stale' })
+  check(gated.submitted.submitted === false, 'stale 遇到无 wiki 的仓库先被首次编译闸门拦下（不替用户决定建 wiki）')
+  const { submitted } = await runJob(repo, { scope: 'full', confirmed: true })
+  check(submitted.submitted === true, '用户确认后 scope=full 提交（既有 scope 修正逻辑）')
   check(calls().every((c) => c.action !== 'update'), `引擎从未收到 update 动作（足迹 ${JSON.stringify(calls().map((c) => c.action))}）`)
 }
 

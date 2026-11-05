@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.48 — 2026-11-05
+
+### 首次编译要先问用户，被排除的仓库不再伪装成失败
+
+三件事，都来自真机：模型在 `dsh-subagent-auto-router` 这类从没建过 wiki 的仓库上顺手调一次 `codewiki_generate`，于是在用户毫不知情的情况下落下几十篇文档并自动提交一次；被排除清单命中的仓库抛出异常，模型把它读成「编译失败」，回头去重试、去排障，白烧一整轮推理。
+
+- **首次编译闸门**：仓库里原本没有 `.codewiki`（`cw status` 判 `missing`）或建了但从未编译（`uncompiled`）时，工具不再提交，改为返回 `submitted: false` + 四行 notes，指名「此仓库尚无 CodeWiki」「首次编译会在仓库里生成整套文档并自动提交一次，需要用户点头」「先问用户，得到同意后显式传 `scope="full"`」。判据看的是**用户原始 `scope`**，不是修正后的 `effectiveScope`——`stale` 遇到无 wiki 的仓库会在上游被自动升成全量，看 `effectiveScope` 等于「凡是以 stale 调进来的都放行」，闸门形同虚设（第一版就是这么写错的，测试直接抓出来）。放行只有两种：`scope="full"`（调用方显式要求全量）与 `confirmed: true`（面板编译按钮，用户本人按下就是确认）。自动调度两条内部路径也都带上了 `confirmed`。
+- **被排除的仓库返回终态而不是抛错**：`state: 'excluded'` + notes 三行，明说「此仓库不编译 CodeWiki，命中了用户设置的排除清单（条目 …）」「这是用户在面板上主动排除的，不是编译失败，也不是配置错误——不要重试、不要排障、不要换成其它 scope 再试」「需要为它建 wiki 时请到设置页把目录移出清单」。`submit()` 里的同类抛错保留（那是内部接口，调用方都已提前判过排除）。
+- **小仓库不做特殊处理**：`empty-module-tree` 那一类（引擎走 whole-repository 模式、`module_tree.json` 是空对象）维持现状。
+
+验证：`test-orchestration.mjs` 补了 26 处 `confirmed` 并新增「仓库里还没有 CodeWiki：工具不得替用户决定建 wiki」用例（六条断言：不提交、state 如实、notes 含「尚无 CodeWiki」与「先问用户」、零模型请求、`stale` 同样被拦、`full` 放行且跑到 done）；`test-engine-native-job.mjs` 的 stale 升全量用例拆成「先被闸门拦下」+「确认后提交」两段。全量 41 个测试 `fail=0`。
+
 ## 0.17.47 — 2026-11-05
 
 ### 泄漏页不再卡基线：从「记阻塞」改成「连同残骸一并删掉」

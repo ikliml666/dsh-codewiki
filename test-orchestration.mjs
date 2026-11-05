@@ -696,7 +696,7 @@ console.log('== 本地规划：零规划请求，模块清单由 localPlan 顶�
   apply(mmCtx.ctx, batchCfg())
   const mmGen = mmCtx.registered.get('codewiki_generate')
   try {
-    const r = await mmGen.execute({ cwd: mmRepo }, { agent: { id: 'sess-mm' } })
+    const r = await mmGen.execute({ cwd: mmRepo, confirmed: true }, { agent: { id: 'sess-mm' } })
     check(r.submitted === true, '带会话路由：提交即返回')
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
@@ -725,7 +725,7 @@ console.log('== 本地规划：零规划请求，模块清单由 localPlan 顶�
   apply(pCtx.ctx, batchCfg())
   const pGen = pCtx.registered.get('codewiki_generate')
   try {
-    const r = await pGen.execute({ cwd: panelRepo }, { agent: 'test-agent' })
+    const r = await pGen.execute({ cwd: panelRepo, confirmed: true }, { agent: 'test-agent' })
     const job = await waitJob(r.cwd)
     check(job?.stage === 'done', `面板提交任务终态 done（实际 ${job?.stage}）`)
     check(mock3.llmCalls.every((c) => c.provider === 'workbuddy' && c.model === 'hy3'), '面板提交按设置的编译模型发出')
@@ -744,7 +744,7 @@ console.log('== codewiki_generate 全量编译：提交即返回，服务推进�
 {
   const mock = makeBatchMock()
   try {
-    const r1 = await gen.execute({ cwd: mainRepo }, { agent: { id: 'sess-e2e' } })
+    const r1 = await gen.execute({ cwd: mainRepo, confirmed: true }, { agent: { id: 'sess-e2e' } })
     console.log('  notes:', r1.notes.join(' | '))
     check(r1.submitted === true && typeof r1.jobId === 'string', '提交即返回（jobId 非空）')
     check(r1.stage === 'articles', `初始 stage=articles（实际 ${r1.stage}）`)
@@ -789,7 +789,7 @@ console.log('== 大 wiki：模块文章总量超预算 → 横切按大档单批
   const bigRepo = makeFixtureRepo()
   const mock = makeBatchMock({ bigArticle: true })
   try {
-    const r = await gen.execute({ cwd: bigRepo }, { agent: 'test-agent' })
+    const r = await gen.execute({ cwd: bigRepo, confirmed: true }, { agent: 'test-agent' })
     check(r.submitted === true, '大 wiki 提交即返回')
     const job = await waitJob(r.cwd)
     check(job?.stage === 'done', `服务 job 终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
@@ -815,7 +815,7 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
   const repoB = makeFixtureRepo()
   const mockStall = makeBatchMock({ stall: true }) // A 的请求挂起不返回，A 长时间占住推进权
   try {
-    const ra = await gen.execute({ cwd: repoA }, { agent: 'test-agent' })
+    const ra = await gen.execute({ cwd: repoA, confirmed: true }, { agent: 'test-agent' })
     check(ra.submitted === true, '项目 A 提交即返回')
     // 等 A 真正离开 submitting 进入 plan（首个批量请求已挂起）
     let jobA = null
@@ -825,7 +825,7 @@ console.log('== 单项目串行：已有项目在跑时新提交进 queued，前
       await new Promise((r) => setTimeout(r, 150))
     }
     check(jobA?.stage === 'articles', `A 进入 articles 占住推进权（实际 ${jobA?.stage}）`)
-    const rb = await gen.execute({ cwd: repoB }, { agent: 'test-agent' })
+    const rb = await gen.execute({ cwd: repoB, confirmed: true }, { agent: 'test-agent' })
     check(rb.submitted === true, '项目 B 提交即返回')
     const jobB0 = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.id === rb.jobId)
     check(jobB0?.stage === 'queued', `B 进 queued 排队（实际 ${jobB0?.stage}）`)
@@ -877,8 +877,8 @@ console.log('== 并行项目上限：关闭单项目串行后多仓库同时推�
     const cc2 = makeCtx({})
     apply(cc2.ctx, batchCfg({ serialProjects: false, parallelProjects: 3 }))
     const gen2 = cc2.registered.get('codewiki_generate')
-    const ra = await gen2.execute({ cwd: repoA }, { agent: 'test-agent' })
-    const rb = await gen2.execute({ cwd: repoB }, { agent: 'test-agent' })
+    const ra = await gen2.execute({ cwd: repoA, confirmed: true }, { agent: 'test-agent' })
+    const rb = await gen2.execute({ cwd: repoB, confirmed: true }, { agent: 'test-agent' })
     check(ra.submitted === true && rb.submitted === true, 'A/B 相继提交即返回')
     // B 不应停留 queued：并行上限 3 下两个项目各自推进
     let jobB = null
@@ -905,7 +905,7 @@ console.log('== 全程走宿主 llm 服务：各阶段请求都经同一个 prov
   const smallRepo = makeFixtureRepo()
   const mock = makeBatchMock()
   try {
-    const r = await gen.execute({ cwd: smallRepo }, { agent: 'test-agent' })
+    const r = await gen.execute({ cwd: smallRepo, confirmed: true }, { agent: 'test-agent' })
     check(r.submitted === true, '提交即返回')
     const job = await waitJob(r.cwd)
     console.log('  notes:', (job?.notes ?? []).join(' | '))
@@ -942,7 +942,7 @@ console.log('== codewiki_generate stale 逐篇更新（预构建任务直达 art
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@test', 'commit', '-m', 'v2'], { cwd: mainRepo })
   const mock = makeBatchMock({ articleMarker: 'Stale-batch' })
   try {
-    const r2 = await gen.execute({ cwd: mainRepo, scope: 'stale' }, { agent: 'test-agent' })
+    const r2 = await gen.execute({ cwd: mainRepo, scope: 'stale', confirmed: true }, { agent: 'test-agent' })
     console.log('  notes:', r2.notes.join(' | '))
     check(r2.submitted === true && r2.stage === 'articles', 'stale 提交直达 articles 阶段')
     const job = await waitJob(r2.cwd)
@@ -982,7 +982,7 @@ console.log('== codewiki_progress：注册、cwd/jobId 过滤、百分比与明�
   const midRepo = makeFixtureRepo()
   const mock = makeBatchMock()
   try {
-    const r = await gen.execute({ cwd: midRepo }, { agent: 'test-agent' })
+    const r = await gen.execute({ cwd: midRepo, confirmed: true }, { agent: 'test-agent' })
     check(r.submitted === true, '进度查询用仓库已提交编译')
     const mid = (await prog.execute({ cwd: midRepo }, { agent: 'test-agent' })).jobs.find((j) => j.id === r.jobId)
     check(mid?.stage === 'articles' && (mid?.progress === null || (mid.progress >= 0 && mid.progress <= 100)),
@@ -1092,12 +1092,12 @@ console.log('== 并发提交占位（首个 tick 窗口）与 flush 磁盘合并
     return res
   }
   try {
-    const first = await gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' })
+    const first = await gen2.execute({ cwd: concRepo, scope: 'full', confirmed: true }, { agent: 'test-agent' })
     await cancelOne(first.jobId)
     await waitJob(concRepo)
     const [ra, rb] = await Promise.all([
-      gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
-      gen2.execute({ cwd: concRepo, scope: 'full' }, { agent: 'test-agent' }),
+      gen2.execute({ cwd: concRepo, scope: 'full', confirmed: true }, { agent: 'test-agent' }),
+      gen2.execute({ cwd: concRepo, scope: 'full', confirmed: true }, { agent: 'test-agent' }),
     ])
     check(ra.jobId && ra.jobId === rb.jobId, `并发提交共享同一 job（${ra.jobId} vs ${rb.jobId}）`)
     await cancelOne(ra.jobId) // 挂起任务收尾，让 flush 落盘
@@ -1117,7 +1117,7 @@ console.log('== 面板端点：GET /api/codewiki/jobs、POST /api/codewiki/contr
   const cancelRepo = makeFixtureRepo()
   const mock = makeBatchMock({ stall: true }) // 请求挂起不返回，job 停在 articles 阶段等取消
   try {
-    const r4 = await gen.execute({ cwd: cancelRepo }, { agent: 'test-agent' })
+    const r4 = await gen.execute({ cwd: cancelRepo, confirmed: true }, { agent: 'test-agent' })
     check(r4.submitted === true, '提交了一个将被取消的任务')
     const jobsEp = main.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     const ctlEp = main.endpoints.find((e) => e.path === '/api/codewiki/control')
@@ -1211,27 +1211,32 @@ console.log('== 0.4.7：排除清单、仓库总览端点、compile 动作 ==')
     check(resC.code === 200 && cOut.ok === true && cOut.submitted === true, `compile 动作提交成功（${resC.code} submitted=${cOut.submitted}）`)
 
     // 2) auto 直调命中幂等（同仓库活动任务直接返回）
-    const rAuto = await gen.execute({ cwd: exRepo, scope: 'auto', auto: true }, { agent: 'test-agent' })
+    const rAuto = await gen.execute({ cwd: exRepo, scope: 'auto', auto: true, confirmed: true }, { agent: 'test-agent' })
     check(rAuto.submitted === false && rAuto.jobId === cOut.jobId, 'auto 直调幂等：返回现有活动任务')
 
     // 3) 任务跑完
     const job = await waitJob(exRepo)
     check(job?.stage === 'done', `compile 提交的任务终态 done（实际 ${job?.stage}，error ${job?.error ?? '-'}）`)
 
-    // 4) 排除清单：compile 与直调都拒绝，报错同时返回命中的排除项（0.8.1）
+    // 4) 排除清单（0.17.48）：排除不是错误，是用户在面板上的表态。compile 与直调都要
+    //    返回明确的终态 state=excluded 并说明「此仓库不编译 CodeWiki」，而不是抛错——
+    //    抛错会被模型读成「编译失败」，然后去重试、排障，白烧一轮推理。
     mainConfig.excludePaths = exRepo
     const resC2 = fakeRes()
     await ctlEp.handler(fakeReq({ action: 'compile', cwd: exRepo }, '127.0.0.1', 'POST'), resC2)
     const c2 = JSON.parse(resC2.out)
-    check(resC2.code === 400 && c2.ok === false && String(c2.error).includes('排除清单') && String(c2.error).includes('命中排除项') && String(c2.error).includes(exRepo), 'compile 对排除仓库 400 拒绝（报错含命中排除项）')
-    let err = null
-    try { await gen.execute({ cwd: exRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
-    check(err && String(err.message).includes('命中排除项') && String(err.message).includes(exRepo), '直调对排除仓库抛错（报错含命中排除项）')
+    check(resC2.code === 200 && c2.ok === true && c2.state === 'excluded' && c2.submitted === false,
+      `compile 对排除仓库返回 200 + state=excluded（${resC2.code} state=${c2.state}）`)
+    check((c2.notes ?? []).some((n) => String(n).includes('此仓库不编译 CodeWiki')) && (c2.notes ?? []).some((n) => String(n).includes(exRepo)),
+      'compile 的 notes 明说「此仓库不编译 CodeWiki」并点名命中的排除条目')
+    const rEx = await gen.execute({ cwd: exRepo }, { agent: 'test-agent' })
+    check(rEx.state === 'excluded' && rEx.submitted === false, `直调对排除仓库返回 excluded（state=${rEx.state}）`)
+    check((rEx.notes ?? []).some((n) => String(n).includes('不是编译失败')), '直调 notes 明确否掉「编译失败」的读法')
     const sub = path.join(exRepo, 'packages', 'app')
     fs.mkdirSync(sub, { recursive: true })
-    let err2 = null
-    try { await gen.execute({ cwd: sub }, { agent: 'test-agent' }) } catch (e) { err2 = e }
-    check(err2 && String(err2.message).includes('命中排除项') && String(err2.message).includes(exRepo), '子目录同样被排除（报错排除项为父目录条目）')
+    const rSub = await gen.execute({ cwd: sub }, { agent: 'test-agent' })
+    check(rSub.state === 'excluded' && (rSub.notes ?? []).some((n) => String(n).includes(exRepo)),
+      '子目录同样被排除（notes 点名父目录条目）')
     delete mainConfig.excludePaths
 
     // 5) repos 总览：排除标记 + 状态 + scheduler 块
@@ -1259,7 +1264,7 @@ console.log('== 0.4.8：knownRepos 登记独立于 job 历史、refresh 动作 =
   // 与产品同源推导：写死 dirname 会落到真实宿主的清单文件（0.16.6 修复）
   const reposFile = reposFileFor(JOBS_FILE)
   try {
-    const r = await gen.execute({ cwd: krRepo }, { agent: 'test-agent' })
+    const r = await gen.execute({ cwd: krRepo, confirmed: true }, { agent: 'test-agent' })
     check(r.submitted === true, '0.4.8 编译提交成功')
     await waitJob(r.cwd)
     // 0.4.11：终态任务明细全结算、中间进度清空
@@ -1373,9 +1378,9 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     const ep2 = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     const epRepos = wx.endpoints.find((e) => e.path === '/api/codewiki/repos')
 
-    const rA = await gen2.execute({ cwd: wsRepo }, { agent: 'test-agent' })
+    const rA = await gen2.execute({ cwd: wsRepo, confirmed: true }, { agent: 'test-agent' })
     await waitJob(rA.cwd)
-    const rB = await gen2.execute({ cwd: outsideRepo }, { agent: 'test-agent' })
+    const rB = await gen2.execute({ cwd: outsideRepo, confirmed: true }, { agent: 'test-agent' })
     await waitJob(rB.cwd)
 
     const readJobs = async () => {
@@ -1388,7 +1393,7 @@ console.log('== 0.4.9：jobs 端点按宿主工作区过滤（workspaceOnly） =
     // 既看不到谁在编译也无法取消。stall 占住 rC 在 articles 阶段，断言后取消：
     const stalledC = makeBatchMock({ stall: true })
     // scope=full：rB 编译后 outsideRepo 的 wiki 已最新，auto 会被 "Wiki is up to date" 短路不提交
-    const rC = await gen2.execute({ cwd: outsideRepo, scope: 'full' }, { agent: 'test-agent' })
+    const rC = await gen2.execute({ cwd: outsideRepo, scope: 'full', confirmed: true }, { agent: 'test-agent' })
     check((await readJobs()).some((j) => j.cwd === outsideRepo && !['done', 'failed', 'cancelled'].includes(j.stage)),
       '工作区外非终态任务仍显示（排队/编译中不被 workspaceOnly 藏掉）')
     const resRC = fakeRes()
@@ -1434,7 +1439,7 @@ console.log('== 0.4.10：workspaceRegistry.list() 抛错时 jobs/repos 降级不
     const gen2 = wx.registered.get('codewiki_generate')
     const ep2 = wx.endpoints.find((e) => e.path === '/api/codewiki/jobs')
     const epRepos = wx.endpoints.find((e) => e.path === '/api/codewiki/repos')
-    const rB = await gen2.execute({ cwd: outsideRepo }, { agent: 'test-agent' })
+    const rB = await gen2.execute({ cwd: outsideRepo, confirmed: true }, { agent: 'test-agent' })
     await waitJob(rB.cwd)
 
     const res = fakeRes()
@@ -1481,11 +1486,11 @@ console.log('== 0.4.10：codewiki_generate 输出过 output schema 校验（null
     apply(wx.ctx, cfg2)
     const def = wx.registered.get('codewiki_generate')
     const schema = def.output.schema
-    const r1 = await def.execute({ cwd: repo }, { agent: 'test-agent' })
+    const r1 = await def.execute({ cwd: repo, confirmed: true }, { agent: 'test-agent' })
     await waitJob(r1.cwd)
     check(validateOut(schema, r1).length === 0, `首次提交返回过 schema（${validateOut(schema, r1).join('; ')}）`)
 
-    const r2 = await def.execute({ cwd: repo }, { agent: 'test-agent' })
+    const r2 = await def.execute({ cwd: repo, confirmed: true }, { agent: 'test-agent' })
     check(validateOut(schema, r2).length === 0, `二次调用（state ${r2.state}）返回过 schema（${validateOut(schema, r2).join('; ')}）`)
   } finally {
     mock.restore()
@@ -1584,16 +1589,16 @@ console.log('== 全局会话 Tab 的聚合接口 + worktree 闸门 ==')
       const mockWt = makeBatchMock()
       try {
         let wtErr = null
-        try { await gen.execute({ cwd: wtLinked }, { agent: 'test-agent' }) } catch (e) { wtErr = e }
+        try { await gen.execute({ cwd: wtLinked, confirmed: true }, { agent: 'test-agent' }) } catch (e) { wtErr = e }
         check(String(wtErr?.message ?? '').includes('worktree'), `worktree 目录提交 → 报错（${String(wtErr?.message ?? '未报错').slice(0, 60)}…）`)
         check(String(wtErr?.message ?? '').includes('合并回主仓库'), '报错文案说明「等合并回主仓库后再编译」')
         // 主工作区对照：同一个仓库的主目录照常接受
-        const rMain = await gen.execute({ cwd: wtMain }, { agent: 'test-agent' })
+        const rMain = await gen.execute({ cwd: wtMain, confirmed: true }, { agent: 'test-agent' })
         check(rMain.submitted === true, `主工作区照常提交（jobId ${rMain.jobId}）`)
         const jobMain = await waitJob(wtMain)
         check(jobMain?.stage === 'done', `主工作区任务跑完（${jobMain?.stage}）`)
         // auto 调度路径：静默跳过，不产生任务、不报错
-        const autoR = await gen.execute({ cwd: wtLinked, scope: 'auto', auto: true }, {})
+        const autoR = await gen.execute({ cwd: wtLinked, scope: 'auto', auto: true, confirmed: true }, {})
         check(autoR.submitted !== true && (autoR.notes ?? []).some((n) => String(n).includes('worktree')), 'auto 调度扫到 worktree → 不提交并记 note')
       } finally {
         mockWt.restore()
@@ -1618,9 +1623,9 @@ console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列�
   try {
     // a) 提交闸门：手动路径报错、auto 路径静默跳过（不产生 job）
     let shErr = null
-    try { await gen.execute({ cwd: shell }, { agent: 'test-agent' }) } catch (e) { shErr = e }
+    try { await gen.execute({ cwd: shell, confirmed: true }, { agent: 'test-agent' }) } catch (e) { shErr = e }
     check(String(shErr?.message ?? '').includes('没有可编译的源码文件'), `空壳目录提交 → 报错（${String(shErr?.message ?? '未报错').slice(0, 50)}…）`)
-    const shAuto = await gen.execute({ cwd: shell, scope: 'auto', auto: true }, {})
+    const shAuto = await gen.execute({ cwd: shell, scope: 'auto', auto: true, confirmed: true }, {})
     check(shAuto.submitted !== true, 'auto 调度扫到空壳目录 → 不提交')
 
     // b) 面板过滤：往 jobs 文件里塞一条空壳目录任务 + 一条正常任务，新实例读取后
@@ -1658,6 +1663,36 @@ console.log('== 空壳目录（扫不出源码）拒绝编译 + 面板任务列�
   }
 }
 
+// ==================== 首次编译必须用户点头（0.17.48） ====================
+await cleanupServices()
+console.log('== 仓库里还没有 CodeWiki：工具不得替用户决定建 wiki，先问 ==')
+{
+  const fresh = makeFixtureRepo() // 全新仓库：没有 .codewiki，cw status 判 missing
+  const mock = makeBatchMock()
+  try {
+    // 1) 默认 scope=auto：拦下，不提交
+    const r = await gen.execute({ cwd: fresh }, { agent: 'test-agent' })
+    check(r.submitted === false && r.jobId === undefined, `首次编译未确认 → 不提交（submitted=${r.submitted}）`)
+    check(r.state === 'missing' || r.state === 'uncompiled', `返回值如实报出仓库状态（state=${r.state}）`)
+    check((r.notes ?? []).some((n) => String(n).includes('尚无 CodeWiki')), 'notes 说明「此仓库尚无 CodeWiki」')
+    check((r.notes ?? []).some((n) => String(n).includes('先问用户')), 'notes 指示模型先问用户，而不是自己决定')
+    check(mock.llmCalls.length === 0, `拦在提交前，一次模型请求都没发出（实际 ${mock.llmCalls.length}）`)
+
+    // 2) scope=stale 同样被拦（这类仓库本来就会被升成全量，等于首次编译）
+    const rStale = await gen.execute({ cwd: fresh, scope: 'stale' }, { agent: 'test-agent' })
+    check(rStale.submitted === false, `scope=stale 遇到无 wiki 的仓库同样不提交（submitted=${rStale.submitted}）`)
+
+    // 3) 用户同意后显式 scope=full：放行
+    const rFull = await gen.execute({ cwd: fresh, scope: 'full' }, { agent: 'test-agent' })
+    check(rFull.submitted === true, `用户显式要求全量 → 放行提交（submitted=${rFull.submitted} state=${rFull.state}）`)
+    const job = await waitJob(fresh)
+    check(job?.stage === 'done', `显式全量编译跑完（stage=${job?.stage}）`)
+  } finally {
+    mock.restore()
+    fs.rmSync(fresh, { recursive: true, force: true })
+  }
+}
+
 // ============================ 编译模型缺失诚实报错（0.10.1） ============================
 await cleanupServices()
 console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理、不静默跑空 ==')
@@ -1666,7 +1701,7 @@ console.log('== 编译模型/provider 缺失：诚实报错，不降级子代理
   const noCfg = makeCtx({})
   apply(noCfg.ctx, { batchProvider: '', batchModel: '' })
   let err = null
-  try { await noCfg.registered.get('codewiki_generate').execute({ cwd: noCfgRepo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  try { await noCfg.registered.get('codewiki_generate').execute({ cwd: noCfgRepo, confirmed: true }, { agent: 'test-agent' }) } catch (e) { err = e }
   check(err && String(err.message).includes('编译模型提供商为空'), `provider 留空 → 报错指向设置项（实际 ${err?.message?.slice(0, 40)}…）`)
   // 失败必须落成 job 的 failed 态（可观测，而不是凭空消失）
   const failedJob = (JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8')).jobs ?? []).find((j) => j.cwd === noCfgRepo)
@@ -1686,7 +1721,7 @@ console.log('== 思考档位不在模型目录里：提交时拦下并列出真�
   const ctx = makeCtx({})
   apply(ctx.ctx, batchCfg({ batchReasoningEffort: 'off' }))
   let err = null
-  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo, confirmed: true }, { agent: 'test-agent' }) } catch (e) { err = e }
   check(err && String(err.message).includes('思考档位'), `档位不在目录 → 提交报错（实际 ${err?.message?.slice(0, 60)}…）`)
   check(err && String(err.message).includes('low/high'), '报错里列出该模型真实可用的档位')
   check(mock.llmCalls.length === 0, `拦在提交时，一次模型请求都没发出（实际 ${mock.llmCalls.length}）`)
@@ -1704,7 +1739,7 @@ console.log('== 档位在目录里（或模型未声明档位）：照常提交 
   const ctx = makeCtx({})
   apply(ctx.ctx, batchCfg({ batchReasoningEffort: 'low' }))
   let err = null
-  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo }, { agent: 'test-agent' }) } catch (e) { err = e }
+  try { await ctx.registered.get('codewiki_generate').execute({ cwd: repo, confirmed: true }, { agent: 'test-agent' }) } catch (e) { err = e }
   check(err === null, `合法档位不拦（实际 ${err?.message?.slice(0, 40) ?? '无错'}）`)
   fs.rmSync(repo, { recursive: true, force: true })
   mock.restore()
@@ -1775,7 +1810,7 @@ console.log('== 自动调度：过期检测触发真实心跳提交，历史外�
   const initCtx = makeCtx()
   apply(initCtx.ctx, batchCfg({ autoUpdate: false }))
   const initGen = initCtx.registered.get('codewiki_generate')
-  const submit = await initGen.execute({ cwd: scanRepo, scope: 'auto' }, {})
+  const submit = await initGen.execute({ cwd: scanRepo, scope: 'auto', confirmed: true }, {})
   check(submit.submitted === true, '自动调度前置：新仓库可提交全量初始化')
   const initJob = await waitJob(scanRepo)
   check(initJob?.stage === 'done', `自动调度前置：初始化编译至终态 done（实际 ${initJob?.stage}）`)
@@ -1821,14 +1856,14 @@ console.log('== 幂等：同一仓库以不同路径写法提交只允许一条�
   apply(idemCtx.ctx, batchCfg({ autoUpdate: false }))
   try {
     const idemGen = idemCtx.registered.get('codewiki_generate')
-    const r1 = await idemGen.execute({ cwd: idemRepo, scope: 'auto' }, {})
+    const r1 = await idemGen.execute({ cwd: idemRepo, scope: 'auto', confirmed: true }, {})
     check(r1.submitted === true, `幂等前置：首次提交成功（submitted=${r1.submitted}）`)
     const variants = [
       ['尾分隔符', idemRepo + path.sep],
       ['盘符大小写不同', idemRepo.toLowerCase()],
     ]
     for (const [label, variant] of variants) {
-      const r = await idemGen.execute({ cwd: variant, scope: 'auto' }, {})
+      const r = await idemGen.execute({ cwd: variant, scope: 'auto', confirmed: true }, {})
       check(
         r.submitted === false && r.jobId === r1.jobId,
         `幂等命中：cwd ${label} 仍返回同一任务（实际 submitted=${r.submitted} jobId=${r.jobId}，期望 ${r1.jobId}）`,
