@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.17.41 — 2026-11-05
+
+### 面板：校对并进校验，七步收成六步
+
+`proofread`（语义校对）与 `validate`（质量门）在面板上是两个并列步骤，名字都像「检查」，看着像同一件事做了两遍。实际流程是检测→修复→复检：质量门纯确定性判产物（frontmatter、source_files、基线、入口契约），校对只针对质量门报出的死链源页调模型改正文，改完再跑一次质量门。
+
+职责不同，但不该占两格。两者合并成一个 `validate` 步骤：
+
+- `client.js` 的 `ACTIVE_STAGES` 去掉 `review`，`LEGACY_STAGE` 把历史任务的 `review` 折回 `validate`（不折的话 `indexOf` 得 -1，失败/取消时整条步骤条熄灭、看不出卡在哪）。
+- `NATIVE_TO_STEP` 与 `index.js` 的 `NATIVE_STAGE_TO_PANEL` 都把 `proofread` 映射到 `validate`，两侧算法保持一致。
+- `STAGE_WEIGHTS` 从 `{prepare .24, articles .46, review .14, validate .07}` 合并为 `{prepare .24, articles .46, validate .21}`——校对在大仓库上要逐页调模型，权重不能只按质量门的 .07 算。
+- 细分阶段名没丢：`NATIVE_STAGE_KEYS.proofread` 仍在，活动流里照样显示「语义校对」。面板并列的格子没了，日志里的信息还在。
+
+### 被取代的旧页改为自动清理
+
+0.17.40 把「源码已被当前树接手、但页名对不上任何模块」的旧页做成只报告不删，理由是它们含人工维护内容（真机 Wxxy-CampusHub 的 11 篇各有 4~20 次人工提交）。用户明确要求不要留待办清单：索引干净比保留过期页重要。
+
+改为进删除集，与孤儿页、残留页同批走落地器事务（`deleteFiles` → pre-image → 可回滚 → 同一个 commit）：
+
+- `findSupersededLegacyPages` 的语义从「只报告」改为「进删除集」，JSDoc 同步改写。判据不变：页名不在树里 + 无 `fsoft_page` + 至少一个 source_file 已被当前树某模块认领。
+- `native-run.js` 把结果并入 `deleteFiles`，notes 里逐篇点名**接手它的源码路径**（`campus-auth.md（→ crates/campus-auth/src/cas.rs）`），并提示原文见 git 历史。删后要捞回来，按这条路径查历史即可。
+- 保护边界没动：`decisions/`、`learnings/`、`concepts/` 这些非模块页不在扫描范围（只看 `modules/`）；没有模块接手其源码的页（source_files 全不被认领）仍然保留。
+
+真机复验（Wxxy-CampusHub）：11 篇全部进删除集，每篇都带接手路径；`decisions/` 14 篇、`learnings/` 29 篇、`concepts/` 2 篇一篇未动。
+
+### 验证
+
+- `test-engine-apply-plan.mjs` 59 passed / 0 failed；用例改名并补断言，明确「进删除集 + 报出 coveredSource」是现在的契约。
+- `test-engine-native-incremental.mjs` **159/159**。用例 16 的人工页 fixture 改成 `source_files: notes/handbook.md`（存在但无模块认领）——保护它的是「没有别的模块接手它的源码」，而不是「title 看上去不像 slug」：真机上旧通道页的标题同样常带括号描述。
+- 39 个测试全绿（含 6 个需要 `.probe-fsoft/venv` 的）。`test-client-panel.mjs` 14 passed、`test-config.mjs` PASS。
+
 ## 0.17.40 — 2026-11-05
 
 拿真实项目（`Wxxy-CampusHub`，254 个文件、80 Rust + 47 TSX，从 9 月底的旧 Node 通道产物起飞）全量编译了一遍，逼出两个 0.17.39 没覆盖到的问题。

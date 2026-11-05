@@ -948,15 +948,16 @@ await check('残留页：嵌套目录里的人工页仍不动（type 或 source_
   assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree }), [])
 })
 
-await check('被取代的旧页：只报告不删（人工提交过的页不能凭 slug 撞车就毁掉）', () => {
+await check('被取代的旧页：进删除集且报出接手它的源码（用户要的是索引干净，不是待办清单）', () => {
   // 真机 Wxxy-CampusHub：11 篇旧页标题全写成「CAS 协议核心（campus-auth）」这种描述性
   // 名字（title !== slug 不中），又平铺在 modules/ 根下（nested 不中），而由于 slug 已不在
   // 树里、source_files 只剩一两个附属文件没被新树覆盖，findOrphanPages 的「全部失效」
-  // 也不成立 —— 三条判据同时擦肩而过。
+  // 也不成立 —— 三条窄判据同时擦肩而过。
   //
-  // 但**不能因此自动删**：那 11 篇各有 4~20 次人工提交（campus-hub-tauri 20 次、
-  // frontend-shell 15 次），正文里是人工补的迁移警告、行号更正和 [[decisions/...]] 链接。
-  // 自动删 = 凭「slug 撞上旧聚类」毁掉用户手写的内容。所以这里只给线索，删除权留给人。
+  // 它们的源码确实已被新树接手，所以归 findSupersededLegacyPages 处理并进删除集。
+  // 代价明确：这 11 篇各有 4~20 次人工提交（campus-hub-tauri 20 次、frontend-shell
+  // 15 次），正文里人工补过的迁移警告与 [[decisions/...]] 链接删后只剩 git 历史一份。
+  // 所以每篇都必须报出「被谁接手」（coveredSource），事后能按路径从历史里捞。
   const repoRoot = makeRepo()
   const mods = join(repoRoot, '.codewiki', 'modules')
   mkdirSync(mods, { recursive: true })
@@ -969,14 +970,14 @@ await check('被取代的旧页：只报告不删（人工提交过的页不能�
   writeFileSync(join(mods, 'campus-auth.md'), page('CAS 协议核心（campus-auth）', [
     'crates/auth/src/cas.rs', 'crates/auth/tests/live.rs', 'NOTICE.md',
   ]), 'utf8')
-  // 一个 source_file 都不被树覆盖 → 连「被取代」的线索都没有
+  // 一个 source_file 都不被树覆盖 → 连「被取代」的线索都没有，必须留下
   writeFileSync(join(mods, 'legacy-unrelated.md'), page('无关旧模块（legacy-unrelated）', ['vendor/old/a.rs']), 'utf8')
   // 人工页（type 不是 module）
   writeFileSync(join(mods, 'human.md'), ['---', 'title: 人工笔记（human）', 'type: concept', 'source_files:', '  - crates/auth/src/cas.rs', '---', '', '# human', ''].join('\n'), 'utf8')
 
-  // 删除集里必须没有它们
+  // 窄判据（findStaleModulePages）不管这类页：它只认 title/嵌套两条可证特征
   assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree }), [])
-  // 但线索要能报出来，且说得出是被哪个文件接手的
+  // 宽判据负责它，且说得出是被哪个文件接手的
   const sup = findSupersededLegacyPages({ repoRoot, moduleTree })
   assert.deepEqual(sup.map((o) => o.rel), ['.codewiki/modules/campus-auth.md'], JSON.stringify(sup))
   assert.equal(sup[0].coveredSource, 'crates/auth/src/cas.rs')

@@ -30,13 +30,16 @@ window.__ModuleLoader__.load({
     const GENERIC_EFFORTS = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队。
-    // 后面六步就是编译真实发生的事，一步不多：准备（探测环境+解析代码图+聚类）→ 写作 →
-    // 校对 → 校验 → 索引 → 提交。旧值 crosscut（横切）随单轮写作通道退役，原生通道
-    // （唯一通道）从不经过它；review 现在是校对真正发生的位置。
-    const ACTIVE_STAGES = ['queued', 'prepare', 'articles', 'review', 'validate', 'index', 'commit']
+    // 后面五步就是编译真实发生的事，一步不多：准备（探测环境+解析代码图+聚类）→ 写作 →
+    // 校验 → 索引 → 提交。旧值 crosscut（横切）随单轮写作通道退役，原生通道
+    // （唯一通道）从不经过它。
+    // 「校对」不再单列一步：它是质量门死链检查的修复动作（检测→改正文→复检），与质量门
+    // 本身是一件事的两半，分两格只会让人以为有两道重复检查。细分名称仍在活动流里可见
+    // （NATIVE_STAGE_KEYS.proofread）。
+    const ACTIVE_STAGES = ['queued', 'prepare', 'articles', 'validate', 'index', 'commit']
     // 历史任务里还留着已退役的阶段名：不映射的话 indexOf 得 -1，步骤条在失败/取消时
-    // 会整条熄灭、不标红，用户看不出卡在哪一步。
-    const LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles' }
+    // 会整条熄灭、不标红，用户看不出卡在哪一步。review 在 0.17.41 并进 validate。
+    const LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles', review: 'validate' }
     const stageOf = (job) => LEGACY_STAGE[job?.stage] ?? job?.stage
 
     const zh = () => ({
@@ -1492,17 +1495,19 @@ window.__ModuleLoader__.load({
             .filter((k) => ACTIVE_STAGES.includes(k))
           return keys.length ? keys[keys.length - 1] : null
         }
-        // 引擎八段 → 面板七步。服务端用同一张表推 job.stage，这里用它把引擎自报的
+        // 引擎八段 → 面板五步。服务端用同一张表推 job.stage，这里用它把引擎自报的
         // 阶段百分比挂到对应步骤上，两边算出来的「当前在哪一步」才不会打架。
+        // proofread 与 validate 都归 validate：前者是后者死链检查的修复动作。
         const NATIVE_TO_STEP = {
           env: 'prepare', graph: 'prepare', cluster: 'prepare',
-          articles: 'articles', proofread: 'review', validate: 'validate',
+          articles: 'articles', proofread: 'validate', validate: 'validate',
           index: 'index', baseline: 'index', commit: 'commit',
         }
         // 总进度：各阶段定权线性推进，阶段内按真实完成度折算；封顶 99，done/partial 才 100。
-        // 权重对应七步里除排队外的六个真实阶段，总和为 1——漏一步或比例错，百分比就会在
-        // 相邻两步之间凭空跳点。准备阶段（环境+代码图+聚类）在大仓库上最费时间，给到 0.24。
-        const STAGE_WEIGHTS = { queued: 0, prepare: 0.24, articles: 0.46, review: 0.14, validate: 0.07, index: 0.05, commit: 0.04 }
+        // 权重对应五步里除排队外的四个真实阶段，总和为 1——漏一步或比例错，百分比就会在
+        // 相邻两步之间凭空跳点。准备阶段（环境+代码图+聚类）在大仓库上最费时间，给到 0.24；
+        // 校验段含死链校对（模型改写正文），在大仓上也不便宜，留 0.14。
+        const STAGE_WEIGHTS = { queued: 0, prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }
         // 单个阶段自己的完成度（0..1）。这是「每个阶段显示自己的百分比」的唯一来源：
         // 已跑过=1，当前阶段优先用引擎自报的 nativePercent（同一段内最细的读数），
         // 退而用 taskList 的完成率，都没有就是 0（刚进入、还没产出任何可计数的东西）。

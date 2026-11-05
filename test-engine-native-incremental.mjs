@@ -708,9 +708,13 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   fs.mkdirSync(mods, { recursive: true })
   fs.writeFileSync(path.join(mods, 'agent-runtime.md'),
     '---\ntitle: agent-runtime\ntype: module\nsource_files:\n  - core/core.py\ntags: []\nfsoft_page: agent_runtime.md\n---\n\n# agent-runtime\n\n旧聚类的残骸。\n', 'utf8')
-  // 人工页没有 fsoft_page，且标题是人写的（不等于文件名），不在删除范围
-  fs.writeFileSync(path.join(mods, 'handwritten.md'),
-    '---\ntitle: 人工维护的笔记\ntype: module\nsource_files:\n  - core/core.py\ntags: []\n---\n\n# 人工维护的笔记\n\n人工维护，别删。\n', 'utf8')
+  // 人工页：source_files 指向的文件存在、但没有任何模块认领它 → 三条判据全不中，留下。
+  // 保护它的是「没有别的模块接手它的源码」，不是「title 看上去不像 slug」：真机上
+  // 旧通道页的 title 也常写成「CAS 协议核心（campus-auth）」这种带括号的人类可读名。
+  fs.mkdirSync(path.join(repo, 'notes'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'notes', 'handbook.md'), '# 手册\n\n非源码文件。\n')
+  fs.writeFileSync(path.join(mods, 'human-notes.md'),
+    '---\ntitle: 手工概览\ntype: module\nsource_files:\n  - notes/handbook.md\ntags: []\n---\n\n# 手工概览\n\n人工维护，别删。\n', 'utf8')
   // 没有归属证据的草稿页（title 恰好等于文件名、但 source_files 空）同样不删：
   // 判据只认「旧通道模板的三个特征同时成立」，不赌人工页不会这样起名。
   fs.writeFileSync(path.join(mods, 'draft.md'),
@@ -722,7 +726,7 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
   check(/发现 1 个残留页/.test(notes), `notes 点名残留页数量（实际 ${notes.slice(-240)}）`)
   check(!fs.existsSync(path.join(mods, 'agent-runtime.md')), '残留页被删除')
-  check(fs.existsSync(path.join(mods, 'handwritten.md')), '没有 fsoft_page 的人工页不得被删')
+  check(fs.existsSync(path.join(mods, 'human-notes.md')), '没有模块接手其源码的人工页不得被删')
   check(fs.existsSync(path.join(mods, 'draft.md')), 'source_files 为空的页不得被删（没有归属证据）')
 }
 

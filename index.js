@@ -2478,9 +2478,12 @@ function createJobService(config, onSettled) {
   // 又能显示「引擎自己走到哪」。映射原则：引擎里发生在写作之前的三段（探测环境、
   // 解析代码图、聚类模块）合成步骤条的「准备」——它们对用户是同一件事：还在摸清仓库。
   // validate 有自己的格子（校验），不再借用 review（那现在是校对真正发生的位置）。
+  // proofread → validate：校对是质量门死链检查的修复动作（检测→改正文→复检），
+  // 与质量门同属「校验产物」这件事。分成两格会让面板出现两个都叫检查的步骤。
+  // 细分阶段名仍由 nativeStage 单独携带，活动流里照样能看到「语义校对」。
   const NATIVE_STAGE_TO_PANEL = {
     env: 'prepare', graph: 'prepare', cluster: 'prepare', articles: 'articles',
-    proofread: 'review', validate: 'validate', index: 'index', baseline: 'index', commit: 'commit',
+    proofread: 'validate', validate: 'validate', index: 'index', baseline: 'index', commit: 'commit',
   }
   // 引擎事件日志：内存留最近 40 条给面板即时看，同时逐条追加到仓库外的 NDJSON
   // （lib/job-logs.js）。两条路都必须有——内存那份随任务记录截断/宿主重启消失，
