@@ -21,6 +21,7 @@ import {
   findOrphanPages,
   findStaleModulePages,
   findSupersededLegacyPages,
+  findDeprecatedConceptPages,
   toApplyBlockers,
   verifyCommitScope,
 } from './lib/engine/apply-plan.js'
@@ -248,23 +249,44 @@ await checkAsync('正常路径：写盘 + index + baseline + commit → done', a
   assert.equal(r.commit.scope.ok, true)
 })
 
-await checkAsync('存量坏文章：阻碍基线推进，但绝不回滚本轮产物', async () => {
+await checkAsync('存量坏文章：格式坏掉的自动修好，不拖累终态', async () => {
   const root = makeRepo()
   const docs = makeDocs()
   writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
   // 库里躺着的坏页：不是本轮产物，也从没被重写过（cw index 照样把它收进索引）。
+  // 它只是缺 frontmatter，内容完好 —— 补一份就能救回来，不该拖累整轮。
   writeFile(root, '.codewiki/modules/legacy.md', '# legacy\n\n没有 frontmatter 的历史页。\n')
   const { deps, calls } = recordingDeps()
   const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
-  assert.equal(r.outcome, 'partial', '存量坏页必须把终态拉成 partial')
-  assert.equal(r.applied, true, '存量坏页不阻止本轮落盘')
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.equal(r.applied, true)
+  assert.ok(!r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
+  const healed = readFile(root, '.codewiki/modules/legacy.md')
+  assert.ok(healed.startsWith('---\n'), `旧页应被补上 frontmatter：${healed.slice(0, 80)}`)
+  assert.ok(healed.includes('没有 frontmatter 的历史页。'), '正文必须原样保留')
+  assert.equal(r.baseline.advanced, true, '可修的存量页不该拦住基线')
+})
+
+await checkAsync('存量坏文章：内容不可救的记阻塞，但绝不回滚本轮产物', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  // 正文本身就是模型提示泄漏：改写没有意义，也不该被当成一篇「文章」留在库里。
+  writeFile(
+    root,
+    '.codewiki/learnings/leaked.md',
+    'm00270–m00270 Cargo lock manual bump lesson\n\nThe user wants to update an existing CodeWiki article ...\n',
+  )
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, deps })
+  assert.equal(r.outcome, 'partial', '不可救的存量页必须把终态拉成 partial')
+  assert.equal(r.applied, true, '不可救的存量页不阻止本轮落盘')
   assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
   assert.ok(r.blockers.some((b) => b.kind === 'quality-gate'), '经 toApplyBlockers 映射成 quality-gate')
   // 回滚是错的处置：它会把刚写好的 core.md / CodeWiki.md 一起撤掉，用一个既存缺陷
-  // 否掉一批好产物。存量坏页既删不掉也修不了，只能记账。
+  // 否掉一批好产物。
   assert.equal(r.rolledBack, false)
   assert.ok(exists(root, '.codewiki/modules/core.md'), '本轮产物必须留在磁盘上')
-  assert.ok(exists(root, '.codewiki/modules/legacy.md'), '存量坏页也不能被删掉')
   assert.equal(r.baseline.advanced, false, '基线绝不推进')
   assert.equal(r.canAdvanceBaseline, false)
   assert.ok(!calls.some((c) => c.args === 'meta update'), `不该跑 meta update：${JSON.stringify(seq(calls))}`)
@@ -296,7 +318,7 @@ await checkAsync('存量体检跳过 `_` 开头的路径（与 cw index 同一�
 })
 
 
-await checkAsync('无变化轮同样要体检存量：库里躺着坏文章时不许报 done', async () => {
+await checkAsync('无变化轮同样要体检存量：内容不可救时报 partial，格式坏掉的静默记账', async () => {
   // Node 通道在 tickIndex 开头无条件跑存量体检。原生通道若把体检放在 idle 短路之后，
   // 「引擎没变化」就等于「库是干净的」—— 两件毫无关系的事被划上等号，终态假绿：
   // 坏文章永远没人发现，基线照旧不动，面板却一直显示 done。
@@ -309,9 +331,27 @@ await checkAsync('无变化轮同样要体检存量：库里躺着坏文章时�
   const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
   assert.deepEqual(r.written, [])
   assert.equal(r.applied, true)
-  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
-  assert.equal(r.outcome, 'partial', '无变化轮里库是脏的，终态不许报 done')
+  // 只是格式坏了：无变化轮刻意不碰索引，所以这里不修、也不阻塞，只记账。
+  assert.equal(r.outcome, 'done', JSON.stringify(r.problems))
+  assert.ok(r.notes.some((n) => /只是格式坏了/.test(n)), JSON.stringify(r.notes))
   assert.equal(r.index.skipped, true)
+  assert.deepEqual(seq(calls), [], '无需写盘时仍不该跑任何 cw 子命令')
+})
+
+await checkAsync('无变化轮：内容不可救的存量页照样把终态拉成 partial', async () => {
+  const root = makeRepo()
+  const docs = makeDocs()
+  writeFile(root, '.codewiki/_meta.yaml', 'last_compiled_commit: cafe\n')
+  writeFile(root, '.codewiki/modules/core.md', '# core\n\n模块正文。\n')
+  writeFile(
+    root,
+    '.codewiki/decisions/leaked.md',
+    '你是 CodeWiki 文章作者。文章全文用中文书写。\n\n## Overview\n\n...\n',
+  )
+  const { deps, calls } = recordingDeps()
+  const r = await applyNativeOutput({ repoRoot: root, report: makeReport(), docsDir: docs, noChanges: true, deps })
+  assert.equal(r.outcome, 'partial', '无变化轮里库是脏的，终态不许报 done')
+  assert.ok(r.problems.some((p) => p.kind === 'existing-bad-article'), JSON.stringify(r.problems))
   assert.deepEqual(seq(calls), [], '无需写盘时仍不该跑任何 cw 子命令')
 })
 
@@ -850,10 +890,11 @@ await checkAsync('孤儿页：source_files 全部失效的存量模块页被识�
   assert.deepEqual(kept.map((o) => o.rel), ['.codewiki/modules/nested/gone2.md'])
 })
 
-await check('残留页：页名已不属于当前模块树的引擎页被识别（聚类重构后必须清）', () => {
-  // 与孤儿页互补的另一类残骸：模块被改名/合并后，旧页的 source_files 指向的文件全都还在
-  // （只是不再归属任何模块），所以 findOrphanPages 一个都命中不了。真机 dsh-codewiki
-  // 落地 92 页而树里只有 20 个模块，剩下 72 页永远挂在 _index.md 上。
+await check('残留页：modules/ 下不是本轮产出的页一律进删除集（不兼容旧产物）', () => {
+  // 0.17.45 起判据收成一条：modules/ 是引擎专属产物目录，页名对不上当前树就是残骸。
+  // 之前逐条证明「它像旧页」（title === slug / 落在子目录 / source_files 被接手），
+  // 每加一条就有一批页能绕过——真机上先后漏掉过描述性 title、平铺在 modules/ 根下、
+  // source_files 部分幸存三批。现在反过来：不是本轮写的就删。
   const repoRoot = makeRepo()
   const mods = join(repoRoot, '.codewiki', 'modules')
   mkdirSync(join(mods, 'nested'), { recursive: true })
@@ -865,18 +906,20 @@ await check('残留页：页名已不属于当前模块树的引擎页被识别�
   const moduleTree = {
     namespaced_mod: { path: 'lib', components: [], children: { leaf_mod: { path: 'lib/leaf.js', components: [], children: {} } } },
   }
+  // 页名命中当前树 → 保留（模块还在，正文好坏归文章契约管）
   writeFileSync(join(mods, 'namespaced-mod.md'), page('namespaced_mod', ['fsoft_page: namespaced_mod.md']), 'utf8')
   writeFileSync(join(mods, 'leaf-mod.md'), page('leaf_mod', ['fsoft_page: leaf_mod.md']), 'utf8')
+  // 页名对不上当前树 → 删，不管它有没有 fsoft_page、是不是人工写的
   writeFileSync(join(mods, 'agent-runtime.md'), page('agent_runtime', ['fsoft_page: agent_runtime.md']), 'utf8')
-  writeFileSync(join(mods, 'nested', 'old-thing.md'), page('old_thing', ['fsoft_page: nested/old_thing.md']), 'utf8')
-  // 人工页 / 旧版本生成器的页：没有 fsoft_page，不能凭页名删
   writeFileSync(join(mods, 'handwritten.md'), page('handwritten'), 'utf8')
+  writeFileSync(join(mods, 'nested', 'old-thing.md'), page('old_thing', ['fsoft_page: nested/old_thing.md']), 'utf8')
   // 非 .md 文件不该进删除集
   writeFileSync(join(mods, 'notes.txt'), 'ignore me\n', 'utf8')
 
   const stale = findStaleModulePages({ repoRoot, moduleTree })
   assert.deepEqual(stale.map((o) => o.rel).sort(), [
     '.codewiki/modules/agent-runtime.md',
+    '.codewiki/modules/handwritten.md',
     '.codewiki/modules/nested/old-thing.md',
   ], JSON.stringify(stale))
   // 删除是不可逆动作，理由必须可审计：要能说出这篇原本属于哪个模块
@@ -884,17 +927,17 @@ await check('残留页：页名已不属于当前模块树的引擎页被识别�
 
   // 本轮写集里的页不算残留（写优先）
   assert.deepEqual(
-    findStaleModulePages({ repoRoot, moduleTree, keepPages: ['.codewiki/modules/agent-runtime.md'] }).map((o) => o.rel),
-    ['.codewiki/modules/nested/old-thing.md'],
+    findStaleModulePages({ repoRoot, moduleTree, keepPages: ['.codewiki/modules/agent-runtime.md'] }).map((o) => o.rel).sort(),
+    ['.codewiki/modules/handwritten.md', '.codewiki/modules/nested/old-thing.md'],
   )
   // 整仓模式（module_tree={}）没有权威模块名：凭页名猜会删掉全部正文
   assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree: {} }), [])
 })
 
-await check('残留页：0.16.0 之前 Node 通道生成的旧格式页也被识别（否则换通道后永久堆积）', () => {
-  // 原生通道把页名规范成 kebab、标题写成可读名，并带 fsoft_page；换通道之前的旧页
-  // 既没有 fsoft_page，标题又恰好是它自己的 slug（旧模板就是 `title: <模块名>`），
-  // 两条判据都扫不到，于是永久留在库里并挂在 _index.md 上。
+await check('残留页：0.16.0 之前的旧格式页同样删（没有 fsoft_page、title 等于 slug）', () => {
+  // 这批页是换通道时真正的卡点：既没有 fsoft_page（旧模板不写），标题又恰好是它
+  // 自己的 slug，于是两条「可证特征」判据都扫不到，永久留在库里并挂在 _index.md 上。
+  // 新判据不看这些特征，只看页名是否还在树里。
   const repoRoot = makeRepo()
   const mods = join(repoRoot, '.codewiki', 'modules')
   mkdirSync(mods, { recursive: true })
@@ -902,19 +945,21 @@ await check('残留页：0.16.0 之前 Node 通道生成的旧格式页也被识
   const legacy = (slug) => ['---', `title: ${slug}`, 'type: module',
     'source_files:', '  - lib/agentic.js', 'tags: []', '---', '', `# ${slug}`, ''].join('\n')
   writeFileSync(join(mods, 'legacy_mod.md'), legacy('legacy_mod'), 'utf8')
-  // 人工页即便碰巧 title === slug，只要 type 不是 module 就不动
+  // 写成 type: concept 的页在 modules/ 里同样是残骸——目录本身就是归属声明
   writeFileSync(join(mods, 'handwritten.md'), ['---', 'title: handwritten', 'type: concept', '---', '', '# h', ''].join('\n'), 'utf8')
-  // 人工页 title 与 slug 不一致 → 不动
   writeFileSync(join(mods, 'human-note.md'), ['---', 'title: 人工笔记', 'type: module', '---', '', '# n', ''].join('\n'), 'utf8')
 
   const moduleTree = { fresh_mod: { path: 'lib', components: [], children: {} } }
   const stale = findStaleModulePages({ repoRoot, moduleTree })
-  assert.deepEqual(stale.map((o) => o.rel), ['.codewiki/modules/legacy_mod.md'], JSON.stringify(stale))
-  assert.equal(stale[0].legacy, true)
-  assert.equal(stale[0].moduleName, 'legacy_mod')
+  assert.deepEqual(stale.map((o) => o.rel).sort(), [
+    '.codewiki/modules/handwritten.md',
+    '.codewiki/modules/human-note.md',
+    '.codewiki/modules/legacy_mod.md',
+  ], JSON.stringify(stale))
+  assert.ok(stale.every((o) => o.legacy === true))
 })
 
-await check('残留页：modules/ 子目录里的旧页也认得（原生页永远 flat，嵌套只可能来自旧通道）', () => {
+await check('残留页：嵌套目录里的页即便 slug 与 live 模块同名也删（原生页永远 flat）', () => {
   // 真机漏网：旧页把 title 写成「apply_plan（阶段 3 落地器）」这类描述性标题，
   // 「title === slug」抓不到，于是它在模块树重构后永久留在库里，正文写的还是
   // 739 行的旧行号，而源码已经是 1335 行。原生通道只产出 modules/<slug>.md
@@ -936,28 +981,31 @@ await check('残留页：modules/ 子目录里的旧页也认得（原生页永�
   assert.equal(stale[0].moduleName, 'apply-plan')
 })
 
-await check('残留页：嵌套目录里的人工页仍不动（type 或 source_files 不满足）', () => {
+await check('残留页：learnings/ decisions/ 不在扫描范围（人工维护的页不受影响）', () => {
+  // 「不兼容旧产物」只针对 modules/。learnings/ 与 decisions/ 是人工维护页，
+  // codewiki_note 与手写都往这里写，它们没有模块名可对，也不该被模块清理波及。
   const repoRoot = makeRepo()
-  const mods = join(repoRoot, '.codewiki', 'modules')
-  mkdirSync(join(mods, 'notes'), { recursive: true })
-  // type=concept：目录再深也不动
-  writeFileSync(join(mods, 'notes', 'a.md'), ['---', 'title: 笔记', 'type: concept', 'source_files:', '  - lib/a.js', '---', '', '# a', ''].join('\n'), 'utf8')
-  // source_files 为空：没有归属证据
-  writeFileSync(join(mods, 'notes', 'b.md'), ['---', 'title: b', 'type: module', 'source_files: []', '---', '', '# b', ''].join('\n'), 'utf8')
+  for (const dir of ['modules', 'learnings', 'decisions', 'concepts']) {
+    mkdirSync(join(repoRoot, '.codewiki', dir), { recursive: true })
+  }
+  writeFileSync(join(repoRoot, '.codewiki', 'modules', 'old-mod.md'), ['---', 'title: old', 'type: module', '---', '', '# old', ''].join('\n'), 'utf8')
+  writeFileSync(join(repoRoot, '.codewiki', 'learnings', 'keep-me.md'), ['---', 'title: keep-me', 'type: learning', '---', '', '## Overview', '', 'x', ''].join('\n'), 'utf8')
+  writeFileSync(join(repoRoot, '.codewiki', 'decisions', 'keep-me-too.md'), ['---', 'title: keep-me-too', 'type: decision', '---', '', '## Overview', '', 'y', ''].join('\n'), 'utf8')
+  writeFileSync(join(repoRoot, '.codewiki', 'concepts', 'old-concept.md'), ['---', 'title: old-concept', 'type: concept', '---', '', '# c', ''].join('\n'), 'utf8')
+
   const moduleTree = { fresh_mod: { path: 'lib', components: [], children: {} } }
-  assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree }), [])
+  const stale = findStaleModulePages({ repoRoot, moduleTree })
+  assert.deepEqual(stale.map((o) => o.rel), ['.codewiki/modules/old-mod.md'], JSON.stringify(stale))
 })
 
-await check('被取代的旧页：进删除集且报出接手它的源码（用户要的是索引干净，不是待办清单）', () => {
+await check('被取代的旧页：报出接手它的源码（删除集由 findStaleModulePages 覆盖）', () => {
   // 真机 Wxxy-CampusHub：11 篇旧页标题全写成「CAS 协议核心（campus-auth）」这种描述性
   // 名字（title !== slug 不中），又平铺在 modules/ 根下（nested 不中），而由于 slug 已不在
   // 树里、source_files 只剩一两个附属文件没被新树覆盖，findOrphanPages 的「全部失效」
   // 也不成立 —— 三条窄判据同时擦肩而过。
   //
-  // 它们的源码确实已被新树接手，所以归 findSupersededLegacyPages 处理并进删除集。
-  // 代价明确：这 11 篇各有 4~20 次人工提交（campus-hub-tauri 20 次、frontend-shell
-  // 15 次），正文里人工补过的迁移警告与 [[decisions/...]] 链接删后只剩 git 历史一份。
-  // 所以每篇都必须报出「被谁接手」（coveredSource），事后能按路径从历史里捞。
+  // 现在删除集由 findStaleModulePages 一条判据全覆盖；findSupersededLegacyPages 只负责
+  // 标注「这篇页的代码现在归谁」，运维时据此决定要不要从 git 历史里捞回来。
   const repoRoot = makeRepo()
   const mods = join(repoRoot, '.codewiki', 'modules')
   mkdirSync(mods, { recursive: true })
@@ -970,18 +1018,49 @@ await check('被取代的旧页：进删除集且报出接手它的源码（用�
   writeFileSync(join(mods, 'campus-auth.md'), page('CAS 协议核心（campus-auth）', [
     'crates/auth/src/cas.rs', 'crates/auth/tests/live.rs', 'NOTICE.md',
   ]), 'utf8')
-  // 一个 source_file 都不被树覆盖 → 连「被取代」的线索都没有，必须留下
+  // 一个 source_file 都不被树覆盖 → 删除集照样收，但没有「被谁接手」的线索
   writeFileSync(join(mods, 'legacy-unrelated.md'), page('无关旧模块（legacy-unrelated）', ['vendor/old/a.rs']), 'utf8')
-  // 人工页（type 不是 module）
-  writeFileSync(join(mods, 'human.md'), ['---', 'title: 人工笔记（human）', 'type: concept', 'source_files:', '  - crates/auth/src/cas.rs', '---', '', '# human', ''].join('\n'), 'utf8')
 
-  // 窄判据（findStaleModulePages）不管这类页：它只认 title/嵌套两条可证特征
-  assert.deepEqual(findStaleModulePages({ repoRoot, moduleTree }), [])
-  // 宽判据负责它，且说得出是被哪个文件接手的
+  // 删除集：两条判据不再分窄宽，非本轮产出即删
+  assert.deepEqual(
+    findStaleModulePages({ repoRoot, moduleTree }).map((o) => o.rel).sort(),
+    ['.codewiki/modules/campus-auth.md', '.codewiki/modules/legacy-unrelated.md'],
+  )
+  // 接手源码只有被树覆盖的那篇报得出
   const sup = findSupersededLegacyPages({ repoRoot, moduleTree })
   assert.deepEqual(sup.map((o) => o.rel), ['.codewiki/modules/campus-auth.md'], JSON.stringify(sup))
   assert.equal(sup[0].coveredSource, 'crates/auth/src/cas.rs')
   assert.equal(sup[0].moduleName, 'campus-auth')
+})
+
+await check('废弃目录：concepts/ 整目录进删除集，learnings/ decisions/ 不动', () => {
+  // concepts/ 是 Node 通道横切层的产物（从模块页全文再蒸馏一遍「概念」），原生通道
+  // 从不写它。里面的页 source_files 大多指向已删除的 lib 模块，留着只会让读者读到
+  // 不存在的规划层。整目录清理，不逐页判断 —— 用户明确要求不兼容旧产物。
+  const repoRoot = makeRepo()
+  const wiki = join(repoRoot, '.codewiki')
+  for (const dir of ['concepts', 'learnings', 'decisions']) mkdirSync(join(wiki, dir), { recursive: true })
+  const page = (title, type) => ['---', `title: ${title}`, `type: ${type}`, 'source_files: []', 'tags: []', '---', '', '## Overview', '', '正文。', ''].join('\n')
+
+  writeFileSync(join(wiki, 'concepts', 'old-planner.md'), page('旧规划层', 'concept'), 'utf8')
+  writeFileSync(join(wiki, 'concepts', 'dead-lib.md'), page('已删模块', 'concept'), 'utf8')
+  writeFileSync(join(wiki, 'learnings', 'keep-me.md'), page('人工记录', 'learning'), 'utf8')
+  writeFileSync(join(wiki, 'decisions', 'keep-me-too.md'), page('人工取舍', 'decision'), 'utf8')
+
+  const got = findDeprecatedConceptPages(repoRoot)
+  assert.deepEqual(got.map((o) => o.rel).sort(), [
+    '.codewiki/concepts/dead-lib.md',
+    '.codewiki/concepts/old-planner.md',
+  ])
+  assert.ok(got.every((o) => o.legacy === true))
+
+  // 本轮写集里的页（写优先）不当删除目标
+  assert.deepEqual(
+    findDeprecatedConceptPages(repoRoot, ['.codewiki/concepts/old-planner.md']).map((o) => o.rel),
+    ['.codewiki/concepts/dead-lib.md'],
+  )
+  // 目录不存在 → 空集（老仓没有 concepts/ 不该报错）
+  assert.deepEqual(findDeprecatedConceptPages(join(repoRoot, 'nope')), [])
 })
 
 await checkAsync('孤儿页：删除走写集（进 pre-image，能回滚，可审计）', async () => {

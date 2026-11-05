@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.17.45 — 2026-11-05
+
+### 存量坏文章：从「只记账」改成「先修再删」
+
+0.17.38 加进来的存量体检（`auditExistingArticles`）发现坏页就 `pushProblem('existing-bad-article', …)`，然后由 `blockedByExisting` 一票否决基线推进。当时的理由是「存量页不是本轮写的，回滚会连好文章一起撤掉」——回滚确实不对，但只记账的代价在真机上暴露得很彻底：**七个仓库全部卡在这个状态**，基线最长落后 71 个提交（`dsh-subagent-auto-router` 900ff14 → 67569d5）。下一轮 change-set 从同一个旧基线算起，同一批文件被反复判成「未消化」，增量链断在原地。
+
+而这些页绝大多数只是格式坏了。实测 `Wxxy-CampusLogin` 的 61 篇坏页：缺 frontmatter 20 篇、未闭合 9 篇、`type` 与目录不符 13 篇、正文前粘了一句模型前言 8 篇、正文真的是模型输出泄漏 11 篇。用前四类否掉整条增量链显然不划算。
+
+于是处置分两步：
+
+- **能修的修**。新增 `lib/article-repair.js`，纯函数 `repairArticle(text, rel)` 返回 `keep` / `repair` / `drop` 三态。它认六种可修形态：纯正文（按目录补 `title` / `type` / `source_files: []` / `tags: []`）、frontmatter 未闭合（补上缺失的 `---`）、`--- frontmatter` 这种带词的分隔符、嵌套的 `frontmatter:` 块（展开成顶层）、`type` 与目录不符（改成目录对应的类型）、整篇被包进 ` ```markdown ` 围栏（连同围栏没闭合的情况）。修完的正文一字不动，只动元数据。
+- **修不动的删**。判据是「文首是不是模型在跟人说话」：`m00270–m00270 …`、`### Compression of Compressed Context`、`The user wants to…`、`我注意到你提供的…`、`你是 CodeWiki 文章作者`、`I will now update…` 等十六种标记。代码块内的同类文本不算（文章里贴日志、引用对话是正常写法）。
+
+`lib/engine/apply-plan.js` 新增 `healExistingArticles(repoRoot, skipRels)`：走 `auditExistingArticles` 找坏页 → 逐篇读盘 → `repairArticle` 分流。它接在两个位置：正常轮在收集写集时调用（可修的并进 `items`，与文章同批写、同批回滚、同批建索引），无变化轮在 idle 短路前调用（只记账不修——idle 轮刻意不碰索引，否则每次状态查询都会制造 wiki 提交）。`existing-bad-article` 的语义随之收窄：只有 `drop` 那批记阻塞，可修的不再拦基线。
+
+删除目标要排除本轮删除集：给一篇待删的孤儿页补 frontmatter，会让它重新成为「合法页」而被 `deleteTargets` 的 `keepRels` 过滤掉（写优先），残骸就永远清不掉。
+
+### 废弃 `concepts/` 目录
+
+原生通道只产 `modules/` 与根 `CodeWiki.md`，从不写 `concepts/`。该目录是 Node 通道横切层的遗留（从模块页全文再蒸馏一遍「概念」），内容与模块页大面积重复，`source_files` 还指向已删掉的 lib 模块。新增 `findDeprecatedConceptPages(repoRoot, keepPages)` 整目录清理，不看模块树——整仓模式下 `liveTree` 为 null，正是这些孤儿最没人管的时候。`learnings/` 与 `decisions/` 不在清理范围：那是人工维护的诊断记录与设计取舍。
+
+### 模块页残留判据收成一条
+
+`findStaleModulePages` 此前有三条可证特征（`title` 等于 slug / 落在 `modules/` 子目录 / `source_files` 部分幸存），每加一条就多一类旧页能绕过：真机上先后漏掉三批（描述性 title 如 `apply_plan（阶段 3 落地器）`、平铺在 `modules/` 根下的 11 篇、`source_files` 只剩附属文件没被覆盖）。现在反过来：`modules/` 是引擎的专属产物目录，**只要页名对不上当前模块树就删**，不逐条证明「它像旧页」。嵌套目录里的页即便 slug 与 live 模块同名也删（原生页永远 flat，旧树按子模块命名目录会撞 slug）。`findSupersededLegacyPages` 保留，职责收窄为「标注这篇页的代码现在归谁」，供运维决定要不要从 git 历史里捞回来。
+
+### 验证
+
+- 新增 `test-article-repair.mjs`，48 条断言：六种可修形态各自修完必须过同一套契约（`inspectArticle` 零 error）、六类泄漏标记必须 `drop`、代码块内的施工文本不判泄漏、合规页 `keep` 时一字不改、目录推不出 type 时不动。
+- `test-engine-apply-plan.mjs` 62 passed（原 61，新增 `concepts/` 清理用例）；`test-engine-native-incremental.mjs` 164 passed（用例 16 的断言按新判据改写：`modules/` 下页名对不上树的页全删，`learnings/` 下的人工页保留）。
+- 全量回归 41 个测试（含 6 个真 venv）`FAILED: 0`。
+- 六仓实测 `healExistingArticles`：可修 62 篇**修完全部过契约**（Wxxy-CampusLogin 58、dsh-git-worktree 2、dsh-presets-Switch 1、dsh-subagent-auto-router 1），`drop` 3 篇（全部确认是提示泄漏）。`findDeprecatedConceptPages` 命中 Wxxy-CampusLogin 30 篇、Wxxy-CampusHub 2 篇、dsh-presets-Switch 4 篇。
+
 ## 0.17.44 — 2026-11-05
 
 ### 语义校对：从「从不触发」到真能触发

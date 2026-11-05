@@ -708,26 +708,29 @@ if (want(16)) { console.log('== 用例 16：页名不属于当前模块树的残
   fs.mkdirSync(mods, { recursive: true })
   fs.writeFileSync(path.join(mods, 'agent-runtime.md'),
     '---\ntitle: agent-runtime\ntype: module\nsource_files:\n  - core/core.py\ntags: []\nfsoft_page: agent_runtime.md\n---\n\n# agent-runtime\n\n旧聚类的残骸。\n', 'utf8')
-  // 人工页：source_files 指向的文件存在、但没有任何模块认领它 → 三条判据全不中，留下。
-  // 保护它的是「没有别的模块接手它的源码」，不是「title 看上去不像 slug」：真机上
-  // 旧通道页的 title 也常写成「CAS 协议核心（campus-auth）」这种带括号的人类可读名。
+  // 同一目录下的其它页也一并清：`modules/` 是引擎专属产物目录，判据只有「页名对不对得上
+  // 当前树」。要保留手写内容请放 learnings/ 或 decisions/，那两处不在扫描范围。
   fs.mkdirSync(path.join(repo, 'notes'), { recursive: true })
   fs.writeFileSync(path.join(repo, 'notes', 'handbook.md'), '# 手册\n\n非源码文件。\n')
   fs.writeFileSync(path.join(mods, 'human-notes.md'),
     '---\ntitle: 手工概览\ntype: module\nsource_files:\n  - notes/handbook.md\ntags: []\n---\n\n# 手工概览\n\n人工维护，别删。\n', 'utf8')
-  // 没有归属证据的草稿页（title 恰好等于文件名、但 source_files 空）同样不删：
-  // 判据只认「旧通道模板的三个特征同时成立」，不赌人工页不会这样起名。
   fs.writeFileSync(path.join(mods, 'draft.md'),
     '---\ntitle: draft\ntype: module\nsource_files: []\ntags: []\n---\n\n# draft\n\n草稿。\n', 'utf8')
+  // learnings/ 下有同样的页：人工维护，不在扫描范围，必须原样保留。
+  const learned = path.join(repo, '.codewiki', 'learnings')
+  fs.mkdirSync(learned, { recursive: true })
+  fs.writeFileSync(path.join(learned, 'keep-me.md'),
+    '---\ntitle: keep-me\ntype: learning\nsource_files: []\ntags: []\n---\n\n## Overview\n\n人工记录。\n', 'utf8')
   // 源码真变了，这一轮才会真正落地（no_change 轮不清理存量页）
   fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "core-v2"\n')
 
   const r = await runJob(repo, { scope: 'stale' })
   const notes = [...(r.job?.notes ?? []), ...(r.job?.nativeResult?.notes ?? [])].join(' | ')
-  check(/发现 1 个残留页/.test(notes), `notes 点名残留页数量（实际 ${notes.slice(-240)}）`)
+  check(/发现 3 个残留页/.test(notes), `notes 点名残留页数量（实际 ${notes.slice(-240)}）`)
   check(!fs.existsSync(path.join(mods, 'agent-runtime.md')), '残留页被删除')
-  check(fs.existsSync(path.join(mods, 'human-notes.md')), '没有模块接手其源码的人工页不得被删')
-  check(fs.existsSync(path.join(mods, 'draft.md')), 'source_files 为空的页不得被删（没有归属证据）')
+  check(!fs.existsSync(path.join(mods, 'human-notes.md')), 'modules/ 下页名对不上树的页一律删（不兼容旧产物）')
+  check(!fs.existsSync(path.join(mods, 'draft.md')), 'source_files 为空也删：判据只看页名')
+  check(fs.existsSync(path.join(learned, 'keep-me.md')), 'learnings/ 不在扫描范围，人工页保留')
 }
 
 // ============================ 用例 17：无变化轮也要清残留页 ============================
