@@ -6,7 +6,7 @@ description: CordisPatchConfig 是 dsh-codewiki 插件向 dsh（DeepSeek Harness
 # Cordis_Patch_Config（插件装配配置）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`70bf6404`](https://github.com/ikliml666/dsh-codewiki/commit/70bf6404241bf06b48f7d49b81a98c3ce74d2f90) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bbcf9332`](https://github.com/ikliml666/dsh-codewiki/commit/bbcf933285594340a19465219b5bf37d28b4c956) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -164,6 +164,6 @@ flowchart TD
 ```
 
 ??? abstract "Documented components (2)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/cordis.patch.yml) — `cordis.patch.yml`
-    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/_addcase2.py) — `_addcase2.py`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/cordis.patch.yml) — `cordis.patch.yml`
+    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/_addcase2.py) — `_addcase2.py`
 

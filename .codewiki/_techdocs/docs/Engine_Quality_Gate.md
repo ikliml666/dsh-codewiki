@@ -6,7 +6,7 @@ description: EngineQualityGate 是 CodeWiki 原生引擎通道（FSoft）编译�
 # Engine_Quality_Gate（原生引擎产物采用门）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`70bf6404`](https://github.com/ikliml666/dsh-codewiki/commit/70bf6404241bf06b48f7d49b81a98c3ce74d2f90) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bbcf9332`](https://github.com/ikliml666/dsh-codewiki/commit/bbcf933285594340a19465219b5bf37d28b4c956) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -229,6 +229,6 @@ sequenceDiagram
 4. **git 只读**：基线与脏检查全部走 `git show` / `git rev-parse` / `git status --porcelain`，超时 15s，失败返回 null 并如实降级，不猜状态。
 
 ??? abstract "Documented components (2)"
-    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
 
