@@ -17,7 +17,7 @@
 | 字段 | 值 | 含义 |
 | --- | --- | --- |
 | `name` | `@ikliml666/dsh-codewiki` | 插件包名；`cordis.patch.yml` 中以裸包名被 `file:///` 直挂或 bundle 依赖引用 |
-| `version` | `0.17.60` | 当前版本号（版本演进史见 `description`） |
+| `version` | `0.17.61` | 当前版本号（版本演进史见 `description`） |
 | `type` | `module` | 全 ESM 双模块（`index.js` 宿主侧 + `client.js` 前端侧） |
 | `main` / `exports` | `./index.js`、`./client` | 双入口：Node 宿主侧入口与 web 前端入口 |
 | `private` | `false` | 可发布包：随附 `repository`（`git+https://github.com/ikliml666/dsh-codewiki.git`）、`homepage`（GitHub README）与 `bugs`（issues 地址）发布元数据 |
