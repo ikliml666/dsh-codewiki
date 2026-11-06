@@ -6,7 +6,7 @@ description: EngineOutput 是 FSoft 引擎产物到 CodeWiki 写集之间的解�
 # Engine_Output 模块文档
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`b1fb29ae`](https://github.com/ikliml666/dsh-codewiki/commit/b1fb29ae2ab1b230913da833ff29050c09212cae) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6809738d`](https://github.com/ikliml666/dsh-codewiki/commit/6809738d25eb24d2eac5d5da75a639b88b67e63e) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -220,5 +220,5 @@ if (!result.ok) {
 5. **一次读原则** —— `collected` 原样带出给上层，避免「两次读之间目录被改」导致判据漂移。
 
 ??? abstract "Documented components (1)"
-    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/b1fb29ae2ab1b230913da833ff29050c09212cae/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
+    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/6809738d25eb24d2eac5d5da75a639b88b67e63e/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
 
