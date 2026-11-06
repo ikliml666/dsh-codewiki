@@ -22,7 +22,7 @@ flowchart TB
         Icon["PanelIcon<br/>侧边栏图标"]
         Repos["ReposTab<br/>仓库总览 + 调度"]
         Session["SessionView<br/>LLM 请求会话"]
-        Helpers["辅助函数群<br/>stageSegments / overallPct /<br/>Spark / Skeleton / activityRow"]
+        Helpers["辅助函数群<br/>stageSegments / stageLegend /<br/>prepareRows / overallPct /<br/>Spark / Skeleton / activityRow"]
     end
 
     subgraph Host["宿主半侧（Node 进程）"]
@@ -202,7 +202,9 @@ flowchart LR
 - `LEGACY_STAGE = { plan: prepare, crosscut: articles, review: validate }`：历史任务里已退役的阶段名映射回当前六步，否则步骤条在失败/取消时整条熄灭；
 - `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }`：`overallPct` 线性加权，封顶 99（done/partial 才 100）；
 - 每个阶段固定色相 `STAGE_HUE`（青→蓝→紫→琥珀→绿），明度饱和度写死在 CSS（58% / 52%），深浅两套主题通用；
-- 分段带语义随任务状态切换：**进行中**段宽 = 进度权重；**终态**段宽 = 该阶段真实耗时（`stageTimings`），一眼看出「时间花在哪一步」。
+- prepare 格子会展开：原生通道任务正在 prepare 且 `nativeStage` 落在 env/graph/cluster 时，分段带与图例都把 prepare 一格拆成 env / graph / cluster 三个子段（`prepareRows` + `expandPrepareRows`）——各用 `PREPARE_HUE` 专属色相、按 `nativeStageTimings` 真实耗时定子段宽（已跑完的子段用真实耗时，没跑到的按预估权重补齐，避免段宽在段间跳变像进度倒退）、各填各的完成度，图例色块色相与带内三段一一对应；任务离开 prepare 后自动收回成原来的一格；
+- prepare 段完成度归一化：引擎整体百分比在它覆盖的 0..54 区间内走动，不归一化时准备跑完这段只填到 8.6%、总进度偏小一半；`stageFraction` 用 `withinRange('cluster', nativePercent)` 把该区间映射回 0..1；
+- 分段带语义随任务状态切换：**进行中**段宽 = 进度权重（prepare 子段再按其内子权重细分）；**终态**段宽 = 该阶段真实耗时（`stageTimings`），一眼看出「时间花在哪一步」；进行中的任务只要存在非排队的活跃阶段（`hasLiveSegments`）就画分段带与图例，不再等总进度 pct > 0。
 
 ### `ReposTab`：仓库总览
 

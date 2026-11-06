@@ -56,7 +56,7 @@ Job 是一个纯普通对象，落盘到 `JOBS_FILE`（默认 `%TMP%/dsh-codewik
 | `channel` | `'native'`（原生引擎）或 `'legacy'`（Node 兼容） |
 | `batchRef` / `batchProgress` / `tasks` / `articles` / `writtenCount` / `failedCount` | 执行器在途标记、逐篇结果与计数 |
 | `outcome` / `blockers` / `canAdvanceBaseline` | 完整性终态与基线推进判据（由 `judgeOutcome` 裁决） |
-| `nativeStage` / `nativePercent` / `nativeLogs` / `nativeResult` | 原生引擎自报阶段、百分比、事件日志与落地结果 |
+| `nativeStage` / `nativePercent` / `nativeStageTimings` / `nativeLogs` / `nativeResult` | 原生引擎自报阶段、百分比、引擎各阶段真实耗时（ms）、事件日志与落地结果 |
 | `autoCommit` / `usage` / `notes` | 自动提交结果、token 用量、运行注释（最近 50 条） |
 
 ### 阶段机（Node 兼容通道）
@@ -114,6 +114,7 @@ flowchart LR
 - `nativeChannelFor(cfg, {kind, scope})` 决定本次任务走哪条通道；任一条件不成立返回 `null`，调用方据此走旧路径——绝不中途悄悄换通道。
 - `resolveNativePython(cfg)` 按 `配置 → 环境变量 DSH_CODEWIKI_PYTHON → PATH` 顺序找解释器，不做启发式探测。
 - `nativeEnginePlan(channel, {bridge, model})` 拼装子进程环境变量（`PYTHONIOENCODING`、`CODEWIKI_BASE_URL`、`CODEWIKI_API_KEY`=占位 key、`CODEWIKI_MAIN_MODEL` 等），真实凭证从不进子进程环境、也从不进日志。
+- 进度帧记账：每帧 `onProgress(p)` 除回写 `nativeStage` / `nativePercent` 外，还在引擎阶段切换时把上一段的墙钟耗时（`Date.now() - nativeStageAt`）累加进 `job.nativeStageTimings`；job 初始化为 `nativeStageTimings: {}` / `nativeStageAt: null`。面板粗粒度 `stageTimings` 的 `prepare` 一格吞了 `env`/`graph`/`cluster` 三段，`nativeStageTimings` 单独按引擎九段记账（`env`/`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`），供终态分段带与 `codewiki_progress` 工具拆分「时间花在哪一段」。
 - 环境不闭合时原生通道以 `engine-deps` 明确失败，不回退 Node 通道冒充成功。
 
 **Node 兼容通道**（`nativeEngine=false`）只保留最小能力：顶层目录分组规划 + 文件级 `source_files` 归属判定，不再接收新能力（符号图/AST 聚类/增量规划已在 0.16.0 阶段 7 受控退役）。
@@ -139,7 +140,7 @@ flowchart LR
 ### `list()` / `jobSummary(job)` / `progressView(job)`
 
 - `list()`：先 `mergeFromDisk()` 再把全部 job 映射成 `jobSummary`；
-- `jobSummary` 是面板与 `codewiki_progress` 的唯一数据源，含 `stage` / `outcome` / `blockers` / `usage` / `nativeStage` / `nativeLogs`（最近 40 条）/ `autoCommit` / `tps` 等；
+- `jobSummary` 是面板与 `codewiki_progress` 的唯一数据源，含 `stage` / `outcome` / `blockers` / `usage` / `nativeStage` / `nativeStageTimings`（引擎各阶段墙钟耗时 ms，键为 `env`/`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`）/ `nativeLogs`（最近 40 条）/ `autoCommit` / `tps` 等；
 - `progressView` 在 `jobSummary` 之上按 `taskList` 算完成百分比。
 
 ### `cancel(jobId)` / `onAbort` 语义
@@ -244,7 +245,7 @@ sequenceDiagram
   Note over S: 下一轮 10s tick
   S->>S: nativeChannelFor 判定 → channel='native'
   S->>E: startNativeRun（bridge 占位 key + 环境变量）
-  E-->>S: onProgress(stage, percent, writtenCount) 逐帧回写 job
+  E-->>S: onProgress(stage, percent, writtenCount) 逐帧回写 job#59; 阶段切换时累加 nativeStageTimings
   E->>G: 引擎产物经 gate 校验
   G->>Cw: cw index / meta update / autoCommitWiki
   G-->>E: EngineResult(outcome, blockers, apply.commit)

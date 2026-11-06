@@ -701,8 +701,11 @@
       "handle_request",
       "is_incremental",
       "main",
+      "parse",
+      "percent_of",
       "release_detail_tap",
       "runEngine",
+      "start",
       "stop"
     ]
   },
@@ -1088,10 +1091,12 @@
       "compile",
       "done",
       "engineLogBlock",
+      "expandPrepareRows",
       "flush",
       "fmtAgo",
       "fmtMs",
       "fmtTok",
+      "hasLiveSegments",
       "isActive",
       "jobSummary",
       "load",
@@ -1100,9 +1105,12 @@
       "mount",
       "overallPct",
       "poolSummary",
+      "prepareRows",
       "rankOf",
       "repoName",
-      "runPool"
+      "runPool",
+      "stageFraction",
+      "withinRange"
     ]
   },
   "overview": {

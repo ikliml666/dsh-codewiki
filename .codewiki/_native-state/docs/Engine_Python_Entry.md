@@ -143,6 +143,7 @@ FSoft 的 `ProgressTracker` 只有五段（Dependency Analysis / Module Clusteri
 - **进度上限刻意压在 90%**：FSoft 只覆盖前四段，剩余 `index / baseline / commit` 由 Node 侧落地器执行——避免「引擎说 100% 但 wiki 还没索引」的假完成。
 - **增量轮按 description 认**：FSoft 的增量更新复用 `start_stage(2, "Incremental Update")` 槽位，阶段号会谎报成 cluster；`bridge_progress` 靠 `is_incremental(description)` 把整轮改报 `articles`。
 - **articles 阶段按真实篇数算百分比**：FSoft 阶段 3 的所有 `update_stage` 都被 `verbose=False` 门控，阶段内进度恒为 0，所以 `articles_percent(written, total)` 用「已写篇数 / 预期篇数」取代 stage_progress。
+- **阶段 1 也按真实进度算百分比**：依赖分析的 `update_stage` 同样被 `verbose=False` 门控，阶段内进度恒为 0（真机上整段 3 分钟以上一动不动）。`_DetailHandler` 从逐文件日志（`parse-start` / `parse`）数出已解析文件数，非完成帧用 `percent_of(1, 已解析/总数)` 取代 stage_progress；阶段完成帧（`stage_progress=1.0`）刻意不走这条路——上游每十分之一文件才打一条日志，最后一条常停在 0.9，拿它算完成帧会让百分比倒退。
 
 ```mermaid
 flowchart LR
@@ -184,7 +185,9 @@ FSoft 以 `verbose=False` 运行时把 `codewiki.src.be` 的 logger 压到 WARNI
 - 临时把该 logger 降到 INFO，同时把已有 handler 的 level 提到 WARNING（防止 INFO 灌进 stderr 被 Node 当日志 tail 收走）；
 - 挂 `_DetailHandler`，用一组正则从日志文本抽出当前模块名 / 阶段；
 - 存活期严格等于一次编译（挂在 `adapter.generate` 的 `try/finally` 里），结束即 `release_detail_tap` 还原；
-- 措辞按阶段分：阶段 3「正在写 X」、阶段 2「正在聚类 X」、「正在生成仓库总览」。
+- 措辞按阶段分：阶段 3「正在写 X」、阶段 2「正在聚类 X」、「正在生成仓库总览」；
+- 阶段 1（依赖分析）没有模块概念：进入 `parse-start` 时把上一阶段残留的模块名清空（否则面板会挂着上一轮「正在写 X」），并记下解析总数；此后每来一条 `parse` 日志就更新「已解析 N/M 个源文件」后缀，同时供 `bridge_progress` 把阶段 1 的百分比从逐文件计数里算出来（见上文映射要点）；
+- `attach_detail_tap` / `release_detail_tap` 都把 `parsed` / `parsed_total` 计数器归零，保证两轮编译之间不留上一轮的解析进度。
 
 ## 动作处理
 
@@ -300,7 +303,7 @@ flowchart TB
     end
 
     subgraph 观测["观测侧"]
-        D1["_DetailHandler.emit<br/>从 codewiki.src.be 日志抽模块名"]
+        D1["_DetailHandler.emit<br/>从 codewiki.src.be 日志抽模块名 / 解析计数"]
     end
 
     M2 --> M3
