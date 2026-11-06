@@ -11,7 +11,7 @@ fsoft_page: Cordis_Patch_Config.md
 
 ## 简介
 
-`Cordis_Patch_Config` 是 dsh-codewiki 插件向 dsh（DeepSeek Harness）宿主声明自身存在的**装配层**：它告诉宿主「有一个 id 为 `codewiki` 的插件要被装进 Cordis 运行时，入口是 `@local/dsh-codewiki`，运行参数放在 `config` 命名空间里」。本模块唯一的实体文件是 [`cordis.patch.yml`](../cordis.patch.yml)——一段 YAML patch，随包自动合并到 profile，无需用户手工追加条目。
+`Cordis_Patch_Config` 是 dsh-codewiki 插件向 dsh（DeepSeek Harness）宿主声明自身存在的**装配层**：它告诉宿主「有一个 id 为 `codewiki` 的插件要被装进 Cordis 运行时，入口是 `@ikliml666/dsh-codewiki`，运行参数放在 `config` 命名空间里」。本模块唯一的实体文件是 [`cordis.patch.yml`](../cordis.patch.yml)——一段 YAML patch，随包自动合并到 profile，无需用户手工追加条目。
 
 它在系统中的定位是**桥接**：向上对接 dsh 的 bundle/补丁装载机制（[Package_Manifest](package-manifest.md) 中 `package.json` 的 `dsh.bundle.patch` 字段把本文件注册为 bundle patch），向下把运行期开关（模型选择、并发档位、原生引擎通道等）传递给插件主体 [Job_Orchestration](job-orchestration.md)、[Engine_Python_Entry](engine-python-entry.md) 等执行模块。
 
@@ -22,7 +22,7 @@ fsoft_page: Cordis_Patch_Config.md
 `cordis.patch.yml` 不是插件运行时读取的配置文件，而是 **dsh 宿主在进程启动时消费的补丁清单**。其核心载荷是一个 `- insert:` 块：
 
 - `id: codewiki` —— 插件在宿主中的唯一身份；两种安装方式（bundle 依赖与 file:/// 直挂）必须保持同 id。
-- `name: "@local/dsh-codewiki"` —— bundle 形态下必须是裸 npm 包名（不带 `/dsh` 子路径），因为 client 半边的激活扫描只认裸包名行；[Web_UI_Panel](web-ui-panel.md) 的挂载依赖这一条。
+- `name: "@ikliml666/dsh-codewiki"` —— bundle 形态下必须是裸 npm 包名（不带 `/dsh` 子路径），因为 client 半边的激活扫描只认裸包名行；[Web_UI_Panel](web-ui-panel.md) 的挂载依赖这一条。
 - `config: {}` —— 刻意留空：默认值不在这里重复声明，全部回落到插件 `index.js` 的 Config schema 默认值。想改哪项就填哪项。
 
 ### 两种安装方式
@@ -107,7 +107,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     P["profile package.json<br/>dsh.bundle.patch 注册本文件"]
-    Y["cordis.patch.yml<br/>insert: id=codewiki, name=@local/dsh-codewiki, config={}"]
+    Y["cordis.patch.yml<br/>insert: id=codewiki, name=@ikliml666/dsh-codewiki, config={}"]
     H["dsh 宿主进程启动时合并 patch"]
 
     P --> Y
@@ -126,7 +126,7 @@ flowchart TD
 ## 与其他模块的关系
 
 - [Package_Manifest](package-manifest.md) —— `package.json` 中 `dsh.bundle.patch: "./cordis.patch.yml"` 是本文件被宿主发现的唯一注册点。
-- [Web_UI_Panel](web-ui-panel.md) —— `name: "@local/dsh-codewiki"` 的裸包名形式是 client 半边激活扫描的匹配依据；bundle 装法下写成带 `/dsh` 子路径会导致面板不激活。
+- [Web_UI_Panel](web-ui-panel.md) —— `name: "@ikliml666/dsh-codewiki"` 的裸包名形式是 client 半边激活扫描的匹配依据；bundle 装法下写成带 `/dsh` 子路径会导致面板不激活。
 - [Job_Orchestration](job-orchestration.md) —— `maxConcurrency`、`bigConcurrency`、`serialProjects`、`autoCommit` 等调度配置在此落地为实际的任务池行为。
 - [Engine_Python_Entry](engine-python-entry.md) —— `nativeEngine*` 系列配置决定子进程解释器、入口脚本与超时边界。
 - [FSoft_Engine_Setup_Script](fsoft-engine-setup-script.md) —— 原生引擎通道所需的闭合 Python venv 由 `tools/fsoft-engine/setup-env.sh` 构建；`nativeEnginePython` 应指向该脚本产出的解释器。

@@ -1,6 +1,6 @@
 {
     "token_budget": 200000,
-    "tokens_used": 3087,
+    "tokens_used": 3240,
     "caps": {
         "per_file_bytes": 16384,
         "per_class_files": 40,
@@ -12,10 +12,12 @@
             "files": [
                 {
                     "path": "package.json",
-                    "bytes": 1431,
+                    "bytes": 1812,
                     "truncated": false,
                     "loaded": true,
-                    "units": []
+                    "units": [
+                        "test"
+                    ]
                 }
             ],
             "omitted_by_class_cap": [],
@@ -25,7 +27,7 @@
             "files": [
                 {
                     "path": "cordis.patch.yml",
-                    "bytes": 4451,
+                    "bytes": 4455,
                     "truncated": false,
                     "loaded": true,
                     "units": []
@@ -48,6 +50,6 @@
             "not_loaded_budget": []
         }
     },
-    "nodes": 3,
-    "edges": 20
+    "nodes": 4,
+    "edges": 21
 }

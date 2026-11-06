@@ -264,7 +264,8 @@
         "components": [
             "lib\\engine\\python\\stage_map.py::articles_ceiling",
             "package.json::package.json",
-            "vendor\\codewiki\\src\\meta.rs::WikiMeta"
+            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+            "package.json::test"
         ],
         "children": {}
     },

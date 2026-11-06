@@ -310,7 +310,8 @@
       "runEngine",
       "runNativeJob",
       "spawnPlan",
-      "terminateProcessTree"
+      "terminateProcessTree",
+      "test"
     ]
   },
   "Engine_Contract": {
@@ -796,6 +797,7 @@
       "list",
       "main",
       "normalize_body",
+      "test",
       "unified_body_diff"
     ]
   },
@@ -1038,6 +1040,7 @@
       "parse",
       "percent_of",
       "save",
+      "test",
       "wiki_path"
     ]
   },

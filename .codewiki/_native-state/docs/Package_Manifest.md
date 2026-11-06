@@ -12,26 +12,35 @@
 
 ## 1. `package.json`：npm 包清单
 
-仓库根目录的 `package.json`（`"name": "@local/dsh-codewiki"`，`"private": true`）是 DeepSeek Harness（dsh）的标准本地插件包。它的关键字段如下：
+仓库根目录的 `package.json`（`"name": "@ikliml666/dsh-codewiki"`，`"private": false`，并已按 npm 发布口径补齐 `repository` / `homepage` / `bugs` / `keywords` / `files` 发布元数据）是 DeepSeek Harness（dsh）的插件包。它的关键字段如下：
 
 | 字段 | 值 | 含义 |
 | --- | --- | --- |
-| `name` | `@local/dsh-codewiki` | 插件包名；`cordis.patch.yml` 中以裸包名被 `file:///` 直挂或 bundle 依赖引用 |
+| `name` | `@ikliml666/dsh-codewiki` | 插件包名；`cordis.patch.yml` 中以裸包名被 `file:///` 直挂或 bundle 依赖引用 |
 | `version` | `0.17.58` | 当前版本号（版本演进史见 `description`） |
 | `type` | `module` | 全 ESM 双模块（`index.js` 宿主侧 + `client.js` 前端侧） |
 | `main` / `exports` | `./index.js`、`./client` | 双入口：Node 宿主侧入口与 web 前端入口 |
+| `private` | `false` | 可发布包：随附 `repository`（`git+https://github.com/ikliml666/dsh-codewiki.git`）、`homepage`（GitHub README）与 `bugs`（issues 地址）发布元数据 |
+| `files` | `index.js`、`client.js`、`cordis.patch.yml`、`lib`、`bin/cw`（`bin/cw.exe`）、`docs`、`tools/fsoft-engine/{setup-env.sh,constraints.txt}`、`LICENSE`、`README.md`、`CHANGELOG.md`、`CodeWiki.md`（排除 `lib/**/__pycache__`） | npm 发布时随包携带的文件清单 |
+| `scripts.test` | `node test-batch.mjs` | 批量测试脚本入口 |
 | `engines.node` | `>=24.9.0` | 最低 Node 版本 |
 | `engines.dsh` | `>=0.2.0-rc.0` | 最低 dsh 宿主版本 |
 | `dependencies` | `@deepseek-ai/schemastery ^3.18.4` | 唯一运行时依赖：配置 schema 校验 |
 | `dsh.client.platform` | `web` | 前端产物走 web 平台（[Web_UI_Panel](Web_UI_Panel.md) 挂载） |
 | `dsh.bundle.patch` | `./cordis.patch.yml` | 指向宿主自动合并的 bundle patch 配置（见 [Cordis_Patch_Config](Cordis_Patch_Config.md)） |
 
-`description` 字段本身就是一份浓缩的版本演进史，直接决定了模块树中两条编译通道的存在理由：
+`description` 字段给出插件的产品定位，直接决定了模块树中两条编译通道的存在理由：
 
-- **0.16.0 起默认原生引擎通道**（`nativeEngine: true`）：以子进程驱动上游 FSoft-AI4Code/CodeWiki Python 引擎，要求本机 Python 3.10+ venv 闭合依赖。
-- **0.16.0 phase 7 退役了 Node 侧重写**：symbols / cluster / graph-diff / incremental / update-planner 的 Node 算法全部删除。
-- **0.17.34 起无默认编译模型**：provider/model 必须在插件设置里显式选择，未选择直接显式报错，不再猜模型；大输入档位默认关闭。
-- **Node 兼容通道**（`nativeEngine: false`）：仅保留顶层目录分组 + 文件级 `source_files` 归因，不新增功能。
+- **产物形态**：把整个仓库编译成 `.codewiki/` 下互链的 Markdown 文章，配套侧边栏面板展示进度、引擎日志与按阶段的模型设置；增量式设计，任何内容落盘前都先过文章契约闸门。
+- **默认通道**：驱动上游 FSoft-AI4Code/CodeWiki Python 引擎，要求本机 Python 3.10+ venv 闭合依赖。
+- **最小内置 Node 通道**：为无法运行 Python 引擎的宿主保留（旧版称为 Node 兼容通道 `nativeEngine: false`，仅保留顶层目录分组 + 文件级 `source_files` 归因）。
+
+### 包装载与宿主集成
+
+
+
+
+- **最小内置 Node 通道**：为无法运行 Python 引擎的宿主保留（旧版称为 Node 兼容通道 `nativeEngine: false`，仅保留顶层目录分组 + 文件级 `source_files` 归因）。
 
 ### 包装载与宿主集成
 

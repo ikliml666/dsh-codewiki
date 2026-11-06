@@ -1,8 +1,7 @@
 ---
 title: Graphdiff Golden Generator
 type: module
-source_files:
-  - test-fixtures/gen-graphdiff-golden.py
+source_files: []
 tags: []
 generated_by: fsoft-native
 fsoft_page: Graphdiff_Golden_Generator.md
