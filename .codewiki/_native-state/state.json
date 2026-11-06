@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "0b68f101ac9e1a635f966cca55c0d2c3785b20b6"
+    "headCommit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "0b68f101ac9e1a635f966cca55c0d2c3785b20b6",
+    "headCommit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96",
     "committed": [
       ".npmignore",
       "CodeWiki.md",
@@ -122,11 +122,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4itd9s-0-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4kyk5r-3-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-06T05:24:08.699Z"
+  "updatedAt": "2026-11-06T06:19:11.837Z"
 }
