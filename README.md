@@ -34,7 +34,7 @@ A repository-level code-wiki compiler for DeepSeek Harness. It turns a repositor
 - `scope=full`：跳过 clean 短路，强制全量重编。
 - 单篇文章失败只记账不中断；只要有任何必需文章没写成、有未映射变更、或质量闸门拦下文章，终态就是 `partial`。
 - 请求并发分两档独立限流，两池同时推进；`serialProjects` 开启时同一时刻只推进一个仓库，其余进 `queued` 排队。
-- 编译产物由插件自动提交（`autoCommit`），成功后不唤醒会话；只有自动提交失败才发一条一次性的「产物待提交」提醒。
+- 编译产物由插件自动提交（`autoCommit`）。编译终态（成功/部分/失败）都不会主动发消息唤醒会话：进度与失败原因在面板和 `codewiki_progress` 里看；只有自动提交失败时，系统提示里会出现一条一次性「产物待提交」提醒。
 
 ## 编译流水线
 

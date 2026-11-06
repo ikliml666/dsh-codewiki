@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.17.63 — 2026-11-06
+
+### 编译终态不再给会话发消息
+
+用户要求「取消 codewiki 编译失败把消息发给模型的这个功能」。确认范围后按「全部取消」
+执行：成功、部分完成、失败、产物待提交，四种终态一律不再 steer 任何消息。
+
+原来的 `wakeCompileSession(job, outcome, agents)` 有两个出口——失败发「【CodeWiki 编译
+失败】任务 …」，`done` 但自动提交没成功发「【CodeWiki 产物待提交】…」。整条路径连同
+`createJobService` 的 `onSettled` 回调参数、`fail()` 的 `notify` 选项一起删掉了：留着
+一个永远传不到的回调只会让下一个人以为终态还有出口。`fail(job, msg, {notify:false})`
+的唯一调用点（原实例停更作废排队项）也随之退回两参数。
+
+保留的部分是**会话通道**，它跟终态通知是两件事：超批量预算的文章要 steer 给发起会话、
+由会话模型派子智能体写作（`dispatchSessionTasks` / `resendSessionSteer`）。`agentsRef`、
+`createUserMessage`、`reassignSession` 因此都还在，只是注释里「唤醒」的措辞改成了
+「会话通道」——否则读代码的人会以为唤醒机制还在。
+
+终态现在只从三处体现：面板任务列表、`codewiki_progress` 工具的返回、以及系统提示里
+那条 `codewiki:update-reminder` section（自动提交失败时它仍会注入一次性的「产物待提交」
+提醒——那是拉取式的，不会主动打断会话）。
+
+### 验证
+
+```
+node --check index.js lib/job-store.js                     SYNTAX_OK
+grep -rn "wakeCompileSession" --include=*.js .             无输出（已彻底移除）
+
+# 模块导出面：唤醒函数消失，其余导出不变（57 个）
+has wakeCompileSession: false   has autoCommitState: true   has commitHintText: true
+
+# apply() 起来后不产生任何 steer（fake agents 服务记录每次 steer）
+apply 完成，steered 条数: 0
+
+# 端到端触发失败：用不存在的引擎解释器提交一次编译，等 tick 走到终态
+submit 返回: {"submitted":false}
+steered 条数（8 秒后）: 0
+
+# 拉取式提醒没被误删：造一条 done + 写入 3 篇 + autoCommit 未成功的 job 记录
+commitHintText(repo) → 1 条，文本为「【CodeWiki 产物待提交·一次性】…写入 3 篇文章…」
+```
+
 ## 0.17.62 — 2026-11-06
 
 ### 同步上游 a1b9f4a，把 PR #155 的 TechDocs 导出接成开关

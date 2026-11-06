@@ -2312,9 +2312,10 @@ function jobSummary(job) {
 }
 
 // ---------------------------------------------------------------------------
-// 编译终态实时唤醒：对发起会话 steer 一条消息（与子代理 send_message 同机制，纯插件侧
-// 现有 API，零 IPC）。agentsRef 由 apply() 经 ctx.inject(['agents']) 赋值；无 agent 上下文
-// （面板/自动调度提交）与冷会话（会话已关）一律静默跳过——系统提示 section 拉取仍兜底。
+// agent 服务引用：apply() 经 ctx.inject(['agents']) 赋值。用途只剩「会话通道」——超批量
+// 预算的文章要 steer 给发起会话、由会话模型派子智能体写作（见 dispatchSessionTasks）。
+// 编译终态不再 steer 任何消息：0.17.63 去掉了那条唤醒（失败与「产物待提交」都不再主动
+// 打扰会话），终态只在面板、codewiki_progress 与系统提示 section 里体现。
 // ---------------------------------------------------------------------------
 let agentsRef = null
 
@@ -2323,11 +2324,11 @@ let agentsRef = null
 // 与 agentsRef 同款：apply 时经 ctx.inject(['llm']) 在注入时取服务。
 let llmRef = null
 
-// 编译产物的入库状态：自动提交的成功/无改动/失败三态由一处判定，唤醒与提醒两条通道
-// 共用同一结论——否则同一次「无需提交」会被两条通道各打扰一次。
-//   'committed'  → 产物已入库，完全静默
-//   'no-changes' → 没有未提交的产物（重编译无变化/提前提交过），同样静默
-//   'pending'    → 插件没能提交，需要会话模型代为提交一次（唯一该打扰的情形）
+// 编译产物的入库状态：自动提交的成功/无改动/失败三态由一处判定，commitHintText 与
+// 系统提示 section 共用同一结论——否则同一次「无需提交」会被两条通道各提醒一次。
+//   'committed'  → 产物已入库，不提
+//   'no-changes' → 没有未提交的产物（重编译无变化/提前提交过），不提
+//   'pending'    → 插件没能提交，需要会话模型代为提交一次（唯一该提的情形）
 // 旧 job（无 autoCommit 字段）按 pending 处理，与 0.10.9 之前的行为一致。
 export function autoCommitState(job) {
   const ac = job?.autoCommit
@@ -2336,24 +2337,7 @@ export function autoCommitState(job) {
   return 'pending'
 }
 
-export function wakeCompileSession(job, outcome, agents = agentsRef) {
-  // 0.10.9：成功且插件已提交（或根本无改动）→ 完全不打扰会话。会话模型提交完工具就继续干活了，
-  // 不再被「请提交改动」的唤醒拉回来做一件插件自己已经做完的事（旧行为的核心缺陷）。
-  // 注：'no-changes' 也必须静默——它是「无需提交」，催它提交只会得到一条自相矛盾的消息。
-  if (outcome !== 'failed' && autoCommitState(job) !== 'pending') return
-  if (!job?.sessionId || !agents || typeof agents.get !== 'function') return
-  let agent
-  try { agent = agents.get(job.sessionId) } catch { return }
-  if (!agent || typeof agent.steer !== 'function') return
-  const text = outcome === 'failed'
-    ? `【CodeWiki 编译失败】任务 ${job.id}（${job.cwd}）失败：${job.error ?? '未知原因'}——可用 codewiki_progress 查详情，处理后重新提交。`
-    : `【CodeWiki 产物待提交】任务 ${job.id} 已完成（写入 ${job.writtenCount} 篇文章），但插件自动提交未成功：${job.autoCommit?.reason ?? '未开启 autoCommit'}。需要入库就随手提交一次（只 add .codewiki/ 与 CodeWiki.md，建议 docs(wiki) 前缀）；不需要就忽略本消息，不要为此中断或轮询。`
-  try {
-    agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
-  } catch { /* 唤醒失败不影响编译任务本身 */ }
-}
-
-function createJobService(config, onSettled) {
+function createJobService(config) {
   const jobs = loadJobs()
   for (const j of jobs) rememberRepo(j.cwd) // 一次性种子：旧历史进已知仓库清单
   let timer = null
@@ -2496,8 +2480,7 @@ function createJobService(config, onSettled) {
     }
   }
 
-  function fail(job, msg, { notify = true } = {}) {
-    const fromSubmit = job.stage === 'submitting' // 提交期失败：错误随工具调用同步返回，无需再唤醒
+  function fail(job, msg) {
     setStage(job, 'failed')
     job.error = msg
     job.outcome = 'failed'
@@ -2506,7 +2489,6 @@ function createJobService(config, onSettled) {
     job.finishedAt = new Date().toISOString()
     note(job, `任务失败：${msg}`)
     touch(job)
-    if (notify && !fromSubmit) onSettled?.(job, 'failed') // sessionId 守卫在 wakeCompileSession 内
   }
 
   // 任务收尾：done / partial / failed 三态。
@@ -2529,7 +2511,6 @@ function createJobService(config, onSettled) {
     job.finishedAt = new Date().toISOString()
     note(job, `任务终态：${describeOutcome(stage, blockers)}`)
     touch(job)
-    onSettled?.(job, stage)
   }
 
   // 阶段收割统一入口：返回 null = 阶段还在跑，下轮 tick 再看。
@@ -3647,7 +3628,7 @@ function createJobService(config, onSettled) {
     saveRecord(job, judged)
     if (job.writtenCount > 0 && liveConfig(config).autoCommit) {
       setStage(job, 'commit')
-      return // 提交在下个 tick 的 tickCommit 完成；完成后才置终态并唤醒会话
+      return // 提交在下个 tick 的 tickCommit 完成；完成后才置终态
     }
     finishJob(job, judged.outcome, judged.blockers)
   }
@@ -3730,9 +3711,9 @@ function createJobService(config, onSettled) {
           if (plan.action === FOREIGN_ACTION.LEAVE) continue
           if (plan.action === FOREIGN_ACTION.VOID) {
             // 作废是被取代，不是编译失败：原实例早已消失，这条排队项从未真正开始。
-            // 不唤醒会话（不等同于「编译失败」），用户下次提交会正常排进队列。
+            // 用户下次提交会正常排进队列。
             note(job, `原实例 ${job.owner} 停更，${plan.reason}，本实例作废该任务`)
-            fail(job, plan.reason, { notify: false })
+            fail(job, plan.reason)
             continue
           }
           const idleMs = Date.now() - lastSeenAt(job)
@@ -3908,7 +3889,7 @@ function createJobService(config, onSettled) {
       owner: instanceId,
       stage: 'submitting',
       auto: auto === true,
-      sessionId: sessionId ?? null, // 发起会话：编译终态 steer 唤醒（面板/自动调度为 null，不唤醒）
+      sessionId: sessionId ?? null, // 发起会话：超预算文章走会话通道时 steer 给它（面板/自动调度为 null）
       plan: null,
       batchRef: null,
       tasks: [],
@@ -4127,7 +4108,7 @@ function generateToolDefinition(cfg, svc) {
       const auto = auto0
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
-      const sessionId = exec?.agent?.id ?? null // 发起会话：编译终态时 steer 唤醒（面板/自动调度无 agent 上下文=不唤醒）
+      const sessionId = exec?.agent?.id ?? null // 发起会话：超预算文章走会话通道时 steer 给它（面板/自动调度无 agent 上下文=null）
 
       const binary = resolveBinary(c)
       const statusRes = await runCw(binary, cwd, ['status'], 120000, exec?.signal)
@@ -4143,7 +4124,7 @@ function generateToolDefinition(cfg, svc) {
       // 幂等：同仓库已有活动任务直接返回
       const active = svc.findActive(cwd)
       if (active) {
-        if (sessionId) active.sessionId = sessionId // 最近一次关心该仓库的会话拿唤醒权
+        if (sessionId) active.sessionId = sessionId // 最近一次关心该仓库的会话拿到会话通道
         notes.push(`该仓库已有进行中的编译任务 ${active.id}（stage ${active.stage}），本次调用直接返回现有任务`)
         result.jobId = active.id
         result.stage = active.stage
@@ -4401,7 +4382,7 @@ function generateToolDefinition(cfg, svc) {
 // 与 codewiki_generate 的差别只在语义与引导文案：固定 scope=auto，返回值明确告诉
 // 模型「本步收尾、继续下一项、不要等待/轮询」。编译产物由插件在 tickIndex 顺带
 // autoCommit（0.10.9），因此成功后既不催模型提交、也不唤醒会话；只有自动提交
-// 失败时才由 commitHintText / wakeCompileSession 发一条「产物待提交」降级提醒。
+// 失败时才由 commitHintText 在系统提示 section 里给一条「产物待提交」提醒。
 // ---------------------------------------------------------------------------
 
 function updateToolDefinition(cfg, generateDef) {
@@ -4409,7 +4390,7 @@ function updateToolDefinition(cfg, generateDef) {
     name: 'codewiki_update',
     description: [
       '提交 CodeWiki 更新请求（日常维护入口，scope=auto 语义）：无 wiki 走全量编译，有变更走逐篇更新，已是最新则直接报告。调用即提交、立即返回——调用后本步收尾、继续下一项工作；不要等待、不要轮询、不要为看进度反复调 codewiki_progress。',
-      '编译产物由插件自己提交（autoCommit 默认开：主题分支 codewiki/wiki-<任务id> 提交后合并回原分支，只 add .codewiki/ 与 CodeWiki.md，不动你的其它改动），所以正常情况下你不需要为 wiki 跑任何 git 命令，也不会被编译完成唤醒。只有插件自动提交没成功时，系统才会给一条「CodeWiki 产物待提交」提醒，届时随手提交一次即可。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
+      '编译产物由插件自己提交（autoCommit 默认开：主题分支 codewiki/wiki-<任务id> 提交后合并回原分支，只 add .codewiki/ 与 CodeWiki.md，不动你的其它改动），所以正常情况下你不需要为 wiki 跑任何 git 命令。编译终态不会主动发消息唤醒会话：失败与否在 codewiki_progress 与面板里看；只有插件自动提交没成功时，系统提示里会出现一条「CodeWiki 产物待提交」提醒，届时随手提交一次即可。与 codewiki_generate 的关系：本工具是固定 scope=auto 的快捷入口，需要 scope=full/stale 时仍用 codewiki_generate。',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -5217,7 +5198,7 @@ export function commitHintText(cwd, jobs = loadJobs()) {
       .filter((j) => ['done', 'partial'].includes(j.stage) && (j.writtenCount ?? 0) > 0 && j.finishedAt && samePath(j.cwd, cwd))
       .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0]
     // 自动提交已成功或产物本就无改动 → 不必再查 git：该任务不需要任何提交动作。
-    // （与 wakeCompileSession 共用 autoCommitState，两条通道对同一次编译给出同一结论。）
+    // （autoCommitState 是这条提醒与系统提示 section 的唯一判据。）
     if (latest && autoCommitState(latest) === 'pending') {
       const g = spawnSync('git', ['-C', cwd, 'log', '-1', '--format=%ct', '--', ...WIKI_PATHS], { encoding: 'utf8', timeout: 5000, windowsHide: true })
       const commitSec = Number.parseInt(String(g.stdout ?? '').trim(), 10)
@@ -5293,7 +5274,7 @@ export function apply(ctx, config) {
   // 产物——面板上看不见它在编译，用户也无从取消（0.16.3 修复）。
   let schedWorkspaceRegistry = null
   if (typeof ctx.inject === 'function') ctx.inject(['workspaceRegistry'], (rc) => { schedWorkspaceRegistry = rc?.workspaceRegistry ?? rc })
-  const service = createJobService(config, wakeCompileSession)
+  const service = createJobService(config)
   service.start()
   // cordis effect：立即执行 body 并把返回值收集为 disposer——必须返回清理函数本身，
   // 写成 () => service.stop() 会在启动时当场停掉服务（返回 undefined 也无 disposer）
