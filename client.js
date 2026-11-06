@@ -2467,18 +2467,20 @@ window.__ModuleLoader__.load({
 
           // ---- 列表 ----
           // 「打开没有内容」在行上就要说清原因：输出空、思考多，是模型把内容都写在思考里；
-          // 输出与思考都空但调了工具，是这一轮在操作工具。别让人点开才发现是空的。
+          // 输出与思考都空但调了工具，是这一轮在操作工具；三者都空但请求还在跑，是增量还没到。
+          // 别让人点开才发现是空的，也别把「即将长出来」误报成「没有内容」。
           const emptyHint = (s) => {
             if (Number(s.outputChars)) return null
             if (Number(s.reasoningChars)) return t('sessHintThinking')
             if (Number(s.toolCalls)) return t('sessHintTools')
+            if (s.status === 'running') return t('sessLive')
             return t('sessHintEmpty')
           }
           const row = (s) => el('button', {
             key: `${s.jobId ?? job?.id}#${s.n}`,
             'data-dscw-p-sessrow': '',
             'data-status': s.status,
-            'data-empty': Number(s.outputChars) ? null : 'true',
+            'data-empty': Number(s.outputChars) || s.status === 'running' ? null : 'true',
             onClick: () => { setSel({ jobId: s.jobId ?? job?.id, n: s.n }); setDetailTab('output') },
           },
             el('span', { 'data-mark': '' }, s.status === 'running' ? '▸' : s.status === 'done' ? '✓' : '✗'),

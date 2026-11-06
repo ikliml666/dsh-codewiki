@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.17.61 — 2026-11-06
+
+### 会话行：正在生成时标「生成中」，不再误报「无内容」
+
+用户截图三条 `原生请求 · doubao-seed-2.1-lite` 都是「无内容」，问「这没有问题吗」。查证分两层。
+
+**那三条是旧版本写的记录，内容确实丢了。** `job-mw4re442-f` 的 #11/#12/#13（17:25:51 / 17:25:56 / 17:26:00）meta 里连 `stage`、`reasoningChars`、`toolCalls` 三个字段都不存在——它们是 0.17.60 上线前写的。对应的 `full.json` 里 `promptLen` 分别 183977 / 184131 / 185137 字符，`outputLen` 全是 0。桥日志显示这三条请求的 chunk 构成：
+
+```
+#11  reasoning-delta 369, text-delta 43, tool-call-delta 15
+#12  reasoning-delta  30, text-delta  0, tool-call-delta 28
+#13  reasoning-delta   0, text-delta  0, tool-call-delta 28
+```
+
+内容都在思考与工具调用里，旧的 `textDeltaOf` 只认正文，整段丢掉了。这正是 0.17.60 修的那个 bug，历史记录无法回填。
+
+**0.17.60 上线后的新记录是完整的。** `job-mw4s9yyc-2` 的 #1 是改动后第一条：`stage=articles`、`outputChars=89`、`reasoningChars=4191`、`toolCalls=1`、`outputTokens=3818`；详情端点返回思考全文（4191 字符）与 `str_replace_editor` 的完整参数（`{"working_dir":"docs","command":"view","path":"overview.md"}`）。
+
+**但这轮还暴露一个真瑕疵：请求正在跑、增量还没到时，三者都是 0，行上也会标「无内容」。** 那个状态是「即将长出来」，不是「没有」。`emptyHint` 原来只在 `outputChars` 为 0 后依次看思考与工具，最后无条件落到 `sessHintEmpty`；现在在兜底前加一层：状态为 running 时显示 `sessLive`（生成中）。同一行的 `data-empty`（给行名降饱和度的标记）也同步排除 running，否则「生成中」的行名会比同组其他行更灰，看着像失败。
+
+验证：
+
+```
+test-client-panel.mjs  24 passed, 0 failed
+  （新增「正在生成且尚无增量时行上标生成中，不误报无内容」）
+反向验证：临时删掉 running 分支 → 该用例 FAIL「生成中的空记录被报成了无内容」，
+          还原后 24 passed
+```
+
+真机对账（`%TEMP%/dsh-codewiki-sessions`，603 条记录）：601 条是旧格式（其中 379 条无正文），2 条新格式且字段齐全。
+
 ## 0.17.60 — 2026-11-06
 
 ### 会话页：按流程分类、正文 Markdown 预览、修掉「打开没有内容」
