@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.17.59 — 2026-11-06
+
+### 会话页重做：详情占满整屏、进行中任务可读、轮询不再白跑
+
+用户反馈三件事叠在一起：「会话标签页会话一多加载就慢」「UI 过于简陋」「点进会话详情只显示半屏，下面一半不显示还要滚动」「无法查看正在进行的会话」。查下来是四个独立缺陷。
+
+**一、详情只占半屏：双层滚动容器把内容压成自己的高度。**
+
+`[data-dscw-p-page]` 自带 `height:100%; overflow-y:auto`。打开会话视图时 `SessionView` 又用同一属性做根节点，于是两个 `height:100%` 套在一起——内层的高度落在「高度不确定的父滚动容器」里，撑不出满高；而详情里唯一的输出块还带着 `pre { max-height: 300px }`。结果就是详情撑到内容高度就停，剩下半屏空白，想看全还得滚外层。
+
+改成：面板根节点在会话页加 `data-dscw-p-fixed`（`overflow:hidden`），高度由 `sesswrap` → `sessdetail` 一路 `flex:1 1 auto; min-height:0` 分配下去；prompt 与输出各自是一块 `[data-dscw-p-sesspane]`，内部 `pre` 自己滚，300px 限高整条删掉。两块面板都能点标题折叠，展开时各占一半可用高度。
+
+**二、进行中任务是裸文本：两个 data 属性没有任何样式规则。**
+
+`[data-dscw-p-active]` / `[data-dscw-p-activerow]` 从 0.17.5 起就在 JSX 里用着，样式表里却一条匹配都没有。渲染出来是几行无边框、无色条的纯文字，和下面带状态色条的请求行完全不在一个视觉体系里，看着就像没画完。
+
+补齐了这两条规则（边框 + 浅底 + pulse 圆点 + `[data-idle="true"]` 灰化），并让全局视图里点一行进行中任务等于「只看这个任务的请求」（`focus`），顶部给一条可清除的筛选条——原本要在一堆跨仓库的请求里自己找。
+
+**三、轮询每 5s 重建整棵列表，滚动位置与焦点被打断。**
+
+`SessionView` 的 `pull` 无条件 `setList/setActiveJobs`，即使 payload 一字未变也触发重渲染。改成先算指纹（total + 每个活跃任务的 stage/percent/requests + 每条记录的 status/outputChars），与上次相同就直接 return。内容没变时列表不重建，滚动位置与键盘焦点都保住。
+
+**四、服务端三处白跑。**
+
+| 位置 | 旧做法 | 新做法 |
+| --- | --- | --- |
+| 全局会话端点算「已发几个请求」 | 对每个活跃任务 `listSessionRecords(id).length`——读全部 meta 再取 length | `countSessionRecords`：只数 `.meta.json` 文件名 |
+| 全局会话列表排序 | 每次轮询读完全部 meta 才能按 startedAt 排序 | meta 按 `mtime:size` 缓存，命中只花 stat；排序换掉 `localeCompare`（ISO 时间串词法序即时间序） |
+| 单任务会话列表 | 一次返回全部（446 条的旧任务是常态） | `limit` 参数，默认 80，配 `total` 供前端「再加载」 |
+| jobs 端点 payload | `nativeResult` 原样带出 `gate.articles`/`incremental.hydrated` 等，前端只用两个 outcome | `nativeResultBrief` 只留 `outcome/stage/gate.outcome/apply.outcome` |
+
+验证（同形态造数：30 个任务 / 2224 条请求记录，新旧两版 `installWebServer` 装在同一份数据上跑真实 HTTP）：
+
+```
+GET /api/codewiki/jobs
+  旧 11.3ms / 601.9KB    新 6.5ms / 254.7KB    体积降 58%
+  nativeResult 字段：旧 344.7KB → 新 2.6KB
+GET /api/codewiki/sessions（全局）
+  旧 990.9ms / 63.8KB    新 52.1ms / 63.8KB
+GET /api/codewiki/sessions?jobId=job-bench-00
+  旧 283.5ms / 114.3KB   新 14.2ms / 20.8KB    体积降 82%
+  旧 sessions=446（无 total/limit）→ 新 sessions=80 total=446 limit=80
+```
+
+`test-client-panel.mjs` 21 passed（新增「详情：两块可伸缩面板取代限高盒子」一条，断言两块 pane、默认都展开、旧 `sessbody` 已消失）；`test-sessions.mjs` 全部通过。
+
 ## 0.17.58 — 2026-11-06
 
 ### 进度条只画已执行的阶段，未执行的不再占位
