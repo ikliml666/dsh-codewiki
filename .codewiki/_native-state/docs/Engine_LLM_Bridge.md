@@ -43,7 +43,7 @@ flowchart LR
 | `effortByStage` | object? | 按引擎阶段覆盖推理档位（`{stage: effort}`） |
 | `timeoutMs` | number? | 单次模型调用超时，默认 10 分钟；[Engine_Native_Run](Engine_Native_Run.md) 会再夹到 `min(总超时, 10分钟)` |
 | `onLog` | (entry)=>void? | 结构化日志回调，**不含 Authorization 与占位 key** |
-| `onRequestStart` | (task)=>handle? | 会话记录钩子：每个 chat 请求开始时调用，返回 `{onDelta, onDone, onError}` |
+| `onRequestStart` | (task)=>handle? | 会话记录钩子：每个 chat 请求开始时调用，入参 `task = {name, model, provider, stage, batchPrompt}`，返回 `{onDelta, onDone, onError}` |
 
 服务实现要点：
 
@@ -101,7 +101,7 @@ sequenceDiagram
   end
   B->>B: readBody（32MB 上限）再 JSON.parse
   B->>B: toLlmRequest 转成 GenerateOptions
-  B->>P: onRequestStart（name/model/batchPrompt，不含 key）
+  B->>P: onRequestStart（name/model/stage/batchPrompt，不含 key）
   P-->>B: 返回 onDelta / onDone / onError 句柄
   B->>H: llm.stream（options + AbortSignal）
   loop 逐 chunk 到达
@@ -137,7 +137,7 @@ sequenceDiagram
 
 会话记录钩子 `onRequestStart` 供 [Web_UI_Panel](Web_UI_Panel.md) 的「会话」视图使用：
 
-- `task` 只含 `name`（`原生请求 · <model>`）、`model`、`provider`、`batchPrompt`——后者由 `messagesToPrompt` 把 messages 摊平成可读文本（保留 role 前缀），超过 200k 字符显式截断并标注原长；**绝不**包含 Authorization 与占位 key。
+- `task` 只含 `name`（`原生请求 · <model>`）、`model`、`provider`、`stage`、`batchPrompt`——后者由 `messagesToPrompt` 把 messages 摊平成可读文本（保留 role 前缀），超过 200k 字符显式截断并标注原长；`stage` 为当前引擎阶段（`currentStage || null`），供面板按「流程走到哪一步」给请求分类，记录本身不经过引擎，不在桥里带下去就只剩统一的请求名；**绝不**包含 Authorization 与占位 key。
 - 会话回调外层有沙箱（`callSession`）：面板记账失败绝不影响正在跑的模型请求。
 
 ## 生命周期与协作关系

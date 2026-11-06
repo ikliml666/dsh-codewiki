@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "8f82b29d7dc28aafc81e03835dd7c09fd2e378c8"
+    "headCommit": "6dd8c167b453d6a590bc7096ad67f73cd80daa0b"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "8f82b29d7dc28aafc81e03835dd7c09fd2e378c8",
+    "headCommit": "6dd8c167b453d6a590bc7096ad67f73cd80daa0b",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
@@ -17,6 +17,7 @@
       "client.js",
       "docs/hy3-concurrency-handoff.md",
       "index.js",
+      "lib/engine/llm-bridge.js",
       "package.json",
       "patches/README.md",
       "patches/upstream-module-parallel.patch",
@@ -129,7 +130,7 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4mnvyg-4-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4ohtvj-8-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-06T07:15:46.068Z"
+  "updatedAt": "2026-11-06T08:11:07.878Z"
 }

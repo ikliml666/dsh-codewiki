@@ -230,16 +230,17 @@ flowchart TB
 
 | 形态 | 入口 | 数据源 | 展示 |
 |---|---|---|---|
-| 单任务 | 任务行「会话」按钮（`sessJob`） | `GET /sessions?jobId=&limit=` | 平铺列表（任务卡占满整页） |
-| 全局 | 面板「会话」Tab（`job=null`） | `GET /sessions?limit=` 聚合 | 按 cwd 工作区分组（`<details>` 折叠），组按最新活动倒序 |
+| 单任务 | 任务行「会话」按钮（`sessJob`） | `GET /sessions?jobId=&limit=` | 按编译阶段分组的列表（任务卡占满整页） |
+| 全局 | 面板「会话」Tab（`job=null`） | `GET /sessions?limit=` 聚合 | 按仓库（cwd）分节、节内再按编译阶段分；仓库组默认展开可折叠，组按最新活动倒序 |
 
 - **滚动归属**：会话页列表 + 详情各占一块，由外层 `[data-dscw-p-fixed]` 固定高度（任务行「会话」按钮与「会话」Tab 两种入口都置）——双层滚动条会把详情区挤成内容高度、下面留大片空白，因此组件不再套一层 page 布局；
-- **列表 5s 轮询**：`inFlight` 锁防重叠；每轮回包按「total + active 摘要 + 每条 `jobId#n:status:outputChars`」算指纹（`sigRef`），内容一字未变就不进 state——此前每次 `setList` 都重建整棵列表，滚动位置与选中焦点被 5s 一轮打断；
+- **列表 5s 轮询**：`inFlight` 锁防重叠；每轮回包按「total + active 摘要 + 每条 `jobId#n:status:stage:outputChars:reasoningChars`」算指纹（`sigRef`），内容一字未变就不进 state——此前每次 `setList` 都重建整棵列表，滚动位置与选中焦点被 5s 一轮打断；
 - **拉取分页**：初始 `limit=80`，底部「再加载 80 条」按钮按 `cap`（全局聚合 500、单任务 2000，与服务端一致）算剩余数，到顶即隐去；头部常显「共 N 条」；
-- **详情轮询**：选中某条后 `GET /sessions/item?jobId&n` 拉 prompt/输出全文；还没有 `finishedAt` 就是仍在生成，2s 后自动重拉一次——正在跑的请求能看着输出逐段长出来。详情是可折叠的两块面板（`prompt` / `output`，`panes` 状态），面板头带字符数提示；
-- **「只看任务」过滤**：全局视图的「进行中的任务」区每行可点，把列表收窄成该任务的请求（`focus`）、并回显「只看任务 <repo> · 看全部任务」工具条；聚焦态不再按 cwd 分组（只有一个仓）。
-- `activeJobs` 段：进行中但尚未发出过 LLM 请求的任务（准备/聚类/收尾）也可见，显示阶段（`stageLabel` / `nativeStageName`）、`nativePercent`、已写篇数、请求数；零请求的行标 `data-idle`。
+- **详情视图**：选中某条后 `GET /sessions/item?jobId&n` 拉 prompt/输出全文；还没有 `finishedAt` 就是仍在生成，2s 后自动重拉一次——正在跑的请求能看着输出逐段长出来。详情由 SegmentedTabs 页签切换：「输出」（默认，正文经 `MarkdownText` 渲染）、「输入」（prompt 按 `[system]/[user]/[assistant]/[tool]` 角色切块）、有 `reasoning` 时出「思考」页签、有工具调用时出「工具」页签；页头常显输出/思考/工具次数与输入输出 token 统计；
+- **「只看任务」过滤**：全局视图的「进行中的任务」区每行可点，把列表收窄成该任务的请求（`focus`）、并回显「只看任务 <repo> · 看全部任务」工具条；聚焦态只有一个仓，不再按仓库分节，但仍按编译阶段分组。
+- `activeJobs` 段：进行中但尚未发出过 LLM 请求的任务（准备/聚类/收尾）也可见，显示仓库名（无 cwd 时退回任务 id）、阶段（`stageLabel` / `nativeStageName`）、`nativePercent`、已写篇数、请求数；零请求的行标 `data-idle`。
 会话页自身固定高度（`embedded` 嵌套模式已移除，两种入口统一）。
+- **列表分层与行内空提示**：全局视图按仓库（cwd）分节、节内再按编译阶段分（单任务/聚焦态直接按阶段分）；阶段组按 `STAGE_ORDER` 的真实流程次序排，历史记录无阶段字段时归入「未标注阶段」组，组头显示条数与完成/失败/在跑汇总；仓库组与阶段组都可折叠（`collapsed` 态，仓库组默认全展开）。每行在输出为空时直接在行内给出原因（思考中 / 仅工具调用 / 无内容），点开详情前就知道为什么空。
 
 ### `Skeleton` / `Spark` / `PanelIcon` / 工具函数
 

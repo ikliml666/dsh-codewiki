@@ -13,7 +13,8 @@
             "client.js::en",
             "client.js::line",
             "client.js::mount",
-            "client.js::zh"
+            "client.js::zh",
+            "client.js::row"
         ],
         "children": {}
     },

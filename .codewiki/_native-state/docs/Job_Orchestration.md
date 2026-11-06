@@ -174,9 +174,17 @@ flowchart LR
 
 每个并发池请求的 prompt 与流式输出落到 `<tmp>/dsh-codewiki-sessions/<jobId>/nnn.{meta,full}.json`，TTL 24h。面板「会话」Tab 据此实时展示「codewiki 现在在跟模型说什么」。仅本地临时目录、仅回环可读，不进 git、不随 job 持久化。
 
-读取侧的三个工程口径：
+**记录内容**：
+
+- 每条记录带 `stage` 字段标注请求发生在哪个引擎阶段：写作通道（batch / agentic，文章与子智能体任务池）的请求显式兜底为 `'articles'`，否则它们会掉进面板的「未标注」；原生通道请求的 `stage` 取自任务本身（桥在 `onRequestStart` 入参里带上 `stage: currentStage || null`），缺失时兜底到 `job.nativeStage`——阶段刚切换、桥还没收到 `setStage` 时 `task.stage` 为 `null`（falsy），而 `job.nativeStage` 由同一份进度帧直接赋值，是当时唯一可靠的阶段事实。
+- 流式增量由 `sessionDeltaOf` 统一抽取（替代旧的 `textDeltaOf`）：正文（`text`）、思考（`reasoning`）与工具调用（`tool`）三类分片分开累积；tool-call-delta 按分片的 `id` 合并成整条调用（`name` + 逐片拼接的 `arguments`），否则一次调用会被记成几十条半截 JSON。
+- meta 上三个计数分开记：`outputChars`（正文字符数）、`reasoningChars`（思考字符数）、`toolCalls`（合并后的工具调用数）。思考档打开时正文可能为空，光看 `outputChars` 会把「想了 1000 段」的请求显示成空，面板需要三个计数才能如实说明「这条请求的内容在思考里」。
+- `full` 文件按 `SESSION_FLUSH_MS` 节流落盘正文，并另存 `reasoning` 与 `tools` 快照；`onDone` 时以完成全文为权威值（流式没抽到正文、只吐了思考时保留思考，不把它当空），并补记 `outputTokens`；`onError` 时同样刷出三类计数与截断 300 字符的 `error`。
+
+读取侧的四个工程口径：
 
 - meta 读取走 `readSessionMetaCached`（同一 meta 文件进程内缓存，翻页与计数共用），TTL 淘汰（`pruneSessionRecords`）删掉文件时同步从缓存剔除，不留下指向已删文件的陈旧条目；
+- 单条详情走 `readSessionRecordDetail`：full 全文与 meta 合并返回。生成中的 full 还没按节流落思考/工具快照时，计数以 meta 上内存里的最新值为准（`outputChars` / `reasoningChars` / `toolCalls` / `status` 缺省回落到 full 快照），`stage` 同样以 full 优先、meta 兜底；
 - 活跃任务的请求计数走 `countSessionRecords` / `countAllSessionRecords`——只数 `*.meta.json` 文件名、不读内容，不再为「数一下有多少请求」把全部 meta 整包读一遍；
 - 列表端点按 `limit` 分页（见下节「观测与 API」），不再一次把单任务几百条记录全量铺满。
 
@@ -296,7 +304,7 @@ flowchart TB
 | `GET /api/codewiki/jobs` | 任务列表（工作区过滤、dead-target 过滤、queued 标注「在等谁」） |
 | `GET /api/codewiki/repos` | 仓库总览（cw status 现算 + 30s 缓存 + 自动调度心跳状态） |
 | `GET /api/codewiki/sessions[?jobId=&limit=]` | 会话记录列表（单任务或全局聚合），分页返回：单任务默认 80 条（硬顶 2000）、全局默认 200 条（硬顶 500），响应里带 `total`（全部记录数）与 `limit`，前端可按需抬高 `limit` |
-| `GET /api/codewiki/sessions/item?jobId=&n=` | 单条请求 prompt/output 全文 |
+| `GET /api/codewiki/sessions/item?jobId=&n=` | 单条请求详情：经 `readSessionRecordDetail` 合并返回 prompt / output 全文与 `reasoning` / `tools` 快照，计数与状态以 meta 为准、full 快照兜底 |
 | `GET /api/codewiki/logs?jobId=&limit=` | 引擎 NDJSON 事件日志翻页 |
 | `GET /api/codewiki/models` / `/api/codewiki/model-efforts` | 模型目录与思考档位（设置页级联下拉数据源） |
 | `POST /api/codewiki/control` | `cancel` / `refresh` / `compile` / `confirm` 动作 |
