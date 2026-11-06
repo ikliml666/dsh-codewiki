@@ -36,8 +36,8 @@
   - `python/` — `entry.py`（JSON-lines 适配、阶段翻译、config 下发）、`stage_map.py`（FSoft 五段阶段 → 引擎九段，进度上限刻意压 90%）、`fsoft_runtime.py` / `full_parallel_runtime.py`（运行期替换上游串行循环，实现受控并行与断点续跑）、`tree_coverage.py`
 - `client.js` — 浏览器半侧：插件设置卡片（`plugins.item`）+ 侧边栏面板（`main` / `sidebar.panellist`）。面板 2s 轮询、阶段步骤条、用量、活动流、取消
 - `vendor/codewiki/` — mraza 上游源码（相对上游只有两处改动，见 `FORK.md`：`src/config.rs` 把 wiki 目录内化到仓库内、`src/main.rs` 统一路径分隔符）；`bin/cw.exe` 是 cargo release 产物（git 跟踪）
-- `docs/fsoft-native-engine.md` — 冻结的引擎契约与上游升级流程；`docs/hy3-concurrency-handoff.md` — 并发设计的交接记录
-- `tools/fsoft-engine/` — venv 建设脚本、图 diff 对拍与无 LLM 探针；`test-*.mjs` 是无框架的 node 断言脚本（多数可离线跑，6 个需要 `.probe-fsoft/venv`）
+- `docs/fsoft-native-engine.md` — 冻结的引擎契约与上游升级流程
+- `tools/fsoft-engine/` — venv 建设脚本、图 diff 对拍与无 LLM 探针
 
 ## Architecture
 

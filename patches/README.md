@@ -22,20 +22,13 @@ diff，让它们可追踪、可复现。
 都要人工解冲突，上一次就因为漏掉一行 `failures.append` 把上游的失败判据悄悄吃掉了。
 适配器用源码锚点定位要替换的片段，锚点不存在就**显式失败**，不会静默退回串行。
 
-## upstream-module-parallel.patch（0.16.14 – 0.17.11 的历史补丁，已停用）
+`moduleConcurrency` 默认 1（串行）。适配器在 `module_concurrency <= 1` 时仍按串行执行，
+所以关掉并行不需要卸任何东西。
 
-- **基准 commit**：`1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d`（2026-11-01，
-  上游 `origin/main` 的「update tree-sitter version」）。0.17.6 起它与
-  `lib/engine/manifest.js` 的 `UPSTREAM_COMMIT` 是**同一个 commit**：此前锁写的
-  `03d0a294…` 在本机 clone 里根本不存在，属于「锁了但锁错」，已废止。
-- **状态**：0.17.12 起不再应用。文件保留是因为它记录了一段真实历史（见下），
-  并且新适配器的分层与合并策略就是从那版补丁里验证出来的。
-- **涉及文件**（当时的）：
-  - `codewiki/src/be/documentation_generator.py` — 模块循环改为按拓扑层并行
-  - `codewiki/src/config.py` — 新增 `module_concurrency` 配置字段
-  - `codewiki/cli/adapters/doc_generator.py` — 透传该配置
+## 一个已删除的历史补丁（0.16.14 – 0.17.11）
 
-### 为什么当初需要它
+那段时期用 `patches/upstream-module-parallel.patch` 直接改上游源码做模块并行，0.17.12
+起被上面的适配器取代，补丁文件已删除。保留这条记录的用处是记住它的教训：
 
 上游 `_generate_modules_in_order` 是严格串行的
 `for module_path, module_name in processing_order: await ...`。
@@ -43,32 +36,7 @@ diff，让它们可追踪、可复现。
 实测单篇约 12 分钟；16 节点的仓库串跑 180 分钟预算耗尽只写 18 篇
 （真机 `job-mvuf1c5b-5`）。
 
-### 为什么后来放弃它
-
-补丁直接改上游源码，只有 `git apply --3way` 能进，而三方合并的冲突点恰好落在
+为什么放弃补丁：它只有 `git apply --3way` 能进，而三方合并的冲突点恰好落在
 「失败清单」这一行上——漏掉它，并行化就会把「有模块失败就 raise」吃成静默成功。
 同样的语义用适配器表达时，`failures` 是我们自己写的循环变量，不存在「合并时漏一行」
 这种失败模式。
-
-### 如果仍要打（仅作历史复现）
-
-```bash
-cd .probe-fsoft/src
-git checkout 1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d   # 或其它基准
-git apply --3way ../../patches/upstream-module-parallel.patch
-```
-
-两处冲突的收口方式：保留上游新增的 `failures = []`、删掉 `processed_modules`；
-保留「只取分支子树合并回主树」的逻辑，并把 `asyncio.gather` 结果里的 `err` 追加成
-`failures.append(f"{path}: {err}")`。
-
-### 验证
-
-```bash
-node test-upstream-parallel.mjs   # 8 条：同层并行、并发 1 时严格串行、父等子、
-                                 # 分支子树合并、真实读-睡-写竞态、单模块失败仍上抛
-node test-fsoft-runtime.mjs       # 6 条：增量叶子并行、写冲突串行重跑、断点续跑
-```
-
-`moduleConcurrency` 默认 1（串行）。适配器在 `module_concurrency <= 1` 时仍按串行执行，
-所以关掉并行不需要卸任何东西。
