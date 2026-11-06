@@ -6,7 +6,7 @@ description: CodeWikiSetup 是 Rust 版 cw CLI（详见 CodeWiki 主入口（cw 
 # CodeWiki 安装配置（CodeWiki_Setup）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`29bf6588`](https://github.com/ikliml666/dsh-codewiki/commit/29bf65881dbbc1d966bd0c8217bd8387a13d16f0) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`70bf6404`](https://github.com/ikliml666/dsh-codewiki/commit/70bf6404241bf06b48f7d49b81a98c3ce74d2f90) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -121,5 +121,5 @@ flowchart TD
 - 实际的 wiki 编译流水线（被本模块安装的规约所驱动的那套流程）由 Node.js 侧的 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) 与 [Article Agentic Pool 文章智能体执行池](Article_Agentic_Pool.md) 承担，本模块只负责把“何时该跑流水线”的规则讲给代理工具听。
 
 ??? abstract "Documented components (1)"
-    - [`claude_home`](https://github.com/ikliml666/dsh-codewiki/blob/29bf65881dbbc1d966bd0c8217bd8387a13d16f0/vendor%5Ccodewiki%5Csrc%5Csetup.rs) — `vendor\codewiki\src\setup.rs`
+    - [`claude_home`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/vendor%5Ccodewiki%5Csrc%5Csetup.rs) — `vendor\codewiki\src\setup.rs`
 

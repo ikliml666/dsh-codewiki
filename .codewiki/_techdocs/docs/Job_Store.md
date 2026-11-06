@@ -6,7 +6,7 @@ description: JobStore（实现于 lib/job-store.js）是 JobService 的持久化
 # Job Store（作业持久化与跨实例协调层）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`29bf6588`](https://github.com/ikliml666/dsh-codewiki/commit/29bf65881dbbc1d966bd0c8217bd8387a13d16f0) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`70bf6404`](https://github.com/ikliml666/dsh-codewiki/commit/70bf6404241bf06b48f7d49b81a98c3ce74d2f90) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -290,5 +290,5 @@ sequenceDiagram
 - **测试性**：本层刻意不反向依赖 `index.js`（路径 key 自带一份 `normKey`），所有函数纯化，跨进程语义可用单测模拟两实例。
 
 ??? abstract "Documented components (1)"
-    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/29bf65881dbbc1d966bd0c8217bd8387a13d16f0/lib%5Cjob-store.js) — `lib\job-store.js`
+    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/70bf6404241bf06b48f7d49b81a98c3ce74d2f90/lib%5Cjob-store.js) — `lib\job-store.js`
 
