@@ -1,5 +1,199 @@
 # Changelog
 
+## 0.17.58 — 2026-11-06
+
+### 进度条只画已执行的阶段，未执行的不再占位
+
+用户看图反馈：进度条的颜色分布是「按固定比例预先排好」的——准备中那一格明明只跑到「解析代码图 2%」，右边却已经摆着聚类、文章、校验、索引、提交的浅色块，看着像五条空槽而不是「现在到哪了」。
+
+根因在 `stageSegments` 的过滤条件：`stageWeight(job, r.stage, running) > 0`。进行中时 `stageWeight` 对**每个**非排队阶段都返回 `STAGE_WEIGHTS[stage]`（非零），于是四个还没轮到的阶段照样被画成 `data-state="todo"` 的浅色段。
+
+改成只画「已跑完 / 正在跑 / 失败在这一步」的段；未执行阶段的权重留成一段透明 spacer（`data-dscw-p-seg-ahead`），让带子的总宽不随阶段推进而跳变，同时把 `[data-dscw-p-segbar]` 的底色补成与普通进度条轨道一致——未执行的地方就是轨道底色，不是阶段色。
+
+图例同口径：未执行的阶段不列出（列出来只有一排 0%，没有信息量）。prepare 展开的三格里，只保留已完成与正在跑的子阶段。
+
+验证：`test-client-panel.mjs` 20 passed（三条受影响断言按新口径改写：准备中 2 段而非 7 段、写文章阶段 2 段而非 5 段、未开始的 cluster 不进图例，并新增「未执行部分留成 spacer」断言）。
+
+## 0.17.57 — 2026-11-06
+
+### 没源码变化就不再提交任务：丢掉永久携带的死路径 + 提交前的空转闸门
+
+用户问「怎么感觉每次重启应用后都会有更新任务，不是已经更新完了吗」。查下来是两个独立缺陷叠加，两个都修了。
+
+**根因一：`state.json` 的 `unconsumed` 会把死路径永久携带。**
+
+`mergeUnconsumed`（`lib/engine/native-state.js:545`）的旧规则是「上一轮携带的路径只有出现在本轮 `committed` 里才算消化」。于是「文件已被删掉、又从未提交过」的路径永远进不了 `committed`，被无限携带，`effectiveChanges` 永远非空，`idleRound` 永不成立——工作区明明干净，每轮仍跑完整的依赖分析。
+
+真机实测（修复前）：
+
+| 仓库 | `unconsumed` | 其中磁盘上已不存在 |
+| --- | --- | --- |
+| `dsh-subagent-auto-router` | 37 | 37（全是 `.dsh-ops/panel/*.json`） |
+| `dsh-git-worktree` | 7 | 6（全是 `.diag-tmp/*`） |
+| `dsh-presets-Switch` | 0 | 0 |
+
+修法：`mergeUnconsumed` 增加第三类判定——不在本轮 git 任何一路（committed / staged / unstaged / untracked / deleted / renamed）里的旧账判为**死条目**，`dropped` 出账并在 notes 里点名。被 `.gitignore` 忽略的文件同样丢弃：用户写进 `.gitignore` 就是声明「这不是仓库内容」，它永远进不了 commit，携带它等于保证空转，而丢掉不会少编译任何东西。被 git 看见的未跟踪文件仍然继续携带。
+
+修复后用同一批真实仓库复验：`dsh-git-worktree` 丢 7 条、`dsh-subagent-auto-router` 丢 37 条，两仓库的 `effectiveChanges` 从「恒非空」降到 **0**。
+
+**根因二：AutoScan 无条件提交任务。**
+
+`codewiki_generate` 的原生通道分支（`index.js:4029`）必须接住 `cw status` 报 clean 的情况——`cw status` 只看 committed，看不见工作区变化与受管状态。代价是 AutoScan 每小时把每个仓库都提交成一条任务，真跑起来要 3 分钟以上依赖分析，之后才发现「变化 0 项」。
+
+修法：新增 `idleNativeReason({ cwd, wikiPath })`（`index.js:1616`），在提交任务前判一次「这一轮没有任何可做的事」。判据乐观——任何一项判不准都返回 `null`（照常提交），宁可漏跳也不许丢变化：
+
+- 变更采集失败 → 不跳（不知道有没有变化）；
+- 受管状态缺件（`module_tree.json` / `metadata.json` / 依赖图）→ 不跳（引擎会转全量）；
+- `state.json` 记录的 `headCommit` ≠ 当前 cw 基线 → 不跳（有别的任务前移过基线，范围对不上）；
+- `effectiveChanges` 非空 → 不跳。
+
+用 `headCommit` 而不是 `baseCommit` 对基线：`cw meta update` 写在基线阶段、取的是那一刻的 HEAD，也就是本轮跑完时的 `headCommit`；`baseCommit` 是本轮开始时的旧基线，天然落后。
+
+**验证（当轮实测）**
+
+- `test-engine-native-incremental.mjs`：用例 19 新增 8 条断言（死条目丢弃 / 活口保留 / gitignore 同样丢弃 / 未跟踪新文件仍进变化集 / state.json 不再写回死条目 / notes 点名）→ **172/172 通过**。
+- `test-batch.mjs`：新增 6 条断言直接测 `idleNativeReason`（干净→跳、有未提交改动→不跳、改动撤回→重新可跳、旧账有活口→不跳、状态缺件→不跳、headCommit 对不上→不跳）→ **123 通过**。
+- `test-engine-native-job.mjs` 142/142、`test-job-reliability.mjs` 125/125、`test-engine-apply-plan.mjs` 62、`test-article-contract.mjs` 33、`test-config.mjs`、`test-worktree.mjs`、`test-wiki-entry.mjs` 全通过。
+- 真实仓库复验：`dsh-git-worktree` / `dsh-subagent-auto-router` / `dsh-presets-Switch` / `Wxxy-CampusHub` 四个仓库的 `idleNativeReason` 全部判为「跳过本轮」，`dsh-codewiki` 因工作区有 27 项真实改动判为不跳。
+
+## 0.17.56 — 2026-11-06
+
+### 「准备中」不再是一格黑箱：按引擎子阶段展开，并按已解析文件数推进
+
+面板的 `prepare` 一格吞了引擎三段：`env`（探测环境）、`graph`（解析代码图）、`cluster`（模块聚类）。真机上这三段耗时差两个数量级——`env` 三秒，`graph` 三到四分钟，`cluster` 十几分钟——而进度条整段**一动不动**。
+
+不动的原因在上游：FSoft 把阶段内的 `update_stage` 全写在 `if self.verbose:` 里（`.probe-fsoft/src/codewiki/cli/adapters/doc_generator.py:207/225/234`），`entry.py:1015` 传的是 `verbose=False`，于是 `stage_progress` 恒为 0，`percent_of(1, 0.0)` = 0%。直到阶段跑完 `complete_stage()` 才一跳跳到 36%。实测 `job-mw4d5snr-7`：`02:36:58 graph 0%` → `02:40:24 graph 36%`，中间 3 分 26 秒零帧。
+
+两处改动：
+
+1. **引擎侧（`lib/engine/python/entry.py`）**：`_DetailHandler` 新增 `parse` / `parse-start` 两条正则，从上游 `call_graph_analyzer.py:118` 的 `[12/36] lib/engine/client.js (4.2s elapsed, ~8.1s remaining)` 里抽出已解析数与总数；`frame_percent` 在阶段 1 用 `percent_of(1, done/total)` 算真实比例；进度帧的 message 补「已解析 12/36 个源文件」。心跳从 60s 收到 10s——FSoft 每解析约十分之一文件才打一条日志，60s 一帧意味着整段只闪 3 次。心跳仍不推进 `percent` 之外的东西，也不改任何 FSoft 行为；`nativeLogSig` 去重让重复帧不进日志。
+
+2. **面板侧（`client.js`）**：`prepareRows()` 在「当前正处在 prepare」时把一格拆成 `env`/`graph`/`cluster` 三段，段宽按 `nativeStageTimings`（新字段）的真实耗时、未跑到的按预估权重补齐；色相从 `prepare` 的 196 向两侧各偏 12°。引擎自报 percent 是整轮口径，三段的区间并不相同（`env` 0-100、`graph` 0-36、`cluster` 36-54，来自 `stage_map.py` 的 `FSOFT_STAGE_WEIGHTS` × `CEILING`），所以按 `ENGINE_PCT` 表归一化，否则 `graph` 跑完只显示 36%。
+
+顺带修两处：
+
+- `stageFraction` 对 `prepare` 段也按 0..54 归一化。此前直接用引擎整体 percent / 100，准备跑完时这一段只填到 8.6%，总进度偏小一半。
+- 分段带的触发条件从 `pct > 0` 改成 `hasLiveSegments(job)`。刚进 `graph` 时归一化后就是 0%，旧的判据会退回一条空的纯色条——恰恰把用户要看的「解析到第几个文件」藏起来。
+
+`index.js` 新增 `job.nativeStageTimings`（按引擎阶段累加的真实耗时）与 `nativeStageAt`，并在 `jobSummary` 与 `codewiki_progress` 的 schema 里暴露。`stageTimings` 仍是面板粗粒度五段的口径，两者不混用。
+
+验证：`test-engine-python-entry.mjs` 24 passed（新增解析进度断言）、`test-client-panel.mjs` 20 passed（新增「准备中按引擎子阶段展开三段」「离开准备段后不再展开」，含反向验证）、`test-engine-native-job.mjs` 142/142、`test-engine-apply-plan.mjs` 62、`test-batch.mjs` 117、`test-config.mjs`、`test-wiki-entry.mjs` 全过。
+
+## 0.17.55 — 2026-11-06
+
+### 删掉进度条右侧的迷你趋势线
+
+0.17.35 起进度条右端有一条 48×14 的 SVG 折线，画的是最近 24 次轮询的 `overallPct`。本意是「数字告诉你在哪，斜率告诉你还动不动」，实际不成立：分段带已经把阶段、完成度、耗时全画出来了，多一条折线既重复又不解释任何东西；它的颜色用 `--dsw-alias-brand-primary`，这个变量在本机主题里映射到 `--dsw-static-neutral-bluish-1000` = `#0f1115`，画出来是一条黑线，看着像进度条末尾的残影。
+
+删除范围：渲染块（`trendOf(job.id).length > 1 ? … el(Spark, …)`）、采样块（每轮 `pctTrendRef` 写入）、`pctTrendRef` / `trendOf` 定义、`[data-dscw-p-trend]` CSS、中英 `trendHint` 两条文案。`Spark` 组件保留——吞吐徽标（tok/s）还在用它。
+
+## 0.17.54 — 2026-11-06
+
+### 修 0.17.53 的白屏：档位下拉把 `{id,name,description}` 对象当 React child
+
+现象：装 0.17.53 后 CodeWiki 面板整块白屏，控制台是
+
+```
+Error: Minified React error #31 ... args[]=object%20with%20keys%20%7Bid%2C%20name%2C%20description%7D
+client.js:638 slot entry crashed in 'main'
+```
+
+根因：`/api/codewiki/model-efforts` 返回的 `efforts` 是对象数组（`index.js` 的 `resolveModelEfforts` 逐个映射成 `{id, name, description}`），而 0.17.53 的「按环节设档位」写成了 `el('option', { key: e, value: e }, e)` —— 第三个参数是 children，传对象就命中 React #31。同一份数据在 `modelTrio`（`client.js:1086-1098`）里一直是对的：取 `e.id` 做 value、`labelOf(e)` 做文本。这段没照它写。
+
+修复：
+
+- 档位选项统一走 `toOption(e)`：字符串按 id 处理，对象取 `id`/`name`，文本形如 `Low（low）`。
+- 「当前值不在目录里」的判据从 `efforts.includes(current)` 换成 `knownIds.includes(current)`——对对象数组，前者永远是 false，会让已配置的档位被误判成陌生值。
+
+测试侧真正的漏洞：桩 React 的 `render` 遇到普通对象子节点会静默展开成空串，所以旧写法在桩里也「通过」。现在桩遇到非元素对象子节点直接抛 `Objects are not valid as a React child（React #31）`，与真实 React 对齐。同时新增用例「档位接口返回对象数组时按环节下拉不崩」，桩 `model-efforts` 返回 `[{id:'low',name:'Low',description:'快速'},{id:'high',...}]`，并等到标签渲染出来再断言（档位目录是二次异步拉取，一帧跑不完）。
+
+反向验证：把 `map(toOption)` 退回 `map((e) => el('option', {...}, e))` 后该用例失败（`Objects are not valid as a React child（React #31）：["id","name","description"]`），恢复后 18 passed。
+
+回归：`test-client-panel.mjs` 18（原 17）、`test-config.mjs`、`test-engine-llm-bridge.mjs` 30、`test-engine-apply-plan.mjs` 62、`test-article-contract.mjs` 33、`test-engine-contract.mjs` 19、`test-engine-quality-gate.mjs` 37、`test-engine-output.mjs` 34、`test-engine-native-job.mjs` 142/142、`test-engine-native-incremental.mjs` 164/164、`test-job-reliability.mjs` 125/125、`test-batch.mjs` 117、`test-article-repair.mjs` 49、`test-wiki-entry.mjs` 全部通过。
+
+## 0.17.53 — 2026-11-05
+
+### 设置页补上「按环节设档位」的控件（0.17.52 只做了后端）
+
+0.17.52 加了 `effortByStage` 配置项，但设置页的字段是 `client.js` 手工渲染的、不读 Config schema，所以设置页里看不到它。这一版补上：
+
+- `client.js` 的 `SAVE_KEYS` 加 `effortByStage`（不加就改了不落盘）。
+- 「编译模型」区块在 `requestLimit` 之后新增一组「按环节设档位」下拉：依赖图 / 模块聚类、文章写作、语义校对、质量门各一个。选项来自模型目录（与上面的思考程度同一份 `useEfforts`），另有「（用兜底档）」空选项；当前值不在目录里时保留成额外选项，避免换模型后静默丢配置。
+- 新增 `[data-dscw-stages]` / `[data-dscw-stage]` / `[data-dscw-stagelabel]` 三段 CSS：每环节一行「名字 96px + 下拉」。
+- 中英文案各 6 条。
+- `test-config.mjs` 新增 7 条用例：默认空对象、环节档位原样透出、空串被剔除、两端空白被裁。
+
+## 0.17.52 — 2026-11-05
+
+### 按环节分别设思考档位（effortByStage）
+
+此前所有模型环节（依赖图/模块树/文章/横切/审校）共用同一个 `batchReasoningEffort`，无法按环节分别开。新增 `effortByStage` 配置项：key 是阶段名（`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`），value 是该环节的 reasoning effort 档位。缺省（空对象或该环节没配）用 `batchReasoningEffort` 兜底，与之前行为完全一致。
+
+实现位置：`lib/engine/llm-bridge.js` 新增 `effortByStage` 参数与 `setStage()` 方法；`lib/engine/native-run.js` 在 `onProgress` 回调里同步阶段给桥；`index.js` 配置 schema 用 `z.dict(z.string())` 接收（schemastery 没有 `z.record`）。
+
+测试：`test-engine-llm-bridge.mjs` 新增 2 条（按阶段选档 + 无 effortByStage 时兜底），30 passed。
+
+## 0.17.51 — 2026-11-05
+
+### 陈旧模块树的死组件不再污染 source_files：基线卡死 9 个提交的病根
+
+本仓库连着 5 个编译任务终态 `partial`，阻塞点恒为一条：
+`[source-missing/product] Shared_Infrastructure_Utilities 的 source_files 指向不存在的文件：lib/wiki-notes.js`。结果是 `cw meta update` 永不执行，`_meta.yaml` 的 `last_compiled_commit` 钉在 `23a0b17f`，而 HEAD 已经走到 `56c49ec6`——中间 9 次 `docs(wiki)` 自动提交全是白跑的产物。
+
+根因不在判据，在证据的时效性，两处叠加：
+
+- **module_tree 只增不减**。上游 `cluster_modules.py:488-496` 在增量轮把新子树**合并进**旧树（`current_module_tree == {}` 才整体替换），删掉的文件不会从旧树消失。本仓库的 `.codewiki/_native-state/docs/module_tree.json` 因此一直留着 `lib\wiki-notes.js::buildNote`（0.17.49 已删该文件）；实测 148 个组件里只有这 1 个是死的，而增量日志确认该轮直接进 `[2/5] Incremental Update`，没有重新聚类的阶段。
+- **`sourceFilesOf` 不做存在性判断**。`lib/engine/mapping.js:70` 从组件 id 的 `::` 前部分直接取文件名塞进 `source_files`，于是死路径被渲染进 frontmatter，`validateOutput` 第 5 段（`lib/engine/output.js:333-346`）每轮如实报 `source-missing`，error 级 → 终态 partial → 基线不推进。这是一条自锁：越不推进基线，越没有机会重新聚类。
+
+修法落在证据链上游（`sourceFilesOf`），不在判据上：
+
+- **`sourceFilesOf(components, componentFiles, fileExists)`**：从组件 id 推出的路径要先过 `fileExists`，不存在就不计入。`componentFiles` 的显式映射**不**受此限——那是调用方给的证据，指错了仍由 `source-missing` 如实报出来（补了用例锁住这条边界）。
+- **`mapFsoftOutput({ fileExists })` / `buildWritePlan({ repoRoot })` 新增可选入参**：`mapping.js` 保持纯函数（不碰磁盘），存在性由调用方以回调形式注入；`buildWritePlan` 只在给了 `repoRoot` 时才传 `(rel) => fs.existsSync(path.join(repoRoot, rel))`，`validateOutput` 沿用已有的 `repoRoot` 参数透传。
+- **不给 `repoRoot` 时行为不变**：`buildWritePlan` 单独调用（测试、离线分析）仍全收组件，不因缺上下文而少算 source_files——「宁缺勿造」只对**已知不存在**生效，不对**未知**生效。
+
+验证：本仓库真实状态目录跑 `gateNativeOutput` → `source-missing` 从 3 条 defect 降到 0，剩下的 2 条是 `commit-mismatch` 与 `uncommitted-input`（工作区 22 个未提交改动，与本缺陷无关，属预期）。
+- `test-engine-output.mjs` 34 passed（原 33，新增「陈旧 module_tree 的组件指向已删文件 → 不计入 source_files，不判 source-missing」；原「source_files 指向不存在的文件 → source-missing」改成走 `componentFiles` 显式证据，锁住判据没被削弱）
+- `test-engine-output-real.mjs` 11 passed、`test-engine-contract.mjs` 19、`test-engine-quality-gate.mjs` 37、`test-engine-apply-plan.mjs` 62、`test-engine-native-job.mjs` 142/142、`test-engine-native-incremental.mjs` 164/164、`test-article-contract.mjs` 33、`test-batch.mjs` 117、`test-wiki-entry.mjs`、`test-wiki-anchors.mjs` 2 过 / 0 败 —— 全部通过。
+
+## 0.17.50 — 2026-11-05
+
+### 适配 DSH 0.2.2-rc.1：54 条破坏性变更逐项核对后，只有 Node 下限这一条落到本插件
+
+`C:/Users/ik/.dsh/reports/dsh-0.2.2-rc.1-breaking-changes.md` 列了 54 条（rc.5 → rc.1 之间的 2624 个提交）。逐条比对后，真正生效的只有 §1.1：`engines.node` 下限提到 `>=24.9.0`。其余 53 条在本仓库**零命中**，不是「改过了」，而是从来没用到那些接口。
+
+- **`engines.node`: `>=20` → `>=24.9.0`**。这条在 rc.5 上不产生任何行为变化（rc.5 的 `dsh-app-boot` 不校验插件 `engines.node`，全库搜 `engines.node` 零命中），它是对齐 rc.1 要求，不是修 bug。
+- **`engines.dsh` 保持 `>=0.2.0-rc.0`**，不收紧。三种写法的 semver 实测（用从 rc.5 asar 里提取的真 semver，`includePrerelease: true`）：`>=0.2.0-rc.0` 在两种 runtime 上都 PASS；`>=0.2.2-rc.1` 只在 rc.1 上 PASS；`>=0.2.0-rc.0 <0.2.2-0` 在 rc.5 上 PASS、rc.1 上 **REJECTED**。写死上界是最坏选择——插件反而会在新宿主上被整层跳过。
+- **§0 的引擎判定语义 rc.5 就已经有**：`dsh-app-boot/lib/index.js:251-299` 的 `unmetRequirements` 里，`engines.dsh` 存在即单独决定（`:1099-1102`），否则才回落到 `@deepseek-ai/dsh*` peerDependencies。报告 §11 说「这 54 条在 rc.5 都还没落地」，对 §0 这一条不成立。
+- **零命中的关键项**（逐条 `rg`，排除 `node_modules`/`vendor`/`.codewiki`/`.probe-fsoft`/`.agents`）：`MenuTarget`/`useMenuTarget`/`menuTarget`（§6.1 P0 编译期改名，本插件不碰菜单）、`SessionProjectionStateMap`/`EntryTree`/`sessionProjections`（§3）、`assembly.tools`（§2.2 高危静默项——本插件只调 `sp.section({name, order, text})`，从不读 `assembly.tools`）、`dsh-tools` 的 `mode`/`maxParallelSubCalls`/`DSH_TOOLS_MODE`（§2.1 P0，本插件不 import `dsh-tools`）、`schedule_*` 工具（§7.4，本插件自带调度器，不调宿主调度工具）、`apply_patch`/`fs-observation`（§7.1）、`session/attachment`（§8）。
+- **`result.tools` 的 7 处命中是误报**：全在 `lib/engine/openai-bridge.js:157` 的 `if (tools) result.tools = tools`，那是 OpenAI 兼容桥自己的响应体，与 `system-prompt/assemble` 的返回值无关。
+- **`purpose` 的 112 处命中也是误报**：全是自然语言与变量名，没有一处走 `GenerateOptions.purpose`。
+
+验证（rc.1 真实加载，不是纸面推演）：用 `E:/software/deepseek-harness`（`dsh-v0.2.2-rc.1-28-g0584c790b4`）起隔离实例 `DSH_HOME=E:/tmp/rc1-cw`、profile `cwtest`、端口 63100，`--version` 输出 `0.2.2-rc.1`。
+- `--dump-config` 尾部出现 `- id: codewiki / name: '@local/dsh-codewiki'` → bundle 组装成功、engines 判定通过。
+- `/api/codewiki/jobs`、`/api/codewiki/repos`、`/api/codewiki/models` 全部 **200** 且返回真实数据；`/api/codewiki/logs` 无 jobId 时 400（预期）。
+- 客户端 bundle `GET /plugins/??@local/dsh-codewiki/client.js` → **200，169771 字节**，且被列进页面 HTML 的 client 模块清单。
+- 4 个工具（`cw`/`codewiki_generate`/`codewiki_update`/`codewiki_progress`）用 rc.1 的 `assertSupportedJsonSchema` + `assertObjectJsonSchema` 逐个过 **PASS**；rc.1 的 `tools.register()` 新增了对 `output.render` 的存在性检查（`packages/core/tools/lib/index.js:480`），本插件 4 个工具本来就有。
+- `installUpdateReminder` 在 rc.1 契约下生成 section `codewiki:update-reminder`、`order=2901`、`text()` 渲染 617 字符且含 `codewiki_generate`；`agent/created` 监听正常挂上。
+
+回归：**40 个测试文件全量 `exit=0`，失败 0**。关键数字：`test-engine-apply-plan.mjs` 62、`test-article-contract.mjs` 33、`test-engine-native-job.mjs` 142/142、`test-engine-native-incremental.mjs` 164/164、`test-job-reliability.mjs` 125/125、`test-engine-quality-gate.mjs` 37、`test-agentic.mjs` 55、`test-article-repair.mjs` 49。
+
+已知未覆盖：`engines.node` 与 `engines.dsh` 在 rc.1 上**只有判定函数层面的验证**，没有在 rc.1 宿主里故意用不合规 manifest 跑一遍拒绝路径；`systemPrompt` 注入验证到 section 生成，没有在 rc.1 的真实对话轮次里确认它进了最终提示词（该路径在 rc.5 上由 `test-batch.mjs` 覆盖）。
+
+## 0.17.49 — 2026-11-05
+
+### 手工维护页整体下线：wiki 内容只由流水线产出
+
+真机上两篇手写 learnings 页积了 22 处失效行号锚点（`test-wiki-anchors.mjs` 347 过 / 22 败全来自它们）：页里写 `normalizeArticlePath` 在 `index.js:321`，实际在 369；`resolveBinary` 写 185-200，实际 233。这类页是唯一不受编译流水线管辖的内容，源码一动锚点就漂，而 `codewiki_generate` 按设计不覆盖手工页，所以重编译永远消化不掉——只能靠人每隔一段时间回去手改，而这正是用户明确不要的维护负担。
+
+- **删除**：`.codewiki/learnings/`（3 篇：`cw-binary-source-lost.md`、`update-reminder-entry-gap.md`、`update-rung-hardcoded.md`）与 `.codewiki/decisions/`（1 篇：`artifact-page-threshold.md`）连同两个空目录一并移除；`lib/wiki-notes.js`（98 行）与 `test-wiki-notes.mjs`（21 条用例）删除。
+- **工具下线**：`codewiki_note` 从注册表摘除（`index.js` 的 import、`noteToolDefinition` 整块 95 行、注册数组末项）。可用工具从 5 个回到 4 个。
+- **提醒文案**：`updateReminder` 里的「- 例外：本轮真修完了一个 bug 就用 codewiki_note…」整行删除。其余提醒项未改动——「不要手工编写或修改 `.codewiki/` 下的文章」那条 0.17.48 就有，本来就在覆盖这件事，不需要补写。
+- **vendor 侧写入口同步改掉**：`vendor/codewiki/skills/codewiki-session.md` 的「After Every Completed Task」第 2、3 条（写 `learnings/`、`decisions/`）与 `vendor/codewiki/src/setup.rs` 里 `CODEX_AGENTS_SECTION` 的同一对要求一并删除，改为「更新受影响文章」。否则 `cw setup` 会把与已删提醒直接矛盾的 MANDATORY 指令重新注入 `~/.claude/skills/` 或 `~/.codex/AGENTS.md`。二进制已按 FORK.md 重编译并同步两处。
+- **保留读取侧兼容**：`TYPE_BY_DIR`（`lib/article-contract.js:26-27`）、`ARTICLE_DIRS`（`index.js:1614`）、`wikiRelOf` 的目录表（`index.js:694`）仍含 `learnings`/`decisions`。理由不是「兼容旧数据」，而是 `cw init` 仍会建这两个目录（`main.rs:105-107` 的 `create_dir_all`），而插件在 `index.js:3374`、`index.js:4159`、`lib/engine/apply-plan.js:1277` 三处都调它——新仓库里空目录照建，删掉读取表就等于「目录建出来了，里面的历史页却识别不了」。三处都补了说明这条理由的注释。
+- 内容去向：4 篇页里的历史结论（cw 二进制源码丢失的来龙去脉、维护提醒的存在性门控、增量档位写死、artifact 页占比门槛）在对应 modules 页里都有覆盖，剩余只在 git 历史里。
+
+验证：`test-engine-apply-plan.mjs` 62 passed、`test-article-contract.mjs` 33 passed、`test-engine-native-job.mjs` 142/142、`test-engine-native-incremental.mjs` 164/164、`test-job-reliability.mjs` 125/125、`test-wiki-entry.mjs`、`test-orchestration.mjs`、`test-batch.mjs` 117 全通过；39 个测试文件全量 `exit=0`。`test-wiki-anchors.mjs` 由「347 过 / 22 败 / 3 待重编译」变为「2 过 / 0 败」：那 22 处失效锚点全部来自被删的两篇手写页，剩下的 2 条是 `vendor/codewiki/src/main.rs:236-256`（此前不扫 `.rs`，一直漏检）。
+
 ## 0.17.48 — 2026-11-05
 
 ### 首次编译要先问用户，被排除的仓库不再伪装成失败

@@ -238,11 +238,11 @@ for (const file of articles) {
     // 一千多条锚点一条都不受检——实测其中就藏着 `README.md：0` 这种误匹配。
     // `(?!\.\d)` 防止把「README.md：0.13.0 三层能力对照表」的版本号当成行号 0：
     // 中文全角冒号后面紧跟版本号是文档里的常见写法，裸 `\d+` 会截出 `0`。
-    const anchors = [...line.matchAll(/([A-Za-z0-9_\-./]+\.(?:js|mjs|ts|md|json|yml|yaml|txt|log))[:：](\d+)(?!\.\d)(?:-(\d+))?/g)]
+    const anchors = [...line.matchAll(/([A-Za-z0-9_\-./]+\.(?:js|mjs|cjs|ts|tsx|jsx|md|json|yml|yaml|txt|log|rs|py))[:：](\d+)(?!\.\d)(?:-(\d+))?/g)]
     if (anchors.length === 0) return
     const syms = symbolsOnLine(line)
     // 本行全部文件锚点数：符号绑定只在「唯一」时校验（见下方注释）
-    const allFileAnchors = [...line.matchAll(/[A-Za-z0-9_\-./]+\.(?:js|mjs|ts|md|json|yml|yaml|txt|log)[:：]\d+(?:-\d+)?/g)]
+    const allFileAnchors = [...line.matchAll(/[A-Za-z0-9_\-./]+\.(?:js|mjs|cjs|ts|tsx|jsx|md|json|yml|yaml|txt|log|rs|py)[:：]\d+(?:-\d+)?/g)]
     for (const a of anchors) {
       const srcName = a[1]
       const start = Number(a[2])

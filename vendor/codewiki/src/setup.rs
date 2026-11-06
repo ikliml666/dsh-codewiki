@@ -42,10 +42,8 @@ cat ~/.codewiki/<project>/modules/<name>.md
 
 Before finishing any task that involved code changes:
 
-1. If you fixed a bug, create `~/.codewiki/<project>/learnings/<slug>.md`
-2. If you made a design decision, create `~/.codewiki/<project>/decisions/<slug>.md`
-3. Update any wiki articles affected by your code changes
-4. Run `cw index` then `cw meta update`
+1. Update any wiki articles affected by your code changes
+2. Run `cw index` then `cw meta update`
 
 ### Article format
 

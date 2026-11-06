@@ -152,9 +152,15 @@ ACTIONS = ("doctor", "generate", "update", "cancel")
 _WRITTEN_RECOUNT_SEC = 2.0
 
 # 心跳间隔：长时间无进度帧的阶段（FSoft 阶段 3 就是典型）由桥接层定时补帧，
-# 让 Node 侧能区分「慢」与「僵死」。取值必须显著小于 Node 侧的僵死判定阈值
-# （lib/engine/client.js 的 silenceMs 默认 10 分钟），否则心跳自己会被判成卡死。
-_HEARTBEAT_SEC = 60.0
+# 心跳间隔：10s。让 Node 侧能区分「慢」与「僵死」——取值必须显著小于
+# lib/engine/client.js 的 silenceMs（默认 10 分钟），否则心跳自己会被判成卡死。
+# 从 60s 收到 10s 的两个理由：
+# 1) 阶段 1（解析代码图）在本仓库要跑 3 分半，且上游把该段 update_stage 全门控在
+#    verbose 里，只能靠心跳把「已解析 N/M 个文件」推给面板。60s 一帧意味着整段
+#    只闪 3 次，看上去仍像卡死。
+# 2) Node 侧按 `阶段|百分比|篇数` 去重（index.js 的 nativeLogSig），百分比不变的
+#    重复帧不会进日志，也不会把真正的事件挤掉——所以加密心跳不产生噪音。
+_HEARTBEAT_SEC = 10.0
 
 # 模型通道的环境变量名。Node 侧桥注入，密钥只活在进程环境里。
 ENV_BASE_URL = "CODEWIKI_BASE_URL"
@@ -209,7 +215,7 @@ def emit_progress(request_id, stage, percent, message="", written=0, failed=0, t
 # 做法刻意保持旁路：不改 FSoft 源码（vendor 锁版本），只在自己进程里把那个
 # logger 临时降到 INFO 并挂一个只读 handler，从日志文本里抽当前模块名。
 # handler 里任何异常都被吞掉——观测失败绝不能弄崩编译。
-_DETAIL = {"module": "", "phase": "", "at": 0.0}
+_DETAIL = {"module": "", "phase": "", "at": 0.0, "parsed": 0, "parsed_total": 0}
 
 # 逐模块日志的文本形态。emoji 前缀不参与匹配：cp936 控制台下非 ASCII 文本
 # 直接 print 会抛 UnicodeEncodeError，所以正则只吃 ASCII 部分。
@@ -221,6 +227,12 @@ _DETAIL = {"module": "", "phase": "", "at": 0.0}
 #   （顶层时是 "repository"，见 cluster_modules.py:290）。
 #   阶段 2 在真机上能跑十几分钟，只报「阶段 2，已写 0 篇」等于没有信息。
 _DETAIL_PATTERNS = (
+    # 阶段 1（call_graph_analyzer.py:118）每解析约十分之一文件打一条
+    # 「  [12/36] lib/engine/client.js (4.2s elapsed, ~8.1s remaining)」。
+    # 这是 graph 段唯一真实可计数的进度——该段的 update_stage 全在
+    # `if self.verbose:` 里，progress 恒为 0，进度条原本一动不动。
+    (re.compile(r"^\s*\[(\d+)/(\d+)\]\s"), "parse"),
+    (re.compile(r"Parsing (\d+) source files"), "parse-start"),
     (re.compile(r"Processing leaf module:\s*(\S.*?)\s*$"), "leaf"),
     (re.compile(r"Processing parent module:\s*(\S.*?)\s*$"), "parent"),
     (re.compile(r"Generating parent documentation for:\s*(\S.*?)\s*$"), "parent"),
@@ -252,6 +264,20 @@ class _DetailHandler(logging.Handler):
                 if not match:
                     continue
                 _DETAIL["phase"] = phase
+                if phase == "parse":
+                    _DETAIL["parsed"] = int(match.group(1))
+                    _DETAIL["parsed_total"] = int(match.group(2))
+                    _DETAIL["module"] = ""
+                    _DETAIL["at"] = time.time()
+                    return
+                if phase == "parse-start":
+                    # 进入阶段 1：上一阶段的模块名（"正在写 X"）到此为止，
+                    # 这里还没有模块概念，留着只会让面板显示错的模块。
+                    _DETAIL["parsed"] = 0
+                    _DETAIL["parsed_total"] = int(match.group(1))
+                    _DETAIL["module"] = ""
+                    _DETAIL["at"] = time.time()
+                    return
                 if phase == "overview":
                     # 「生成仓库总览」这一步没有模块名，但它是阶段 3 最后一个大块，
                     # 面板上必须能看见，否则这十几分钟又是一片空白。
@@ -290,6 +316,8 @@ def attach_detail_tap():
         logger_obj.setLevel(logging.INFO)
         _DETAIL["module"] = ""
         _DETAIL["phase"] = ""
+        _DETAIL["parsed"] = 0
+        _DETAIL["parsed_total"] = 0
         return {
             "logger": logger_obj,
             "handler": handler,
@@ -314,6 +342,8 @@ def release_detail_tap(tap):
     finally:
         _DETAIL["module"] = ""
         _DETAIL["phase"] = ""
+        _DETAIL["parsed"] = 0
+        _DETAIL["parsed_total"] = 0
 
 
 def detail_suffix():
@@ -325,6 +355,12 @@ def detail_suffix():
     try:
         module = _DETAIL["module"]
         phase = _DETAIL["phase"]
+        if phase in ("parse", "parse-start"):
+            done = _DETAIL["parsed"]
+            total = _DETAIL["parsed_total"]
+            if total <= 0:
+                return ""
+            return f"，已解析 {done}/{total} 个源文件"
         if not module:
             if phase == "overview":
                 return "，正在生成仓库总览"
@@ -669,6 +705,13 @@ def bridge_progress(adapter, request_id, on_stage=None, docs_dir=None):
         """
         if mode["incremental"] or int(stage or 0) == 3:
             return articles_percent(written, expected_total(written))
+        if int(stage or 0) == 1 and _DETAIL["parsed_total"] > 0 and stage_progress < 1.0:
+            # 阶段 1 的 stage_progress 恒为 0（update_stage 全在 `if self.verbose:`
+            # 里），真实进度只能从逐文件日志里数——否则整段 3 分钟以上一动不动。
+            # 阶段完成帧（stage_progress=1.0）不走这里：上游每十分之一文件才打一条
+            # 日志，最后一条常常停在 0.9，拿它算完成帧会让百分比倒退。
+            done = min(_DETAIL["parsed"], _DETAIL["parsed_total"])
+            return percent_of(1, done / _DETAIL["parsed_total"])
         return percent_of(stage, stage_progress)
 
     def written_now(force=False):

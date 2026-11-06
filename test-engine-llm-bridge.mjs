@@ -483,6 +483,36 @@ await check('启动参数缺失 → 抛错（不让桥以半配置状态监听�
   assert.throws(() => startLlmBridge({ llm: { stream() {} }, provider: 'p' }), /model/)
 })
 
+// ── 按环节分别设思考档位 ──────────────────────────────────────────────
+await check('effortByStage: stage-specific override', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'text-delta', text: 'ok' }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm', reasoningEffort: 'medium', effortByStage: { graph: 'off', articles: 'high' } }, async (bridge) => {
+    bridge.setStage('graph')
+    await post(bridge, simpleBody)
+    assert.equal(llm.calls[0].reasoningEffort, 'off', 'graph should use off')
+    bridge.setStage('articles')
+    await post(bridge, simpleBody)
+    assert.equal(llm.calls[1].reasoningEffort, 'high', 'articles should use high')
+    bridge.setStage('validate')
+    await post(bridge, simpleBody)
+    assert.equal(llm.calls[2].reasoningEffort, 'medium', 'unset stage should use fallback')
+  })
+})
+await check('effortByStage: absent keeps old behavior', async () => {
+  const llm = fakeLlm(async function* () {
+    yield { type: 'text-delta', text: 'ok' }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  })
+  await withBridge({ llm, provider: 'p', model: 'm', reasoningEffort: 'high' }, async (bridge) => {
+    bridge.setStage('graph')
+    await post(bridge, simpleBody)
+    assert.equal(llm.calls[0].reasoningEffort, 'high', 'no effortByStage uses fallback')
+  })
+})
+
 console.log(`\n${pass} passed, ${fails.length} failed`)
 if (fails.length) {
   for (const f of fails) console.log(`\n--- ${f.label}\n${f.err.stack ?? f.err.message}`)

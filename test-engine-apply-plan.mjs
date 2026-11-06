@@ -982,9 +982,9 @@ await check('残留页：嵌套目录里的页即便 slug 与 live 模块同名�
   assert.equal(stale[0].moduleName, 'apply-plan')
 })
 
-await check('残留页：learnings/ decisions/ 不在扫描范围（人工维护的页不受影响）', () => {
-  // 「不兼容旧产物」只针对 modules/。learnings/ 与 decisions/ 是人工维护页，
-  // codewiki_note 与手写都往这里写，它们没有模块名可对，也不该被模块清理波及。
+await check('残留页：learnings/ decisions/ 不在扫描范围（模块清理只碰 modules/）', () => {
+  // 「不兼容旧产物」只针对 modules/。learnings/ 与 decisions/ 没有模块名可对，
+  // 也不该被模块清理波及——别的仓库里历史残留的这类页就靠这条保住。
   const repoRoot = makeRepo()
   for (const dir of ['modules', 'learnings', 'decisions', 'concepts']) {
     mkdirSync(join(repoRoot, '.codewiki', dir), { recursive: true })

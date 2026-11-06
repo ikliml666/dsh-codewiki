@@ -87,28 +87,7 @@ Do NOT wait until session end. After completing each task (bug fix, feature, ref
 
 1. **Update affected wiki articles.** If you changed `src/auth/middleware.py` and `modules/auth.md` describes that file, update the article now. You have full context right now — you won't remember the details later.
 
-2. **Write learnings.** If you fixed a bug, write `learnings/<slug>.md` immediately:
-```
----
-title: <Short description>
-type: learning
-source_files: [affected files]
-tags: [relevant, tags]
----
-What happened, root cause, and fix.
-```
-
-3. **Write decisions.** If you made a design decision, write `decisions/<slug>.md` immediately:
-```
----
-title: <Decision>
-type: decision
-tags: [relevant, tags]
----
-What was decided, why, and what alternatives were considered.
-```
-
-4. **Run `cw meta update`** to record the current commit.
+2. **Run `cw meta update`** to record the current commit.
 
 This is part of completing the task, not a separate step. A task isn't done until the wiki reflects what changed.
 

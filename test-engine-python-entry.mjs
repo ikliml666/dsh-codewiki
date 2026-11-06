@@ -944,6 +944,15 @@ long_len = len(entry.detail_suffix())
 
 # 阶段 2（cluster_modules.py）不逐模块打印，而是围绕当前子树发消息，
 # label 就是子树名。真机阶段 2 能跑十几分钟，只报「阶段 2」等于没信息。
+# 阶段 1（call_graph_analyzer.py:118）：每约十分之一文件打一条，是 graph 段
+# 唯一真实可计数的进度。该段 update_stage 全在 verbose 门控里，不数这里就只能报 0%。
+child.info("\U0001f4ca Parsing 36 source files (this may take a few minutes)...")
+steps.append({"phase": "parse-start", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
+child.info("  [12/36] lib/engine/client.js (4.2s elapsed, ~8.1s remaining)")
+steps.append({"phase": "parse-mid", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix(), "parsed": entry._DETAIL["parsed"], "total": entry._DETAIL["parsed_total"]})
+child.info("  [35/36] lib/index.js (12.0s elapsed, ~0.3s remaining)")
+steps.append({"phase": "parse-late", "suffix": entry.detail_suffix(), "parsed": entry._DETAIL["parsed"]})
+
 child.info("Requesting LLM module clustering for lib/engine because 12000 tokens exceed the 8000-token threshold.")
 steps.append({"phase": "cluster", "module": entry._DETAIL["module"], "suffix": entry.detail_suffix()})
 
@@ -975,6 +984,13 @@ pathlib.Path(${JSON.stringify(outFile)}).write_text(
   assert.equal(by('cluster').module, 'lib/engine', `阶段 2 的子树名必须抽出来：${JSON.stringify(by('cluster'))}`)
   assert.ok(by('cluster').suffix.includes('聚类'), `阶段 2 措辞必须是「正在聚类」（不是「正在写」）：${by('cluster').suffix}`)
   assert.ok(by('super-group').suffix.includes('归并'), `子系统归并阶段必须能看见：${JSON.stringify(by('super-group'))}`)
+  // 只知道总数、还不知道进度：如实报 0/N，不编造比例，也不能沿用上一阶段的模块名
+  assert.equal(by('parse-start').module, '', `进入解析阶段必须清掉上一阶段的模块名：${JSON.stringify(by('parse-start'))}`)
+  assert.ok(by('parse-start').suffix.includes('0/36'), `只知总数时应报 0/36：${by('parse-start').suffix}`)
+  assert.equal(by('parse-mid').parsed, 12, `必须从 [12/36] 抽出已解析数：${JSON.stringify(by('parse-mid'))}`)
+  assert.equal(by('parse-mid').total, 36, `必须从 [12/36] 抽出总数：${JSON.stringify(by('parse-mid'))}`)
+  assert.ok(by('parse-mid').suffix.includes('12/36'), `进度帧必须带「已解析 12/36」：${by('parse-mid').suffix}`)
+  assert.equal(by('parse-late').parsed, 35, `尾部一条应当覆盖前一条：${JSON.stringify(by('parse-late'))}`)
   assert.equal(got.restored_level, 30, `摘掉 tap 必须把 level 还原成 WARNING，实际 ${got.restored_level}`)
   assert.equal(by('after-release').module, '', `摘掉 tap 之后不能再改状态：${JSON.stringify(by('after-release'))}`)
 })

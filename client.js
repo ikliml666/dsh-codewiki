@@ -8,7 +8,7 @@
 // 词典值必须是字符串——词典值若为函数，t() 会回退返回键名。
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-codewiki',
+  id: '@ikliml666/dsh-codewiki',
   factory(require) {
     const React = require('react')
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
@@ -37,6 +37,26 @@ window.__ModuleLoader__.load({
     // 本身是一件事的两半，分两格只会让人以为有两道重复检查。细分名称仍在活动流里可见
     // （NATIVE_STAGE_KEYS.proofread）。
     const ACTIVE_STAGES = ['queued', 'prepare', 'articles', 'validate', 'index', 'commit']
+    // 「准备」一格实际是三件事，耗时还极不均衡：探测环境（秒级）、解析代码图
+    // （真机 3-4 分钟）、模块聚类（全量轮十几分钟）。压成一格时用户只能看到
+    // 0% 冻住，分不清是在解析还是卡死了。这三段只在 prepare 期间展开显示，
+    // 段宽来自 nativeStageTimings（引擎自己报的真实阶段耗时）；老任务没有这份
+    // 数据就退回原来的一格，不编造比例。
+    const PREPARE_STAGES = ['env', 'graph', 'cluster']
+    const PREPARE_WEIGHT = { env: 0.08, graph: 0.62, cluster: 0.30 }
+    // 引擎自报 percent 是「整轮」百分比，而 prepare 覆盖 FSoft 阶段 1+2，所以
+    // 这三段的读数区间并不相同：env 帧直接报自身 0-100；graph 是
+    // percent_of(1, p) = 0..36；cluster 是 percent_of(2, p) = 36..54。
+    // 界值来自 lib/engine/python/stage_map.py 的
+    // FSOFT_STAGE_WEIGHTS={1:0.40, 2:0.20} × FSOFT_PROGRESS_CEILING=90。
+    // 不归一化的话，graph 跑完只显示 36%，看上去永远没跑完。
+    const ENGINE_PCT = { env: [0, 100], graph: [0, 36], cluster: [36, 54] }
+    const withinRange = (stage, pct) => {
+      const r = ENGINE_PCT[stage]
+      if (!r || !Number.isFinite(pct)) return 0
+      const span = r[1] - r[0] || 1
+      return Math.max(0, Math.min(1, (pct - r[0]) / span))
+    }
     // 每个阶段一个固定色相，用来在同一条进度条里区分「时间花在哪一步」。
     // 色相挑的是彼此相距 40° 上下、且在中低饱和下仍能分辨的几支：青→蓝→紫→琥珀→绿。
     // 明度与饱和度写在 CSS（58% / 52%），两套主题下都不用改。
@@ -108,6 +128,13 @@ window.__ModuleLoader__.load({
       batchReasoningEffortNone: '该模型未声明可选思考档位，只能用默认档。',
       batchReasoningEffortGeneric: '该模型目录未声明可选思考档位，以下为通用档位供手动指定；若模型不支持所选值，请求会自动回落模型默认档（不会失败）。',
       batchReasoningEffortError: '读取思考档位失败（{error}）——先用模型默认档。',
+      effortByStage: '按环节设档位',
+      effortByStageHint: '给单个环节单独指定思考档位；留空的环节用上面的「思考程度」兜底。',
+      effortByStageFallback: '（用兜底档）',
+      effortByStageGraph: '依赖图 / 模块聚类',
+      effortByStageArticles: '文章写作',
+      effortByStageProofread: '语义校对',
+      effortByStageValidate: '质量门',
       secBig: '大档模型（超长输入）',
       secBigHint: '超过普通档单请求预算（110k）的模块改由这里一次写完。只对 Node 兼容通道生效（关闭「使用原生引擎」时）；原生通道的输入预算由引擎按模块切分，不经这一档。',
       bigEnabled: '启用大档模型（超长输入）',
@@ -286,7 +313,6 @@ window.__ModuleLoader__.load({
       copiedLabel: '已复制',
       runningCount: '个进行中',
       runningLabel: '进行中',
-      trendHint: '最近若干次采样的总进度',
       poolHint: '进行中任务的聚合进度',
       poolSlowest: '最慢',
       poolQueued: '排队',
@@ -355,6 +381,13 @@ window.__ModuleLoader__.load({
       batchReasoningEffortNone: 'This model declares no selectable efforts; only the default applies.',
       batchReasoningEffortGeneric: 'The model catalog declares no efforts for this model; the generic levels below can be set manually. If the model rejects the chosen level, the request automatically falls back to the model default (it will not fail).',
       batchReasoningEffortError: 'Could not read reasoning efforts ({error}) — keeping the model default.',
+      effortByStage: 'Per-stage effort',
+      effortByStageHint: 'Override the reasoning effort for individual stages; a blank stage falls back to the Reasoning effort above.',
+      effortByStageFallback: '(use fallback)',
+      effortByStageGraph: 'Dependency graph / clustering',
+      effortByStageArticles: 'Article writing',
+      effortByStageProofread: 'Semantic proofread',
+      effortByStageValidate: 'Quality gate',
       secBig: 'Large-input model',
       secBigHint: 'Modules over the normal 110k request budget use this model. Only the Node compatibility channel (native engine off) uses this tier; the native channel splits input per module inside the engine.',
       bigEnabled: 'Enable large-tier model (very long input)',
@@ -531,7 +564,6 @@ window.__ModuleLoader__.load({
       copiedLabel: 'Copied',
       runningCount: 'running',
       runningLabel: 'Running',
-      trendHint: 'Total progress over recent polls',
       poolHint: 'Aggregate progress across running jobs',
       poolSlowest: 'slowest',
       poolQueued: 'queued',
@@ -540,7 +572,7 @@ window.__ModuleLoader__.load({
     })
 
     const style = document.createElement('style')
-    style.dataset.plugin = '@local/dsh-codewiki'
+    style.dataset.plugin = '@ikliml666/dsh-codewiki'
     style.textContent = [
       '[data-dscw-page] { display: flex; flex-direction: column; gap: 16px; max-width: 1280px; padding-bottom: 28px; color: var(--dsw-alias-label-primary); }',
       // 分类卡片：五个分组各成一张卡，横向按可用宽度自动排 1–3 列。
@@ -563,6 +595,10 @@ window.__ModuleLoader__.load({
       '[data-dscw-grid] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }',
       '[data-dscw-grid] > label { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-secondary); margin-top: 7px; }',
       '[data-dscw-grid] > label:first-child { margin-top: 0; }',
+      // 按环节设档位：每个环节一行「名字 + 下拉」，名字定宽让四个下拉左边对齐。
+      '[data-dscw-stages] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }',
+      '[data-dscw-stage] { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; }',
+      '[data-dscw-stagelabel] { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-secondary); }',
       // 开关类字段：控件只有一行高，再按「标签一行 + 控件一行 + 说明三行」堆，
       // 卡片里就会连续出现一片只有右边有个小圆点的空白带。改成标签与开关同行。
       '[data-dscw-toggle] { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 7px; min-width: 0; }',
@@ -659,7 +695,6 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-repofold] > summary:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 70%, transparent); }',
       '[data-dscw-p-repofold] > summary > [data-count] { margin-left: auto; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-repofold] > [data-body] { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }',
-      '[data-dscw-p-trend] { color: var(--dsw-alias-brand-primary); opacity: .75; align-self: center; }',
       '[data-dscw-p-pool] { margin-left: auto; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-seclabel] { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 16px; letter-spacing: 0.05em; color: var(--dsw-alias-label-tertiary); }',
       '[data-dscw-p-seclabel]::after { content: ""; flex: 1; height: 0.5px; background: var(--dsw-alias-border-l3); }',
@@ -716,7 +751,7 @@ window.__ModuleLoader__.load({
       // 段色用固定色相而非主题色：五个阶段必须彼此可分辨，全用 brand-primary 就退化成一条纯色。
       // 明度锁在 52%，深浅两套主题下都能读；未跑完的部分用同色低透明度打底，所以
       // 「这段是什么」（色相）与「这段做到哪」（填充宽度）互不占用同一个通道。
-      '[data-dscw-p-segbar] { display: flex; gap: 2px; flex: 1 1 auto; min-width: 40px; height: 5px; }',
+      '[data-dscw-p-segbar] { display: flex; gap: 2px; flex: 1 1 auto; min-width: 40px; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--dsw-alias-border-l3) 60%, transparent); }',
       // 最小宽度 3px：真机上准备段常占 99%（06:54 对 790ms），不给小段保底宽度，
       // 「校验 24ms」这类阶段会缩成亚像素直接看不见——而它们恰恰是「这几步都不慢」的证据。
       '[data-dscw-p-seg] { position: relative; min-width: 3px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, hsl(var(--seg-hue) 58% 52%) 20%, transparent); }',
@@ -798,7 +833,7 @@ window.__ModuleLoader__.load({
       '@keyframes dscw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }',
     ].join('\n')
     // HMR/重复加载时避免堆叠重复样式表
-    if (!document.head.querySelector('style[data-plugin="@local/dsh-codewiki"]')) document.head.appendChild(style)
+    if (!document.head.querySelector('style[data-plugin="@ikliml666/dsh-codewiki"]')) document.head.appendChild(style)
 
     function el(tag, props, ...children) {
       return React.createElement(tag, props, ...children)
@@ -867,7 +902,7 @@ window.__ModuleLoader__.load({
         const SAVE_KEYS = [
           'enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency',
           'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit',
-          'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort',
+          'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
           'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'excludePaths',
           'autoUpdate', 'autoUpdateMin', 'bigEnabled', 'requestLimit',
           'nativeEngine', 'nativeEnginePython', 'nativeEngineEntry', 'nativeEngineTimeoutMs',
@@ -1364,6 +1399,56 @@ window.__ModuleLoader__.load({
                     }),
                     el('div', { 'data-dscw-hint': '' }, t('requestLimitHint')),
                   ),
+                  // 按环节设档位：每个环节一个下拉，选项来自模型目录（与上面的思考程度同一份）。
+                  // 留空 = 用上面的 batchReasoningEffort 兜底；整组都留空时配置里就是空对象。
+                  el('label', null, t('effortByStage')),
+                  el('div', { 'data-dscw-field': '' },
+                    el('div', { 'data-dscw-stages': '' },
+                      ...[
+                        ['graph', 'effortByStageGraph'],
+                        ['articles', 'effortByStageArticles'],
+                        ['proofread', 'effortByStageProofread'],
+                        ['validate', 'effortByStageValidate'],
+                      ].map(([stage, labelKey]) => {
+                        const current = String(draft.effortByStage?.[stage] ?? '')
+                        // 目录档位是 { id, name, description } 对象（见 index.js resolveModelEfforts），
+                        // 通用档位是裸字符串；两种都要能进下拉，所以先统一取 id。
+                        const efforts = Array.isArray(effortsState.efforts) ? effortsState.efforts : []
+                        const knownIds = efforts.map((e) => String(e?.id ?? e ?? ''))
+                        // 用了目录里没有的档位（模型换了、目录改了）：保留成选项，避免静默丢掉配置
+                        const extra = current && !knownIds.includes(current) && !GENERIC_EFFORTS.includes(current) ? [current] : []
+                        const toOption = (e) => {
+                          const id = typeof e === 'string' ? e : String(e?.id ?? '')
+                          const name = typeof e === 'string' ? e : String(e?.name ?? e?.id ?? '')
+                          return el('option', { key: id, value: id }, name && name !== id ? `${name}（${id}）` : id)
+                        }
+                        return el('div', { key: stage, 'data-dscw-stage': '' },
+                          el('span', { 'data-dscw-stagelabel': '' }, t(labelKey)),
+                          el('select', {
+                            'data-dscw-select': '',
+                            value: current,
+                            onChange: (e) => {
+                              const next = e.target.value
+                              setDraft((prev) => {
+                                if (!prev) return prev
+                                const out = structuredClone(prev)
+                                const map = { ...(out.effortByStage && typeof out.effortByStage === 'object' ? out.effortByStage : {}) }
+                                if (next) map[stage] = next
+                                else delete map[stage]
+                                out.effortByStage = map
+                                return out
+                              })
+                            },
+                          },
+                          el('option', { key: '__fallback', value: '' }, t('effortByStageFallback')),
+                          ...[...extra, ...efforts].map(toOption),
+                          ...GENERIC_EFFORTS.filter((e) => !knownIds.includes(e)).map((e) => el('option', { key: e, value: e }, e)),
+                          ),
+                        )
+                      }),
+                    ),
+                    el('div', { 'data-dscw-hint': '' }, t('effortByStageHint')),
+                  ),
                 ),
               ),
               // 大档模型（超长输入）：超过普通档单请求预算的模块改用它，仍全部在插件内完成。
@@ -1587,6 +1672,9 @@ window.__ModuleLoader__.load({
           if (idx < curIdx) return 1
           if (idx > curIdx) return 0
           if (NATIVE_TO_STEP[job.nativeStage] === stage && Number.isFinite(job.nativePercent)) {
+            // prepare 覆盖引擎的 env/graph/cluster 三段，引擎整体百分比在这段里
+            // 只走 0..54；不归一化的话准备跑完时这一段只填到 8.6%，总进度偏小一半。
+            if (stage === 'prepare') return withinRange('cluster', job.nativePercent)
             return Math.max(0, Math.min(100, job.nativePercent)) / 100
           }
           const tl = Array.isArray(job.taskList) ? job.taskList : []
@@ -1608,6 +1696,40 @@ window.__ModuleLoader__.load({
             return { stage: s, frac, done, running, failedStep, dur }
           })
         }
+        // 准备段细分：只在「当前正处在 prepare」时展开。终态不展开的理由——
+        // 终态的分段带按真实耗时定宽，prepare 整段只占一格，硬拆成三段后每段
+        // 都只有几个像素，反而看不清；且 nativeStageTimings 是 0.17.56 才有的
+        // 字段，老任务根本没有，展开会得到三根 0 宽的线。
+        const prepareRows = (job) => {
+          const cur = job.nativeStage
+          if (stageOf(job) !== 'prepare' || !PREPARE_STAGES.includes(cur)) return null
+          const timings = job.nativeStageTimings ?? {}
+          const total = PREPARE_STAGES.reduce((n, k) => n + (Number(timings[k]) > 0 ? Number(timings[k]) : 0), 0)
+          // 已经跑完的子阶段用真实耗时定宽，没跑到的按预估值补齐——否则总宽会
+          // 在段与段之间跳变，看起来像进度倒退。
+          const weights = PREPARE_STAGES.map((k) => {
+            const ms = Number(timings[k])
+            if (Number.isFinite(ms) && ms > 0) return ms
+            return total > 0 ? PREPARE_WEIGHT[k] * total : PREPARE_WEIGHT[k]
+          })
+          const sum = weights.reduce((a, b) => a + b, 0) || 1
+          const curIdx = PREPARE_STAGES.indexOf(cur)
+          return PREPARE_STAGES.map((k, i) => {
+            const frac = i < curIdx ? 1
+              : i > curIdx ? 0
+                : (job.nativeStage === k ? withinRange(k, job.nativePercent) : 0)
+            return {
+              stage: k,
+              frac,
+              weight: weights[i] / sum,
+              label: tBound(NATIVE_STAGE_KEYS[k]),
+              done: i < curIdx,
+              running: i === curIdx,
+              failedStep: false,
+              dur: Number.isFinite(Number(timings[k])) && Number(timings[k]) > 0 ? Number(timings[k]) : null,
+            }
+          })
+        }
         // 段宽的口径随任务状态切换，这是两条带子唯一的分歧点：
         //   进行中 → 进度权重（这一步占总进度的多少，和上面的总进度条同口径）；
         //   终态   → 该阶段真实耗时（占比就是「时间花在哪」，此时进度恒为 100% 毫无信息量）。
@@ -1622,37 +1744,103 @@ window.__ModuleLoader__.load({
         }
         // 老任务没有 stageTimings（0.5.0 之前的记录），终态就别画一条全是 0 的空白带。
         const hasTimings = (job) => ACTIVE_STAGES.some((s) => s !== 'queued' && stageWeight(job, s, false) > 0)
+        // 进行中是否有可画的分段：只要有任何一个非排队阶段拿到非零段宽就行。
+        // 不能用 pct>0 判——prepare 刚进 graph 时归一化后就是 0%，此时恰恰最需要
+        // 那条带（用户要看的「已解析 N/M 个文件」就在段里的填充比例上）。
+        const hasLiveSegments = (job) => ACTIVE_STAGES.some((s) => s !== 'queued' && stageWeight(job, s, true) > 0)
         // 阶段可视化：一条分段带，段宽的含义见 stageWeight。早先是每阶段一行独立轨道，
         // 一张卡就吃掉 300px 高度，同一个信息用分段带表达只占 5px。
         // 0.17.46 起它不再另起一行——用户要的是「一条进度条，各截断按时间占比用不同颜色」，
         // 所以这条带直接就是主进度条本身，上面的 [data-dscw-p-bar] 只在没有分段信息时兜底。
+        // 引擎子阶段（env/graph/cluster）在带子里画成一格 prepare 的三等分。
+        // 色相从 prepare 的 196 往两侧各偏 12°，既能看出「都属于准备」，
+        // 又能分辨是哪一段在跑。
+        const PREPARE_HUE = { env: 184, graph: 196, cluster: 208 }
+        // 一条带子里只画**已经在跑或跑过**的阶段。未执行的阶段既不占宽度也不上色——
+        // 早先按权重把 4 个未执行阶段也铺成浅色块，等于先摆出四条空槽，用户看到
+        // 的是一排「还没轮到」的颜色而不是「现在到哪了」（0.17.58）。
+        // 为了让带子的总宽不随阶段推进而跳，未执行那部分的权重留成一段透明 spacer。
         const stageSegments = (job, running) => {
           const rows = stageRows(job)
-          const shown = rows.filter((r) => stageWeight(job, r.stage, running) > 0)
+          const prep = prepareRows(job)
+          const cells = []
+          let ahead = 0
+          for (const r of rows) {
+            const w = stageWeight(job, r.stage, running)
+            if (w <= 0) continue
+            if (!r.done && !r.running && !r.failedStep) { ahead += w; continue }
+            if (r.stage === 'prepare' && prep) {
+              for (const sub of prep) {
+                if (!sub.done && !sub.running) { ahead += w * sub.weight; continue }
+                cells.push({
+                  key: sub.stage,
+                  label: sub.label,
+                  weight: w * sub.weight,
+                  frac: sub.frac,
+                  done: sub.done,
+                  running: sub.running,
+                  failedStep: false,
+                  dur: sub.dur,
+                  hue: PREPARE_HUE[sub.stage],
+                })
+              }
+              continue
+            }
+            cells.push({
+              key: r.stage,
+              label: stageLabel(r.stage),
+              weight: w,
+              frac: r.frac,
+              done: r.done,
+              running: r.running,
+              failedStep: r.failedStep,
+              dur: timingsOf(job)[r.stage],
+              hue: STAGE_HUE[r.stage] ?? 210,
+            })
+          }
           return el('div', {
             'data-dscw-p-segbar': '', 'data-tone': job.stage,
             title: legendHintOf(job, running),
           },
-            shown.map((r) => {
-              const w = stageWeight(job, r.stage, running)
-              const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
-              const dur = timingsOf(job)[r.stage]
+            cells.map((c) => {
+              const state = c.failedStep ? 'failed' : c.running ? 'running' : c.done ? 'done' : 'todo'
               return el('div', {
-                key: r.stage, 'data-dscw-p-seg': '', 'data-state': state,
-                style: { flex: `${w} 0 0`, '--seg-hue': String(STAGE_HUE[r.stage] ?? 210), '--seg-done': `${Math.round(r.frac * 100)}%` },
+                key: c.key, 'data-dscw-p-seg': '', 'data-state': state,
+                style: { flex: `${c.weight} 0 0`, '--seg-hue': String(c.hue), '--seg-done': `${Math.round(c.frac * 100)}%` },
                 title: running
-                  ? `${stageLabel(r.stage)} · ${Math.round(r.frac * 100)}%${dur ? ` · ${fmtMs(dur)}` : ''}`
-                  : `${stageLabel(r.stage)} · ${fmtMs(w)}`,
+                  ? `${c.label} · ${Math.round(c.frac * 100)}%${c.dur ? ` · ${fmtMs(c.dur)}` : ''}`
+                  : `${c.label} · ${fmtMs(c.weight)}`,
               })
-            }))
+            }).concat(ahead > 0
+              ? [el('div', { key: '__ahead', 'data-dscw-p-seg-ahead': '', style: { flex: `${ahead} 0 0` } })]
+              : []))
         }
         const legendHintOf = (job, running) => (running ? tBound('legendHint') : tBound('legendHintDone'))
         // 图例：每个阶段一个小标签，只写「阶段名 读数」，当前阶段加粗。
         // 一行放得下就一行，放不下就换行——比逐行轨道省一个数量级的高度。
         // 读数进行中是完成百分比，终态是该阶段耗时：「跑完了」这件事看一次就够，
         // 真正无法从别处得到的信息是「时间花在哪一步」。
+        // 图例行替换：prepare 行 → env/graph/cluster 三行（保持原位置）。
+        const expandPrepareRows = (rows, prep) => {
+          if (!prep) return rows
+          const out = []
+          for (const r of rows) {
+            if (r.stage !== 'prepare') { out.push(r); continue }
+            for (const sub of prep) {
+              out.push({ ...sub, stage: sub.stage, expanded: true })
+            }
+          }
+          return out
+        }
         const stageLegend = (job, running) => {
-          const rows = stageRows(job).filter((r) => stageWeight(job, r.stage, running) > 0)
+          const prep = prepareRows(job)
+          // prepare 展开时，图例也拆成三个子标签（色块色相与带子里那三段一致）；
+          // 不展开时就是原来的一格。
+          // 与带子同口径：未执行的阶段不列（列出来只有一排 0%，没有信息量）。
+          const reached = stageRows(job)
+            .filter((r) => stageWeight(job, r.stage, running) > 0)
+            .filter((r) => r.done || r.running || r.failedStep)
+          const rows = expandPrepareRows(reached, prep).filter((r) => !r.expanded || r.done || r.running)
           // 色块是颜色与阶段之间唯一的绑定：色块色相与上方进度条里那一段完全一致，
           // 所以「哪段是什么」不用去猜——照着色块找同色的段即可。
           return el('div', {
@@ -1662,17 +1850,18 @@ window.__ModuleLoader__.load({
             rows.map((r) => {
               const state = r.failedStep ? 'failed' : r.running ? 'running' : r.done ? 'done' : 'todo'
               const pct = Math.round(r.frac * 100)
-              const dur = timingsOf(job)[r.stage]
+              const dur = r.expanded ? r.dur : timingsOf(job)[r.stage]
+              const name = r.expanded ? r.label : stepName(r.stage)
               return el('span', {
                 key: r.stage, 'data-state': state,
-                style: { '--seg-hue': String(STAGE_HUE[r.stage] ?? 210) },
+                style: { '--seg-hue': String(r.expanded ? PREPARE_HUE[r.stage] : (STAGE_HUE[r.stage] ?? 210)) },
                 // 终态把百分比降级到悬停：终态全 100%，写出来只是重复。
                 title: running
-                  ? `${stageLabel(r.stage)} · ${tBound(`legendState_${state}`)} · ${pct}%`
-                  : `${stageLabel(r.stage)} · ${fmtMs(dur ?? 0)}`,
+                  ? `${r.expanded ? r.label : stageLabel(r.stage)} · ${tBound(`legendState_${state}`)} · ${pct}%`
+                  : `${r.expanded ? r.label : stageLabel(r.stage)} · ${fmtMs(dur ?? 0)}`,
               },
                 el('i', { 'data-swatch': '' }),
-                `${stepName(r.stage)} ${running ? `${pct}%` : fmtMs(dur ?? 0)}`)
+                `${name} ${running ? `${pct}%` : fmtMs(dur ?? 0)}`)
             }))
         }
         const overallPct = (job) => {
@@ -2155,10 +2344,6 @@ window.__ModuleLoader__.load({
           const sparkRef = React.useRef(new Map()) // jobId -> number[]
           const batchRateRef = React.useRef(new Map()) // jobId -> { at, completed, rate }
           const sparkOf = (id) => sparkRef.current.get(id) ?? []
-          // 进度趋势（0.17.35）：每轮记一次 overallPct。只看数字不知道「还剩多久」，
-          // 看斜率才知道：曲线平了说明卡住，还在涨说明在推进。
-          const pctTrendRef = React.useRef(new Map()) // jobId -> number[]
-          const trendOf = (id) => pctTrendRef.current.get(id) ?? []
           const rateOf = (id) => batchRateRef.current.get(id) ?? null
 
           React.useEffect(() => {
@@ -2173,13 +2358,6 @@ window.__ModuleLoader__.load({
                 const arr = Array.isArray(data.jobs) ? data.jobs : []
                 const now = Date.now()
                 for (const j of arr) {
-                const pj = overallPct(j)
-                if (pj != null) {
-                  const h2 = pctTrendRef.current.get(j.id) ?? []
-                  if (h2[h2.length - 1] !== pj) h2.push(pj)
-                  if (h2.length > 24) h2.shift()
-                  pctTrendRef.current.set(j.id, h2)
-                }
                   if (typeof j.tps === 'number' && j.tps > 0) {
                     const h = sparkRef.current.get(j.id) ?? []
                     h.push(j.tps)
@@ -2366,19 +2544,15 @@ window.__ModuleLoader__.load({
                     : el('div', { 'data-dscw-p-pct': '' }, String(pct), el('span', { 'data-unit': '' }, '%')),
                   // 一条条子的两种画法：有分段信息就用分段带，老任务（没有 stageTimings、
                   // 也没进到可计时的阶段）退回纯色填充，免得整行空着。
-                  (active && pct > 0) || (!active && hasTimings(job))
+                  (active && hasLiveSegments(job)) || (!active && hasTimings(job))
                     ? stageSegments(job, active)
                     : el('div', { 'data-dscw-p-bar': '', 'data-tone': job.stage },
                       el('div', { 'data-dscw-p-barfill': '', style: { width: `${pct ?? 0}%` } })),
-                  // 趋势：数字告诉你在哪，斜率告诉你还动不动。
-                  trendOf(job.id).length > 1
-                    ? el('span', { 'data-dscw-p-trend': '', title: t('trendHint') }, el(Spark, { values: trendOf(job.id), width: 48, height: 14 }))
-                    : null,
                   headMeta.length
                     ? el('span', { 'data-dscw-p-pctmeta': '' }, headMeta.join(' · '))
                     : null),
               // 图例解释分段带上的颜色与读数：进行中读百分比，终态读耗时。
-              (active && pct > 0) || (!active && hasTimings(job))
+              (active && hasLiveSegments(job)) || (!active && hasTimings(job))
                 ? stageLegend(job, active)
                 : null,
               // 次要信息压成一条流水线：数字、用量、最新一条备注合成一行，放不下就换行。

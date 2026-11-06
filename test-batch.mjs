@@ -9,12 +9,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import {
   collectSources, classifySessionTask, estimateTokens, fixAnchors, numberLines,
   buildSessionSteerText,
   runRealtimeTasks,
   localPlan, packArticles, scanRepoFiles, listModelCatalog, resolveModelEfforts, installWebServer,
-  validateArticleEnvelope,
+  validateArticleEnvelope, idleNativeReason,
 } from './index.js'
 
 let passed = 0
@@ -561,6 +562,64 @@ console.log('\n== validateArticleEnvelope ==')
   // 正文里的 --- 不能被误当成 frontmatter 结尾：只有紧随首个 --- 段落后那一个才算
   check(validateArticleEnvelope(C(['---', 'title: t', '---', '', '正文', '', '---', '', '分隔线'])) === null,
     '正文里的 --- 分隔线不影响信封判定')
+}
+
+// ── 空转闸门（0.17.57）：没有源码变化就不提交任务 ────────────────────────────
+// 真机事故：AutoScan 每小时把每个仓库都提交成一条任务，跑 3 分钟以上的依赖分析后
+// 才发现「变化 0 项」。另一半根因（state.json 里的死路径让 effectiveChanges 永远
+// 非空）由 mergeUnconsumed 的丢弃判定修掉，用例在 test-engine-native-incremental 的 19。
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cw-idle-'))
+  const git = (...a) => execFileSync('git', a, { cwd: root, stdio: 'pipe' })
+  fs.writeFileSync(path.join(root, 'a.js'), 'export const a = 1\n')
+  git('init'); git('config', 'user.name', 't'); git('config', 'user.email', 't@t')
+  git('add', '-A'); git('commit', '-m', 'init')
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+
+  const wikiPath = path.join(root, '.codewiki')
+  const stateDir = path.join(wikiPath, '_native-state')
+  const docsDir = path.join(stateDir, 'docs')
+  const writeState = (unconsumed = []) => {
+    fs.mkdirSync(path.join(docsDir, 'temp', 'dependency_graphs'), { recursive: true })
+    fs.writeFileSync(path.join(docsDir, 'module_tree.json'), '{}\n')
+    fs.writeFileSync(path.join(docsDir, 'metadata.json'), '{}\n')
+    // 文件名里非字母数字一律换成下划线（见 native-state.js 的 graphFileName），
+    // mkdtemp 的目录名带 `-`，直接拼 basename 会造出错误的文件名。
+    const safe = path.basename(root).replace(/[^\p{L}\p{N}]/gu, '_')
+    fs.writeFileSync(path.join(docsDir, 'temp', 'dependency_graphs', `${safe}_dependency_graph.json`), '{}\n')
+    fs.writeFileSync(path.join(stateDir, 'state.json'), JSON.stringify({
+      stateVersion: 1, unconsumed, consumedRange: { baseCommit: head, headCommit: head },
+    }))
+  }
+  const writeMeta = (commit) => {
+    fs.mkdirSync(wikiPath, { recursive: true })
+    fs.writeFileSync(path.join(wikiPath, '_meta.yaml'), `project: x\nlast_compiled_commit: ${commit}\n`)
+  }
+
+  writeMeta(head); writeState([])
+  const idle = idleNativeReason({ cwd: root, wikiPath })
+  check(typeof idle === 'string' && /跳过本轮/.test(idle), `工作区干净 + 状态齐备 + 无旧账 → 判为空转（${idle}）`)
+
+  fs.writeFileSync(path.join(root, 'a.js'), 'export const a = 2\n')
+  check(idleNativeReason({ cwd: root, wikiPath }) === null, '工作区有未提交改动 → 不跳')
+
+  fs.writeFileSync(path.join(root, 'a.js'), 'export const a = 1\n')
+  check(typeof idleNativeReason({ cwd: root, wikiPath }) === 'string', '改动撤回后重新可跳（判据看的是当下磁盘状态）')
+
+  // 活口：文件真实存在且确实未提交（untracked）。ghost.js 那种不存在的会被丢弃，
+  // 不能拿它测「活口」——它正是另一半修复要丢的东西。
+  fs.writeFileSync(path.join(root, 'untracked.js'), 'export const u = 1\n')
+  writeState(['untracked.js'])
+  check(idleNativeReason({ cwd: root, wikiPath }) === null, '旧账里还有活口 → 不跳')
+  fs.rmSync(path.join(root, 'untracked.js'))
+
+  writeState([])
+  fs.rmSync(path.join(docsDir, 'metadata.json'))
+  check(idleNativeReason({ cwd: root, wikiPath }) === null, '受管状态缺件 → 不跳（引擎会转全量）')
+
+  writeState([])
+  writeMeta('0' * 40)
+  check(idleNativeReason({ cwd: root, wikiPath }) === null, '记录的 headCommit 与 cw 基线对不上 → 不跳')
 }
 
 console.log(`\n${failures.length ? 'FAIL' : 'ALL PASS'}：${passed} 通过，${failures.length} 失败`)

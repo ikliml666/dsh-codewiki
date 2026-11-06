@@ -1,4 +1,21 @@
-# @local/dsh-codewiki
+# dsh-codewiki
+
+[![dsh-plugin](https://img.shields.io/badge/dsh--plugin-topic-blue)](https://github.com/topics/dsh-plugin)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
+**给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的仓库级代码 wiki。** 一条命令把整个仓库编译成 `<repo>/.codewiki/` 下的一组互相链接的 Markdown 文章（模块、架构、关键流程），随仓库一起提交、和团队共享；侧边栏面板里能看任务进度、翻引擎日志、改编译模型与并发。
+
+它做三件别的地方不好做的事：
+
+- **不是一次性文档生成器，而是可增量的编译器**：下一轮只重写接口真变了的模块，基线（`last_compiled_commit`）只有整轮干净成功才推进，没消化完的轮次不会把变化记成已消化。
+- **终态诚实**：`done` / `partial` / `failed` / `cancelled` 四态，`partial` 会在面板上写明是哪一条没满足，不会拿「生成了文件」冒充成功。
+- **坏文章不入库**：所有写盘产物先过文章契约闸门（frontmatter 完整性、必填字段、`source_files` 是否指向真实文件、章节重复、死链），不合格的页不落盘、不推进基线。
+
+> 默认通道驱动上游 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki) 的 Python 引擎（**需要本机有 Python 3.10+ 与闭合依赖环境**）；装不了 Python 依赖时可用内置 Node 兼容通道，但它只保留最小能力、不再接收新特性。
+
+## English summary
+
+A repository-level code-wiki compiler for DeepSeek Harness. It turns a whole repository into a set of cross-linked Markdown articles under `<repo>/.codewiki/`, committed alongside the code, with a sidebar panel for job progress, engine logs, and per-stage model settings. Incremental by design: only modules whose interfaces actually changed get rewritten, the baseline advances only on a fully clean run, and every page must pass an article contract gate before it reaches disk. The default channel drives the upstream FSoft-AI4Code/CodeWiki Python engine and requires a local Python 3.10+ venv with closed dependencies; a minimal built-in Node channel remains for environments where that is not possible. MIT licensed.
 
 把 [mraza007/codewiki](https://github.com/mraza007/codewiki)（Rust CLI `cw`，MIT）接入 DeepSeek Harness：仓库内代码 wiki（`<repo>/.codewiki/`，随仓库提交共享）+ 智能体编排编译，支持为编译子代理指定模型。
 
@@ -27,7 +44,7 @@
 | `codewiki_update` | 工具 | 日常维护入口（0.7.0 起）：固定 scope=auto 的提交制更新请求，调用即返回并明确告知「本步收尾、继续下一项」，不要等待、不要轮询；编译产物由插件自动提交入库（0.10.9，`autoCommit`），**成功时不再唤醒会话**，只有自动提交失败才发一条一次性「产物待提交」降级提醒 |
 | `codewiki_progress` | 工具 | 只读查编译进度：提交后随时查 stage/百分比/已写/失败篇数/失败原因，立即返回不等待（数据与侧边栏面板同源）。可选按 `cwd` 或 `jobId` 过滤，都不传列全部任务。0.14.0 起终态有四种：`done`（完整成功）/`partial`（部分完成，附 `blockers` 说明原因）/`failed`/`cancelled`。0.17.0 起另带 `baselineEligible`（质量门是否许可推进基线）与 `baselineAdvanced`（本轮基线**事实上**是否已前移）——提交失败时会看到 `baselineAdvanced:true` 而 `deliveryComplete:false`，两者口径不同 |
 | CodeWiki 设置页 | 插件页 UI | 插件管理页 Official 组出现 CodeWiki 条目（id `codewiki`），点进详情页可改编译模型（provider/model 级联下拉，目录来自 modelCatalog）与运行选项；`view=summary` 一行简介，`view=page` 完整表单 + 保存条 |
-| `codewiki_note` | 工具 | 0.17.43 起：把一次真修完的 bug 记成 `.codewiki/learnings/<slug>.md`（`kind=learning`）、把一个已定的设计取舍记成 `.codewiki/decisions/<slug>.md`（`kind=decision`）。这是 mraza007/codewiki 技能约定「After Every Completed Task」的真实现——原生通道只产模块页与入口，learnings/decisions 一直由模型在任务收尾时自己写。正文必须含非空的 `## Overview`，落盘前用与编译流水线同一套契约校验（不通过直接报错且不写盘），写完自动跑 `cw index` 刷新索引。这类页**手工维护、编译不会覆盖**，也不在孤儿页清理的扫描范围内 |
+| `codewiki_note` | 工具 | **0.17.49 起已下线**。0.17.43–0.17.48 存在过：把一次真修完的 bug 记成 `.codewiki/learnings/<slug>.md`、把已定的设计取舍记成 `.codewiki/decisions/<slug>.md`，都由模型在收尾时手写。下线原因：这两类页是唯一不受编译流水线管辖的内容，行号锚点会随源码漂移而失效（真机上两篇页积了 22 处失效锚点），而原生通道从来只产 `modules/` 与入口 `CodeWiki.md`。现在 wiki 内容全部由流水线产出，`learnings/`、`decisions/` 两个目录连同写入口一并移除 |
 
 `codewiki_generate` 关键行为：
 
@@ -133,6 +150,25 @@ llm bridge 转发。
 | 写文章阶段百分比长时间不动 | 上游在阶段 3（Documentation Generation）内的所有 `update_stage` 都在 `if self.verbose:` 里，入口传 `verbose=False`，于是从 `start_stage(3)` 到 `complete_stage()` 之间一帧进度都没有 | `stage_map.articles_percent` 在 `articles` 槽位内按「已写篇数 / 本轮起始 `.md` 篇数」插值，心跳帧带真实篇数；篇数口径与 `written_now` 的 baseline 快照同源，不拿模块名数当分母 |
 | 增量轮被报成「聚合类模块」 | 增量分支复用 `start_stage(2, "Incremental Update")` 的槽位，按阶段号会映射成 `cluster` | `stage_map.is_incremental` 按 description 里的 `incremental update` 识别，整轮报 `articles` |
 | 用量恒为 0 | 引擎已把 `usage_ledger` 汇总进 `result.usage`，`native-run.js` 也一路带到 `EngineResult.usage`，但收割段没写进 `job.usage` | 按旧通道字段形状落账（`inputTok`/`outputTok`/`requests`），并写进 `nativeResult.usage` |
+| 「准备中」整段 0% 不动（0.17.56） | 同一族原因：阶段 1（Dependency Analysis）的 `update_stage` 也在 `verbose` 门控里，`percent_of(1, 0.0)` = 0%，直到阶段跑完才跳到 36%（实测 3 分 26 秒零帧） | `entry.py` 的 detail tap 从 `call_graph_analyzer.py:118` 的 `[12/36] path (…s elapsed)` 抽出已解析数，`frame_percent` 用它算阶段 1 的真实比例；心跳从 60s 收到 10s。面板把 `prepare` 一格拆成 `env`/`graph`/`cluster` 三段，段宽按 `nativeStageTimings` 的真实耗时 |
+
+### 没变化就不提交任务（0.17.57）
+
+AutoScan 每小时对每个已知工作区跑一次 `scope=auto`。历史上它**无条件提交任务**——因为 `cw status` 只看 committed，看不见工作区未提交变化与受管状态，原生通道必须自己再看一遍。代价是：仓库明明没有源码变化，也会起一轮任务，跑 3 分钟以上依赖分析后才在决议里得到「变化 0 项」。
+
+两个缺陷叠在一起：
+
+1. `state.json` 的 `unconsumed` 会把**死路径**永久携带。旧规则「只有出现在 `committed` 里才算消化」对「文件已删、又从未提交过」的路径永远不成立，于是它被无限携带、`effectiveChanges` 永远非空。真机上 `dsh-subagent-auto-router` 积了 37 条 `.dsh-ops/panel/*.json`、`dsh-git-worktree` 积了 6 条 `.diag-tmp/*`。现在不在本轮 git 任何一路里的旧账会被判为死条目并丢弃（`.gitignore` 忽略的同样丢弃——那是「不是仓库内容」的声明；被 git 看见的未跟踪文件仍继续携带）。
+2. 提交前没有空转闸门。现在 `idleNativeReason`（`index.js`）在提交前判一次「这一轮有没有可做的事」，判据乐观（任何一项判不准就照常提交）：
+
+| 判据 | 判不准时 |
+|------|---------|
+| 变更采集成功 | 不跳（不知道有没有变化） |
+| 受管状态齐备（`module_tree.json` / `metadata.json` / 依赖图） | 不跳（引擎会转全量） |
+| `state.json` 的 `headCommit` = 当前 cw 基线 | 不跳（有别的任务前移过基线） |
+| `effectiveChanges` 为空 | 不跳 |
+
+判为跳过时 `notes` 会说「工作区与已提交范围都没有源码变化，受管状态齐备且已覆盖基线 xxx——跳过本轮，不提交任务」，AutoScan 的计数落在 `noop`（不是 `submitted`）。
 
 日志：`lib/job-logs.js` 把引擎事件逐条追加到**仓库外**的 NDJSON（默认
 `%TEMP%/dsh-codewiki-logs/<jobId>.ndjson`，可用 `DSH_CODEWIKI_LOG_DIR` 改目录、
@@ -197,10 +233,11 @@ stderr、阶段切换这些真正有用的事件挤出去。查看方式三选�
   `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”）。
   这是上游配额，不是适配层问题。**规格的 hy3 硬门禁因此没有通过**：换额度可用后必须把
   `batchModel` 改回 `hy3` 重跑八场景，才算闭环；在那之前这里是「替代验证」而非「符合规格」。
-- `node test-wiki-anchors.mjs --strict` 实测 **369 过 / 0 败 / 3 待重编译**（默认档同值）。
+- `node test-wiki-anchors.mjs --strict` 实测 **2 过 / 0 败**（默认档同值）。
   0.17.39 之前是 3354 过 / 59 败 / 32 待重编译——那 59 条**全部**落在旧 Node 通道遗留的
   横切产物（`_architecture.md` / `_patterns.md` / `concepts/`）与两篇 `learnings/` 上，
-  前者已整体下线，后者是锚点行号随代码前移后的机械漂移，已逐条对齐。
+  前者已整体下线，后者 0.17.49 随手工维护通道一并删除。剩下的 2 条都指向
+  `vendor/codewiki/src/main.rs:236-256`：锚点正则长期不认 `.rs`/`.py`，这两条一直漏检。
 - **阶段 7 受控退役已执行**（0.16.0）：`nativeEngine` 默认 `true`；`lib/symbols.js`、
   `lib/cluster.js`、`lib/graph-diff.js`、`lib/incremental.js`、`lib/update-planner.js`
   与对应 7 套测试已删除。已知能力损失：兼容通道失去符号级增量与语义聚类（都只剩最小
@@ -279,7 +316,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 - `bigConcurrency`（0.12.2）：大档（`bigModel`）请求并发上限（1–8，硬顶 8）；`0`/留空 = 跟随 `maxConcurrency`（等价 0.12.1 的单一池行为）。两档各自独立计数、**同时推进**——大档常是付费长上下文档、与免费默认档配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全堵住；代价是总在飞请求数最高可达两者之和，上游限流时把其中一个调小。
 - `serialProjects`（0.10.0）：单项目串行，默认开。开启后同一时刻只推进一个仓库的编译任务，后提交的项目进 `queued`，前一个收尾后自动轮到——避免多项目同时编译抢占同一个免费额度。
 - `articleLanguage`：文章语言，默认中文。**两条通道都生效**：兼容通道写进提示词，原生通道经 `runNativeJob` 的 `language` 字段传进引擎 payload、落在 `agent_instructions.language`（上游 `config.py` 的 `language` property 读它）。0.16.7 之前原生通道整条链路都没接这个字段，引擎静默按英文写。
-- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（模块文章、入口 `CodeWiki.md` 与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；唯一例外是 `codewiki_note`：本轮真修完 bug 记 learning、做了设计取舍记 decision（见工具表）；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
+- `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 wiki 入口 `CodeWiki.md` 时出现（text 回调每次组装求值，实时判断；判定不看 `.codewiki/` 目录——只有空骨架目录时提醒会指向读不到的入口）；提醒内容：收尾必须调用 `codewiki_generate` 更新 wiki（模块文章、入口 `CodeWiki.md` 与索引刷新由流水线完成，不要手工编写/修改 `.codewiki/` 下的文章——手改不进流水线、不被面板记录，会被下次编译覆盖）；`codewiki_note` 与它写的手工页 0.17.49 已下线，提醒里对应的例外条款一并删除，没有替代通道；`codewiki_generate` 是后台编译，调用即返回、调用后本步收尾，不要等待/轮询；产物由插件自动提交（见下一条）。0.2.5 起。0.10.9 起同一 section 只兼职**降级**提醒：最近一次成功编译的完成时间晚于 `.codewiki/`+`CodeWiki.md` 最后一次 git 提交 → 注入「产物待提交」（并写明自动提交为何没成功），一次性、不催促（时间戳派生自 jobs 文件与 `git log`，插件提交后自动静默，零持久状态）。0.8.0 起编译终态另有实时唤醒：工具调用会话（exec.agent）在编译 failed、或 done 但自动提交失败时收到 steer 消息（与子代理 send_message 同机制），**自动提交成功或产物本就无改动时完全不打扰会话**，面板/自动调度提交与冷会话静默跳过。
 - `autoCommit`（0.10.9，0.10.10 修正文档与三态）：编译产物自动提交，默认开。编译终态（done 且有文章写成功）后由插件自己 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`，带任务 id 与篇数），把「等编译完成 → 会话模型代跑 git」这件事彻底收回插件侧——会话模型因此不必等待编译、不必轮询、不必提交。安全边界：改动由 pathspec 限定在这两个路径（不是 `-A`/`--all`/`.`，因此不会卷进工作区其它改动）、不 amend/push/改写历史、不跑仓库钩子；以下情形一律**拒绝并降级**为一次性「产物待提交」提醒（不会半个提交、不会静默丢产物）：非 git 仓库、仓库无 HEAD、merge/rebase/cherry-pick 进行中、目标路径存在未解决冲突、`.codewiki/`（或未 tracked 的 `CodeWiki.md`）被 `.gitignore` 忽略、缺 `user.name`/`user.email`、`git add`/`git commit` 失败（含 `index.lock` 被并发占用）。结果写入 job 的 `autoCommit`（`committed`/`sha`/`message`/`reason`/`noChanges`），`codewiki_progress` 输出与侧边栏任务卡直接显示；三条通道（唤醒、系统提示提醒、面板）统一按 `autoCommitState()` 判定三态：已提交 → 静默、产物无改动 → 静默不催、未提交 → 才提醒一次。
 - `autoUpdate` / `autoUpdateMin`（0.4.0 引入，0.16.2 修正扫描来源，0.16.3 遵守 `workspaceOnly`）：自动更新默认关；开启后服务每 60s 心跳一次，距上次扫描超过扫描间隔（`autoUpdateMin`，默认 30 分钟，最小 5）时逐仓 `scope=auto` 判态提交（被排除目录、worktree、空壳目录静默跳过），单仓失败只记 `lastError` 不中断。**0.16.2 起扫描来源是「已知仓库清单 ∪ 任务历史」**（`REPOS_FILE`，`rememberRepo()` 在每次提交时写入）：只扫任务历史会让「编译过一次、后来没再手动编译」的仓库在 job 被 `MAX_JOBS_KEPT=30` 截断或 Temp 终态启动清理后永久退出自动扫描——面板仍显示过期，却永远等不到自动编译。**0.16.3 起自动调度与面板一样遵守 `workspaceOnly`**：不在已添加 dsh 工作区清单里的仓库（如已移出工作区的目录）不再被后台定时编译——旧实现只让面板过滤遵守它，会产物悄悄写进别人的 `.codewiki/` 而面板上根本看不到那条任务；被跳过的仓数在面板上以「工作区外跳过 N」显示（`scheduler.lastScanSkipped`）。心跳间隔可用环境变量 `DSH_CODEWIKI_AUTO_SCAN_MS` 覆盖（下限 100ms，仅用于测试；生产别设）；空壳判定缓存可用 `DSH_CODEWIKI_SOURCE_PROBE_EMPTY_TTL_MS` 覆盖「无源码」结论的 TTL（默认 60s，命中源码时仍缓存 10 分钟）。**0.16.6 起仓库清单的落点跟随 `JOBS_FILE` 名字**（`reposFileFor()`）：`dsh-codewiki-jobs.json` → `dsh-codewiki-repos.json`，`dsh-codewiki-jobs-test-<pid>-<token>.json` → `dsh-codewiki-repos-test-<pid>-<token>.json`；显式 `DSH_CODEWIKI_REPOS_FILE` 仍最优先。旧实现只按**目录**推导，导致任何改了 `DSH_CODEWIKI_JOBS_FILE` 的测试都写到真实宿主的清单文件里——真机上该文件曾被塞进 `%TEMP%/cw-orch-xxxxxx` 这类早已删除的 fixture 目录，每次自动扫描都要为它们空跑一轮探测。
 - 所有设置 `volatile`，改完即生效（execute 时解包读取），无需重启。
@@ -288,7 +325,17 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 
 两种装法，按用途选一种。**装完都要重启 dsh**（bundle 层与 client 半边都只在进程启动时装载）。
 
-### 装法 A：bundle 依赖（标准本地插件形态，推荐）
+从 GitHub 装（社区用户最省事的一条）：
+
+```sh
+dsh plugin --profile <你的 profile> add @ikliml666/dsh-codewiki
+# 或直接从仓库装（尚未发布到 npm 时用这条）
+dsh plugin --profile <你的 profile> add github:ikliml666/dsh-codewiki
+```
+
+装完把 `@ikliml666/dsh-codewiki` 加进该 profile 的 `dsh.profile.bundles`，重启 dsh。下面的装法 A / B 是本地源码开发的两种形态。
+
+### 装法 A：bundle 依赖（推荐）
 
 插件行由插件自带的 `cordis.patch.yml` 自动合并进 profile，**不需要**在 profile 的 `cordis.patch.yml` 里再手写 codewiki 条目：
 
@@ -298,17 +345,17 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
    ```jsonc
    {
      "dependencies": {
-       "@local/dsh-codewiki": "link:E:/ik/Documents/trae_projects/1/dsh plugin/dsh-codewiki"
+       "dsh-codewiki": "github:ikliml666/dsh-codewiki"
      },
      "dsh": {
        "profile": {
-         "bundles": ["…", "@local/dsh-codewiki"]
+         "bundles": ["…", "dsh-codewiki"]
        }
      }
    }
    ```
 
-3. 在该 profile 目录跑一次 `pnpm install`，让 `node_modules/@local/dsh-codewiki` 真的指向源码目录。
+3. 在该 profile 目录跑一次 `pnpm install`，让 `node_modules/dsh-codewiki` 真的指向源码目录。
 4. 要改配置，在本 profile 的 `cordis.patch.yml` 里写**同 id 覆盖条目**（不是 insert）：
 
    ```yaml
@@ -320,7 +367,7 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
 
    覆盖条目的 `config` 是**整对象替换**：上面没写的键回落到 `index.js` 的 `Config` 默认值，不会与 bundle 层里的 `config: {}` 深合并。因此只想改一项时，也要把其余改过的项一并写上（或干脆都靠默认值）。
 
-装法 A 下 `cordis.patch.yml` 里那条 insert 写的是裸包名 `"@local/dsh-codewiki"`。**name 必须是裸 npm 包名（不带 `/dsh` 子路径）**：client 半边的激活扫描（`client-modules locatePkgJson` → `exactPackageSpecifier`）只认裸包名行。
+装法 A 下 `cordis.patch.yml` 里那条 insert 写的是本包包名 `"@ikliml666/dsh-codewiki"`。**name 必须是裸 npm 包名（不带 `/dsh` 子路径）**：client 半边的激活扫描（`client-modules locatePkgJson` → `exactPackageSpecifier`）只认裸包名行。
 
 ### 装法 B：`file:///` 直挂（改插件源码时用）
 
@@ -333,13 +380,37 @@ AST 能力曾依赖 `vendor/tree-sitter/`（`web-tree-sitter` + `tree-sitter-was
       config: {}
 ```
 
-URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自带的 bundle 层在装法 B 下不要同时启用（`bundles` 里不要有 `@local/dsh-codewiki`），否则同 id 会出现两条 insert。两种装法保持 id 一致：`codewiki`。
+URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自带的 bundle 层在装法 B 下不要同时启用（`bundles` 里不要有本包），否则同 id 会出现两条 insert。两种装法保持 id 一致：`codewiki`。
 
 ### 依赖解析（两种装法都一样）
 
-`@deepseek-ai/schemastery`（仅 `Config` 用）走插件**自己**的 `node_modules/@deepseek-ai/schemastery` junction → `E:\software\deepseek-harness\vendor\schemastery`。link 装法下 Node 从源码真实路径解析，仍然走这个 junction，不借 profile 的 `node_modules`。工具与子代理全走注入服务，零 `dsh-*` import。
+`@deepseek-ai/schemastery`（仅 `Config` 用）走插件**自己**的 `node_modules/@deepseek-ai/schemastery` junction → `E:\software\deepseek-harness\vendor\schemastery`。link 装法下 Node 从源码真实路径解析，仍然走这个 junction，不借 profile 的 `node_modules`。
+
+运行时 import 只有三个 `@deepseek-ai` 包：`schemastery`（Config）、`dsh-llm`（`createUserMessage` / `BlockAssembler`，原生通道的模型桥）、`dsh-client-ui-primitives`（客户端半侧的 `Switch`/`Button`/`Input`/`Tag`）。工具、子代理、`systemPrompt`、`webServer`、`agents`、`llm` 全部走注入服务，不 import `dsh-tools` / `dsh-agent` / `dsh-app-boot` 这类宿主实现包。
+
+`engines`：`node >=24.9.0`（DSH 0.2.2-rc.1 起不再支持 Node 22）、`dsh >=0.2.0-rc.0`。`engines.dsh` 刻意不写上界——写死上界（如 `<0.2.2-0`）会让插件在新宿主的 bundle 层被整条跳过，而 `>=0.2.0-rc.0` 在 0.2.1-rc.5 与 0.2.2-rc.1 上都通过（`includePrerelease: true` 的 semver 实测）。
 
 客户端半侧（设置页）由包声明驱动：`package.json` 里 `dsh.client.platform: "web"` + `exports["./client"]`，宿主 client 扫描器找到本包后自动把 `client.js` 送进浏览器——同样需要一次重启（「非 client 包」判定按条目缓存到重启为止）。
+
+## 来源与许可（Credits and third-party licenses）
+
+本项目站在两个上游项目之上，二者均为 MIT：
+
+| 上游 | 在本项目里的形态 | 许可 |
+|------|-----------------|------|
+| [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki) | 原生通道（默认）直接把它当子进程驱动，`codegraph` 阶段由它的 Python 引擎完成。本仓库不分发它的源码，用户按 `tools/fsoft-engine/setup-env.sh` 自行准备 venv。 | MIT，Copyright (c) 2025 FSoft-AI4Code |
+| [mraza007/codewiki](https://github.com/mraza007/codewiki) | Rust CLI `cw`，以源码形式 vendored 在 `vendor/codewiki/`（已去除 `.git`），并附带编译好的 `bin/cw.exe` 兜底。`vendor/codewiki/FORK.md` 记录了对上游的改动与同步方式。 | MIT，Copyright (c) 2026 Muhammad Raza |
+
+本插件自身的代码同样以 MIT 发布，见 [LICENSE](./LICENSE)。
+
+> **关于 vendored 的 `bin/cw.exe`**：这是从 `vendor/codewiki/` 源码编译出来的产物，随包携带以免用户在 Windows 上还得装 Rust 工具链。它不含任何第三方专有代码。
+
+## 链接
+
+- 官方 Harness 仓库：<https://github.com/deepseek-ai/deepseek-harness>
+- 插件发现：GitHub 的 [`dsh-plugin` topic](https://github.com/topics/dsh-plugin)
+- 问题与建议：<https://github.com/ikliml666/dsh-codewiki/issues>
+
 
 ## 开发
 

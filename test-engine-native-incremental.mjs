@@ -819,6 +819,58 @@ if (want(18)) { console.log('== 用例 18：增量档位 rung=0 → 本机判全
     `用户显式选的档位不挂增量降级 blocker（${JSON.stringify((r.blockers ?? []).map((b) => b.kind))}）`)
 }
 
+// ============================ 用例 19：死条目不再被永久携带 ============================
+// 真机复现（0.17.56 之前）：dsh-subagent-auto-router 的 state.json 积了 37 条
+// `.dsh-ops/panel/*.json`，dsh-git-worktree 积了 6 条 `.diag-tmp/*` —— 这些文件早被
+// 删掉、又从未提交过。旧规则「只有出现在 committed 里才算消化」让它们永远进不了
+// committed，于是被无限携带：工作区明明干净，每小时仍判「有变化」跑完整一轮依赖分析。
+if (want(19)) { console.log('== 用例 19：已不存在且从未提交的旧账被丢弃，不再永久携带 ==')
+  const { repo } = makeRepo('deadcarry', { mode: 'done' })
+  await runJob(repo, { scope: 'full' })
+
+  const statePath = path.join(repo, STATE_DIR, 'state.json')
+  const st = readJson(statePath)
+  // 造两个方向相反的条目：
+  //   · gone.py —— 磁盘上没有、也没提交过（死条目，必须丢）
+  //   · core/core.py —— 真实存在且确实未提交（活口，必须继续携带）
+  fs.writeFileSync(path.join(repo, 'core', 'core.py'), 'def run():\n    return "dirty"\n')
+  st.unconsumed = ['gone.py', 'core/core.py']
+  st.consumedRange = { baseCommit: st.consumedRange?.baseCommit ?? '', headCommit: st.consumedRange?.headCommit ?? '' }
+  fs.writeFileSync(statePath, JSON.stringify(st, null, 2))
+
+  const r = await runNativeJob({
+    repoRoot: repo, scope: 'stale', docsDir: freshDocs('deadcarry'),
+    deps: baseDeps(),
+  })
+  const inc = r.incremental ?? {}
+  const dropped = Array.isArray(inc.dropped) ? inc.dropped : []
+  check(dropped.includes('gone.py'), `死条目进 dropped（${JSON.stringify(dropped)}）`)
+  check(!(inc.changes ?? []).includes('gone.py'), `死条目不进变化集（${JSON.stringify((inc.changes ?? []).slice(0, 8))}）`)
+  check((inc.changes ?? []).includes('core/core.py'), '活口仍进变化集（真改动不许跟着死条目一起丢）')
+  const after = readJson(statePath)
+  check(!(after.unconsumed ?? []).includes('gone.py'), `死条目不再写回 state.json（${JSON.stringify(after.unconsumed ?? [])}）`)
+  check((after.unconsumed ?? []).includes('core/core.py'), '活口继续携带')
+  const noteText = [...(r.notes ?? []), ...(inc.notes ?? [])].join(' | ')
+  check(/丢弃 \d+ 条已不存在且从未提交的旧账/.test(noteText), `notes 说明丢弃了什么（${noteText.slice(0, 240)}）`)
+
+  // gitignore 掉的文件同样丢弃：用户写进 .gitignore 就是声明「这不是仓库内容」，
+  // 它们永远进不了 commit，携带它们等于保证 idleRound 永不成立。反过来，被 git 看见
+  // 的未跟踪文件（下面这条）必须继续携带——那是真改动。
+  const st2 = readJson(statePath)
+  st2.unconsumed = ['ignored.log', 'untracked-new.py']
+  fs.writeFileSync(statePath, JSON.stringify(st2, null, 2))
+  fs.writeFileSync(path.join(repo, '.gitignore'), '*.log\n')
+  fs.writeFileSync(path.join(repo, 'ignored.log'), 'noise\n')
+  fs.writeFileSync(path.join(repo, 'untracked-new.py'), 'x = 1\n')
+  const r2 = await runNativeJob({
+    repoRoot: repo, scope: 'stale', docsDir: freshDocs('deadcarry2'),
+    deps: baseDeps(),
+  })
+  const inc2 = r2.incremental ?? {}
+  check((inc2.dropped ?? []).includes('ignored.log'), `被 .gitignore 忽略的旧账同样丢弃（${JSON.stringify(inc2.dropped)}）`)
+  check((inc2.changes ?? []).includes('untracked-new.py'), '未被忽略的新文件仍进变化集')
+}
+
 // ============================ 收尾 ============================
 for (const d of madeDirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* Windows 占用留给系统清理 */ } }
 try { fs.rmSync(JOBS_FILE, { force: true }) } catch { /* ignore */ }

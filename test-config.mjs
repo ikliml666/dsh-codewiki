@@ -46,6 +46,26 @@ check(liveConfig(defaults).requestLimit === 100, '单模块请求上限默认 10
 // schemastery 返回带 get() 的包装对象，取值一律走 liveConfig（运行期也是它）
 check(liveConfig(defaults).bigEnabled === false, '大档默认关闭（0.17.34：超长输入不再默认换模型）')
 
+// ── 按环节设思考档位（0.17.52）──────────────────────────────────────────────
+check(JSON.stringify(liveConfig(defaults).effortByStage) === '{}', 'effortByStage 默认空对象（全部环节走兜底档）')
+
+{
+  const live = liveConfig(Config({
+    batchReasoningEffort: 'medium',
+    effortByStage: { graph: 'off', articles: 'high' },
+  }))
+  check(live.effortByStage.graph === 'off', '环节档位原样透出（graph=off）')
+  check(live.effortByStage.articles === 'high', '环节档位原样透出（articles=high）')
+  check(live.batchReasoningEffort === 'medium', '兜底档位与环节档位共存')
+}
+
+{
+  const live = liveConfig(Config({ effortByStage: { graph: '', articles: '  high  ', ' unknown ': 'low' } }))
+  check(!('graph' in live.effortByStage), '空串的环节被剔除（等于用兜底档）')
+  check(live.effortByStage.articles === 'high', '档位值两端空白被裁掉')
+  check(live.effortByStage.unknown === 'low', '阶段名两端空白被裁掉')
+}
+
 {
   const live = liveConfig(Config({
     bigEnabled: false,

@@ -45,7 +45,7 @@
 #   装法见 README「原生引擎通道（0.15.0）」，环境脚本 tools/fsoft-engine/setup-env.sh。
 - insert:
     - id: codewiki
-      name: "@local/dsh-codewiki"
+      name: "@ikliml666/dsh-codewiki"
       # 默认值不在这里重复声明：留空即用插件 Config schema 里的默认值（见 index.js 的 Config）。
       # 想改哪项就填哪项，未填的沿用默认。
       config: {}

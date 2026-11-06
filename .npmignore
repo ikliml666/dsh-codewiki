@@ -1,0 +1,23 @@
+# npm 打包时排除（files 白名单已经限定了大方向，这里只做目录内精选）
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# 开发期临时物
+.probe-*
+.dbg-*
+.tmp-*
+
+# 上游 Rust 源码与构建产物不进 npm 包（体积大，且用户装的是兜底二进制）
+vendor/codewiki/target/
+vendor/codewiki/src/
+vendor/codewiki/Cargo.toml
+vendor/codewiki/Cargo.lock
+
+# 编译产物
+.codewiki/
+.agents/
+
+# 测试脚本（要跑测试请用 git 仓库）
+test-*.mjs

@@ -174,18 +174,44 @@ await check('validateOutput：页不在模块树 → unmapped-page（不静默�
   assert.equal(p.source, 'Orphan.md')
 })
 
-await check('validateOutput：source_files 指向不存在的文件 → source-missing', async () => {
+// 显式 componentFiles 是调用方给的证据，指错了必须如实报——这条闸门不能因为
+// 下面那条「陈旧组件过滤」而失效。
+await check('validateOutput：componentFiles 指到不存在的文件 → source-missing', async () => {
   const dir = makeDocs('bad-source', {
     'module_tree.json': JSON.stringify({
-      Core: { path: 'src/core', components: ['src/core/nope.py::Ghost'], children: {} },
+      Core: { path: 'src/core', components: ['src/core/engine.py::Engine'], children: {} },
       Web: { path: 'src/web', components: ['src/web/handler.py::Handler'], children: {} },
     }),
   })
-  const v = validateOutput({ docsDir: dir, repoRoot })
+  const v = validateOutput({
+    docsDir: dir,
+    repoRoot,
+    componentFiles: { 'src/core/engine.py::Engine': 'src/core/nope.py' },
+  })
   assert.equal(v.ok, false)
   const p = v.problems.find((x) => x.kind === 'source-missing')
   assert.ok(p, JSON.stringify(v.problems))
   assert.equal(p.target, 'src/core/nope.py')
+})
+
+// module_tree 是引擎增量合并出来的（cluster_modules.py 把新子树并进旧树），删掉的
+// 文件不会从旧树消失。真机本仓库因此连着 9 个提交卡在 partial：source_files 里那条
+// 死路径每轮报 source-missing，基线永不推进。组件 id 推出的路径不存在时不计入。
+await check('validateOutput：陈旧 module_tree 的组件指向已删文件 → 不计入 source_files，不判 source-missing', async () => {
+  const dir = makeDocs('stale-tree', {
+    'module_tree.json': JSON.stringify({
+      Core: {
+        path: 'src/core',
+        components: ['src/core/engine.py::Engine', 'src/core/deleted.py::Gone'],
+        children: {},
+      },
+      Web: { path: 'src/web', components: ['src/web/handler.py::Handler'], children: {} },
+    }),
+  })
+  const v = validateOutput({ docsDir: dir, repoRoot })
+  assert.equal(v.problems.some((p) => p.kind === 'source-missing'), false, JSON.stringify(v.problems))
+  const core = v.mapped.articles.find((a) => a.moduleName === 'Core')
+  assert.deepEqual(core.sourceFiles, ['src/core/engine.py'])
 })
 
 await check('validateOutput：不给 repoRoot 时跳过 source_files 存在性检查（阶段 2 可选）', async () => {

@@ -140,6 +140,12 @@ const loadPlugin = (react) => {
 const render = (node, react) => {
   if (node == null || node === false || node === true) return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
+  // 真实 React 遇到普通对象子节点会抛 #31（objects are not valid as a React child）。
+  // 桩若静默吞掉，就会把「下拉选项塞了个 {id,name} 对象」这类崩溃测成通过——
+  // 0.17.53 的白屏正是这样漏出去过一次。
+  if (typeof node === 'object' && !Array.isArray(node) && node.type === undefined) {
+    throw new Error(`Objects are not valid as a React child（React #31）：${JSON.stringify(Object.keys(node))}`)
+  }
   if (Array.isArray(node)) return node.map((n) => render(n, react)).join('')
   if (node.type === react.Fragment) return render(node.children, react)
   // 函数组件要拿到 children：createElement 把子节点放在第三个参数之后，桩若只透传 props，
@@ -170,7 +176,9 @@ const check = async (label, fn) => {
   catch (err) { fails.push({ label, err }); console.log(`FAIL  ${label}\n      ${err.message}`) }
 }
 
-const mountPanel = (tFactory = null) => {
+// configValue 决定设置页拿到的草稿：settingsSmoke 里要构造「已选模型」这类场景，
+// 空对象喂不出 useEfforts（它靠 batchProvider/batchModel 才去拉档位目录）。
+const mountPanel = (tFactory = null, configValue = {}) => {
   const { React, reset, cleanups } = makeReact()
   platform()
   reset()
@@ -185,7 +193,7 @@ const mountPanel = (tFactory = null) => {
       // subscribe 必须存在：设置页的 CodewikiCard 会订阅 snapshot 变化，缺了它
       // 整个设置 Tab 会在渲染期抛 TypeError（此前没有任何用例渲染过设置页）。
       get: () => ({
-        getSnapshot: () => ({ status: 'ready', revision: 1, value: {}, writable: true, subscribe: () => () => {} }),
+        getSnapshot: () => ({ status: 'ready', revision: 1, value: configValue, writable: true, subscribe: () => () => {} }),
         subscribe: () => () => {},
         mutate: async () => ({}),
       }),
@@ -650,6 +658,135 @@ await check('任务页：进行中的分段带仍按进度百分比读数', asyn
     assert.ok(!/Panel error:/.test(html), `进行中渲染抛错：${html.slice(0, 400)}`)
     assert.ok(/data-dscw-p-legend/.test(html), '进行中缺少阶段图例')
     assert.ok(/«stepArticles» \d+%/.test(html), '进行中的读数应为百分比')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 「准备中」一格实际是 env + graph + cluster 三段，耗时还极不均衡（真机上
+// graph 3-4 分钟、cluster 十几分钟都在这一格里）。压成一格时用户只能看到
+// 0% 冻住，分不清是在解析还是卡死了。这条用例锁住：prepare 期间分段带与
+// 图例都按引擎子阶段展开成三段，段宽来自 nativeStageTimings。
+await check('任务页：准备中按引擎子阶段展开三段（env/graph/cluster）', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs')
+        ? {
+          jobs: [{
+            ...JOB, stage: 'prepare', finishedAt: null, outcome: null,
+            nativeStage: 'graph', nativePercent: 18,
+            nativeStageTimings: { env: 3000 },
+            stageStartedAt: '2026-11-02T00:01:00.000Z', notes: [],
+          }],
+        }
+        : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `渲染抛错：${html.slice(0, 400)}`)
+    // 0.17.58：只画已经在跑或跑过的阶段。此时 env 已完成、graph 在跑、cluster 与
+    // 后面的 articles/validate/index/commit 都还没轮到——它们不占位，只留 spacer。
+    assert.equal((html.match(/data-dscw-p-seg=""/g) ?? []).length, 2,
+      `准备中应只有 env（已完成）+ graph（进行中）两段：${(html.match(/data-dscw-p-seg=""/g) ?? []).length}`)
+    assert.ok(/data-dscw-p-seg-ahead/.test(html), '未执行的阶段应留成 spacer，不该铺成阶段色块')
+    // 三段各自的文案 key 必须出现（桩把文案渲染成 «key»）。漏一个就说明展开
+    // 没生效，用户看到的仍是一格笼统的「准备」。
+    for (const key of ['nativeEnv', 'nativeGraph']) {
+      assert.ok(html.includes(`«${key}»`), `图例缺少子阶段「${key}」：${html.slice(0, 900)}`)
+    }
+    // graph 段的读数是区间归一化后的值：引擎整体 18% 落在 graph 的 0..36 → 50%
+    assert.ok(/«nativeGraph» 50%/.test(html), `graph 段应显示 50%：${html.slice(0, 900)}`)
+    // env 已跑完显示 100%；cluster 还没开始，连图例都不该出现
+    assert.ok(/«nativeEnv» 100%/.test(html), 'env 已跑完应为 100%')
+    assert.ok(!html.includes('«nativeCluster»'), '未开始的子阶段不该出现在图例里')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 准备段之外（例如写文章阶段）不该展开：那三段已经跑完，拆开只占宽度。
+await check('任务页：离开准备段后不再展开三段', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel()
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).endsWith('/api/codewiki/jobs')
+        ? {
+          jobs: [{
+            ...JOB, stage: 'articles', finishedAt: null, outcome: null,
+            nativeStage: 'articles', nativePercent: 40,
+            nativeStageTimings: { env: 3000, graph: 200000, cluster: 5000 },
+            stageStartedAt: '2026-11-02T00:01:00.000Z', notes: [],
+          }],
+        }
+        : REPOS_PAYLOAD),
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset)
+    const html = await settle(Panel, React, reset)
+    assert.ok(!/Panel error:/.test(html), `渲染抛错：${html.slice(0, 400)}`)
+    // prepare 已跑完 + articles 在跑；validate/index/commit 还没轮到，不画。
+    assert.equal((html.match(/data-dscw-p-seg=""/g) ?? []).length, 2,
+      `写文章阶段应只有 prepare（已完成）+ articles（进行中）两段：${(html.match(/data-dscw-p-seg=""/g) ?? []).length}`)
+    assert.ok(!html.includes('«nativeGraph»'), '离开准备段后不该再显示子阶段名')
+  } finally {
+    globalThis.fetch = prev
+    cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })
+  }
+})
+
+// 真机的 /api/codewiki/model-efforts 返回的是对象数组 [{id, name, description}]，
+// 不是裸字符串。0.17.53 的「按环节设档位」把元素直接当 React child 渲染，真机上
+// 整块设置页崩成白屏（React error #31：object with keys {id, name, description}）。
+// 桩测试当时只喂过空数组，所以没抓住。这条用例锁住对象形态能渲染。
+await check('设置页：档位接口返回对象数组时按环节下拉不崩（React #31 回归）', async () => {
+  const prev = globalThis.fetch
+  const { Panel, React, reset, cleanups } = mountPanel(null, {
+    batchProvider: 'deepseek-official',
+    batchModel: 'deepseek-v4.1-flash',
+    batchReasoningEffort: 'high',
+    effortByStage: { articles: 'high' },
+  })
+  try {
+    globalThis.fetch = async (url) => ({
+      ok: true,
+      json: async () => {
+        const u = String(url)
+        if (u.endsWith('/api/codewiki/jobs')) return { jobs: [JOB] }
+        if (u.endsWith('/api/codewiki/repos')) return REPOS_PAYLOAD
+        if (u.includes('/api/codewiki/models')) {
+          return { ok: true, providers: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-v4.1-flash', name: 'V4.1 Flash' }] }] }
+        }
+        if (u.includes('/api/codewiki/model-efforts')) {
+          return {
+            ok: true,
+            efforts: [
+              { id: 'low', name: 'Low', description: '快速' },
+              { id: 'high', name: 'High', description: '深入' },
+            ],
+            defaultEffort: 'high',
+          }
+        }
+        return REPOS_PAYLOAD
+      },
+    })
+    await settle(Panel, React, reset)
+    gotoTab(Panel, React, reset, 'tabSettings')
+    // 档位目录是二次异步拉取（先 models 再 model-efforts），一帧跑不完：
+    // 等到下拉里出现可读标签再断言，否则测的是「还没加载完」的中间态。
+    const html = await settleUntil(Panel, React, reset, /Low（low）/, 60)
+    assert.ok(!/Panel error:/.test(html), `设置页渲染抛错：${html.slice(0, 400)}`)
+    assert.ok(!/\[object Object\]/.test(html), '档位对象被直接渲染成 [object Object]')
+    assert.ok(/data-dscw-stages=/.test(html), '缺少按环节设档位分区')
+    assert.equal((html.match(/data-dscw-stage=""/g) ?? []).length, 4, '应有四个环节下拉')
+    assert.ok(html.includes('Low（low）'), `档位选项应带可读标签：${html.slice(0, 800)}`)
   } finally {
     globalThis.fetch = prev
     cleanups.forEach((fn) => { try { fn() } catch { /* 同上 */ } })

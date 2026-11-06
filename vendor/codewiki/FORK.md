@@ -3,7 +3,7 @@
 本目录是 [mraza007/codewiki](https://github.com/mraza007/codewiki) 的**本地 fork**，为 dsh-codewiki 插件提供 `cw` CLI 的可维护真源码。
 
 - **基线**：上游 main `64323823b6767d74af732f742c67ed75371c4f0d`（2026-04-06），已验证与 2026-10-10 的上游 main 逐字节一致（src/ + Cargo.toml diff 为空）。
-- **历史**：插件的现役二进制曾在 Temp/cw-src 魔改编译后源码丢失（见 `.codewiki/learnings/cw-binary-source-lost.md`）；2026-10-10 以本目录为基线在本地重施魔改并重建二进制，此后源码永久保存在本目录（随插件仓库提交）。
+- **历史**：插件的现役二进制曾在 Temp/cw-src 魔改编译后源码丢失（那篇诊断记录所在的 `.codewiki/learnings/` 已于 0.17.49 随手工维护通道整体下线，内容只在 git 历史里）；2026-10-10 以本目录为基线在本地重施魔改并重建二进制，此后源码永久保存在本目录（随插件仓库提交）。
 
 ## 魔改点（相对上游的全部差异）
 
