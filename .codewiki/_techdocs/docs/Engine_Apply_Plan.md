@@ -6,7 +6,7 @@ description: '阶段 3 的原生产物落地器：把 EngineQualityGate（原生
 # Engine_Apply_Plan（原生产物落地器）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bbcf9332`](https://github.com/ikliml666/dsh-codewiki/commit/bbcf933285594340a19465219b5bf37d28b4c956) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d8e5cbc2`](https://github.com/ikliml666/dsh-codewiki/commit/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 阶段 3 的**原生产物落地器**：把 [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 给出的采用裁决（report）原子地应用到仓库里——写盘 → `cw index` → 基线推进（`cw meta update`）→ 自动提交。本模块只服务原生引擎通道（`nativeEngine: true`，见 [Package_Manifest 包清单](Package_Manifest.md) 中 `package.json` 的说明），单文件实现于 `lib/engine/apply-plan.js`。
 
@@ -178,10 +178,10 @@ flowchart LR
 - **下游影响**：基线是否真的推进（`baselineAdvanced`）直接决定下一轮 [Change_Set 变更集采集模块](Change_Set.md) 的增量起点；`ApplyResult.blockers` 经 [Engine_Contract 引擎契约](Engine_Contract.md) 的 `validateEngineResult` 校验后进入终态与面板展示（[Web_UI_Panel](Web_UI_Panel.md) 的步骤条按 `APPLY_STAGES` 对齐）。
 
 ??? abstract "Documented components (6)"
-    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
 

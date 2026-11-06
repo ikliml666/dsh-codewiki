@@ -6,7 +6,7 @@ description: ArticleAgenticPool 是插件内置 Node 兼容通道的第二条文
 # Article Agentic Pool 文章智能体执行池
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bbcf9332`](https://github.com/ikliml666/dsh-codewiki/commit/bbcf933285594340a19465219b5bf37d28b4c956) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d8e5cbc2`](https://github.com/ikliml666/dsh-codewiki/commit/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 > 模块文件：`lib/articles-agentic.js`
 > 核心组件：`runPool`（并发池调度）、`worker`（池内任务执行单元）
@@ -234,6 +234,6 @@ flowchart LR
 - Change_Set — 变更集收集。
 
 ??? abstract "Documented components (2)"
-    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
-    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/bbcf933285594340a19465219b5bf37d28b4c956/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
+    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
+    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/d8e5cbc24ca1dc4eae2a85f121043832b56a09b7/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
 
