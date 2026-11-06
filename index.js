@@ -98,6 +98,7 @@ export const Config = z.object({
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
   nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 180 分钟（真机全量实测约 174 分钟）；超时由进程树终止兜底，已写文章按 partial 抢救'),
+  techdocs: z.boolean().default(false).volatile().description('TechDocs 站点导出（上游 a1b9f4a 的 PR #155）：每轮编译后额外产出一份 mkdocs 站点到 .codewiki/_techdocs/（mkdocs.yml + docs/），可直接交给 Backstage TechDocs 渲染。站点内容来自引擎原始产物，与 .codewiki/modules/ 里那批过了质量门、链接改写过的正式文章不同。默认关闭：它是给文档站点发布用的附加产物，会让每轮提交多出 37 个文件'),
   updateRung: z.string().default('').volatile().description('增量档位（上游 ablation rung）：3=组件级增量（默认，全部能力）；3b=同 3 但依赖跟两跳（k_hop=2，影响面更大）；2=只重写受影响的叶子页、不原地打补丁；1=纯规则失效、不开路由/增长重聚类/依赖扩散/陈旧扫描；0=放弃组件级增量、退化成按文件失效的全量重写（每轮都重写全部文章，最慢）。留空=上游默认 3'),
   updateTauNb: z.string().default('').volatile().description('增量阈值 tau_nb（0–1，路由判据）：一个叶子里聚集了多少比例的新增组件邻居才把图 diff 路由到该叶子。留空=上游默认 0.5'),
   updateTauGrow: z.string().default('').volatile().description('增量阈值 tau_grow（0–1）：新增组件占多少比例会触发整体重聚类。留空=上游默认 0.33'),
@@ -213,6 +214,8 @@ export function liveConfig(config) {
     nativeEnginePython: String(val(c.nativeEnginePython) ?? '').trim(),
     nativeEngineEntry: String(val(c.nativeEngineEntry) ?? '').trim(),
     nativeEngineTimeoutMs: Number(val(c.nativeEngineTimeoutMs)) || 0,
+    // TechDocs 站点导出：缺省关闭（附加产物，不是每轮都需要）
+    techdocs: val(c.techdocs) === true,
     // 增量档位与阈值：原样透出（空串=用上游默认）。合法性在提交时由
     // updateOptionsOf 显式校验——配置边界只校验一次，下游不再逐层判空。
     updateRung: String(val(c.updateRung) ?? '').trim(),
@@ -2751,6 +2754,9 @@ function createJobService(config, onSettled) {
     // 「.codewiki/ 存在但缺 _meta.yaml（人工删改过？）」→ wiki-missing → failed。
     // 放临时目录还顺带避免产物被当成仓库页、避免残留污染 git 状态。
     const docsDir = path.join(os.tmpdir(), `dsh-codewiki-native-${job.id}`)
+    // TechDocs 站点也走仓库外临时目录：上游导出直接写盘，写进仓库就绕过了落地器。
+    // 读回与落盘由 native-run 的 3.8 段负责，这里只给路径。
+    const techdocsDir = c.techdocs ? path.join(os.tmpdir(), `dsh-codewiki-techdocs-${job.id}`) : null
     const run = Promise.resolve()
       .then(() => runNativeJob({
         repoRoot: job.cwd,
@@ -2773,6 +2779,8 @@ function createJobService(config, onSettled) {
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),
+        // TechDocs 站点输出目录（仓库外，null = 不导出）：内容由 native-run 读成写集。
+        techdocsDir,
         deps: {
           config: {
             ...c,
@@ -2873,6 +2881,10 @@ function createJobService(config, onSettled) {
         // 注意：这里清的是 `docsDir`（被消费的工作副本），**不清** rawTreeRoot 下那份
         // 留档 —— 留档存在的意义正是「消费之后还能回看引擎原样」。
         try { fs.rmSync(docsDir, { recursive: true, force: true }) } catch { /* 清不掉不影响终态 */ }
+        // 站点同理：内容已被读成写集落进 `.codewiki/_techdocs/`，临时目录不再需要。
+        if (techdocsDir) {
+          try { fs.rmSync(techdocsDir, { recursive: true, force: true }) } catch { /* 清不掉不影响终态 */ }
+        }
         touch(job)
       })
     nativeRuns.set(job.id, run)

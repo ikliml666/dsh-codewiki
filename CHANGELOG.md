@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.17.62 — 2026-11-06
+
+### 同步上游 a1b9f4a，把 PR #155 的 TechDocs 导出接成开关
+
+上游从 `1b4af43` 走到 `a1b9f4a` 只有两个提交，全是 PR #155「export Backstage TechDocs
+projects」（13 文件 / +982 行）。**没有触及本插件依赖的任何内部模块**：`updater.py`、
+`agent_orchestrator.py`、`generate_sub_module_documentations.py`、`call_graph_analyzer`
+一行未动，两处运行时适配器的源码锚点（`IncrementalUpdater._run` 的 Step 5 段、
+`DocumentationGenerator._generate_modules_in_order`）在新版本上仍然命中。
+
+新能力本身是纯文件转换，不调模型：读一份引擎产物目录，产出 `mkdocs.yml` + `docs/`，
+每页加 front matter、来源横幅（commit/日期/模型）与可折叠组件清单，交给 Backstage
+TechDocs 渲染。接成配置项 `techdocs`，默认关。
+
+**为什么默认关**：它是给文档站点发布用的附加产物，每轮提交会多出 37 个文件；编译本身
+不需要它。
+
+**为什么站点目录必须建在仓库外**：上游这一步是直接写盘的。让它往 `.codewiki/` 里写，
+就绕过了落地器的写集封闭与回滚——`partial`/`failed` 的一轮会留下一份半截站点，而落地
+器不知道它存在，既不会算进写集也不会回滚它。现在 `index.js` 在 `os.tmpdir()` 下建临时
+站点，`entry.py` 把它传给 adapter，跑完由 `lib/engine/techdocs.js` 的 `captureSite()`
+读成 `{rel, content}` 写集，在 `native-run.js` 段 3.8 并进本轮 `stateFiles`，与文章
+**同一个事务**落进 `.codewiki/_techdocs/`。
+
+**为什么只有真的读到站点才裁剪它**：`pruneRoots` 里 `_techdocs` 是有条件的
+（`siteCapture.captured.length ? [TECHDOCS_DIR] : []`）。写死进去的话，某一次导出失败
+（上游那条路径只 `click.secho` 警告、不失败整轮）就会让裁剪把上一轮整站删光，而这一轮
+什么也没写——静默丢产物。
+
+**站点里没有图片**：落地器的 extraFiles 通道要求 `content` 是字符串
+（`apply-plan.js:1148`），二进制走不了。`captureSite()` 把非 UTF-8 文件记进 `skipped`。
+
+`.codewiki/_techdocs/` 以 `_` 开头，因此与 `_native-state/` 完全一致的待遇：`cw index`
+跳过整棵子树，孤儿页与索引收录校验不管它，`lib/change-set.js` 的 `isWikiProduct` 不会
+把站点改动算成源码变化。它随编译一起提交，不进 wiki 索引。
+
+### 顺带重写 7 个受管仓库的引擎锁
+
+`UPSTREAM_COMMIT` 一变，所有既有仓库的 `.codewiki/engine-lock.json` 就与当前环境不符，
+`compareLock` 报 `drift`，而 `native-run.js:305` 对 `drift` 是直接
+`settle({outcome:'failed', stage:'env'})`——下一轮会在环境校验就失败。这次用
+`buildLockBody` 生成与引擎自己落锁完全一致的正文，把 7 个仓库的锁重写到 a1b9f4a
+（指纹 `815347593ef61e2a` → `deb591f66b067016`）。`version`/`pythonVersion`/`pipCheckOk`
+沿用旧锁里的真实值：本次只有上游源码 commit 变了，venv 与解释器都没动。
+
+### 验证
+
+```
+# 引擎升级后的接口兼容与锚点
+CLIDocumentationGenerator.__init__ 参数 = [self, repo_path, output_dir, config,
+  verbose, generate_html, commit_id, techdocs_dir]        has techdocs_dir: True
+install_full_runtime(1) / install_incremental_runtime()   均成功，Step5 replaced: True
+pip check                                    No broken requirements found.
+
+# 真引擎算图（不花模型费）
+probe-no-llm-graph.py --fsoft-src .probe-fsoft/src
+  → "ok": true，R1–R5 五条判据全 true，total_components=15，edge_count=8
+
+# 上游 techdocs 在本仓库真产物上实跑
+codewiki.cli.main techdocs .codewiki/_native-state/docs <tmp>
+  → ✓ Wrote 36 TechDocs pages，mkdocs.yml nav 38 行
+
+# entry.py 接线
+注入假 generator 后调 action_generate：techdocs_dir 已传入（绝对路径）
+  C:\...\entry-td-site，generate_html=False
+
+# runNativeJob 端到端（假引擎产物 + 假站点）
+notes: "TechDocs 站点已导出 3 个文件到 .codewiki/_techdocs/"
+artifacts.techdocsDir = '.codewiki/_techdocs'，techdocsFiles: 3
+落盘 4 个文件（含 docs/.codewiki-techdocs marker）全部存在
+_index.md 不收录 _techdocs（正确），git status --porcelain 为 clean（与文章同批提交）
+captureSite 单独跑真站点：captured 38、skipped 0，隐藏文件确实收录
+  二进制站点文件（PNG 头 + 非法 utf8）被跳过并记进 skipped，不冒充成写集项
+
+# 上游 adapter 真导出分支（真 CLIDocumentationGenerator + 真 generate_techdocs，不碰模型）
+_run_techdocs_generation() → site file count: 38，mkdocs.yml: True，
+  marker: True，page count: 36
+
+# 7 个受管仓库的锁重写后逐个跑生产路径 doctor
+match  dsh-codewiki / dsh-git-worktree / dsh-presets-Switch / dsh-subagent-auto-router
+match  Wxxy-CampusHub / Wxxy-CampusLogin / dsh-hindsight-on-demand
+   （全部 status: match，无 diffs）
+```
+
+**未验证**：真引擎 + 真模型的完整一轮（宿主进程启动于本次改动之前，插件仍是旧代码，
+`techdocs` 开关尚未生效）。这一环要重启宿主后跑一次真实编译才能确认。
+
 ## 0.17.61 — 2026-11-06
 
 ### 会话行：正在生成时标「生成中」，不再误报「无内容」

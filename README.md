@@ -202,6 +202,10 @@ URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自�
 - `articleLanguage`：文章语言，默认中文。两条通道都生效。
 - `autoCommit`：编译产物自动提交，默认开。终态 `done` 且有文章写成功时由插件自己 `git add -- .codewiki CodeWiki.md` + `git commit --no-verify`（信息前缀 `docs(wiki):`）。安全边界：pathspec 限定这两个路径（不 `-A` / `--all` / `.`）、不 amend / push / 改写历史、不跑仓库钩子；非 git 仓库、无 HEAD、merge/rebase/cherry-pick 进行中、目标路径有未解决冲突、被 `.gitignore` 忽略、缺 `user.name` / `user.email`、git 命令失败等情形一律拒绝并降级为一次性「产物待提交」提醒，不会半个提交、不会静默丢产物。
 - `autoUpdate` / `autoUpdateMin`：自动更新，默认关；开启后按间隔逐仓判态提交，默认 30 分钟（最小 5）。
+- `techdocs`：额外导出 Backstage TechDocs 站点，默认关。开启后每轮编译结束时以引擎产物为输入
+  生成 `mkdocs.yml` + `docs/`，落到 `.codewiki/_techdocs/`（以 `_` 开头，与 `_native-state/`
+  一样不进 `cw` 索引、不算源码变化），随本轮文章一起提交。纯文件转换、不调模型，所以不增加
+  token 成本，代价是每轮多约 37 个文件。站点里没有图片：落地器的写集通道只接受文本。
 - `updateReminder`：会话系统提示注入 wiki 维护提醒，默认开。仅当会话仓库根存在 `CodeWiki.md` 时出现；提醒收尾调用 `codewiki_generate`、不要手改 `.codewiki/` 下的文章、调用即返回不要轮询、产物由插件自动提交。另兼职**降级**提醒：最近一次成功编译的完成时间晚于产物的最后一次 git 提交时，注入一次「产物待提交」，插件提交后自动静默。
 
 ## 已知限制

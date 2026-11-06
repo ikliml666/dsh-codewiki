@@ -124,6 +124,7 @@ blocker 用，但枚举里没有它，`normalizeBlocker` 会静默降级成 `eng
 | `update_record.json` | `.codewiki/temp/update-record.json`（原样搬运） | — |
 | artifact 页 | 同上模块页，`pageKind: artifact` | 不冒充业务模块 |
 | 父模块页（有 children） | 同上模块页，`pageKind: parent` | 不平铺成叶页 |
+| TechDocs 站点（`techdocs=true` 时） | `.codewiki/_techdocs/` | 不是文章 |
 
 四条硬规则（对应测试）：
 
@@ -154,6 +155,38 @@ blocker 用，但枚举里没有它，`normalizeBlocker` 会静默降级成 `eng
   判据实现见 `lib/engine/quality-gate.js` 的 `baselineEligible` 与本文件「落地器」一节，
   两者必须一致；
 - 自动提交仍只 `git add -- .codewiki CodeWiki.md`，pathspec 边界不变。
+
+## TechDocs 导出
+
+上游 PR #155 把「把写好的文档导出成 Backstage TechDocs 站点」做成了引擎能力：
+`codewiki/cli/techdocs_generator.py` 读一份引擎产物目录，产出 `mkdocs.yml` + `docs/`，
+每页加 front matter、来源横幅（commit/日期/模型）与可折叠组件清单。**纯文件转换，不调模型**，
+所以接在引擎之后跑不增加 token 成本。
+
+插件侧开关是 `techdocs`（默认 `false`）。打开后：
+
+1. `index.js` 在仓库外建临时站点目录 `os.tmpdir()/dsh-codewiki-techdocs-<jobId>`，随
+   payload 的 `techdocsDir` 下发；
+2. `entry.py` 把它转成 `CLIDocumentationGenerator(techdocs_dir=…)`，上游在
+   `_run_backend_generation()` 之后、`_finalize_job()` 之前导出；
+3. `lib/engine/techdocs.js` 的 `captureSite()` 把站点读成 `{rel, content}` 写集，
+   `native-run.js` 段 3.8 把它们并进本轮 `stateFiles`，由落地器与文章**同一个事务**
+   写进 `.codewiki/_techdocs/`。
+
+三条设计约束：
+
+- **站点目录必须在仓库外**。让上游直接写 `.codewiki/_techdocs/` 会绕过落地器的写集封闭
+  与回滚：一次失败的编译会留下半截站点，而落地器不知道它存在也不会回滚它。
+- **二进制走不了写集**。落地器的 extraFiles 通道要求 `content` 是字符串
+  （`apply-plan.js:1148`），所以 png/jpg 等图片不进站点，`captureSite()` 把它们记进
+  `skipped`。当前上游只复制页面与图片，实际影响 = 文章里引用的图片在站点里缺图。
+- **只有真的读到站点才把 `_techdocs` 加进裁剪根**（`pruneRoots`）。否则一次导出失败，
+  裁剪会把上一轮整站删光，而这一轮什么也没写。
+
+`.codewiki/_techdocs/` 以 `_` 开头，因此与 `_native-state/` 一样：`cw index` 跳过整棵子树
+（`vendor/codewiki/src/main.rs:244` 只判仓库相对路径首段）、孤儿页与索引收录校验都不管它、
+`lib/change-set.js` 的 `isWikiProduct` 也不会把站点改动算成源码变化。它随编译一起提交，
+不进 wiki 索引。
 
 ## 阶段门禁
 
@@ -325,8 +358,17 @@ request_limit of 1`，CLI 退出码 4——**语义失败与进程退出码分�
 ## 上游同步
 
 上游仓库 [FSoft-AI4Code/CodeWiki](https://github.com/FSoft-AI4Code/CodeWiki)，
-**锁定 commit `1b4af43d6d20c8dbd758fe1d5f888cc6947ed11d`**（2026-11-01，
-`update tree-sitter version`），该源码树自报 `codewiki.__version__ = 2.0.0`。
+**锁定 commit `a1b9f4acac4d3e1925c9d49e258b618741410540`**（2026-11-05，
+`Merge pull request #155 from FSoft-AI4Code/feat/techdocs-output`），
+该源码树自报 `codewiki.__version__ = 2.0.0`。
+
+0.17.62 从 `1b4af43` 前进到 `a1b9f4a`，跨 2 个提交（全是 PR #155「export Backstage
+TechDocs projects」引入的 TechDocs 导出，13 文件 / +982 行）。这一跳**没有触及本文件
+依赖的任何内部模块**：`updater.py`、`agent_orchestrator.py`、`generate_sub_module_documentations.py`、
+`call_graph_analyzer` 一行未动，运行时适配器的两处源码锚点（`IncrementalUpdater._run` 的
+Step 5 段、`DocumentationGenerator._generate_modules_in_order`）在新版本上仍然命中。
+新增的 `cli/techdocs_generator.py` 与 `cli/commands/techdocs.py` 是纯附加能力，见
+「TechDocs 导出」一节。
 
 0.17.6 之前锁的 `03d0a294…`（2026-10-22，PR #142）是**错锁**：那个对象在本机
 clone 里根本不存在（`git cat-file` 报 `could not get object info`），
@@ -352,11 +394,16 @@ commit，并顺带同步了上游 15 个提交（`364b67a` → `1b4af43`，
    `locked-requirements.txt`，再 `pip install --no-deps -r locked-requirements.txt
    -c constraints.txt`，最后 `pip check` 必须零破损。
 3. 跑 `tools/fsoft-engine/setup-env.sh` 从零重建 venv 复核（脚本就是这条流程的固化）。
-4. 跑契约与入口测试：`node test-engine-contract.mjs`、`node test-engine-client.mjs`、
-   `node test-engine-manifest.mjs`、`node test-engine-python-entry.mjs`、
-   `node test-engine-output.mjs`、`node test-engine-quality-gate.mjs`、
-   `node test-engine-apply-plan.mjs`。**入口面对上游 API 的假设集中在
-   `lib/engine/python/entry.py` 与 `stage_map.py` 两个文件**，升级时先看这两处。
+4. **入口面对上游 API 的假设集中在 `lib/engine/python/entry.py` 与 `stage_map.py`
+   两个文件**，升级时先看这两处。可执行的复核手段（0.17.62 起仓库不再带 node 测试文件）：
+   - `pip check` 必须零破损；
+   - 起一个 venv 里的 Python，import `CLIDocumentationGenerator` 并打印
+     `inspect.signature(__init__)`，确认入口传的每个关键字参数都还在；
+   - 跑 `install_full_runtime(1)` / `install_incremental_runtime()`，两处源码锚点不命中
+     会直接抛「源码锚点不匹配，拒绝安装运行时适配」；
+   - 跑 no-LLM 依赖图探针（不花模型费，只验引擎能算图）：
+     `PYTHONIOENCODING=utf-8 <venv>/Scripts/python.exe tools/fsoft-engine/probe-no-llm-graph.py --fsoft-src .probe-fsoft/src`，
+     输出 `"ok": true` 且 R1–R5 五条判据全 `true` 才算过。
 5. 跑真实编译：README「原生引擎通道」里的八场景（全量 → committed stale → 未提交 →
    重命名 → 删除 → 取消 → 失败 → 无变化轮）。至少要有全量 + committed stale + 无变化轮
    三条的真机输出，否则不算验证过。
@@ -377,7 +424,7 @@ commit，并顺带同步了上游 15 个提交（`364b67a` → `1b4af43`，
 原生通道是**运行期开关**，不涉及数据结构迁移，所以回滚只有一步：
 把 `nativeEngine` 设为 `false`（或删掉该配置项）即回到 0.14.0 的 Node 流水线。
 `.codewiki/_native-state/` 是原生通道的受管状态目录，Node 通道不读它；如要彻底清理，
-`git rm -r .codewiki/_native-state .codewiki/engine-lock.json` 后提交即可
+`git rm -r .codewiki/_native-state .codewiki/_techdocs .codewiki/engine-lock.json` 后提交即可
 （`.codewiki/modules/` 与 `CodeWiki.md` 不受影响，它们两条通道共用）。
 
 若已升级过上游且新版本行为异常，按上表把 venv 重建回锁 commit 的依赖快照：

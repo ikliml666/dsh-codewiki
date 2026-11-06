@@ -1051,6 +1051,12 @@ def action_generate(request_id, payload, is_update=False):
             from fsoft_runtime import install_incremental_runtime
             install_incremental_runtime()
 
+        # TechDocs 导出（上游 a1b9f4a 的 PR #155）：把刚写好的 docs 树转成 mkdocs 站点。
+        # 目标目录放在**仓库外**的临时位置，由 Node 侧读成写集的一部分再落进
+        # `.codewiki/_techdocs/`——上游这一步是直接写盘的，让它往仓库里写就绕过了
+        # 落地器的写集封闭与回滚（partial/failed 轮会留下一份半成品站点）。
+        techdocs_dir = payload.get("techdocsDir") or None
+
         adapter = CLIDocumentationGenerator(
             repo_path=repo_path,
             output_dir=docs_dir,
@@ -1058,6 +1064,7 @@ def action_generate(request_id, payload, is_update=False):
             verbose=False,
             generate_html=False,
             commit_id=commit_id,
+            techdocs_dir=Path(str(techdocs_dir)).resolve() if techdocs_dir else None,
         )
         bridge_progress(
             adapter,
