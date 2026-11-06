@@ -187,7 +187,7 @@ flowchart LR
 flowchart TD
     Q["决议输入"] --> Q1["baseCommit：readCommittedBaseline 已提交编译基线"]
     Q1 --> Q2["changeSetImpl(root, baseCommit) 四路变化"]
-    Q2 --> Q3["prevState + mergeUnconsumed 合并未携带账目"]
+    Q2 --> Q3["prevState + mergeUnconsumed 合并未携带账目<br/>死条目（文件已删且从未提交）丢弃并记 note"]
     Q3 --> Q4{"eligible?"}
 
     Q4 -->|"是"| U["resolution=update<br/>hydrateDocsDir 水合上一轮图/树/文章到隔离 docsDir"]
@@ -207,6 +207,7 @@ flowchart TD
 
 - **「变化集为空」不是跳过引擎的理由**：FSoft 判断「有没有变」靠**图 diff**，不是 git 路径集合（重命名/跨文件重构能让路径集非空而图不变，反之亦然）。change-set 只用于决定「增量可不可信」，把「变没变」留给引擎自己的 `update_record`。
 - **未提交改动的账**：引擎读的是工作区文件（内容对），但 cw 基线只能推进到 HEAD（记账指向 HEAD）。阶段 1.9 的**工作区快照**把未提交改动合成一个不挂 ref 的临时 commit，让本轮 `commitId` 指向它，使「文章反映的内容」与「账本记的位置」对齐。快照造不出不算失败，退回用 HEAD 记账并记 note。
+- **死账丢弃**：上一轮携带的 `unconsumed` 里，凡是本轮 git 已完全看不见的条目（文件早被删掉、又从未提交过）都算死条目——按「只有 committed 才算消化」的规则它们会被永久携带，让工作区明明干净的仓库每轮仍判「有变化」白跑整轮。`mergeUnconsumed` 把它们收进 `dropped` 并从 `unconsumed` 移除，编排层随即记一条 note（列前 3 条路径），并把 `dropped` 写进增量现场证据 `inc.dropped` 供事后复盘。
 - **无变化轮（idleRound）**：`updateOutcome=no_change` 且变化集空且无未消费路径时，**沿用**上一轮受管状态——不重写图/树/metadata/update_record/state.json，也不推进基线/提交，避免每次状态查询都制造一次纯记账提交。
 
 ---

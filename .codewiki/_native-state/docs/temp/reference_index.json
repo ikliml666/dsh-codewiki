@@ -502,6 +502,7 @@
       "findOrphanPages",
       "findStaleModulePages",
       "findSupersededLegacyPages",
+      "mergeUnconsumed",
       "noop",
       "proofreadPages",
       "run",
@@ -525,7 +526,6 @@
     ],
     "names": [
       "archiveDocsTree",
-      "base",
       "buildStatePayload",
       "captureDocsDir",
       "findArticlesMissingFromIndex",

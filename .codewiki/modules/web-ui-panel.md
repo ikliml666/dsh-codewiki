@@ -211,9 +211,10 @@ flowchart LR
 - `LEGACY_STAGE = { plan: prepare, crosscut: articles, review: validate }`：历史任务里已退役的阶段名映射回当前六步，否则步骤条在失败/取消时整条熄灭；
 - `STAGE_WEIGHTS = { prepare: 0.24, articles: 0.46, validate: 0.21, index: 0.05, commit: 0.04 }`：`overallPct` 线性加权，封顶 99（done/partial 才 100）；
 - 每个阶段固定色相 `STAGE_HUE`（青→蓝→紫→琥珀→绿），明度饱和度写死在 CSS（58% / 52%），深浅两套主题通用；
-- prepare 格子会展开：原生通道任务正在 prepare 且 `nativeStage` 落在 env/graph/cluster 时，分段带与图例都把 prepare 一格拆成 env / graph / cluster 三个子段（`prepareRows` + `expandPrepareRows`）——各用 `PREPARE_HUE` 专属色相、按 `nativeStageTimings` 真实耗时定子段宽（已跑完的子段用真实耗时，没跑到的按预估权重补齐，避免段宽在段间跳变像进度倒退）、各填各的完成度，图例色块色相与带内三段一一对应；任务离开 prepare 后自动收回成原来的一格；
+- prepare 格子会展开：原生通道任务正在 prepare 且 `nativeStage` 落在 env/graph/cluster 时，分段带与图例都把 prepare 一格拆成 env / graph / cluster 三个子段（`prepareRows` + `expandPrepareRows`）——已到达（跑完或正在跑）的子段各用 `PREPARE_HUE` 专属色相、按 `nativeStageTimings` 真实耗时定宽并填各的完成度，没跑到的子段不单独成段（其预估权重并入带尾占位，见下条）；图例色块色相与带内已显示的子段一一对应；任务离开 prepare 后自动收回成原来的一格；
 - prepare 段完成度归一化：引擎整体百分比在它覆盖的 0..54 区间内走动，不归一化时准备跑完这段只填到 8.6%、总进度偏小一半；`stageFraction` 用 `withinRange('cluster', nativePercent)` 把该区间映射回 0..1；
 - 分段带语义随任务状态切换：**进行中**段宽 = 进度权重（prepare 子段再按其内子权重细分）；**终态**段宽 = 该阶段真实耗时（`stageTimings`），一眼看出「时间花在哪一步」；进行中的任务只要存在非排队的活跃阶段（`hasLiveSegments`）就画分段带与图例，不再等总进度 pct > 0。
+- 未执行的阶段不进图：分段带与图例同口径，只列已 done / running / failedStep 的阶段（图例经过滤的 `reached` 行展开 prepare 子段后，未展开的子段也不列）——列出来只有一排 0%，没有信息量；已到达阶段之后还没开始的权重不丢弃，聚合为带尾一段无标签占位（`[data-dscw-p-seg-ahead]`），保持整条带子的总宽占比恒定，进度填充不会跳。
 
 ### `ReposTab`：仓库总览
 

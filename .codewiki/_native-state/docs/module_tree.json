@@ -20,7 +20,8 @@
     "Cordis_Patch_Config": {
         "path": "cordis.patch.yml",
         "components": [
-            "cordis.patch.yml::cordis.patch.yml"
+            "cordis.patch.yml::cordis.patch.yml",
+            "_addcase2.py::__file__"
         ],
         "children": {}
     },

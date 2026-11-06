@@ -175,7 +175,7 @@ sequenceDiagram
 | `stateVersion` | 状态格式版本（当前 `1`），磁盘版本不符 → 不可增量 |
 | `consumedRange` | 本轮开始时「已消化到哪儿」（baseCommit / headCommit），权威副本供审计 |
 | `pendingChanges` | 本轮引擎真正看见的变化（committed / staged / unstaged / untracked / deleted / renamed） |
-| `unconsumed` | **「已读进产物、但还没进任何 commit」的路径**。下一轮无条件并入变化集，直到它们出现在 `git diff base..HEAD` 里才移出 |
+| `unconsumed` | **「已读进产物、但还没进任何 commit」的路径**。下一轮无条件并入变化集；移出规则见下文 `mergeUnconsumed`：出现在本轮 committed → 移出（`consumedNow`）；本轮 git 仍看得见 → 继续携带；本轮 git 已看不见（文件已删且从未提交 / 被 `.gitignore`）→ 丢弃（`dropped`），绝不永久携带 |
 | `engineVersion` | 引擎版本；与状态里记录的不一致 → 旧图不可比，退全量 |
 | `scope` / `effectiveScope` | 本轮请求的 scope 与实际生效的 scope（显式记下 full 回退） |
 | `updateOutcome` | 引擎自报的增量结局（incremental / no_change / full_fallback…） |
@@ -199,13 +199,16 @@ flowchart TB
     C["本轮 committed 路径"] --> M
     M --> D{"携带的路径<br/>本轮进了 committed？"}
     D -- "是（已被提交消化）" --> E["consumedNow：移出携带"]
-    D -- "否" --> F["stillUnconsumed：继续携带"]
+    D -- "否" --> H{"本轮 git 仍看得见？<br/>seenNow = committed ∪ 三路 ∪<br/>deleted ∪ renamed 两端"}
+    H -- "是" --> F["stillUnconsumed：继续携带"]
+    H -- "否（死条目）" --> K["dropped：丢弃，不再携带"]
     M --> G["effectiveChanges = 四路 ∪ 携带（去重排序）"]
 ```
 
 - `staged / unstaged / untracked` 一律算未消费，并入 `unconsumed`；
 - `committed` 里的路径本轮被看见时已进 commit，不需要再携带；
-- 上一轮携带的路径，只有「这一轮已出现在 committed」才算被消化掉，否则继续携带（文件可能还在工作区、也可能删了但删除未提交）。
+- 上一轮携带的路径，「这一轮已出现在 committed」即被消化掉（`consumedNow`）；
+- **死条目丢弃（`dropped`）**：本轮 git 完全看不见的旧账，是「文件已被删掉、又从未提交过」的死条目——它永远进不了 committed，按旧规则会被永久携带下去。真机上 `dsh-subagent-auto-router` 积了 37 条 `.dsh-ops/panel/*.json`（目录早被清掉）、`dsh-git-worktree` 积了 6 条 `.diag-tmp/*`，结果仓库工作区明明干净，每轮仍判「有变化」跑完整一轮。现在这类路径直接丢弃，不再携带。被 `.gitignore` 忽略的文件同样按「git 看不见」丢弃——这是有意的：用户写进 `.gitignore` 就是声明「这不是仓库内容」，携带它们等于保证 idleRound 永不成立（永久白跑），而丢掉不会少编译任何东西。
 
 ---
 
@@ -307,7 +310,7 @@ flowchart LR
 | `buildStatePayload({...})` | 组装 `state.json` 内容（不记本轮结局，只记开始时的凭据） |
 | `stateFileItem(payload, stateDir)` | 把 payload 包成一条写集项交给落地器 |
 | `stateFingerprint(text)` | 剥掉 `updatedAt`/`notes` 的实质内容指纹（无变化不重写） |
-| `mergeUnconsumed({changeSet, prevUnconsumed})` | 跨轮「未消化变化」合并（纯函数） |
+| `mergeUnconsumed({changeSet, prevUnconsumed})` | 跨轮「未消化变化」合并（纯函数）；返回 `unconsumed` / `consumedNow` / `dropped` / `effectiveChanges` / `carried`——本轮 git 已看不见的旧账进 `dropped`，不再永久携带 |
 
 ---
 
@@ -317,6 +320,6 @@ flowchart LR
 2. **为什么 `_` 开头** → `cw index` 的跳过规则，避免原始文章被收成第二份索引副本。
 3. **复制不移动** → 水合方向两侧互不影响，单轮失败不毁掉下一轮输入。
 4. **同事务结构** → 状态写集进落地器 `extraFiles`，与文章同 pre-image / 回滚 / commit。
-5. **未消费账不丢** → `unconsumed` 把「已读进产物、还没进 commit」的路径每轮并入变化集，直到出现在 `git diff base..HEAD`。
+5. **未消费账不丢、也不烂** → `unconsumed` 把「已读进产物、还没进 commit」的路径每轮并入变化集；出现在本轮 committed 才移出，本轮 git 已看不见的死条目（含 `.gitignore` 忽略）进 `dropped` 丢弃，绝不永久携带导致每轮白跑。
 6. **无变化不提交** → `stateFingerprint` 剥时间戳比对，避免 idle 轮产生纯记账提交。
 7. **留档是证据不是产物** → `archiveDocsTree` 失败只记 note，绝不拖垮一次编译。

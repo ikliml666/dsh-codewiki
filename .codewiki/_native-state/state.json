@@ -2,13 +2,13 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "dfd12f5d160143df563096342b443f9ad1da955e",
-    "headCommit": "0e7d0fb937bac87ce245a4539a6eeffcbdb9306c"
+    "baseCommit": "0e7d0fb937bac87ce245a4539a6eeffcbdb9306c",
+    "headCommit": "ed423cb111b79dd73e46a54fa736d5e3a93762c8"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "dfd12f5d160143df563096342b443f9ad1da955e",
-    "headCommit": "0e7d0fb937bac87ce245a4539a6eeffcbdb9306c",
+    "baseCommit": "0e7d0fb937bac87ce245a4539a6eeffcbdb9306c",
+    "headCommit": "ed423cb111b79dd73e46a54fa736d5e3a93762c8",
     "committed": [],
     "staged": [
       "lib/wiki-notes.js",
@@ -25,13 +25,16 @@
       "lib/engine/llm-bridge.js",
       "lib/engine/mapping.js",
       "lib/engine/native-run.js",
+      "lib/engine/native-state.js",
       "lib/engine/output.js",
       "lib/engine/python/entry.py",
       "package.json",
+      "test-batch.mjs",
       "test-client-panel.mjs",
       "test-config.mjs",
       "test-engine-apply-plan.mjs",
       "test-engine-llm-bridge.mjs",
+      "test-engine-native-incremental.mjs",
       "test-engine-output.mjs",
       "test-engine-python-entry.mjs",
       "test-wiki-anchors.mjs",
@@ -39,7 +42,9 @@
       "vendor/codewiki/skills/codewiki-session.md",
       "vendor/codewiki/src/setup.rs"
     ],
-    "untracked": [],
+    "untracked": [
+      "_addcase2.py"
+    ],
     "deleted": [
       "lib/wiki-notes.js",
       "test-wiki-notes.mjs"
@@ -48,15 +53,9 @@
     "reason": ""
   },
   "unconsumed": [
-    ".tmp-keys.mjs",
-    ".tmp-probe-tabs.mjs",
-    ".tmp-type.mjs",
-    ".tmp-verify-cov.mjs",
     "CHANGELOG.md",
     "README.md",
-    "_ext2.cjs",
-    "_probe-config.mjs",
-    "_probe-settings.mjs",
+    "_addcase2.py",
     "bin/cw.exe",
     "client.js",
     "index.js",
@@ -65,17 +64,19 @@
     "lib/engine/llm-bridge.js",
     "lib/engine/mapping.js",
     "lib/engine/native-run.js",
+    "lib/engine/native-state.js",
     "lib/engine/output.js",
     "lib/engine/python/entry.py",
     "lib/wiki-notes.js",
     "package.json",
+    "test-batch.mjs",
     "test-client-panel.mjs",
     "test-config.mjs",
     "test-engine-apply-plan.mjs",
     "test-engine-llm-bridge.mjs",
+    "test-engine-native-incremental.mjs",
     "test-engine-output.mjs",
     "test-engine-python-entry.mjs",
-    "test-orchestration.mjs",
     "test-wiki-anchors.mjs",
     "test-wiki-notes.mjs",
     "vendor/codewiki/FORK.md",
@@ -89,10 +90,10 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 b96668c 与本次 cw 基线 dfd12f5 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "工作区未提交改动已合成临时 commit f4612216fc44（25 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4e84hs-8-native（44 个文件）",
-    "本轮把 25 个未提交源码改动一并写进产物（快照 f4612216fc44）：CHANGELOG.md、README.md、bin/cw.exe、client.js、index.js 等"
+    "丢弃 8 条已不存在且从未提交的旧账（.tmp-keys.mjs、.tmp-probe-tabs.mjs、.tmp-type.mjs 等）——只有 committed 才算消化的规则会让它们被永久携带，白跑整轮",
+    "持久化基线 dfd12f5 与本次 cw 基线 0e7d0fb 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "工作区未提交改动已合成临时 commit 1bdcdd8033c7（29 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4g95e8-6-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-06T03:27:18.436Z"
+  "updatedAt": "2026-11-06T04:32:31.084Z"
 }

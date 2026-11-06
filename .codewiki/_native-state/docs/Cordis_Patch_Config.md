@@ -129,7 +129,7 @@ flowchart TD
 
 - **0.16.0**：原生引擎通道（`nativeEngine: true`）成为默认；Node 侧的 FSoft 算法重实现（symbols/cluster/graph-diff/incremental/update-planner）已退役删除，`nativeEngine: false` 仅保留为最小兼容通道（顶层目录分组 + 文件级 source_files 归属，不再加新特性）。
 - **0.17.34**：不再内置默认编译模型——提交任务时未选 provider/model 会以显式错误失败，而不是对着猜测的模型静默运行；大档并发默认关闭。
-- 当前版本 `0.17.56`：零 subagents、单项目串行。
+- 当前版本 `0.17.58`：零 subagents、单项目串行。
 
 ## 使用示例
 
