@@ -2,13 +2,13 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "2c31ee0eec9b11036071b4742f2ce7d38bb408f7",
-    "headCommit": "6dfd76a6f9a156b3866cf2008393696688494cf2"
+    "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
+    "headCommit": "7e93c52865322683e62536b3c1adce0a6dffaad2"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "2c31ee0eec9b11036071b4742f2ce7d38bb408f7",
-    "headCommit": "6dfd76a6f9a156b3866cf2008393696688494cf2",
+    "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
+    "headCommit": "7e93c52865322683e62536b3c1adce0a6dffaad2",
     "committed": [],
     "staged": [],
     "unstaged": [],
