@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.17.60 — 2026-11-06
+
+### 会话页：按流程分类、正文 Markdown 预览、修掉「打开没有内容」
+
+用户第二轮反馈四件事：「还是不美观」「每个工作区的会话要按流程分类」「打开一些会话发现没有输出内容，这没有问题吧」「会话内部按 md 预览显示」。第三条不是观感问题——查下来是真 bug。
+
+**一、「没有输出内容」是记录环节把内容丢了，不是模型没说话。**
+
+真机上统计 101 条会话记录：48 条有正文，53 条 `outputChars=0` 但 `outputTokens>0`（#4 tok192、#5 tok284、#7 tok156、#8 tok371…）。token 确实产生了，正文却是空。翻桥日志 `/tmp/dsh-codewiki-logs/*.ndjson` 里的 chunk 构成：
+
+```
+{"block-start":3,"reasoning-delta":1094,"block-end":3,"text-delta":17,"tool-call-delta":11,"usage":1,"finish":1}
+```
+
+模型这一轮几乎没写正文，token 全在 `reasoning-delta`（思考）与 `tool-call-delta`（工具调用）里。而 `textDeltaOf(chunk)` 只认 `chunk.text` / `chunk.delta.text` / `chunk.content`——DSH 的 chunk 类型是 `{type:'reasoning-delta', text}` 与 `{type:'tool-call-delta', id, argumentsDelta}`（`@deepseek-ai/dsh-llm/lib/types/types.d.ts:463-472`），两种都不匹配，于是整段被当成「非文本 chunk」直接 `return`。
+
+改成 `sessionDeltaOf(chunk)` 按 `type` 分流成 `{text}` / `{reasoning}` / `{tool}`；`beginSessionRecord` 分别累积正文、思考与工具（工具按 `id` 合并分片，`argumentsDelta` 是逐片流下来的，不合并会把一次调用记成几十条半截 JSON）。meta 新增 `reasoningChars` / `toolCalls`，full 新增 `reasoning` / `tools`。终态仍以 `onDone` 给的全文为准，只有它为空时才保留流式结果。
+
+体感变化：那 53 条「空的」请求，点开能看到模型当时想的是什么、调了哪些工具、参数是什么。列表行上也会直接标注原因（「内容在思考里」/「这轮在调工具」），不必点开才发现是空的。
+
+**二、按流程分类：阶段信息此前根本没进会话记录。**
+
+会话 meta 里没有 stage 字段——95 条记录的 `name` 全是「原生请求 · doubao-seed-2.1-lite」，列表上完全分不清哪条是解析代码图、哪条是在写文章。阶段信息在引擎里是有的（`llm-bridge.js` 的 `currentStage`，由 `native-run.js:702` 的 `onProgress` 通过 `bridge.setStage(p.stage)` 同步），但 `onRequestStart` 的 task 只带了 `name/model/provider/batchPrompt`，没传 stage。
+
+三处补上：桥的 `onRequestStart` 带 `stage: currentStage`；native 通道用 `task.stage || job.nativeStage`；batch chat 与 agentic 通道用 `t.stage || job.stage || 'articles'`。历史记录没有阶段，面板统一归到「未标注」，不回填、不猜。
+
+面板因此变成三层：工作区（仓库名 + 条数）→ 编译阶段（阶段名 + 条数 + 完成/失败/在跑）→ 单条请求。阶段按流程序排（排队→解析→聚类→写文章→校对→校验→索引→提交），不按时间——按时间排会让同一个阶段在列表里出现多次、来回跳。折叠态全在 `collapsed` map 里，默认全展开：进这一页就是想一眼看完，折叠是用户的额外动作而不是前提。
+
+**三、正文改 Markdown 预览。**
+
+原来 prompt 与输出都是 `<pre>{text}</pre>`，模型输出的 `## 标题`、列表、代码块全按原文摊着。改用宿主 primitives 里的 `MarkdownText`（`variant: 'compact'`，未完成的请求带 `streaming`——它走增量解析器，能看着输出逐段长出来），分类用 `SegmentedTabs`：输出 / 提示词 / 思考 / 工具，后两个只在真有内容时出现。提示词按 `[system]/[user]/[assistant]` 切块，每块带粘顶的角色标签。
+
+**四、视觉：三层各有各的语法，不再一律描边。**
+
+仓库层只有标题与条数，靠留白和一条底边分隔；阶段层左侧一条 1px 竖线把「同一步的请求」圈在一起（缩进用 padding，竖线才连续）；请求层只用状态点，不描边。详情区两块面板吃掉剩余高度自己滚，`pre` 的 300px 限高彻底删除。
+
+验证：
+
+```
+test-client-panel.mjs  23 passed, 0 failed
+  （新增：同一工作区内按编译阶段分组 / 输出为空但产出了思考时行上说明原因 /
+    会话详情正文按 Markdown 渲染且四个页签齐全 / 全局视图默认全展开）
+test-sessions.mjs      全部通过
+  （新增：阶段落进 meta / 思考全文落盘 / 同一 id 的工具分片合并成一条 /
+    onDone 正文覆盖流式累积）
+真实 HTTP（起真 server，打三个会话端点）：
+  全局列表行带 stage=graph、outputChars=0 且 reasoningChars=11
+  单条端点返回思考全文与合并后的工具调用 read_file {"path":"a.ts"}
+  jobs 端点 nativeResult 不再携带 gate.articles 全量清单
+```
+
+一处取舍：`readSessionRecordDetail` 合并 full 与 meta 时，思考与工具的**计数**取 meta（3s 节流期间 meta 是内存里最新的），**内容**取 full（节流快照）。正在生成的请求点开时，计数可能比正文多出最后几秒的部分——这个差在 3s 内自愈，比让面板显示过期计数更好。
+
 ## 0.17.59 — 2026-11-06
 
 ### 会话页重做：详情占满整屏、进行中任务可读、轮询不再白跑
