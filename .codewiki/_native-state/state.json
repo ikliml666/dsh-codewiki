@@ -3,21 +3,27 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "9a04e48c8c5f0c6bfa57e5292a4aff7e4d0f3afb"
+    "headCommit": "29bf65881dbbc1d966bd0c8217bd8387a13d16f0"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "9a04e48c8c5f0c6bfa57e5292a4aff7e4d0f3afb",
+    "headCommit": "29bf65881dbbc1d966bd0c8217bd8387a13d16f0",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
       "CodeWiki.md",
       "README.md",
       "client.js",
+      "docs/fsoft-native-engine.md",
       "docs/hy3-concurrency-handoff.md",
       "index.js",
       "lib/engine/llm-bridge.js",
+      "lib/engine/manifest.js",
+      "lib/engine/native-run.js",
+      "lib/engine/python/entry.py",
+      "lib/engine/techdocs.js",
+      "lib/job-store.js",
       "package.json",
       "patches/README.md",
       "patches/upstream-module-parallel.patch",
@@ -126,11 +132,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4sixgt-3-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4vm1yw-0-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-06T09:53:54.144Z"
+  "updatedAt": "2026-11-06T11:27:10.063Z"
 }

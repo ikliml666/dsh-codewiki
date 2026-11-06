@@ -1,0 +1,50 @@
+site_name: dsh-codewiki
+site_description: dsh-codewiki 是 DeepSeek Harness（dsh）宿主环境下的本地代码文档插件，npm 包名为 @local/dsh-codewiki。它的核心目标是将任意代码仓库自动编译为结构化、可追溯的 Wiki 文档体系，替代手工维护文档的低效模式。 核心能力包括：
+repo_url: https://github.com/ikliml666/dsh-codewiki
+edit_uri: ''
+docs_dir: docs
+nav:
+- dsh-codewiki 仓库总览: index.md
+- Web_UI_Panel: Web_UI_Panel.md
+- Cordis_Patch_Config（插件装配配置）: Cordis_Patch_Config.md
+- Job Orchestration（编译任务编排服务）: Job_Orchestration.md
+- Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）: Agentic_Host.md
+- Agentic_Edit 模块: Agentic_Edit.md
+- Article_Contract（文章契约闸门）: Article_Contract.md
+- 存量文章修复（Article_Repair）: Article_Repair.md
+- Article Agentic Pool 文章智能体执行池: Article_Agentic_Pool.md
+- Change_Set 变更集采集模块: Change_Set.md
+- Engine_Apply_Plan（原生产物落地器）: Engine_Apply_Plan.md
+- Engine_Client（引擎进程客户端）: Engine_Client.md
+- Engine_Contract 引擎契约: Engine_Contract.md
+- 引擎 LLM 桥（Engine_LLM_Bridge）: Engine_LLM_Bridge.md
+- 引擎清单（Engine_Manifest）: Engine_Manifest.md
+- Engine_Mapping：FSoft 产物到 CodeWiki 的格式映射层: Engine_Mapping.md
+- Engine_Native_Run（原生编译裁决编排层）: Engine_Native_Run.md
+- Engine_Native_State（原生引擎跨轮受管状态）: Engine_Native_State.md
+- Engine OpenAI 桥转换层: Engine_OpenAI_Bridge.md
+- Engine_Output 模块文档: Engine_Output.md
+- Engine_Process_Tree 模块文档: Engine_Process_Tree.md
+- Engine_Proofread：原生引擎产物的死链语义校对: Engine_Proofread.md
+- Engine_Python_Entry: Engine_Python_Entry.md
+- Engine_FSoft_Runtime：增量 Step 5 的受控并行与断点运行时: Engine_FSoft_Runtime.md
+- 全量并行运行时（Engine_Full_Parallel_Runtime）: Engine_Full_Parallel_Runtime.md
+- Engine_Quality_Gate（原生引擎产物采用门）: Engine_Quality_Gate.md
+- 工作区快照（Engine_Workspace_Snapshot）: Engine_Workspace_Snapshot.md
+- Job_Logs: Job_Logs.md
+- Job Store（作业持久化与跨实例协调层）: Job_Store.md
+- Update_Record（编译更新记录）: Update_Record.md
+- Package_Manifest 包清单: Package_Manifest.md
+- Graphdiff_Golden_Generator（图差分金样生成器）: Graphdiff_Golden_Generator.md
+- FSoft 引擎环境搭建脚本（FSoft_Engine_Setup_Script）: FSoft_Engine_Setup_Script.md
+- No-LLM_Graph_Probe（无 LLM 依赖图验收探针）: No-LLM_Graph_Probe.md
+- CodeWiki 主入口（cw CLI）: CodeWiki_Main.md
+- CodeWiki 安装配置（CodeWiki_Setup）: CodeWiki_Setup.md
+plugins:
+- techdocs-core
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
