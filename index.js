@@ -1819,19 +1819,52 @@ function writeSessionFull(jobId, n, full) {
     fs.writeFileSync(path.join(dir, `${String(n).padStart(3, '0')}.full.json`), JSON.stringify(full), 'utf8')
   } catch { /* 同上 */ }
 }
+// meta 文件的内容写一次就不再变（onDone/onError 各写一次），mtime+size 足以判定是否同一个版本。
+// 全局会话页每 5s 轮询要按 startedAt 跨任务取最新 200 条，必须读完全部 meta 才能排序：
+// 真机 1718 条时单次 70ms，而缓存命中后只剩 stat 成本。面板轮询打的是热路径，值得这一层。
+const sessionMetaCache = new Map() // 绝对路径 -> { key, meta }
+function readSessionMetaCached(p) {
+  let st
+  try { st = fs.statSync(p) } catch { return null }
+  const key = `${st.mtimeMs}:${st.size}`
+  const hit = sessionMetaCache.get(p)
+  if (hit && hit.key === key) return hit.meta
+  const meta = readJsonFile(p)
+  if (meta) sessionMetaCache.set(p, { key, meta })
+  return meta
+}
 // 列表：只读 meta 文件（轻量），按 n 倒序（最新在前）
-export function listSessionRecords(jobId) {
+// limit：只解析最新的 N 条。文件名是零填充的 ${n}.meta.json，倒序文件名序即倒序 n，
+// 所以可以先排序再只 parse 前 N 个——446 条的旧任务是常态，全量解析只为截前 80 条是白费。
+export function listSessionRecords(jobId, limit = 0) {
   const dir = sessionDirFor(jobId)
   let names
   try { names = fs.readdirSync(dir) } catch { return [] }
-  return names
-    .filter((f) => f.endsWith('.meta.json'))
-    .map((f) => readJsonFile(path.join(dir, f)))
+  const metas = names.filter((f) => f.endsWith('.meta.json')).sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+  const picked = limit > 0 ? metas.slice(0, limit) : metas
+  return picked
+    .map((f) => readSessionMetaCached(path.join(dir, f)))
     .filter(Boolean)
-    .sort((a, b) => (b.n ?? 0) - (a.n ?? 0))
 }
 export function readSessionRecord(jobId, n) {
   return readJsonFile(path.join(sessionDirFor(jobId), `${String(n).padStart(3, '0')}.full.json`))
+}
+// 只要条数：会话端点给每个在跑的任务算「已发几个请求」，此前走 listSessionRecords 读全部
+// meta 再取 .length —— 1718 个 meta 单次 70ms，而全局端点每个活跃任务都要算一次。
+// 只数文件名 2.4ms，同一个数量级的结果。
+export function countSessionRecords(jobId) {
+  try { return fs.readdirSync(sessionDirFor(jobId)).filter((f) => f.endsWith('.meta.json')).length } catch { return 0 }
+}
+// 全局条数：面板要显示「共 N 条」并据此决定还能不能再加载，同样只数文件名。
+export function countAllSessionRecords() {
+  let dirs
+  try { dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }) } catch { return 0 }
+  let total = 0
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue
+    total += countSessionRecords(d.name)
+  }
+  return total
 }
 // 全局会话列表（1.2.0）：跨所有任务聚合请求记录，按 startedAt 倒序，前面带 jobId。
 // 用途是面板顶部那个「会话」Tab——不进任何任务行就能看到「codewiki 现在在跟模型说什么」。
@@ -1849,12 +1882,18 @@ export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
     try { names = fs.readdirSync(dir) } catch { continue }
     for (const f of names) {
       if (!f.endsWith('.meta.json')) continue
-      const meta = readJsonFile(path.join(dir, f))
+      const meta = readSessionMetaCached(path.join(dir, f))
       if (meta) out.push({ ...meta, jobId: d.name })
     }
   }
-  // 排序键：startedAt 优先，缺失时退到 n（同一 job 内 n 递增）
-  out.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')) || (b.n ?? 0) - (a.n ?? 0))
+  // 排序键：startedAt 优先，缺失时退到 n（同一 job 内 n 递增）。
+  // 这里刻意不用 localeCompare：两千条记录上它是 8ms 对 0.4ms，而两者的键是 ISO 时间串，
+  // 只含数字与 T/Z/./: ——词法序即时间序，不需要语言环境比较的开销。
+  out.sort((a, b) => {
+    const x = String(b.startedAt ?? '')
+    const y = String(a.startedAt ?? '')
+    return x === y ? (b.n ?? 0) - (a.n ?? 0) : x < y ? -1 : 1
+  })
   return out.slice(0, Math.max(1, limit))
 }
 // 进行中任务（0.17.5）：会话页原本只读「LLM 请求记录」，而记录只在真的发出请求后才存在——
@@ -1881,7 +1920,11 @@ export function activeSessionJobs(jobs, { requestCount = () => 0, isTerminal = (
     })
   }
   // 最新开始的排最前：面板首屏就是「现在在跑什么」
-  out.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
+  out.sort((a, b) => {
+    const x = String(b.startedAt ?? '')
+    const y = String(a.startedAt ?? '')
+    return x === y ? 0 : x < y ? -1 : 1
+  })
   return out
 }
 
@@ -1900,7 +1943,7 @@ export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) 
       const p = path.join(dir, f)
       try {
         const st = fs.statSync(p)
-        if (nowMs - st.mtimeMs > ttlMs) { fs.rmSync(p); removed += 1 } else left += 1
+        if (nowMs - st.mtimeMs > ttlMs) { fs.rmSync(p); removed += 1; sessionMetaCache.delete(p) } else left += 1
       } catch { /* 单文件失败不拖累整轮 */ }
     }
     if (!left) { try { fs.rmdirSync(dir) } catch { /* 非空/占用则留着 */ } }
@@ -2109,6 +2152,18 @@ function saveJobs(jobs) {
   jobsStore.save(jobs)
 }
 
+// nativeResult 只留两个裁决结论：面板读 gate.outcome / apply.outcome（client.js jobCard），
+// 其余明细（gate.articles 57 项、incremental 现场）在 job 内存与引擎里都在，不靠这份轮询推送。
+function nativeResultBrief(nr) {
+  if (!nr || typeof nr !== 'object') return null
+  return {
+    outcome: nr.outcome ?? null,
+    stage: nr.stage ?? null,
+    gate: nr.gate ? { outcome: nr.gate.outcome ?? null } : null,
+    apply: nr.apply ? { outcome: nr.apply.outcome ?? null } : null,
+  }
+}
+
 function jobSummary(job) {
   // tps：最近任务样本的聚合（总输出 token / 总生成毫秒），尚无完成任务时为 null
   const samples = job.tpsSamples ?? []
@@ -2161,7 +2216,11 @@ function jobSummary(job) {
     nativePercent: job.nativePercent ?? null,
     nativeMessage: job.nativeMessage ?? null,
     nativeTotal: job.nativeTotal ?? null,
-    nativeResult: job.nativeResult ?? null,
+    // 原生通道结果（0.18.0 瘦身）：这份结构里 gate.articles（57 项、11KB）与
+    // incremental.hydrated/stateCaptured（各 66 项、3.2KB）占了整个 payload 的大半，
+    // 而面板只用 gate.outcome 与 apply.outcome 两个短字符串。2s 轮询下等于每秒
+    // 重复推送十几倍无用数据，30 个任务时接口 600KB/285ms。裁剪在组装处，不改引擎侧。
+    nativeResult: nativeResultBrief(job.nativeResult),
     // 引擎事件日志（0.17.1）：内存里最近 40 条给面板即时看；完整 NDJSON 在仓库外的
     // 临时目录（见 lib/job-logs.js），端点 /api/codewiki/logs 按需翻全量。
     // 此前这两个字段都不进 jobSummary，面板与 codewiki_progress 都看不到任何引擎日志。
@@ -4768,19 +4827,29 @@ export function installWebServer(ctx, service, extra = {}) {
           if (jobId) {
             // 单任务会话视图同样要能看出「任务在跑但还没有请求」
             const job = service.list().find((j) => j.id === jobId)
-            const active = activeSessionJobs(job ? [job] : [], { requestCount: (id) => listSessionRecords(id).length })
-            writeJson(res, 200, { sessions: listSessionRecords(jobId), active })
+            const active = activeSessionJobs(job ? [job] : [], { requestCount: countSessionRecords })
+            // 单任务也曾一次返回全部（单个任务 446 条、合计 271MB 记录），列表一次性铺满
+            // 446 行既慢又没人从头读到尾。分页：只给最新的 limit 条，前端按需加 limit。
+            const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get('limit')) || 80))
+            writeJson(res, 200, {
+              sessions: listSessionRecords(jobId, limit),
+              total: countSessionRecords(jobId),
+              limit,
+              active,
+            })
             return
           }
           // 全局聚合：带上 cwd（面板行里显示是哪个仓库在编译），只给最近 limit 条
           const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 200))
+          const all = service.list()
           const byId = new Map()
-          for (const j of service.list()) byId.set(j.id, j.cwd ?? '')
+          for (const j of all) byId.set(j.id, j.cwd ?? '')
           const sessions = listAllSessionRecords({ limit }).map((s) => ({
             ...s, cwd: byId.get(s.jobId) ?? '',
           }))
-          const active = activeSessionJobs(service.list(), { requestCount: (id) => listSessionRecords(id).length })
-          writeJson(res, 200, { sessions, active })
+          // 数请求条数走 countSessionRecords：每个活跃任务只数文件名，不再读一遍它的全部 meta
+          const active = activeSessionJobs(all, { requestCount: countSessionRecords })
+          writeJson(res, 200, { sessions, total: countAllSessionRecords(), limit, active })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }
