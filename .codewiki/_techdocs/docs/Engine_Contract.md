@@ -6,7 +6,7 @@ description: EngineContract 是 FSoft 原生引擎（Python）与 Node 侧之间
 # Engine_Contract 引擎契约
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`3d8b1453`](https://github.com/ikliml666/dsh-codewiki/commit/3d8b1453259db2f27fe08da49ac8529c81633ab3) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`22a52db1`](https://github.com/ikliml666/dsh-codewiki/commit/22a52db11dedb4475d457a56274e3db2c5f2cf72) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -230,7 +230,7 @@ flowchart TB
 3. 终态自洽性（done 不带 blockers / partial 必带 / failed 必带 error）是硬不变量，只能在 `engineResult` 与 `validateEngineResult` 两处同时修改，并在 TDD 用例中钉死。
 
 ??? abstract "Documented components (3)"
-    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/3d8b1453259db2f27fe08da49ac8529c81633ab3/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/3d8b1453259db2f27fe08da49ac8529c81633ab3/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/3d8b1453259db2f27fe08da49ac8529c81633ab3/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/22a52db11dedb4475d457a56274e3db2c5f2cf72/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/22a52db11dedb4475d457a56274e3db2c5f2cf72/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/22a52db11dedb4475d457a56274e3db2c5f2cf72/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
 
