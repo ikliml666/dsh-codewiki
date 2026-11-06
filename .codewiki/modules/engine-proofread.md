@@ -65,7 +65,7 @@ flowchart TD
 
 | 依赖 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `lib/engine/wiki-links.js` | `scanPageLinks` 扫正文里的 `[文字](x.md)` 相对链接；`isExternalTarget` 跳过 `http:`/`mailto:` 等外链 | [Job_Logs](job-logs.md)（该文件在模块树中的登记页） |
+| `lib/engine/wiki-links.js` | `scanPageLinks` 扫正文里的 `[文字](Engine_Output.md)` 相对链接；`isExternalTarget` 跳过 `http:`/`mailto:` 等外链 | [Job_Logs](job-logs.md)（该文件在模块树中的登记页） |
 | `lib/article-contract.js` | `stripCode`：把代码围栏与行内代码等长替换成空白，避免「文章在讲解链接语法」被误判成死链 | [Article_Contract](article-contract.md) |
 | `lib/git-paths.js` | `toPosix`：Windows 反斜杠统一成 POSIX，路径比对与门保持同一口径 | [Job_Logs](job-logs.md) |
 | 宿主 `chat(prompt, signal)` | 单轮文本生成（由 `native-run.js` 经 `deps.chat` 注入，最终走 [Engine_LLM_Bridge](engine-llm-bridge.md) 的宿主模型通道） | [Engine_LLM_Bridge](engine-llm-bridge.md) |
@@ -126,7 +126,7 @@ flowchart LR
 
 | 形态 | 例子 | 识别方式 |
 | --- | --- | --- |
-| 相对链接 | `[文字](x.md)` | 复用 `wiki-links.js` 的 `scanPageLinks`（三处共用的唯一一份正则） |
+| 相对链接 | `[文字](Engine_Output.md)` | 复用 `wiki-links.js` 的 `scanPageLinks`（三处共用的唯一一份正则） |
 | wiki 索引语法 | `[[x]]` / `[[x\|文字]]` / `[[x#锚点]]` | 本函数内的正则，与 `article-contract.js` 的 `collectWikiLinks` 同形 |
 
 判定规则（与门的判据同源，不另立判据）：

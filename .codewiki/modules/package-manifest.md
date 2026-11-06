@@ -28,7 +28,7 @@ fsoft_page: Package_Manifest.md
 | 字段 | 值 | 含义 |
 | --- | --- | --- |
 | `name` | `@local/dsh-codewiki` | 插件包名；`cordis.patch.yml` 中以裸包名被 `file:///` 直挂或 bundle 依赖引用 |
-| `version` | `0.17.53` | 当前版本号（版本演进史见 `description`） |
+| `version` | `0.17.55` | 当前版本号（版本演进史见 `description`） |
 | `type` | `module` | 全 ESM 双模块（`index.js` 宿主侧 + `client.js` 前端侧） |
 | `main` / `exports` | `./index.js`、`./client` | 双入口：Node 宿主侧入口与 web 前端入口 |
 | `engines.node` | `>=24.9.0` | 最低 Node 版本 |

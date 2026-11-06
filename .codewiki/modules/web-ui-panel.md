@@ -182,7 +182,7 @@ stateDiagram-v2
 - **面板侧采样**（纯客户端派生，不占带宽）：
   - `sparkRef`：每 job 保留最近 30 个 `tps` 采样 → `Spark` 微趋势线；
   - `batchRateRef`：批量完成速率 EWMA（α=0.6 旧 + 0.4 新）→ 篇/分 + ETA；
-  - `pctTrendRef`：每轮记录 `overallPct`（最多 24 点）→ 进度趋势斜率；
+  - `pctTrendRef`：整体进度斜率采样（已在新版移除）
 - **分组**：`byCwd` 保持首次出现顺序，组内 `unshift` 最新在前；进行中任务（`isActive`）全部展开为「进行中」区，否则只取 `byUpdated` 最新一条当门面，其余进「历史任务」折叠区，再按仓库 `repofold` 二级折叠。
 
 #### 阶段模型（面板与引擎对齐的关键）
@@ -248,7 +248,7 @@ flowchart TB
 | 组件 | 作用 |
 |---|---|
 | `Skeleton` | 三行 shimmer 呼吸条（宽 100/72/46%），替代光秃秃的「…」，数据到达时不跳高度 |
-| `Spark` | 纯 SVG polyline 微趋势线（默认 56×16），用于 tps 与进度斜率 |
+| `Spark` | 纯 SVG polyline 微趋势线（默认 56×16），专用于 tps 采样窗口 |
 | `PanelIcon` | 摊开的书形 SVG（16×16），作为侧边栏面板入口图标 |
 | `activityRow` | 活动流备注轻量归约：正则归 tone（ok/warn/error）+ 提取括号内阶段名；命中不了就按普通条目，不猜 |
 | `fmtMs` / `fmtTok` / `fmtAgo` / `repoName` | 时长（亚秒级显示 ms）、token（k/M）、相对时间、目录名（取末两段）格式化 |
@@ -268,7 +268,7 @@ sequenceDiagram
     loop 每 2s（inFlight 锁）
         P->>S: GET /jobs
         S-->>P: { jobs: [...] }
-        P->>P: 采样 sparkRef / batchRateRef / pctTrendRef
+        P->>P: 采样 sparkRef / batchRateRef
         P->>R: overallPct(job) → stageRows → stageSegments
         R-->>P: 大数字 + 分段带 + 图例 + 次要信息行
     end
