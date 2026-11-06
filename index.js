@@ -1849,6 +1849,30 @@ export function listSessionRecords(jobId, limit = 0) {
 export function readSessionRecord(jobId, n) {
   return readJsonFile(path.join(sessionDirFor(jobId), `${String(n).padStart(3, '0')}.full.json`))
 }
+// 会话详情：面板一次要显示 prompt / 输出 / 思考 / 工具调用，还要知道这一条属于哪个阶段。
+// full 里有内容但没有阶段与统计（它们只在 meta 里），所以详情要把两个文件合起来返回——
+// 让前端自己再去拉一次 meta 等于把「这条是干嘛的」留成空白。
+export function readSessionRecordDetail(jobId, n) {
+  const full = readSessionRecord(jobId, n)
+  if (!full) return null
+  const meta = readSessionMetaCached(path.join(sessionDirFor(jobId), `${String(n).padStart(3, '0')}.meta.json`))
+  // 正在生成的 full 还没落思考与工具快照（它们随 3s 节流写），meta 上的计数是内存里最新的
+  return {
+    ...meta,
+    ...full,
+    stage: full.stage ?? meta?.stage ?? null,
+    status: meta?.status ?? (full.finishedAt ? 'done' : 'running'),
+    outputChars: meta?.outputChars ?? String(full.output ?? '').length,
+    reasoningChars: meta?.reasoningChars ?? String(full.reasoning ?? '').length,
+    toolCalls: meta?.toolCalls ?? (Array.isArray(full.tools) ? full.tools.length : 0),
+    inputTokens: meta?.inputTokens ?? null,
+    outputTokens: meta?.outputTokens ?? full.outputTokens ?? 0,
+    model: meta?.model ?? null,
+    provider: meta?.provider ?? null,
+    finishedAt: meta?.finishedAt ?? full.finishedAt ?? null,
+    error: full.error ?? meta?.error ?? null,
+  }
+}
 // 只要条数：会话端点给每个在跑的任务算「已发几个请求」，此前走 listSessionRecords 读全部
 // meta 再取 .length —— 1718 个 meta 单次 70ms，而全局端点每个活跃任务都要算一次。
 // 只数文件名 2.4ms，同一个数量级的结果。
@@ -1950,59 +1974,108 @@ export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) 
   }
   return removed
 }
-// 从流式 chunk 尽力提取文本增量：不同 provider 的 chunk 形态不一（{text} / {delta:{text}} /
-// {content} 等），提取不到就返回空串——完成时全文覆盖兜底，实时性损失可接受。
-function textDeltaOf(chunk) {
-  if (typeof chunk === 'string') return chunk
-  if (!chunk || typeof chunk !== 'object') return ''
-  if (typeof chunk.text === 'string') return chunk.text
-  if (typeof chunk.delta?.text === 'string') return chunk.delta.text
-  if (typeof chunk.content === 'string') return chunk.content
-  return ''
+// 把流式 chunk 归成三类增量：正文、思考、工具调用。
+// 必须按 type 分流，不能只认 {text}：DSH 的 chunk 是 {type:'reasoning-delta', text} 与
+// {type:'tool-call-delta', id, name, argumentsDelta}，打开思考档时正文可能一个 token 都没有。
+// 旧实现只取 text/delta.text/content，于是「模型想了上千条 reasoning-delta」被记成空输出——
+// 面板里那些「打开没有内容」的请求，其实是记录环节把内容丢了，不是模型没干活。
+function sessionDeltaOf(chunk) {
+  if (typeof chunk === 'string') return chunk ? { text: chunk } : null
+  if (!chunk || typeof chunk !== 'object') return null
+  const type = String(chunk.type ?? '')
+  const text = typeof chunk.text === 'string'
+    ? chunk.text
+    : typeof chunk.delta?.text === 'string'
+      ? chunk.delta.text
+      : typeof chunk.content === 'string'
+        ? chunk.content
+        : ''
+  if (type === 'reasoning-delta') return text ? { reasoning: text } : null
+  if (type === 'tool-call-delta') {
+    const name = chunk.name ?? chunk.toolName ?? null
+    const args = chunk.argumentsDelta ?? chunk.arguments ?? ''
+    if (!name && !args) return null
+    return { tool: { id: chunk.id ?? chunk.toolCallId ?? null, name, args } }
+  }
+  return text ? { text } : null
 }
 // 开始记录一个请求：写 meta（status:running）+ full（prompt 全文），返回句柄给并发池回调。
-// 导出供测试直接驱动（与 estimateTokens / classifySessionTask 同一理由：并发池与桥两条
-// 调用路径都要喂它同一套字段，只有能直连测，才能锁住「桥传的 task 与这里读的字段一致」）。
+// task.stage 是发起时的引擎阶段（native 通道由桥的 setStage 同步，batch/agentic 通道由调用点
+// 显式给出）——会话记录本身没有阶段字段，而面板要按「流程走到哪一步」给请求分类，只能在这里落下来。
+// 历史记录没有 stage，面板按「未标注」归组，不回填、不猜。
 export function beginSessionRecord(job, task) {
   const n = (job.sessionSeq ?? 0) + 1
   job.sessionSeq = n
   const startedAt = new Date().toISOString()
+  // 思考档打开时正文可能为空：光看 outputChars 会把「想了 1000 段」的请求显示成空。
+  // 三个计数分开记，面板才能如实说明「这条请求的内容在思考里」。
   const meta = {
     n, jobId: job.id, name: task.name, model: task.model || null, provider: task.provider || null,
+    stage: task.stage || null,
     startedAt, finishedAt: null, status: 'running',
-    inputTokens: estimateTokens(task.batchPrompt), outputChars: 0, outputTokens: 0,
+    inputTokens: estimateTokens(task.batchPrompt),
+    outputChars: 0, reasoningChars: 0, toolCalls: 0, outputTokens: 0,
   }
-  const full = { n, jobId: job.id, name: task.name, startedAt, prompt: task.batchPrompt ?? '', output: '' }
+  const full = { n, jobId: job.id, name: task.name, stage: meta.stage, startedAt, prompt: task.batchPrompt ?? '', output: '', reasoning: '', tools: [] }
   writeSessionMeta(job.id, meta)
   writeSessionFull(job.id, n, full)
   let out = ''
+  let think = ''
+  // tool-call-delta 是按分片流下来的（argumentsDelta 逐个拼），必须按 id 合并成整条，
+  // 否则一次调用会被记成几十条半截 JSON。
+  const tools = new Map()
+  let toolSeq = 0
   let lastFlush = 0
   return {
     onDelta(chunk) {
-      const d = textDeltaOf(chunk)
+      const d = sessionDeltaOf(chunk)
       if (!d) return
-      out += d
+      if (d.text) out += d.text
+      if (d.reasoning) think += d.reasoning
+      if (d.tool) {
+        const id = d.tool.id ?? `#${toolSeq}`
+        if (!d.tool.id) toolSeq += 1
+        const cur = tools.get(id) ?? { id: d.tool.id ?? null, name: d.tool.name ?? null, args: '' }
+        if (d.tool.name && !cur.name) cur.name = d.tool.name
+        cur.args += d.tool.args ?? ''
+        tools.set(id, cur)
+      }
       meta.outputChars = out.length
+      meta.reasoningChars = think.length
+      meta.toolCalls = tools.size
       const now = Date.now()
       if (now - lastFlush >= SESSION_FLUSH_MS) {
         lastFlush = now
-        writeSessionFull(job.id, n, { ...full, output: out })
+        writeSessionFull(job.id, n, { ...full, output: out, reasoning: think, tools: [...tools.values()] })
       }
     },
     onDone(content, outputTokens) {
       meta.status = 'done'
       meta.finishedAt = new Date().toISOString()
-      meta.outputChars = (content ?? '').length
+      // 完成时的全文是权威值；流式没抽到正文（只吐了思考）时保留思考，不把它当空。
+      if (typeof content === 'string' && content) out = content
+      meta.outputChars = out.length
+      meta.reasoningChars = think.length
+      meta.toolCalls = tools.size
       meta.outputTokens = outputTokens ?? 0
       writeSessionMeta(job.id, meta)
-      writeSessionFull(job.id, n, { ...full, output: content ?? '', finishedAt: meta.finishedAt })
+      writeSessionFull(job.id, n, {
+        ...full, output: out, reasoning: think, tools: [...tools.values()],
+        finishedAt: meta.finishedAt, outputTokens: meta.outputTokens,
+      })
     },
     onError(err) {
       meta.status = 'error'
       meta.finishedAt = new Date().toISOString()
       meta.error = String(err?.message ?? err).slice(0, 300)
+      meta.outputChars = out.length
+      meta.reasoningChars = think.length
+      meta.toolCalls = tools.size
       writeSessionMeta(job.id, meta)
-      writeSessionFull(job.id, n, { ...full, output: out, error: meta.error, finishedAt: meta.finishedAt })
+      writeSessionFull(job.id, n, {
+        ...full, output: out, reasoning: think, tools: [...tools.values()],
+        error: meta.error, finishedAt: meta.finishedAt,
+      })
     },
   }
 }
@@ -2724,7 +2797,9 @@ function createJobService(config, onSettled) {
           },
           // 会话记录钩子：原生通道的模型请求全部经 llm-bridge 打进来，不在这里接线
           // 面板「会话」视图就永远是空列表（batch/agentic 通道早已各自接好）。
-          onRequestStart: (task) => beginSessionRecord(job, task),
+          // 桥在 onProgress 里同步过阶段，这里兜到 job.nativeStage：阶段刚切换、桥还没来得及
+          // 收到 setStage 时，task.stage 会是空串，而 job.nativeStage 由同一份进度直接赋值。
+          onRequestStart: (task) => beginSessionRecord(job, { ...task, stage: task.stage || job.nativeStage || null }),
           engineFor: ({ bridge }) => nativeEnginePlan(channel, {
             requestId: job.id,
             bridge,
@@ -2940,7 +3015,9 @@ function createJobService(config, onSettled) {
         bigConcurrency: c.bigConcurrency, // 0 = 跟随默认档并发
         notes: job.notes,
         signal: ac.signal,
-        onRequestStart: (t) => beginSessionRecord(job, t), // 会话内容记录（面板「会话」视图）
+        // 这两条通道的请求全部发生在写作阶段（文章与子智能体的任务池），
+        // 记录时显式带上，否则面板里它们会掉进「未标注」。
+        onRequestStart: (t) => beginSessionRecord(job, { ...t, stage: t.stage || job.stage || 'articles' }), // 会话内容记录（面板「会话」视图）
         onTaskDone: (s) => {
           doneCount += 1
           job.batchProgress = { completed: doneCount, total: prepared.length }
@@ -2995,7 +3072,7 @@ function createJobService(config, onSettled) {
         allowedWritePaths: tasks.filter((t) => t.articlePath).map((t) => t.articlePath),
         notes: job.notes,
         signal: ac.signal,
-        onRequestStart: (t) => beginSessionRecord(job, t),
+        onRequestStart: (t) => beginSessionRecord(job, { ...t, stage: t.stage || job.stage || 'articles' }),
         onTaskDone: (s) => {
           doneCount += 1
           job.batchProgress = { completed: doneCount, total: tasks.length }
@@ -4865,7 +4942,7 @@ export function installWebServer(ctx, service, extra = {}) {
           const jobId = String(url.searchParams.get('jobId') ?? '').trim()
           const n = Number(url.searchParams.get('n'))
           if (!jobId || !Number.isInteger(n) || n < 1) { writeJson(res, 400, { error: '缺少 jobId/n 查询参数' }); return }
-          const rec = readSessionRecord(jobId, n)
+          const rec = readSessionRecordDetail(jobId, n)
           if (!rec) { writeJson(res, 404, { error: '会话记录不存在或已过期（保留 24h）' }); return }
           writeJson(res, 200, rec)
         } catch (err) {
