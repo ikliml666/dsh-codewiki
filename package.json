@@ -44,9 +44,6 @@
     "CHANGELOG.md",
     "CodeWiki.md"
   ],
-  "scripts": {
-    "test": "node test-batch.mjs"
-  },
   "engines": {
     "node": ">=24.9.0",
     "dsh": ">=0.2.0-rc.0"

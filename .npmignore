@@ -18,6 +18,3 @@ vendor/codewiki/Cargo.lock
 # 编译产物
 .codewiki/
 .agents/
-
-# 测试脚本（要跑测试请用 git 仓库）
-test-*.mjs

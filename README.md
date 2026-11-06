@@ -233,7 +233,7 @@ stderr、阶段切换这些真正有用的事件挤出去。查看方式三选�
   `429 quota_exceeded`（“您的使用量已超出频率限制，将在 2026-10-29 14:23:38 UTC+8 重置”）。
   这是上游配额，不是适配层问题。**规格的 hy3 硬门禁因此没有通过**：换额度可用后必须把
   `batchModel` 改回 `hy3` 重跑八场景，才算闭环；在那之前这里是「替代验证」而非「符合规格」。
-- `node test-wiki-anchors.mjs --strict` 实测 **2 过 / 0 败**（默认档同值）。
+- 锚点校验（`test-wiki-anchors.mjs --strict`，0.17.49 起该测试文件不再随仓库分发）实测 **2 过 / 0 败**（默认档同值）。
   0.17.39 之前是 3354 过 / 59 败 / 32 待重编译——那 59 条**全部**落在旧 Node 通道遗留的
   横切产物（`_architecture.md` / `_patterns.md` / `concepts/`）与两篇 `learnings/` 上，
   前者已整体下线，后者 0.17.49 随手工维护通道一并删除。剩下的 2 条都指向
@@ -420,50 +420,7 @@ bin/cw.exe         cargo build --release 产物（git 内跟踪，改了 vendor 
 client.js          插件页设置卡片（浏览器半侧；协议参照 ui-settings-agent-loop / router client.js）
 ```
 
-验证：`node --check index.js client.js`；编排冒烟 `node test-orchestration.mjs`（mock 子代理 + 真实 cw CLI）；CLI 冒烟见 CHANGELOG 0.1.0；设置页需重启 dsh 后在插件页实测。
+验证：`node --check index.js client.js`；设置页需重启 dsh 后在插件页实测。
 
-全量测试（35 个文件，都直接 `node <file>`，无框架）：
-
-```
-test-agentic.mjs / test-agentic-host.mjs / test-agentic-fallback.mjs / test-articles-agentic.mjs
-test-article-contract.mjs / test-change-set.mjs / test-update-record.mjs / test-batch.mjs
-test-prune-orphans.mjs / test-orchestration.mjs / test-sessions.mjs / test-worktree.mjs
-test-cwd-paths.mjs / test-wiki-entry.mjs / test-wiki-anchors.mjs / test-repos-isolation.mjs
-
-# 原生引擎通道（0.15.0）
-test-engine-contract.mjs / test-engine-client.mjs / test-engine-manifest.mjs
-test-engine-python-entry.mjs / test-engine-output.mjs / test-engine-output-real.mjs
-test-engine-quality-gate.mjs / test-engine-apply-plan.mjs / test-engine-bridge.mjs
-test-engine-llm-bridge.mjs / test-engine-native-job.mjs
-test-engine-native-incremental.mjs / test-engine-process-tree.mjs
-test-engine-proofread.mjs / test-engine-proofread-e2e.mjs（语义校对，0.17.31）
-
-# 增量并行与断点续跑（0.17.2）/ 全量并行与缺页修复（0.17.12）
-test-fsoft-runtime.mjs / test-fsoft-coverage.mjs（含全量并行、module_tree 并发合并、未归属文件补挂） / test-upstream-parallel.mjs
-
-# 面板渲染冒烟（0.17.3）：最小 React 桩渲染侧边栏面板，捕获渲染期异常
-test-client-panel.mjs
-
-# 任务生命周期与可观测性（0.17.0 / 0.17.1）
-test-job-reliability.mjs / test-job-logs.mjs
-
-# 设置项契约（0.17.5）：已退役字段不得回流，bigEnabled 开关两侧行为
-test-config.mjs
-
-# 思考档位合法性（0.17.24）：档位不在模型目录里时提交即拦，不静默空跑
-test-reasoning-effort.mjs
-```
-
-测试用假引擎（`test-fixtures/fake-native-engine.mjs`）走真实子进程协议，所以能覆盖协议
-契约、终态裁决、落地不变量与受管状态；但它**读的是平铺字段、自报 `no_change`**，因此
-上面第 4、7 条那类「只有真实引擎才暴露」的缺陷它一条都测不出来——真实验收必须跑真引擎。
-
-`test-wiki-anchors.mjs` 校验 `.codewiki/` 里所有 `file:行号` 锚点是否指向真实代码，分两档：
-
-- **默认档**：结构事实（行号越界、区间倒序）永远硬断言；**符号绑定**按新鲜度分档——源文件自编译基线（`.codewiki/_meta.yaml` 的 `last_compiled_commit`）以来没变则硬断言，变了则记为「待重编译」不计失败（文档这时候本来就该滞后，跑一次 `codewiki_generate` 基线前移后自动升级为硬断言）。
-- **`--strict` 档**：符号绑定一律硬断言，用于发版前自查。0.15.0 实测：默认档
-  `2196 过 / 8 败 / 55 待重编译`，`--strict` 下失败数显著更多——全部是**文档滞后**
-  （`README.md` 行号漂移、`.codewiki/modules/lib.md:518` 引用了 `client.js:223` 的
-  `runEngine`，而该符号在 client.js 里根本不存在），不是代码错误。这些必须由一次真实
-  全量重编译重写，**不手工改文章绕过**。
-
+测试文件不随包发布（已在 `.npmignore` 排除），也不再随仓库分发；改动后请自行按 CHANGELOG
+里的验收记录复现（每条修复都留了实测命令与数字）。
