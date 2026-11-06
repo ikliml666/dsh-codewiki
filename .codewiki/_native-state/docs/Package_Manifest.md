@@ -22,7 +22,7 @@
 | `main` / `exports` | `./index.js`、`./client` | 双入口：Node 宿主侧入口与 web 前端入口 |
 | `private` | `false` | 可发布包：随附 `repository`（`git+https://github.com/ikliml666/dsh-codewiki.git`）、`homepage`（GitHub README）与 `bugs`（issues 地址）发布元数据 |
 | `files` | `index.js`、`client.js`、`cordis.patch.yml`、`lib`、`bin/cw`（`bin/cw.exe`）、`docs`、`tools/fsoft-engine/{setup-env.sh,constraints.txt}`、`LICENSE`、`README.md`、`CHANGELOG.md`、`CodeWiki.md`（排除 `lib/**/__pycache__`） | npm 发布时随包携带的文件清单 |
-| `scripts.test` | `node test-batch.mjs` | 批量测试脚本入口 |
+| `scripts` | （已移除） | 原先的 `test` 脚本（`node test-batch.mjs`）已从 `package.json` 删除 |
 | `engines.node` | `>=24.9.0` | 最低 Node 版本 |
 | `engines.dsh` | `>=0.2.0-rc.0` | 最低 dsh 宿主版本 |
 | `dependencies` | `@deepseek-ai/schemastery ^3.18.4` | 唯一运行时依赖：配置 schema 校验 |

@@ -24,7 +24,7 @@
 - [[modules/engine-python-entry|Engine_Python_Entry]]
 - [[modules/engine-quality-gate|Engine_Quality_Gate（原生引擎产物采用门）]]
 - [[modules/fsoft-engine-setup-script|FSoft 引擎环境搭建脚本（FSoft_Engine_Setup_Script）]]
-- [[modules/graphdiff-golden-generator|Graphdiff Golden Generator]]
+- [[modules/graphdiff-golden-generator|Graphdiff_Golden_Generator（图差分金样生成器）]]
 - [[modules/job-orchestration|Job Orchestration（编译任务编排服务）]]
 - [[modules/job-store|Job Store（作业持久化与跨实例协调层）]]
 - [[modules/job-logs|Job_Logs]]

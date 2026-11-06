@@ -1,6 +1,6 @@
 {
     "token_budget": 200000,
-    "tokens_used": 3240,
+    "tokens_used": 3221,
     "caps": {
         "per_file_bytes": 16384,
         "per_class_files": 40,
@@ -12,12 +12,10 @@
             "files": [
                 {
                     "path": "package.json",
-                    "bytes": 1812,
+                    "bytes": 1693,
                     "truncated": false,
                     "loaded": true,
-                    "units": [
-                        "test"
-                    ]
+                    "units": []
                 }
             ],
             "omitted_by_class_cap": [],
@@ -50,6 +48,6 @@
             "not_loaded_budget": []
         }
     },
-    "nodes": 4,
-    "edges": 21
+    "nodes": 3,
+    "edges": 20
 }

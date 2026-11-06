@@ -310,8 +310,7 @@
       "runEngine",
       "runNativeJob",
       "spawnPlan",
-      "terminateProcessTree",
-      "test"
+      "terminateProcessTree"
     ]
   },
   "Engine_Contract": {
@@ -781,24 +780,19 @@
   "Graphdiff_Golden_Generator": {
     "ids": [],
     "links": [
-      "Agentic_Host",
-      "Engine_Native_Run",
+      "Engine_FSoft_Runtime",
+      "Engine_Full_Parallel_Runtime",
       "Engine_Python_Entry",
+      "Engine_Workspace_Snapshot",
       "FSoft_Engine_Setup_Script",
+      "Job_Logs",
       "Job_Orchestration",
-      "No-LLM_Graph_Probe",
-      "Web_UI_Panel"
+      "No-LLM_Graph_Probe"
     ],
     "names": [
-      "_tokens",
-      "body_hash",
-      "body_similarity",
-      "documented_source",
-      "list",
       "main",
-      "normalize_body",
-      "test",
-      "unified_body_diff"
+      "out",
+      "run"
     ]
   },
   "Job_Logs": {
@@ -1040,7 +1034,6 @@
       "parse",
       "percent_of",
       "save",
-      "test",
       "wiki_path"
     ]
   },
@@ -1146,7 +1139,6 @@
       "Engine_Quality_Gate",
       "Engine_Workspace_Snapshot",
       "FSoft_Engine_Setup_Script",
-      "Graphdiff_Golden_Generator",
       "Job_Logs",
       "Job_Orchestration",
       "Job_Store",

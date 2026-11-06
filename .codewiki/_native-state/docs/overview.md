@@ -53,7 +53,7 @@ flowchart TB
     subgraph Base["配置与底座层"]
         CORDIS["Cordis_Patch_Config<br/>插件装配补丁"]
         PKG["Package_Manifest<br/>包身份与契约口径"]
-        PROBE["测试/探针工具<br/>环境搭建/对拍 fixture"]
+        PROBE["测试/探针工具<br/>环境搭建/验收探针"]
         VENDOR["vendored Rust CodeWiki<br/>索引与元数据管理"]
     end
 
@@ -130,7 +130,6 @@ flowchart TB
 - [Engine_Native_State](Engine_Native_State.md)：跨轮持久化的引擎增量记忆，避免每轮退化为全量编译
 - [Engine_Process_Tree](Engine_Process_Tree.md)：子进程树可靠终止、模块归属树自愈补丁
 ### 测试与工具域
-- [Graphdiff_Golden_Generator](Graphdiff_Golden_Generator.md)：图差异算法的对拍基准生成工具
 - [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md)：独立 venv 的 FSoft 引擎环境搭建脚本
 - [No-LLM_Graph_Probe](No-LLM_Graph_Probe.md)：无 LLM 依赖图链路的验收探针
 
