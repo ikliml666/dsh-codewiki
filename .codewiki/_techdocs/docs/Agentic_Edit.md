@@ -6,7 +6,7 @@ description: lib/agentic.js 是单篇文章的「agentic 写作工作台」本�
 # Agentic_Edit 模块
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`a1d08b82`](https://github.com/ikliml666/dsh-codewiki/commit/a1d08b82baee5fe8033e1ed95d9447f6693338e5) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`e9d8c624`](https://github.com/ikliml666/dsh-codewiki/commit/e9d8c624098da09edd776028dae5a6f2a4804bd5) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -204,5 +204,5 @@ flowchart LR
 | `parseToolArgs / stripJsonFence / sliceBalancedObject` | 函数 | 坏 JSON 三级容错 |
 
 ??? abstract "Documented components (1)"
-    - [`edit`](https://github.com/ikliml666/dsh-codewiki/blob/a1d08b82baee5fe8033e1ed95d9447f6693338e5/lib%5Cagentic.js) — `lib\agentic.js`
+    - [`edit`](https://github.com/ikliml666/dsh-codewiki/blob/e9d8c624098da09edd776028dae5a6f2a4804bd5/lib%5Cagentic.js) — `lib\agentic.js`
 

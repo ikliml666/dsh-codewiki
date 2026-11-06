@@ -6,7 +6,7 @@ description: dsh-codewiki 是 DeepSeek Harness（dsh）宿主环境下的本地�
 # dsh-codewiki 仓库总览
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`a1d08b82`](https://github.com/ikliml666/dsh-codewiki/commit/a1d08b82baee5fe8033e1ed95d9447f6693338e5) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`e9d8c624`](https://github.com/ikliml666/dsh-codewiki/commit/e9d8c624098da09edd776028dae5a6f2a4804bd5) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 仓库定位与核心目标
 `dsh-codewiki` 是 DeepSeek Harness（dsh）宿主环境下的本地代码文档插件，npm 包名为 `@local/dsh-codewiki`。它的核心目标是将任意代码仓库自动编译为结构化、可追溯的 Wiki 文档体系，替代手工维护文档的低效模式。
