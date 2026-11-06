@@ -6,7 +6,7 @@ description: ArticleRepair 是 wiki 存量坏页的修复裁决层，全部实�
 # 存量文章修复（Article_Repair）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`a41aaf18`](https://github.com/ikliml666/dsh-codewiki/commit/a41aaf189f3b46e72c5373c9694d989d325386d7) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`11e4224e`](https://github.com/ikliml666/dsh-codewiki/commit/11e4224e6128a4b770f42f9d65782b1fb3a0cef0) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -227,5 +227,5 @@ sequenceDiagram
 - [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) — 本轮新产物的采用门；修复器管的是「库里躺着的存量页」，与它管的「刚渲染出来的页」共用 `NATIVE_ARTICLE_OPTS` 口径，避免两套判据漂移。
 
 ??? abstract "Documented components (1)"
-    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/a41aaf189f3b46e72c5373c9694d989d325386d7/lib%5Carticle-repair.js) — `lib\article-repair.js`
+    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/11e4224e6128a4b770f42f9d65782b1fb3a0cef0/lib%5Carticle-repair.js) — `lib\article-repair.js`
 
