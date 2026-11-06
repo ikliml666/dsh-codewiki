@@ -6,7 +6,7 @@ description: GraphdiffGoldenGenerator 是插件测试基建中的金样（golden
 # Graphdiff_Golden_Generator（图差分金样生成器）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`e9d8c624`](https://github.com/ikliml666/dsh-codewiki/commit/e9d8c624098da09edd776028dae5a6f2a4804bd5) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`2533fb69`](https://github.com/ikliml666/dsh-codewiki/commit/2533fb6946992ba6bf0d8498ebc395c8a01900e2) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -179,5 +179,5 @@ python test-fixtures/gen-graphdiff-golden.py \
 异常。CI 中通过 git diff 审查金样变化，把「引擎图演进」变成一次显式、可评审的提交。
 
 ??? abstract "Documented components (1)"
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/e9d8c624098da09edd776028dae5a6f2a4804bd5/test-fixtures%5Cgen-graphdiff-golden.py) — `test-fixtures\gen-graphdiff-golden.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/2533fb6946992ba6bf0d8498ebc395c8a01900e2/test-fixtures%5Cgen-graphdiff-golden.py) — `test-fixtures\gen-graphdiff-golden.py`
 
