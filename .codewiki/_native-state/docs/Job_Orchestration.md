@@ -47,7 +47,7 @@ Job 是一个纯普通对象，落盘到 `JOBS_FILE`（默认 `%TMP%/dsh-codewik
 | `channel` | `'native'`（原生引擎）或 `'legacy'`（Node 兼容） |
 | `batchRef` / `batchProgress` / `tasks` / `articles` / `writtenCount` / `failedCount` | 执行器在途标记、逐篇结果与计数 |
 | `outcome` / `blockers` / `canAdvanceBaseline` | 完整性终态与基线推进判据（由 `judgeOutcome` 裁决） |
-| `nativeStage` / `nativePercent` / `nativeStageTimings` / `nativeLogs` / `nativeResult` | 原生引擎自报阶段、百分比、引擎各阶段真实耗时（ms）、事件日志与落地结果 |
+| `nativeStage` / `nativePercent` / `nativeStageTimings` / `nativeLogs` / `nativeResult` | 原生引擎自报阶段、百分比、引擎各阶段真实耗时（ms）、事件日志与落地结果。`nativeResult` 在进 jobSummary 时经 `nativeResultBrief` 瘦身，只留 `outcome` / `stage` / `gate.outcome` / `apply.outcome` 四个短字段（原结构里的 `gate.articles`、`incremental.hydrated/stateCaptured` 占 payload 大半而面板从不读） |
 | `autoCommit` / `usage` / `notes` | 自动提交结果、token 用量、运行注释（最近 50 条） |
 
 ### 阶段机（Node 兼容通道）
@@ -131,7 +131,7 @@ flowchart LR
 ### `list()` / `jobSummary(job)` / `progressView(job)`
 
 - `list()`：先 `mergeFromDisk()` 再把全部 job 映射成 `jobSummary`；
-- `jobSummary` 是面板与 `codewiki_progress` 的唯一数据源，含 `stage` / `outcome` / `blockers` / `usage` / `nativeStage` / `nativeStageTimings`（引擎各阶段墙钟耗时 ms，键为 `env`/`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`）/ `nativeLogs`（最近 40 条）/ `autoCommit` / `tps` 等；
+- `jobSummary` 是面板与 `codewiki_progress` 的唯一数据源，含 `stage` / `outcome` / `blockers` / `usage` / `nativeStage` / `nativeStageTimings`（引擎各阶段墙钟耗时 ms，键为 `env`/`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`）/ `nativeLogs`（最近 40 条）/ `autoCommit` / `tps` 等；其中 `nativeResult` 刻意经 `nativeResultBrief` 裁剪成 `{outcome, stage, gate.outcome, apply.outcome}`——完整引擎结果里的逐篇门检与增量水合明细只在引擎侧落盘，不进 2s 轮询的接口 payload；
 - `progressView` 在 `jobSummary` 之上按 `taskList` 算完成百分比。
 
 ### `cancel(jobId)` / `onAbort` 语义
@@ -173,6 +173,12 @@ flowchart LR
 ### 会话记录（`beginSessionRecord` / `listSessionRecords` / `listAllSessionRecords` / `activeSessionJobs` / `pruneSessionRecords`）
 
 每个并发池请求的 prompt 与流式输出落到 `<tmp>/dsh-codewiki-sessions/<jobId>/nnn.{meta,full}.json`，TTL 24h。面板「会话」Tab 据此实时展示「codewiki 现在在跟模型说什么」。仅本地临时目录、仅回环可读，不进 git、不随 job 持久化。
+
+读取侧的三个工程口径：
+
+- meta 读取走 `readSessionMetaCached`（同一 meta 文件进程内缓存，翻页与计数共用），TTL 淘汰（`pruneSessionRecords`）删掉文件时同步从缓存剔除，不留下指向已删文件的陈旧条目；
+- 活跃任务的请求计数走 `countSessionRecords` / `countAllSessionRecords`——只数 `*.meta.json` 文件名、不读内容，不再为「数一下有多少请求」把全部 meta 整包读一遍；
+- 列表端点按 `limit` 分页（见下节「观测与 API」），不再一次把单任务几百条记录全量铺满。
 
 ### 自动提交 `autoCommitWiki(cwd, {jobId, writtenCount})`
 
@@ -289,7 +295,7 @@ flowchart TB
 | --- | --- |
 | `GET /api/codewiki/jobs` | 任务列表（工作区过滤、dead-target 过滤、queued 标注「在等谁」） |
 | `GET /api/codewiki/repos` | 仓库总览（cw status 现算 + 30s 缓存 + 自动调度心跳状态） |
-| `GET /api/codewiki/sessions[?jobId=]` | 会话记录列表（单任务或全局聚合） |
+| `GET /api/codewiki/sessions[?jobId=&limit=]` | 会话记录列表（单任务或全局聚合），分页返回：单任务默认 80 条（硬顶 2000）、全局默认 200 条（硬顶 500），响应里带 `total`（全部记录数）与 `limit`，前端可按需抬高 `limit` |
 | `GET /api/codewiki/sessions/item?jobId=&n=` | 单条请求 prompt/output 全文 |
 | `GET /api/codewiki/logs?jobId=&limit=` | 引擎 NDJSON 事件日志翻页 |
 | `GET /api/codewiki/models` / `/api/codewiki/model-efforts` | 模型目录与思考档位（设置页级联下拉数据源） |

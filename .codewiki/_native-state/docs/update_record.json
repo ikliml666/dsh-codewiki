@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-11-06T14:19:11+0800",
-  "finished_at": "2026-11-06T14:19:11+0800",
-  "outcome": "no_change",
+  "started_at": "2026-11-06T15:07:14+0800",
+  "finished_at": "2026-11-06T15:15:45+0800",
+  "outcome": "incremental",
   "options": {
     "rung": "3",
     "tau_ren": 0.95,
@@ -24,57 +24,1755 @@
     }
   },
   "revision": {
-    "old_commit": "0b68f101ac9e1a635f966cca55c0d2c3785b20b6",
-    "new_commit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96",
+    "old_commit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96",
+    "new_commit": "8f82b29d7dc28aafc81e03835dd7c09fd2e378c8",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
   },
   "diff": {
     "counts": {
-      "added": 0,
+      "added": 6,
       "deleted": 0,
       "interface": 0,
-      "body": 0,
-      "edge": 0,
+      "body": 12,
+      "edge": 2,
       "renamed": 0
     },
-    "added": [],
+    "added": [
+      "client.js::load",
+      "client.js::pane",
+      "index.js::countAllSessionRecords",
+      "index.js::countSessionRecords",
+      "index.js::nativeResultBrief",
+      "index.js::readSessionMetaCached"
+    ],
     "deleted": [],
     "interface": [],
-    "body": [],
-    "edge": [],
+    "body": [
+      "client.js::CodewikiPanel",
+      "client.js::SessionView",
+      "client.js::cwdOf",
+      "client.js::en",
+      "client.js::zh",
+      "index.js::activeSessionJobs",
+      "index.js::installWebServer",
+      "index.js::jobSummary",
+      "index.js::listAllSessionRecords",
+      "index.js::listSessionRecords",
+      "index.js::pruneSessionRecords",
+      "package.json::package.json"
+    ],
+    "edge": [
+      "index.js::loadJobs",
+      "index.js::syncCancelFlags"
+    ],
     "renamed": {}
   },
-  "repair": {},
+  "repair": {
+    "renamed": {},
+    "removed": [],
+    "routing": [
+      {
+        "component_id": "client.js::load",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "client.js::pane",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "index.js::countAllSessionRecords",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "index.js::countSessionRecords",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "index.js::nativeResultBrief",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      },
+      {
+        "component_id": "index.js::readSessionMetaCached",
+        "rule": "untracked",
+        "leaf_path": null,
+        "new_leaf": false,
+        "detail": "not a selected leaf node"
+      }
+    ],
+    "orphans": [],
+    "deleted_nodes": [],
+    "created_leaves": [],
+    "growth": {},
+    "growth_flagged": []
+  },
   "reclustered": [],
-  "reports": {},
-  "ownership": [],
-  "active": [],
-  "write_sets": {},
-  "fallback": {},
-  "verdicts": [],
-  "pages_written": [],
+  "reports": {
+    "Web_UI_Panel": {
+      "leaf_path": [
+        "Web_UI_Panel"
+      ],
+      "mode": "edit",
+      "own": [
+        "client.js::CodewikiPanel",
+        "client.js::cwdOf",
+        "client.js::en",
+        "client.js::zh",
+        "client.js::SessionView"
+      ],
+      "adopted": {
+        "client.js::cwdOf": "1:same_file"
+      },
+      "up": [],
+      "context": [
+        "client.js::load",
+        "client.js::pane"
+      ],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "Web_UI_Panel"
+    },
+    "Job_Orchestration": {
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "mode": "edit",
+      "own": [
+        "index.js::syncCancelFlags",
+        "index.js::listAllSessionRecords",
+        "index.js::activeSessionJobs",
+        "index.js::listSessionRecords",
+        "index.js::jobSummary",
+        "index.js::installWebServer",
+        "index.js::loadJobs",
+        "index.js::pruneSessionRecords"
+      ],
+      "adopted": {
+        "index.js::syncCancelFlags": "1:same_file",
+        "index.js::listAllSessionRecords": "1:same_file",
+        "index.js::activeSessionJobs": "1:same_file",
+        "index.js::listSessionRecords": "1:same_file",
+        "index.js::installWebServer": "1:same_file",
+        "index.js::loadJobs": "1:same_file",
+        "index.js::pruneSessionRecords": "1:same_file"
+      },
+      "up": [],
+      "context": [
+        "index.js::nativeResultBrief"
+      ],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "Job_Orchestration"
+    },
+    "Package_Manifest": {
+      "leaf_path": [
+        "Package_Manifest"
+      ],
+      "mode": "edit",
+      "own": [
+        "package.json::package.json"
+      ],
+      "adopted": {},
+      "up": [],
+      "context": [],
+      "refch": [],
+      "entered": [],
+      "left": [],
+      "children_added": [],
+      "children_removed": [],
+      "reclustered": false,
+      "page": "Package_Manifest"
+    }
+  },
+  "ownership": [
+    {
+      "component_id": "client.js::cwdOf",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Web_UI_Panel"
+      ],
+      "detail": "12 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::activeSessionJobs",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::installWebServer",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::listAllSessionRecords",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::listSessionRecords",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::loadJobs",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::pruneSessionRecords",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    },
+    {
+      "component_id": "index.js::syncCancelFlags",
+      "rule": "1:same_file",
+      "leaf_path": [
+        "Job_Orchestration"
+      ],
+      "detail": "19 tracked components in file",
+      "deleted": false
+    }
+  ],
+  "active": [
+    {
+      "leaf": "Web_UI_Panel",
+      "page": "Web_UI_Panel",
+      "mode": "edit",
+      "order": 0
+    },
+    {
+      "leaf": "Job_Orchestration",
+      "page": "Job_Orchestration",
+      "mode": "edit",
+      "order": 1
+    },
+    {
+      "leaf": "Package_Manifest",
+      "page": "Package_Manifest",
+      "mode": "edit",
+      "order": 2
+    }
+  ],
+  "write_sets": {
+    "Web_UI_Panel": [
+      "CodeWiki_Main",
+      "Cordis_Patch_Config",
+      "Engine_Apply_Plan",
+      "Engine_Contract",
+      "Engine_LLM_Bridge",
+      "Engine_Native_Run",
+      "Engine_OpenAI_Bridge",
+      "Job_Logs",
+      "Job_Orchestration",
+      "Package_Manifest",
+      "Update_Record",
+      "Web_UI_Panel",
+      "overview"
+    ],
+    "Job_Orchestration": [
+      "Agentic_Edit",
+      "Article_Agentic_Pool",
+      "Change_Set",
+      "CodeWiki_Main",
+      "CodeWiki_Setup",
+      "Cordis_Patch_Config",
+      "Engine_Apply_Plan",
+      "Engine_Contract",
+      "Engine_LLM_Bridge",
+      "Engine_Native_Run",
+      "Engine_Output",
+      "Engine_Process_Tree",
+      "Graphdiff_Golden_Generator",
+      "Job_Logs",
+      "Job_Orchestration",
+      "Job_Store",
+      "Package_Manifest",
+      "Update_Record",
+      "Web_UI_Panel",
+      "overview"
+    ],
+    "Package_Manifest": [
+      "Agentic_Edit",
+      "Change_Set",
+      "CodeWiki_Main",
+      "Cordis_Patch_Config",
+      "Engine_Apply_Plan",
+      "Engine_Python_Entry",
+      "Job_Logs",
+      "Job_Orchestration",
+      "Package_Manifest",
+      "Web_UI_Panel",
+      "overview"
+    ]
+  },
+  "fallback": {
+    "r_leaf": 0.08571428571428572,
+    "r_tree": 0.0,
+    "n_active": 3,
+    "n_leaves": 35,
+    "n_structural": 0,
+    "tau_full": 0.5,
+    "tau_tree": 0.3,
+    "fired": false
+  },
+  "verdicts": [
+    {
+      "page": "Web_UI_Panel",
+      "verdict": "patch",
+      "reason": "SessionView 重写：去掉 embedded、加 fixed 高度/指纹差分/limit 分页/详情 2s 重拉/focus 过滤/折叠面板；端点对照表与架构图同步",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": true
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "仅概述层提到 Web_UI_Panel 提供「LLM 请求会话查看」能力，组件内部变化不影响该描述",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Package_Manifest",
+      "verdict": "no-op",
+      "reason": "仅以 dsh.client.platform: web 与 exports ./client 指向 Web_UI_Panel，契约未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "CodeWiki_Main",
+      "verdict": "no-op",
+      "reason": "仅泛述「面板展示的仓库与会话视图依赖 Wiki 目录约定」，组件内部改动无关",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Cordis_Patch_Config",
+      "verdict": "no-op",
+      "reason": "讲的是裸包名激活扫描 → 挂载面板，挂载机制未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Apply_Plan",
+      "verdict": "no-op",
+      "reason": "面板步骤条按 APPLY_STAGES 对齐的描述仍成立",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Contract",
+      "verdict": "no-op",
+      "reason": "面板按 ENGINE_STAGES 渲染进度条仍成立",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_LLM_Bridge",
+      "verdict": "no-op",
+      "reason": "会话视图仍消费 onRequestStart 钩子记录模型调用",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Native_Run",
+      "verdict": "no-op",
+      "reason": "面板依据终态/逐篇明细展示的行为未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_OpenAI_Bridge",
+      "verdict": "no-op",
+      "reason": "会话视图消费会话记录的描述未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Logs",
+      "verdict": "no-op",
+      "reason": "面板通过 readLogTail/logStats 展示引擎日志的链路未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Orchestration",
+      "verdict": "no-op",
+      "reason": "sessions 端点语义（单任务/全局聚合）未变；limit 为新增可选 query 而文档未声称其完整形状",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Update_Record",
+      "verdict": "no-op",
+      "reason": "终态文案与 blockers 仍渲染到面板，契约未变",
+      "by_leaf": "Web_UI_Panel",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Orchestration",
+      "verdict": "patch",
+      "reason": "no verdict returned by agent (page changed on disk)",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": true
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Package_Manifest",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Agentic_Edit",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Article_Agentic_Pool",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Change_Set",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "CodeWiki_Main",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "CodeWiki_Setup",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Cordis_Patch_Config",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Apply_Plan",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Contract",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_LLM_Bridge",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Native_Run",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Output",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Process_Tree",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Graphdiff_Golden_Generator",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Logs",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Store",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Update_Record",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Web_UI_Panel",
+      "verdict": "no-op",
+      "reason": "no verdict returned by agent",
+      "by_leaf": "Job_Orchestration",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Package_Manifest",
+      "verdict": "patch",
+      "reason": "package.json version row updated 0.17.58 → 0.17.59; other components unchanged",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": true
+    },
+    {
+      "page": "overview",
+      "verdict": "no-op",
+      "reason": "summarizes Package_Manifest generically; no version number cited, constraints unchanged",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Agentic_Edit",
+      "verdict": "no-op",
+      "reason": "cites historical 0.17.5 and unchanged Node >= 24.9.0 constraint",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Change_Set",
+      "verdict": "no-op",
+      "reason": "cites unchanged engines.node >= 24.9.0 only",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "CodeWiki_Main",
+      "verdict": "no-op",
+      "reason": "describes WikiMeta/cw CLI; no package version number cited",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Cordis_Patch_Config",
+      "verdict": "patch",
+      "reason": "\"当前版本 0.17.58\" line under 版本沿革要点 updated to 0.17.59",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": true
+    },
+    {
+      "page": "Engine_Apply_Plan",
+      "verdict": "no-op",
+      "reason": "cites historical 0.14.0 lesson only; no current version",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Engine_Python_Entry",
+      "verdict": "no-op",
+      "reason": "references stage_map contract, not package version",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Logs",
+      "verdict": "no-op",
+      "reason": "cites unchanged engines.node >= 24.9.0 only",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Job_Orchestration",
+      "verdict": "no-op",
+      "reason": "generic package reference without version number",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    },
+    {
+      "page": "Web_UI_Panel",
+      "verdict": "no-op",
+      "reason": "dsh.client.platform/exports contract unchanged",
+      "by_leaf": "Package_Manifest",
+      "changed_on_disk": false
+    }
+  ],
+  "pages_written": [
+    "Web_UI_Panel",
+    "Job_Orchestration",
+    "Package_Manifest",
+    "Cordis_Patch_Config"
+  ],
   "pages_removed": [],
   "write_set_violations": [],
-  "stale_scan": {},
-  "calls": [],
-  "detector_notes": [],
+  "stale_scan": {
+    "scanned": 32,
+    "pages_with_hits": {},
+    "fixed": []
+  },
+  "calls": [
+    {
+      "kind": "leaf_agent",
+      "target": "Web_UI_Panel",
+      "seconds": 455.3631126880646,
+      "usage": {
+        "input_tokens": 3485869,
+        "output_tokens": 17535,
+        "cache_read_tokens": 2809320,
+        "cache_write_tokens": 0,
+        "total_tokens": 3503404,
+        "requests": 34
+      },
+      "error": null
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "Job_Orchestration",
+      "seconds": 280.7682647705078,
+      "usage": {
+        "input_tokens": 1371061,
+        "output_tokens": 11438,
+        "cache_read_tokens": 617920,
+        "cache_write_tokens": 0,
+        "total_tokens": 1382499,
+        "requests": 17
+      },
+      "error": null
+    },
+    {
+      "kind": "leaf_agent",
+      "target": "Package_Manifest",
+      "seconds": 54.63845658302307,
+      "usage": {
+        "input_tokens": 236758,
+        "output_tokens": 4002,
+        "cache_read_tokens": 78248,
+        "cache_write_tokens": 0,
+        "total_tokens": 240760,
+        "requests": 7
+      },
+      "error": null
+    },
+    {
+      "kind": "missing_pages",
+      "target": "-",
+      "seconds": 0.03040003776550293,
+      "usage": null,
+      "error": null
+    }
+  ],
+  "detector_notes": [
+    "[Web_UI_Panel] agent notes: Web_UI_Panel.md 的 SessionView 一节已全面改写：(1) 移除 embedded prop，改为外层 [data-dscw-p-fixed] 固定高度；(2) 列表 5s 轮询改为指纹差分（sigRef）避免打断滚动；(3) limit=80 起始、按 cap 分页「再加载 80 条」；(4) 详情对生成中请求 2s 重拉，prompt/output 为可折叠 panes；(5) 全局视图新增「只看任务」focus 过滤；(6) activeJobs 行可点、零请求标 data-idle。架构图与端点对照表同步更新。",
+    "[Package_Manifest] agent notes: Single-line version bump 0.17.58 → 0.17.59; two pages carried the current-version string and were patched. No structural, contract, or diagram changes required."
+  ],
   "errors": [],
-  "wall_seconds": 0.07,
+  "wall_seconds": 510.8,
   "usage_report": {
     "schema_version": 2,
     "scope": "this run only (modules resumed from disk cost nothing)",
     "currency": "USD",
-    "cost_status": "complete",
+    "cost_status": "unknown",
     "incomplete": false,
     "unknown_usage_calls": 0,
-    "n_calls": 0,
+    "n_calls": 58,
     "totals": {
-      "cost_usd": 0.0
+      "input_tokens": 5093688,
+      "output_tokens": 32975,
+      "cache_read_tokens": 3505488,
+      "cache_write_tokens": 0,
+      "requests": 58,
+      "total_tokens": 5126663
     },
-    "by_phase": {},
-    "by_model": {},
-    "unpriced_models": [],
-    "calls": []
+    "by_phase": {
+      "update": {
+        "calls": 58,
+        "input_tokens": 5093688,
+        "output_tokens": 32975,
+        "cache_read_tokens": 3505488,
+        "cache_write_tokens": 0,
+        "requests": 58,
+        "total_tokens": 5126663,
+        "unpriced_calls": 58
+      }
+    },
+    "by_model": {
+      "doubao-seed-2.1-lite": {
+        "calls": 58,
+        "input_tokens": 5093688,
+        "output_tokens": 32975,
+        "cache_read_tokens": 3505488,
+        "cache_write_tokens": 0,
+        "requests": 58,
+        "total_tokens": 5126663,
+        "unpriced_calls": 58
+      }
+    },
+    "unpriced_models": [
+      "doubao-seed-2.1-lite"
+    ],
+    "calls": [
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 12.31,
+        "input_tokens": 32159,
+        "output_tokens": 789,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 32948,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 14.28,
+        "input_tokens": 42664,
+        "output_tokens": 1056,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 43720,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.64,
+        "input_tokens": 51134,
+        "output_tokens": 192,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 51326,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 34.62,
+        "input_tokens": 13966,
+        "output_tokens": 2686,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 16652,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.42,
+        "input_tokens": 59127,
+        "output_tokens": 284,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 59411,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.12,
+        "input_tokens": 24490,
+        "output_tokens": 194,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 24684,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.86,
+        "input_tokens": 71843,
+        "output_tokens": 156,
+        "cache_read_tokens": 51000,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 71999,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.14,
+        "input_tokens": 82114,
+        "output_tokens": 124,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 82238,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.28,
+        "input_tokens": 93702,
+        "output_tokens": 69,
+        "cache_read_tokens": 81976,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 93771,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 6.2,
+        "input_tokens": 36442,
+        "output_tokens": 371,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 36813,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 8.33,
+        "input_tokens": 48207,
+        "output_tokens": 496,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 48703,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 15.33,
+        "input_tokens": 58121,
+        "output_tokens": 987,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 59108,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.76,
+        "input_tokens": 67710,
+        "output_tokens": 229,
+        "cache_read_tokens": 48184,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 67939,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.83,
+        "input_tokens": 75577,
+        "output_tokens": 124,
+        "cache_read_tokens": 57912,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 75701,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.31,
+        "input_tokens": 85167,
+        "output_tokens": 202,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 85369,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.06,
+        "input_tokens": 93720,
+        "output_tokens": 122,
+        "cache_read_tokens": 48184,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 93842,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.75,
+        "input_tokens": 100505,
+        "output_tokens": 163,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 100668,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 69.48,
+        "input_tokens": 97814,
+        "output_tokens": 6501,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 104315,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 59.0,
+        "input_tokens": 103195,
+        "output_tokens": 4339,
+        "cache_read_tokens": 93496,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 107534,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 6.14,
+        "input_tokens": 108610,
+        "output_tokens": 303,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 108913,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 12.27,
+        "input_tokens": 105703,
+        "output_tokens": 1001,
+        "cache_read_tokens": 51000,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 106704,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.83,
+        "input_tokens": 106958,
+        "output_tokens": 132,
+        "cache_read_tokens": 81976,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 107090,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 8.47,
+        "input_tokens": 107389,
+        "output_tokens": 860,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 108249,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.66,
+        "input_tokens": 108477,
+        "output_tokens": 226,
+        "cache_read_tokens": 106808,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 108703,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.11,
+        "input_tokens": 109464,
+        "output_tokens": 88,
+        "cache_read_tokens": 57912,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 109552,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.34,
+        "input_tokens": 110129,
+        "output_tokens": 404,
+        "cache_read_tokens": 109368,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 110533,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.78,
+        "input_tokens": 109014,
+        "output_tokens": 199,
+        "cache_read_tokens": 107320,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 109213,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.86,
+        "input_tokens": 111052,
+        "output_tokens": 444,
+        "cache_read_tokens": 93496,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 111496,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.53,
+        "input_tokens": 112007,
+        "output_tokens": 283,
+        "cache_read_tokens": 109368,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 112290,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 7.14,
+        "input_tokens": 109553,
+        "output_tokens": 693,
+        "cache_read_tokens": 97592,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 110246,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.67,
+        "input_tokens": 110363,
+        "output_tokens": 603,
+        "cache_read_tokens": 105528,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 110966,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.05,
+        "input_tokens": 111728,
+        "output_tokens": 237,
+        "cache_read_tokens": 97592,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 111965,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.73,
+        "input_tokens": 112068,
+        "output_tokens": 238,
+        "cache_read_tokens": 106808,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 112306,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Job_Orchestration",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 29.61,
+        "input_tokens": 112699,
+        "output_tokens": 3,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 112702,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.11,
+        "input_tokens": 112938,
+        "output_tokens": 322,
+        "cache_read_tokens": 111672,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 113260,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.12,
+        "input_tokens": 113387,
+        "output_tokens": 162,
+        "cache_read_tokens": 111672,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 113549,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.45,
+        "input_tokens": 113577,
+        "output_tokens": 90,
+        "cache_read_tokens": 112696,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 113667,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.7,
+        "input_tokens": 113840,
+        "output_tokens": 226,
+        "cache_read_tokens": 111928,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 114066,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.08,
+        "input_tokens": 114561,
+        "output_tokens": 331,
+        "cache_read_tokens": 112696,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 114892,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.98,
+        "input_tokens": 114986,
+        "output_tokens": 203,
+        "cache_read_tokens": 107320,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 115189,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.59,
+        "input_tokens": 115758,
+        "output_tokens": 115,
+        "cache_read_tokens": 114488,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 115873,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 1.81,
+        "input_tokens": 115917,
+        "output_tokens": 15,
+        "cache_read_tokens": 115512,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 115932,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.97,
+        "input_tokens": 116013,
+        "output_tokens": 242,
+        "cache_read_tokens": 105528,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 116255,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.03,
+        "input_tokens": 116366,
+        "output_tokens": 252,
+        "cache_read_tokens": 115768,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 116618,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.39,
+        "input_tokens": 116733,
+        "output_tokens": 164,
+        "cache_read_tokens": 116280,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 116897,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.38,
+        "input_tokens": 116957,
+        "output_tokens": 89,
+        "cache_read_tokens": 115768,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 117046,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.48,
+        "input_tokens": 117457,
+        "output_tokens": 260,
+        "cache_read_tokens": 111928,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 117717,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 5.62,
+        "input_tokens": 118298,
+        "output_tokens": 355,
+        "cache_read_tokens": 111928,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 118653,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.95,
+        "input_tokens": 118594,
+        "output_tokens": 157,
+        "cache_read_tokens": 111928,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 118751,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.0,
+        "input_tokens": 119077,
+        "output_tokens": 151,
+        "cache_read_tokens": 115768,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 119228,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Web_UI_Panel",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 15.39,
+        "input_tokens": 119600,
+        "output_tokens": 1041,
+        "cache_read_tokens": 118840,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 120641,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 4.0,
+        "input_tokens": 7882,
+        "output_tokens": 336,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 8218,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.62,
+        "input_tokens": 12219,
+        "output_tokens": 265,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 12484,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 2.88,
+        "input_tokens": 21467,
+        "output_tokens": 239,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 21706,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.84,
+        "input_tokens": 28599,
+        "output_tokens": 280,
+        "cache_read_tokens": 21304,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 28879,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 3.88,
+        "input_tokens": 41476,
+        "output_tokens": 267,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 41743,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 16.12,
+        "input_tokens": 61917,
+        "output_tokens": 1641,
+        "cache_read_tokens": 28472,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 63558,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      },
+      {
+        "phase": "update",
+        "kind": "update_agent",
+        "target": "Package_Manifest",
+        "model": "doubao-seed-2.1-lite",
+        "seconds": 11.3,
+        "input_tokens": 63198,
+        "output_tokens": 974,
+        "cache_read_tokens": 28472,
+        "cache_write_tokens": 0,
+        "requests": 1,
+        "total_tokens": 64172,
+        "usage_reported": true,
+        "provider": "openai-compatible",
+        "requested_model": "doubao-seed-2.1-lite",
+        "cost_source": "unknown"
+      }
+    ]
   },
-  "run_id": "d3659fcc-b323-4daf-afb1-e7b97d16ec5c"
+  "run_id": "142b9129-17bd-42bb-9621-c4237b818d16"
 }

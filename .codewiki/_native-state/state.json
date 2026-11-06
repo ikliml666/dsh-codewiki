@@ -3,17 +3,20 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96"
+    "headCommit": "8f82b29d7dc28aafc81e03835dd7c09fd2e378c8"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "897c47ea390dffcd20fddc2e2cc7dd81c2b93b96",
+    "headCommit": "8f82b29d7dc28aafc81e03835dd7c09fd2e378c8",
     "committed": [
       ".npmignore",
+      "CHANGELOG.md",
       "CodeWiki.md",
       "README.md",
+      "client.js",
       "docs/hy3-concurrency-handoff.md",
+      "index.js",
       "package.json",
       "patches/README.md",
       "patches/upstream-module-parallel.patch",
@@ -122,11 +125,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4kyk5r-3-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw4mnvyg-4-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-06T06:19:11.837Z"
+  "updatedAt": "2026-11-06T07:15:46.068Z"
 }
