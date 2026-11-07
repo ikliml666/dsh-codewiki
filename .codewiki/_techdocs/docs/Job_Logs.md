@@ -6,7 +6,7 @@ description: JobLogs 模块是引擎运行时的持久化事件日志层：它�
 # Job_Logs
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -201,14 +201,14 @@ flowchart LR
 5. **幂等与宽容**：`decodeGitPath` 非转义串原样返回；`readLogTail` 坏行跳过；`removeLog` 删不掉就留着，不影响任何判定。
 
 ??? abstract "Documented components (10)"
-    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
-    - [`decodeGitPath`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cgit-paths.js) — `lib\git-paths.js`
-    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Cscripts%5Crun.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\scripts\run.py`
-    - [`Engine`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Ccore%5Cengine.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\core\engine.py`
-    - [`Handler`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Chandler.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\handler.py`
-    - [`TaskQueue`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
-    - [`TaskQueue.push`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
-    - [`project_name`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/vendor%5Ccodewiki%5Csrc%5Cconfig.rs) — `vendor\codewiki\src\config.rs`
-    - [`ArticleFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/vendor%5Ccodewiki%5Csrc%5Cfrontmatter.rs) — `vendor\codewiki\src\frontmatter.rs`
+    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
+    - [`decodeGitPath`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cgit-paths.js) — `lib\git-paths.js`
+    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Cscripts%5Crun.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\scripts\run.py`
+    - [`Engine`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Ccore%5Cengine.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\core\engine.py`
+    - [`Handler`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Chandler.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\handler.py`
+    - [`TaskQueue`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
+    - [`TaskQueue.push`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
+    - [`project_name`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/vendor%5Ccodewiki%5Csrc%5Cconfig.rs) — `vendor\codewiki\src\config.rs`
+    - [`ArticleFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/vendor%5Ccodewiki%5Csrc%5Cfrontmatter.rs) — `vendor\codewiki\src\frontmatter.rs`
 

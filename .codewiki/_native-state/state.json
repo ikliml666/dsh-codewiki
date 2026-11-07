@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "57d635690667fc2f481ab95078e1a65fd6db9555"
+    "headCommit": "d135ea42291511410de6fe1d13ad199d5529e1ed"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "57d635690667fc2f481ab95078e1a65fd6db9555",
+    "headCommit": "d135ea42291511410de6fe1d13ad199d5529e1ed",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
@@ -74,7 +74,9 @@
       "vendor/tree-sitter/package.json"
     ],
     "staged": [],
-    "unstaged": [],
+    "unstaged": [
+      "CHANGELOG.md"
+    ],
     "untracked": [],
     "deleted": [
       "docs/hy3-concurrency-handoff.md",
@@ -128,7 +130,9 @@
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [],
+  "unconsumed": [
+    "CHANGELOG.md"
+  ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
@@ -136,7 +140,9 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5sy9qd-3-native（44 个文件）"
+    "工作区未提交改动已合成临时 commit 2a82c7bf7a1b（1 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5uat1t-4-native（44 个文件）",
+    "本轮把 1 个未提交源码改动一并写进产物（快照 2a82c7bf7a1b）：CHANGELOG.md"
   ],
-  "updatedAt": "2026-11-07T02:51:01.876Z"
+  "updatedAt": "2026-11-07T03:29:17.028Z"
 }

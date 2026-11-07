@@ -6,7 +6,7 @@ description: EngineManifest 是原生编译通道的环境裁决层，模块文�
 # 引擎清单（Engine_Manifest）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -228,6 +228,6 @@ sequenceDiagram
 - [Engine_Contract 引擎契约](Engine_Contract.md) — `drift / unhealthy / probe-failed` 被翻成 `engine-deps / engine-missing` 等契约错误码的终态形状。
 
 ??? abstract "Documented components (2)"
-    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
-    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
 

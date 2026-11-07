@@ -6,7 +6,7 @@ description: EngineMapping（lib/engine/mapping.js）是原生引擎流水线中
 # Engine_Mapping：FSoft 产物到 CodeWiki 的格式映射层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -282,5 +282,5 @@ flowchart LR
 4. **与上游同一词汇表**：布局（`hierarchical` / `flat`）、页路径（`module_doc_relpath`）、whole-repository 空树行为都与 FSoft 上游逐条对齐，避免两层各猜一遍。
 
 ??? abstract "Documented components (1)"
-    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
+    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
 

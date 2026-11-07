@@ -6,7 +6,7 @@ description: EngineClient 是 Node 宿主与 Python 原生引擎（FSoft CodeWik
 # Engine_Client（引擎进程客户端）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 `Engine_Client` 是 Node 宿主与 Python 原生引擎（FSoft CodeWiki）之间的**薄适配层**，是整个迁移架构里唯一的跨语言边界。它只做四件事：起一个受管子进程、写一行请求 JSON、按 JSON-lines 读回引擎消息、把消息翻译成契约规定的 `EngineResult` / `EngineProgress` / `EngineError`，并在超时、取消、崩溃、协议破坏时给出**可机读**的失败。
 
@@ -215,5 +215,5 @@ sequenceDiagram
 - **协议版本**：`ENGINE_PROTOCOL_VERSION = 1` 与 `entry.py` 的 `PROTOCOL_VERSION` 一一对应；版本不符只记 `protocol-version` 违规而不中断——版本协商的责任在上层。
 
 ??? abstract "Documented components (1)"
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
 
