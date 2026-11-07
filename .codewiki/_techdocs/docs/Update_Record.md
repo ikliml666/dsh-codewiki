@@ -6,7 +6,7 @@ description: lib/update-record.js 是 CodeWiki 编译流水线的终态裁决与
 # Update_Record（编译更新记录）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6f631409`](https://github.com/ikliml666/dsh-codewiki/commit/6f631409754b5c2a22a443c558171f86885b086f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6574afd0`](https://github.com/ikliml666/dsh-codewiki/commit/6574afd08e6fadf45fade44268aa46e687e49ad3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -213,6 +213,6 @@ sequenceDiagram
 5. **IO 可注入**：`saveUpdateRecord / loadUpdateRecord` 的 `fsImpl` 参数默认用 `node:fs`，测试可注入假文件系统，配合纯函数裁决实现离线单测。
 
 ??? abstract "Documented components (2)"
-    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/lib%5Cupdate-record.js) — `lib\update-record.js`
-    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/6574afd08e6fadf45fade44268aa46e687e49ad3/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/6574afd08e6fadf45fade44268aa46e687e49ad3/lib%5Cupdate-record.js) — `lib\update-record.js`
 
