@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "9d08002feba5ec5cd925796ba31c21de74a152ad"
+    "headCommit": "4877231e2f743a3ba18890a9db2d6468a9885218"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "9d08002feba5ec5cd925796ba31c21de74a152ad",
+    "headCommit": "4877231e2f743a3ba18890a9db2d6468a9885218",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
@@ -142,12 +142,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "丢弃 4 条已不存在且从未提交的旧账（.bench-sess.mjs、.bench2.mjs、.bench3.mjs 等）——只有 committed 才算消化的规则会让它们被永久携带，白跑整轮",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw6cg1pa-7-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw6cqmu0-a-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-07T11:57:45.440Z"
+  "updatedAt": "2026-11-07T12:29:16.411Z"
 }
