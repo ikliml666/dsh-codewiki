@@ -6,7 +6,7 @@ description: lib/update-record.js 是 CodeWiki 编译流水线的终态裁决与
 # Update_Record（编译更新记录）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6f631409`](https://github.com/ikliml666/dsh-codewiki/commit/6f631409754b5c2a22a443c558171f86885b086f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -207,12 +207,12 @@ sequenceDiagram
 ## 设计要点与不变量
 
 1. **版本化读回**：`loadUpdateRecord` 对 `version !== UPDATE_RECORD_VERSION` 或任何读/解析错误一律返回 `null`——旧格式记录不得被当成「上次成功编译」，防止跨版本语义混淆。
-2. **基线判据宁可严不可松**：本模块服务的是「基线只代表所有变化已消化」这条判据，其 blocker 含「未归属变更」「缺页」这类「没消化完」语义；一旦放宽就会把未消化的变化记成已消化——下一轮这些变化不再触发文章更新，wiki 会静默落后于代码。因此本模块刻意保持比 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md) / [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 通道更严。
+2. **基线判据宁可严不可松**：本模块的 blocker 含「未归属变更」「缺页」这类「没消化完」语义；一旦放宽就会把未消化的变化记成已消化——下一轮这些变化不再触发文章更新，wiki 会静默落后于代码。因此本模块刻意保持比 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md) / [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 通道更严。
 3. **每个 action 必带原因**：记录中 `plan.actions[].reason` 是「可复盘」的最低要求——事后能回答「为什么这篇被重写/被 review」。
 4. **错误截断**：`error / detail` 一律 `slice(0, 300)`，防止单条异常堆栈撑爆 JSON；`notes` 只留最近 20 条。
 5. **IO 可注入**：`saveUpdateRecord / loadUpdateRecord` 的 `fsImpl` 参数默认用 `node:fs`，测试可注入假文件系统，配合纯函数裁决实现离线单测。
 
 ??? abstract "Documented components (2)"
-    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cupdate-record.js) — `lib\update-record.js`
-    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/lib%5Cupdate-record.js) — `lib\update-record.js`
 

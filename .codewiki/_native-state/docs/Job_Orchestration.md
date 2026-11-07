@@ -42,7 +42,7 @@ Job 是一个纯普通对象，落盘到 `JOBS_FILE`（默认 `%TMP%/dsh-codewik
 | 字段 | 含义 |
 | --- | --- |
 | `id` / `cwd` / `wikiPath` / `kind` / `scope` | 任务标识与编译范围（`kind`=full/stale；`scope`=auto/full/stale） |
-| `owner` / `heartbeatAt` / `sessionId` | 实例所有权、心跳、发起会话（终态唤醒目标） |
+| `owner` / `heartbeatAt` / `sessionId` | 实例所有权、心跳、发起会话记账（终态唤醒目标） |
 | `stage` | 当前阶段：`queued` → `articles`（引擎启动点），随后由引擎进度帧映射为 `prepare` / `articles` / `validate` / `index` / `commit`，或终态 `done` / `partial` / `failed` / `cancelled` |
 | `channel` | 恒为 `'native'`（原生引擎通道），作为「谁在跑」的记账 |
 | `nativeChannel` | 原生通道快照（入口、解释器、超时），宿主重启后据此重放 |

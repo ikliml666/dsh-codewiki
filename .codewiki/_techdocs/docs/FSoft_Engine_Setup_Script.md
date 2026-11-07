@@ -6,7 +6,7 @@ description: tools/fsoft-engine/setup-env.sh 是 CodeWiki 插件「阶段 1A」�
 # FSoft 引擎环境搭建脚本（FSoft_Engine_Setup_Script）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6f631409`](https://github.com/ikliml666/dsh-codewiki/commit/6f631409754b5c2a22a443c558171f86885b086f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -180,5 +180,5 @@ sequenceDiagram
 简言之：**doctor 负责「发现环境漂了」，setup-env.sh 负责「把环境修回已验证快照」**，二者配合保证同一份 wiki 在不同机器上的产物可复现。
 
 ??? abstract "Documented components (1)"
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
 

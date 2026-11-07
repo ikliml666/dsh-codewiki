@@ -3,27 +3,34 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "8d87985d8a7f05b87556281b81e28f82bc471b1d"
+    "headCommit": "6f631409754b5c2a22a443c558171f86885b086f"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "8d87985d8a7f05b87556281b81e28f82bc471b1d",
+    "headCommit": "6f631409754b5c2a22a443c558171f86885b086f",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
       "CodeWiki.md",
       "README.md",
       "client.js",
+      "cordis.patch.yml",
       "docs/fsoft-native-engine.md",
       "docs/hy3-concurrency-handoff.md",
       "index.js",
+      "lib/agentic-host.js",
+      "lib/agentic.js",
+      "lib/article-repair.js",
+      "lib/articles-agentic.js",
+      "lib/engine/apply-plan.js",
       "lib/engine/llm-bridge.js",
       "lib/engine/manifest.js",
       "lib/engine/native-run.js",
       "lib/engine/python/entry.py",
       "lib/engine/techdocs.js",
       "lib/job-store.js",
+      "lib/update-record.js",
       "package.json",
       "patches/README.md",
       "patches/upstream-module-parallel.patch",
@@ -74,13 +81,7 @@
       "vendor/tree-sitter/package.json"
     ],
     "staged": [],
-    "unstaged": [
-      "CHANGELOG.md",
-      "index.js",
-      "lib/agentic-host.js",
-      "lib/agentic.js",
-      "lib/articles-agentic.js"
-    ],
+    "unstaged": [],
     "untracked": [],
     "deleted": [
       "docs/hy3-concurrency-handoff.md",
@@ -137,13 +138,7 @@
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [
-    "CHANGELOG.md",
-    "index.js",
-    "lib/agentic-host.js",
-    "lib/agentic.js",
-    "lib/articles-agentic.js"
-  ],
+  "unconsumed": [],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
@@ -151,8 +146,7 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 695bf7d0681f（5 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5wfyxj-7-native（44 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5znznr-0-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-07T05:35:06.842Z"
+  "updatedAt": "2026-11-07T06:31:44.102Z"
 }

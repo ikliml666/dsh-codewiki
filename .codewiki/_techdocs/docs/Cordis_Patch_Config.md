@@ -6,7 +6,7 @@ description: CordisPatchConfig 是 dsh-codewiki 插件向 dsh（DeepSeek Harness
 # Cordis_Patch_Config（插件装配配置）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6f631409`](https://github.com/ikliml666/dsh-codewiki/commit/6f631409754b5c2a22a443c558171f86885b086f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -74,8 +74,8 @@ flowchart TD
 
 | 设置项 | 说明 | 默认 |
 | --- | --- | --- |
-| `maxConcurrency` | 默认档并发上限（1–8） | 2 |
-| `bigConcurrency` | 大档并发上限（1–8）；与默认档各自独立限流、同时推进 | 0（跟随默认档） |
+| `maxConcurrency` | 并发上限（1–8） | 2 |
+| `moduleConcurrency` | 原生引擎的模块生成并行度（1–8）；0 = 跟随 `maxConcurrency` | 0（跟随 `maxConcurrency`） |
 | `serialProjects` | 单项目串行：同一时刻只推进一个仓库的编译任务，其余排队 | 开 |
 
 ### 文章生成行为
@@ -83,23 +83,20 @@ flowchart TD
 | 设置项 | 说明 | 默认 |
 | --- | --- | --- |
 | `articleLanguage` | 文章语言 | 中文 |
-| `planMode` | 模块划分：`auto` = AST 符号 + LLM 语义聚类；`dirs` = 顶层目录分组（旧行为） | `auto` |
-| `agenticArticles` | 文章写作走 agentic 工具循环：模型自己 `read_code`/`edit_article`，不整包内联 | 开 |
-| `agenticMaxSteps` | agentic 单篇步数上限（1–100） | 30 |
-| `symbolIncremental` | 增量按 AST 符号级判定：只重写接口真变了的模块，注释/空白改动跳过 | 开 |
-| `updateReminder` | 会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 `.codewiki/`） | 开 |
+| `updateReminder` | 会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 `CodeWiki.md`） | 开 |
 | `autoCommit` | 编译完成后自动提交 wiki 产物 | 开 |
+| `techdocs` | 导出 Backstage TechDocs 站点到 `.codewiki/_techdocs/` | 关 |
 
-### 原生引擎通道（0.15.0 引入，0.16.0 起默认开启）
+### 原生引擎
 
 | 设置项 | 说明 | 默认 |
 | --- | --- | --- |
-| `nativeEngine` | `true` = 编译交给上游 FSoft Python 引擎；`false` = 走内置 Node 兼容通道 | `true` |
+| `nativeEngine` | `true` = 编译交给上游 FSoft Python 引擎 | `true` |
 | `nativeEnginePython` | venv 解释器绝对路径；留空 → 环境变量 `DSH_CODEWIKI_PYTHON` → `python` | 空 |
 | `nativeEngineEntry` | 入口脚本路径 | `lib/engine/python/entry.py` |
-| `nativeEngineTimeoutMs` | 单次引擎调用上限 | 2700000（45 分钟） |
+| `nativeEngineTimeoutMs` | 单次引擎调用上限 | 180 分钟 |
 
-> 设计约束：不做「找一个能用的解释器」的启发式——猜错会把环境不闭合伪装成引擎坏了。两条通道并存、**互不回退**：原生通道环境不闭合时以 `engine-deps` 明确失败，不会悄悄改用 Node 通道。
+> 设计约束：不做「找一个能用的解释器」的启发式——猜错会把环境不闭合伪装成引擎坏了。环境不闭合时以 `engine-deps` 明确失败。
 
 ## 运行时数据流：从配置文件到执行模块
 
@@ -115,31 +112,31 @@ flowchart TD
     H --> IDX["插件 index.js<br/>Config schema 校验 + 默认值回落"]
     H --> CLI["client.js<br/>激活扫描(裸包名行) → 挂载 Web_UI_Panel"]
 
-    IDX --> JO["Job_Orchestration<br/>maxConcurrency/bigConcurrency/<br/>serialProjects/autoCommit 生效"]
+    IDX --> JO["Job_Orchestration<br/>maxConcurrency/moduleConcurrency/<br/>serialProjects/autoCommit 生效"]
     IDX --> ENG["Engine_Python_Entry<br/>nativeEngine/nativeEnginePython/<br/>nativeEngineEntry/nativeEngineTimeoutMs 生效"]
-    IDX --> MAP["Engine_Mapping<br/>planMode=auto/dirs 生效"]
-    IDX --> SYM["Engine_Workspace_Snapshot<br/>symbolIncremental 生效"]
+    IDX --> OUT["Engine_Apply_Plan<br/>techdocs 导出 Backstage TechDocs 站点生效"]
+
 ```
 
 ## 与其他模块的关系
 
 - [Package_Manifest 包清单](Package_Manifest.md) —— `package.json` 中 `dsh.bundle.patch: "./cordis.patch.yml"` 是本文件被宿主发现的唯一注册点。
 - [Web_UI_Panel](Web_UI_Panel.md) —— `name: "@ikliml666/dsh-codewiki"` 的裸包名形式是 client 半边激活扫描的匹配依据；bundle 装法下写成带 `/dsh` 子路径会导致面板不激活。
-- [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) —— `maxConcurrency`、`bigConcurrency`、`serialProjects`、`autoCommit` 等调度配置在此落地为实际的任务池行为。
+- [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) —— `maxConcurrency`、`moduleConcurrency`、`serialProjects`、`autoCommit` 等调度配置在此落地为实际的任务池行为。
 - [Engine_Python_Entry](Engine_Python_Entry.md) —— `nativeEngine*` 系列配置决定子进程解释器、入口脚本与超时边界。
 - [FSoft 引擎环境搭建脚本（FSoft_Engine_Setup_Script）](FSoft_Engine_Setup_Script.md) —— 原生引擎通道所需的闭合 Python venv 由 `tools/fsoft-engine/setup-env.sh` 构建；`nativeEnginePython` 应指向该脚本产出的解释器。
 - Engine_LLM_Bridge / Engine_OpenAI_Bridge —— `batchProvider`、`batchModel`、`batchReasoningEffort` 在 LLM 桥接层被消费。
-- Engine_Mapping —— `planMode` 控制模块划分策略。
+- Engine_Apply_Plan —— `techdocs` 控制是否导出 Backstage TechDocs 站点到 `.codewiki/_techdocs/`。
 
 ## 版本沿革要点（来自 package.json）
 
-- **0.16.0**：原生引擎通道（`nativeEngine: true`）成为默认；Node 侧的 FSoft 算法重实现（symbols/cluster/graph-diff/incremental/update-planner）已退役删除，`nativeEngine: false` 仅保留为最小兼容通道（顶层目录分组 + 文件级 source_files 归属，不再加新特性）。
-- **0.17.34**：不再内置默认编译模型——提交任务时未选 provider/model 会以显式错误失败，而不是对着猜测的模型静默运行；大档并发默认关闭。
-- 当前版本 `0.17.64`：零 subagents、单项目串行。
+- **0.16.0**：原生引擎通道（`nativeEngine: true`）成为默认；Node 侧的 FSoft 算法重实现（symbols/cluster/graph-diff/incremental/update-planner）已退役删除。
+- **0.17.34**：不再内置默认编译模型——提交任务时未选 provider/model 会以显式错误失败，而不是对着猜测的模型静默运行。
+- 当前版本 `0.18.0`：零 subagents、单项目串行。
 
 ## 使用示例
 
-在 profile 的 `cordis.patch.yml` 中追加同 id 覆盖条目，换编译模型、调并发、关掉 agentic 写作：
+在 profile 的 `cordis.patch.yml` 中追加同 id 覆盖条目，换编译模型、调并发：
 
 ```yaml
 - id: codewiki
@@ -147,8 +144,7 @@ flowchart TD
     batchProvider: volces-ark
     batchModel: glm-5.3-flash
     maxConcurrency: 2
-    agenticArticles: true
-    agenticMaxSteps: 30
+    nativeEnginePython: E:/path/to/venv/Scripts/python.exe
 ```
 
 或指向自建的 FSoft 原生引擎 venv：
@@ -158,10 +154,10 @@ flowchart TD
   config:
     nativeEngine: true
     nativeEnginePython: /abs/path/to/.probe-fsoft/venv/bin/python
-    nativeEngineTimeoutMs: 2700000
+    nativeEngineTimeoutMs: 10800000
 ```
 
 ??? abstract "Documented components (2)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/cordis.patch.yml) — `cordis.patch.yml`
-    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/_addcase2.py) — `_addcase2.py`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/cordis.patch.yml) — `cordis.patch.yml`
+    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/6f631409754b5c2a22a443c558171f86885b086f/_addcase2.py) — `_addcase2.py`
 
