@@ -3,6 +3,7 @@ title: Engine_Apply_Plan（原生产物落地器）
 type: module
 source_files:
   - lib/engine/apply-plan.js
+  - lib/engine/techdocs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Engine_Apply_Plan.md

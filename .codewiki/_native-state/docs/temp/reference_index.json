@@ -953,7 +953,6 @@
       "tickReview",
       "updateOptionsOf",
       "validateArticleEnvelope",
-      "wakeCompileSession",
       "worker",
       "writeValidated"
     ]

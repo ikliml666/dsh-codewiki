@@ -6,7 +6,7 @@ description: PackageManifest 是 dsh-codewiki 插件的包级元数据清单模�
 # Package_Manifest 包清单
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`937f8886`](https://github.com/ikliml666/dsh-codewiki/commit/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`681efc8d`](https://github.com/ikliml666/dsh-codewiki/commit/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 `Package_Manifest` 是 dsh-codewiki 插件的**包级元数据清单**模块，承载三类互相独立、但同属「包身份与跨语言口径」的资产：
 
@@ -25,7 +25,7 @@ description: PackageManifest 是 dsh-codewiki 插件的包级元数据清单模�
 | 字段 | 值 | 含义 |
 | --- | --- | --- |
 | `name` | `@ikliml666/dsh-codewiki` | 插件包名；`cordis.patch.yml` 中以裸包名被 `file:///` 直挂或 bundle 依赖引用 |
-| `version` | `0.17.61` | 当前版本号（版本演进史见 `description`） |
+| `version` | `0.17.64` | 当前版本号（版本演进史见 `description`） |
 | `type` | `module` | 全 ESM 双模块（`index.js` 宿主侧 + `client.js` 前端侧） |
 | `main` / `exports` | `./index.js`、`./client` | 双入口：Node 宿主侧入口与 web 前端入口 |
 | `private` | `false` | 可发布包：随附 `repository`（`git+https://github.com/ikliml666/dsh-codewiki.git`）、`homepage`（GitHub README）与 `bugs`（issues 地址）发布元数据 |
@@ -199,8 +199,8 @@ flowchart TD
 5. **配置默认值集中**：`cordis.patch.yml` 的 `config: {}` 留空即回落 `index.js` 的 Config schema 默认值，覆盖条目采用同 id 整对象替换。
 
 ??? abstract "Documented components (4)"
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/package.json) — `package.json`
-    - [`WikiMeta`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/vendor%5Ccodewiki%5Csrc%5Cmeta.rs) — `vendor\codewiki\src\meta.rs`
-    - [`test`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/package.json) — `package.json`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/package.json) — `package.json`
+    - [`WikiMeta`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/vendor%5Ccodewiki%5Csrc%5Cmeta.rs) — `vendor\codewiki\src\meta.rs`
+    - [`test`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/package.json) — `package.json`
 

@@ -130,6 +130,8 @@ flowchart LR
 新建一条 job 并立刻推进。提交闸门链：
 
 1. 排除清单（`excludePaths`）命中 → 抛错（auto 调度静默跳过）；
+
+> **工具层排除清单口径（`codewiki_generate` / `codewiki_update`）**：命中排除清单时工具不抛错，而返回不带原因的中性终态（`state='excluded'`、`submitted=false`、`notes=[]`），`render` 只回一句「codewiki：本仓库无需处理，继续手头工作。」——排除是用户在面板上的表态，模型若读到「被排除」就会追问原因、建议改设置；因此原因不进会话、`state` 仅供内部判定，模型照常收尾即可。
 2. linked git worktree（`detectLinkedWorktree`，60s 缓存）→ 拒绝编译；
 3. 无可编译源码（`hasCompilableSources`，10min/60s 差异化 TTL 缓存）→ 拒绝；
 4. `rememberRepo(cwd)` 登记已知仓库（写入 `REPOS_FILE`，与 [Job_Store.md](job-store.md) 同源目录生命周期）；

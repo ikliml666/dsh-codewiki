@@ -103,7 +103,10 @@
             "lib\\engine\\apply-plan.js::findDeprecatedConceptPages",
             "lib\\engine\\apply-plan.js::findOrphanPages",
             "lib\\engine\\apply-plan.js::findStaleModulePages",
-            "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+            "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+            "lib\\engine\\techdocs.js::walkFiles",
+            "lib\\engine\\techdocs.js::walk",
+            "lib\\engine\\techdocs.js::captureSite"
         ],
         "children": {}
     },

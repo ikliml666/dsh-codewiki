@@ -6,7 +6,7 @@ description: EngineLLMBridge（lib/engine/llm-bridge.js）是 FSoft 原生引擎
 # 引擎 LLM 桥（Engine_LLM_Bridge）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`937f8886`](https://github.com/ikliml666/dsh-codewiki/commit/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`681efc8d`](https://github.com/ikliml666/dsh-codewiki/commit/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -177,6 +177,6 @@ flowchart TD
 - [Web_UI_Panel](Web_UI_Panel.md) — 「会话」视图通过 `onRequestStart` 钩子消费桥记录的模型调用。
 
 ??? abstract "Documented components (2)"
-    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
 
