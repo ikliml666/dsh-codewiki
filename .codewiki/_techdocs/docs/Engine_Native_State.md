@@ -6,7 +6,7 @@ description: EngineNativeState 是原生引擎编译流水线的跨轮受管状�
 # Engine_Native_State（原生引擎跨轮受管状态）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`4877231e`](https://github.com/ikliml666/dsh-codewiki/commit/4877231e2f743a3ba18890a9db2d6468a9885218) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`b96a0b46`](https://github.com/ikliml666/dsh-codewiki/commit/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -333,5 +333,5 @@ flowchart LR
 7. **留档是证据不是产物** → `archiveDocsTree` 失败只记 note，绝不拖垮一次编译。
 
 ??? abstract "Documented components (1)"
-    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/4877231e2f743a3ba18890a9db2d6468a9885218/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
+    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
 
