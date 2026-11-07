@@ -6,7 +6,7 @@ description: EngineOpenAIBridge（lib/engine/openai-bridge.js）是原生引擎�
 # Engine OpenAI 桥转换层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`fd3ef771`](https://github.com/ikliml666/dsh-codewiki/commit/fd3ef771f9b84b535086711edf2e6fc0b62c6940) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`df743bda`](https://github.com/ikliml666/dsh-codewiki/commit/df743bda12b693793139b00990016d9a63536736) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -180,5 +180,5 @@ sequenceDiagram
 插件包 `@local/dsh-codewiki`（见仓库 `package.json`）要求 Node `>=24.9.0`、DSH 宿主 `>=0.2.0-rc.0`；桥服务器监听 `127.0.0.1` 随机端口，不对外暴露，也不新增任何外部网络依赖。
 
 ??? abstract "Documented components (1)"
-    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/fd3ef771f9b84b535086711edf2e6fc0b62c6940/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/df743bda12b693793139b00990016d9a63536736/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
 
