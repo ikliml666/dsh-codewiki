@@ -6,7 +6,7 @@ description: lib/agentic-host.js 是 agentic 文章写作通道里的格式适�
 # Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`11e4224e`](https://github.com/ikliml666/dsh-codewiki/commit/11e4224e6128a4b770f42f9d65782b1fb3a0cef0) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d0adce52`](https://github.com/ikliml666/dsh-codewiki/commit/d0adce524f95d60d0bdb0d12ada263ed951b8fd9) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 模块定位
 
@@ -207,5 +207,5 @@ flowchart LR
 它的价值在「让 [Agentic_Edit 模块](Agentic_Edit.md) 保持纯逻辑可离线测试」这一点上——所有宿主相关的复杂性都被吸收在这一个文件里。
 
 ??? abstract "Documented components (1)"
-    - [`absOf`](https://github.com/ikliml666/dsh-codewiki/blob/11e4224e6128a4b770f42f9d65782b1fb3a0cef0/lib%5Cagentic-host.js) — `lib\agentic-host.js`
+    - [`absOf`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cagentic-host.js) — `lib\agentic-host.js`
 

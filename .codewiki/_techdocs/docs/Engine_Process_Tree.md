@@ -6,7 +6,7 @@ description: EngineProcessTree 是引擎层（lib/engine/）中「树」类职�
 # Engine_Process_Tree 模块文档
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`11e4224e`](https://github.com/ikliml666/dsh-codewiki/commit/11e4224e6128a4b770f42f9d65782b1fb3a0cef0) on 2026-11-06 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d0adce52`](https://github.com/ikliml666/dsh-codewiki/commit/d0adce524f95d60d0bdb0d12ada263ed951b8fd9) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -212,6 +212,6 @@ flowchart TD
 - [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) —— 调度层持有取消信号（`signal`），沿 `runEngine` 一路传到本模块的杀树逻辑。
 
 ??? abstract "Documented components (2)"
-    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/11e4224e6128a4b770f42f9d65782b1fb3a0cef0/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
-    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/11e4224e6128a4b770f42f9d65782b1fb3a0cef0/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
+    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
 
