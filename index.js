@@ -4048,6 +4048,9 @@ function generateToolDefinition(cfg, svc) {
         required: ['cwd', 'scope', 'wikiPath', 'state', 'submitted', 'notes'],
       },
       render(args, value) {
+        // 排除清单命中：一个字都不用说。用户自己排除了这个仓库，他要的就是「别编译它」；
+        // 把原因写进会话只会让模型追问、建议改设置，或者向用户复述一件用户早就决定的事。
+        if (value.state === 'excluded') return [{ type: 'text', text: 'codewiki：本仓库无需处理，继续手头工作。' }]
         const lines = [`codewiki_generate（${value.scope}，${value.cwd}）`]
         if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
         if (value.submitted) lines.push(`已提交后台任务 ${value.jobId}（stage ${value.stage}）——本步到此结束：去做手头其它工作，不要等待；编译产物由插件完成后自动提交入库。进度只在需要时用 codewiki_progress 或侧边栏 CodeWiki 面板查看`)
@@ -4063,9 +4066,9 @@ function generateToolDefinition(cfg, svc) {
       const cwd = normalizeCwd(args.cwd)
       if (!cwd || !fs.existsSync(cwd)) throw new Error(`codewiki_generate：cwd 不存在：${args.cwd ?? ''}`)
       const exHit = excludedItem(cwd, c.excludePaths)
-      // 排除清单**不是错误**：那是用户在面板上显式勾掉「这个仓库不要 CodeWiki」的表态。
-      // 抛错会让模型把它读成「编译失败」并去重试/排障，白烧一轮推理。
-      // 所以这里返回一个明确的终态（state=excluded + 指名原因），让模型直接放弃这个仓库。
+      // 排除清单是用户在面板上的表态，**不是错误、也不需要被转述**：模型看到「被排除」
+      // 会去追问用户为什么、建议改设置，而用户本来就是要它不编译。所以这里给一个不带
+      // 原因的中性终态（notes 为空，state 只给内部用，render 不显示它），模型照常收尾。
       if (exHit) {
         return {
           cwd,
@@ -4073,11 +4076,7 @@ function generateToolDefinition(cfg, svc) {
           wikiPath: '',
           state: 'excluded',
           submitted: false,
-          notes: [
-            `此仓库不编译 CodeWiki：${cwd} 命中了用户设置的排除清单（条目 ${exHit}）。`,
-            '这是用户在面板上主动排除的，不是编译失败，也不是配置错误——不要重试、不要排障、不要换成其它 scope 再试。',
-            '需要为它建 wiki 时，请让用户到侧边栏 CodeWiki 面板的「设置」页把该目录移出排除清单。',
-          ],
+          notes: [],
         }
       }
       const auto0 = args.auto === true // 内部直调（自动调度/面板编译）打的标，工具 schema 不暴露
@@ -4417,6 +4416,8 @@ function updateToolDefinition(cfg, generateDef) {
         required: ['cwd', 'scope', 'wikiPath', 'state', 'submitted', 'notes'],
       },
       render(args, value) {
+        // 同 codewiki_generate：命中排除清单时不解释、不显示 state。
+        if (value.state === 'excluded') return [{ type: 'text', text: 'codewiki：本仓库无需处理，继续手头工作。' }]
         const lines = [`codewiki_update（${value.cwd}）`]
         if (value.wikiPath) lines.push(`wiki：${value.wikiPath}`)
         if (value.submitted) lines.push(`更新已开始（任务 ${value.jobId}，stage ${value.stage}）——已提交后台编译，本步到此结束：继续下一项工作，不要等待，也不要去查进度；产物由插件自己提交入库`)
