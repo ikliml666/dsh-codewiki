@@ -31,8 +31,7 @@ window.__ModuleLoader__.load({
     const REPOS_POLL_MS = 10000
     // queued 单列在最前：单项目串行时后提交的项目在此等待，阶段条第 0 个点亮表示排队。
     // 后面五步就是编译真实发生的事，一步不多：准备（探测环境+解析代码图+聚类）→ 写作 →
-    // 校验 → 索引 → 提交。旧值 crosscut（横切）随单轮写作通道退役，原生通道
-    // （唯一通道）从不经过它。
+    // 校验 → 索引 → 提交。
     // 「校对」不再单列一步：它是质量门死链检查的修复动作（检测→改正文→复检），与质量门
     // 本身是一件事的两半，分两格只会让人以为有两道重复检查。细分名称仍在活动流里可见
     // （NATIVE_STAGE_KEYS.proofread）。
@@ -61,8 +60,8 @@ window.__ModuleLoader__.load({
     // 色相挑的是彼此相距 40° 上下、且在中低饱和下仍能分辨的几支：青→蓝→紫→琥珀→绿。
     // 明度与饱和度写在 CSS（58% / 52%），两套主题下都不用改。
     const STAGE_HUE = { queued: 210, prepare: 196, articles: 262, validate: 32, index: 152, commit: 220 }
-    // 历史任务里还留着已退役的阶段名：不映射的话 indexOf 得 -1，步骤条在失败/取消时
-    // 会整条熄灭、不标红，用户看不出卡在哪一步。review 在 0.17.41 并进 validate。
+    // 已落盘的历史任务里可能还留着别的阶段名：不映射的话 indexOf 得 -1，步骤条在
+    // 失败/取消时会整条熄灭、不标红，用户看不出卡在哪一步。
     const LEGACY_STAGE = { plan: 'prepare', crosscut: 'articles', review: 'validate' }
     const stageOf = (job) => LEGACY_STAGE[job?.stage] ?? job?.stage
 
@@ -83,8 +82,6 @@ window.__ModuleLoader__.load({
       maxConcurrencyHint: '默认档请求并发 1–8。',
       moduleConcurrency: '模块生成并行度',
       moduleConcurrencyHint: '同层模块并行写文档；留空或 0 跟随默认档，1 = 严格串行。',
-      bigConcurrency: '大档并发上限',
-      bigConcurrencyHint: '大档并发 1–8；留空跟随默认档。',
       serialProjects: '单项目串行',
       serialProjectsHint: '开启时只推进一个仓库；关闭后按并行上限推进。',
       parallelProjects: '并行项目上限',
@@ -165,30 +162,13 @@ window.__ModuleLoader__.load({
       effortByStageArticles: '文章写作',
       effortByStageProofread: '语义校对',
       effortByStageValidate: '质量门',
-      secBig: '大档模型（超长输入）',
-      secBigHint: '超过普通档单请求预算（110k）的模块改由这里一次写完。只对 Node 兼容通道生效（关闭「使用原生引擎」时）；原生通道的输入预算由引擎按模块切分，不经这一档。',
-      bigEnabled: '启用大档模型（超长输入）',
-      bigEnabledHint: '关闭后超预算请求不再换模型；下方配置保留。',
-      requestLimit: '单模块请求上限',
-      requestLimitHint: '单模块请求次数 1–1000；太小会让复杂模块中断成部分完成。',
-      invalidRequestLimit: '单模块请求上限需在 1–1000 之间',
-      bigProvider: '大档提供商',
-      bigProviderOff: '（未启用大档）',
-      bigProviderHint: '仅在启用大档时生效；凭证同样由宿主解析。',
-      bigModel: '大档模型',
-      bigModelHint: '建议选长上下文的模型。',
-      bigReasoningEffort: '大档思考程度',
-      bigReasoningEffortHint: '取自模型目录；留空用模型默认。',
-      bigTokenBudget: '大档输入预算（token）',
-      bigTokenBudgetHint: '须大于 110000，且不超过模型上下文扣掉输出后的余量。',
-      bigDisabled: '大档通道已关闭（提供商留空）——超大输入将退回会话通道兜底。',
       articleLanguage: '文章语言',
       articleLanguageHint: '留空则跟随当前会话语言。',
       binaryPath: 'cw 可执行路径',
       binaryPathHint: '留空优先用 PATH 里的 cw，其次插件自带 bin/cw.exe。',
       secScale: '并发与语言',
       secNative: '原生引擎',
-      secNativeHint: '关闭后退回内置 Node 流水线（兼容通道，不再加新能力）。',
+      secNativeHint: '编译由上游 FSoft 引擎完成；关掉后不编译。',
       nativeEngine: '使用原生引擎',
       nativeEngineHint: '需要本机 Python 3.10+；环境不闭合会明确失败，不会悄悄换通道。',
       nativeEnginePython: 'Python 解释器',
@@ -366,8 +346,6 @@ window.__ModuleLoader__.load({
       maxConcurrencyHint: 'In-flight requests for the default tier (batchModel), 1–8.',
       moduleConcurrency: 'Module parallelism',
       moduleConcurrencyHint: 'Modules on the same layer write concurrently; parents still wait for every child. Empty or 0 follows the default-tier concurrency; 1 is strictly sequential.',
-      bigConcurrency: 'Big-tier concurrency',
-      bigConcurrencyHint: 'In-flight requests for the big tier (bigModel), 1–8; empty follows the default tier.',
       serialProjects: 'One project at a time',
       serialProjectsHint: 'Only one repository compiles at a time; later submissions queue. Turn off to compile several repos in parallel.',
       parallelProjects: 'Parallel repo limit',
@@ -444,30 +422,13 @@ window.__ModuleLoader__.load({
       effortByStageArticles: 'Article writing',
       effortByStageProofread: 'Semantic proofread',
       effortByStageValidate: 'Quality gate',
-      secBig: 'Large-input model',
-      secBigHint: 'Modules over the normal 110k request budget use this model. Only the Node compatibility channel (native engine off) uses this tier; the native channel splits input per module inside the engine.',
-      bigEnabled: 'Enable large-tier model (very long input)',
-      bigEnabledHint: 'When off, requests above the normal budget stay at the normal tier. Configured values are kept for re-enabling.',
-      requestLimit: 'Per-module request limit',
-      requestLimitHint: 'Requests allowed while writing one module, 1-1000. Too low and complex modules stop as partial.',
-      invalidRequestLimit: 'Per-module request limit must be between 1 and 1000',
-      bigProvider: 'Large-tier provider',
-      bigProviderOff: '(large tier off)',
-      bigProviderHint: 'Only used while the large tier is on.',
-      bigModel: 'Large-tier model',
-      bigModelHint: 'Model id under that provider.',
-      bigReasoningEffort: 'Large-tier reasoning effort',
-      bigReasoningEffortHint: 'From the model catalog. Empty = model default.',
-      bigTokenBudget: 'Large-tier input budget (tokens)',
-      bigTokenBudgetHint: 'Must exceed the normal 110000 and fit in the model context window after reserving output.',
-      bigDisabled: 'Large tier off (empty provider) — oversized input falls back to the session channel.',
       articleLanguage: 'Article language',
       articleLanguageHint: 'Empty follows the current session language.',
       binaryPath: 'cw binary path',
       binaryPathHint: 'Empty = cw on PATH first, bundled bin/cw.exe as fallback.',
       secScale: 'Concurrency & language',
       secNative: 'Native engine',
-      secNativeHint: 'Off falls back to the built-in Node pipeline (compatibility channel, no new features).',
+      secNativeHint: 'Compilation is done by the upstream FSoft engine; off means no compilation.',
       nativeEngine: 'Use the native engine',
       nativeEngineHint: 'Needs local Python 3.10+ with a closed dependency environment; an unclosed environment fails as engine-deps instead of silently switching channels.',
       nativeEnginePython: 'Python interpreter',
@@ -803,7 +764,7 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-task][data-state="failed"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-textarea] { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 12px; line-height: 18px; padding: 6px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); box-sizing: border-box; }',
       // 吞吐徽标：方角，读数用等宽数字对齐
-      // 分段带就是进度条本体（0.17.46）：段宽=该阶段占总时间的比例，段色=阶段身份。
+      // 分段带就是进度条本体：段宽=该阶段占总时间的比例，段色=阶段身份。
       // 段色用固定色相而非主题色：五个阶段必须彼此可分辨，全用 brand-primary 就退化成一条纯色。
       // 明度锁在 52%，深浅两套主题下都能读；未跑完的部分用同色低透明度打底，所以
       // 「这段是什么」（色相）与「这段做到哪」（填充宽度）互不占用同一个通道。
@@ -1017,11 +978,11 @@ window.__ModuleLoader__.load({
 
         // 设置页可自动保存的字段表：新增字段必须同时进这里与渲染，否则改了不会落盘。
         const SAVE_KEYS = [
-          'enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency', 'bigConcurrency',
+          'enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency',
           'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit',
           'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
-          'bigProvider', 'bigModel', 'bigReasoningEffort', 'bigTokenBudget', 'excludePaths',
-          'autoUpdate', 'autoUpdateMin', 'bigEnabled', 'requestLimit',
+          'excludePaths',
+          'autoUpdate', 'autoUpdateMin', 'requestLimit',
           'nativeEngine', 'nativeEnginePython', 'nativeEngineEntry', 'nativeEngineTimeoutMs',
           'updateRung', 'updateTauNb', 'updateTauGrow', 'updateTauFull', 'updateTauTree',
         ]
@@ -1126,13 +1087,10 @@ window.__ModuleLoader__.load({
             return state
           }
           const effortsState = useEfforts(draft?.batchProvider, draft?.batchModel)
-          const bigEffortsState = useEfforts(draft?.bigProvider, draft?.bigModel)
 
-          // 一个模型的三个字段（提供商 / 模型 / 思考程度），普通档与大档共用同一套渲染与
-          // 目录联动：换提供商清空模型与旧档位、目录里的模型下拉、档位来自 model-efforts 端点。
-          // allowEmptyProvider=true 时多给一个「（未启用）」空选项：大档关闭时不必填提供商，
-          // 空值只表示「这条任务不走指定 provider」，开关本身是 bigEnabled。
-          const modelTrio = ({ pKey, mKey, eKey, state, allowEmptyProvider, providerPlaceholder }) => {
+          // 一个模型的三个字段（提供商 / 模型 / 思考程度）：目录联动——换提供商清空模型
+          // 与旧档位、目录里的模型下拉、档位来自 model-efforts 端点。
+          const modelTrio = ({ pKey, mKey, eKey, state, providerPlaceholder }) => {
             const currentProvider = String(draft[pKey] ?? '').trim()
             const entry = Array.isArray(catalog) ? catalog.find((p) => p?.id === currentProvider) : null
             const models = entry?.models
@@ -1158,7 +1116,6 @@ window.__ModuleLoader__.load({
                         setPath(eKey, '') // 换模型后旧档位可能不存在
                       },
                     },
-                    ...(allowEmptyProvider ? [el('option', { key: '__none', value: '' }, t('bigProviderOff'))] : []),
                     (Array.isArray(catalog) ? catalog : []).map((p) => el('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? `${p.name}（${p.id}）` : p.id)),
                     // 已配置但目录里没有的 provider（例如刚删掉的渠道）：保留选项，避免静默丢失配置
                     currentProvider && !(Array.isArray(catalog) ? catalog : []).some((p) => p?.id === currentProvider)
@@ -1195,7 +1152,6 @@ window.__ModuleLoader__.load({
               el('label', null, t(eKey)),
               el('div', { 'data-dscw-field': '' },
                 (() => {
-                  if (!currentProvider && allowEmptyProvider) return el('div', { 'data-dscw-hint': '' }, t('bigDisabled'))
                   if (!currentProvider) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortNone'))
                   if (state.loading && !state.efforts.length) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortLoading'))
                   if (state.error) return el('div', { 'data-dscw-hint': '' }, t('batchReasoningEffortError').replace('{error}', state.error))
@@ -1251,9 +1207,6 @@ window.__ModuleLoader__.load({
           const validateDraft = (d) => {
             const concurrency = Number(d?.maxConcurrency)
             if (Number.isFinite(concurrency) && (concurrency < 1 || concurrency > 8 || !Number.isInteger(concurrency))) return t('invalidConcurrency')
-            // 大档并发：0 = 跟随默认档；负值/小数/超硬顶一律拦下（0 留给「跟随」语义，不报错）
-            const bigConc = Number(d?.bigConcurrency)
-            if (Number.isFinite(bigConc) && bigConc !== 0 && (bigConc < 1 || bigConc > 8 || !Number.isInteger(bigConc))) return t('invalidConcurrency')
             // 单模块请求上限：拦住非整数与越界，避免 0 或负数被当成「不限制」
             const reqLimit = Number(d?.requestLimit)
             if (!Number.isInteger(reqLimit) || reqLimit < 1 || reqLimit > 1000) return t('invalidRequestLimit')
@@ -1423,8 +1376,7 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               ),
-              // 原生引擎：决定走 FSoft 原生流水线还是内置 Node 兼容通道，以及引擎的
-              // Python 解释器、入口脚本与超时。这四项此前只能改配置文件。
+              // 原生引擎：开关、Python 解释器、入口脚本与超时。
               el('section', { 'data-dscw-sec': '' },
                 el('div', { 'data-dscw-head': '' }, el('h4', null, t('secNative'))),
                 el('div', { 'data-dscw-hint': '' }, t('secNativeHint')),
@@ -1506,7 +1458,7 @@ window.__ModuleLoader__.load({
                 el('div', { 'data-dscw-head': '' }, el('h4', null, t('secCompile'))),
                 el('div', { 'data-dscw-hint': '' }, t('secCompileHint')),
                 el('div', { 'data-dscw-grid': '' },
-                  ...modelTrio({ pKey: 'batchProvider', mKey: 'batchModel', eKey: 'batchReasoningEffort', state: effortsState, allowEmptyProvider: false, providerPlaceholder: 'workbuddy' }),
+                  ...modelTrio({ pKey: 'batchProvider', mKey: 'batchModel', eKey: 'batchReasoningEffort', state: effortsState, providerPlaceholder: 'workbuddy' }),
                   el('label', null, t('requestLimit')),
                   el('div', { 'data-dscw-field': '' },
                     el(Input, {
@@ -1566,47 +1518,6 @@ window.__ModuleLoader__.load({
                     ),
                     el('div', { 'data-dscw-hint': '' }, t('effortByStageHint')),
                   ),
-                ),
-              ),
-              // 大档模型（超长输入）：超过普通档单请求预算的模块改用它，仍全部在插件内完成。
-              // bigEnabled 是唯一开关（0.17.5 前靠 bigProvider 留空隐式关闭）：关掉后整组字段
-              // 收起，但取值保留在配置里，重新开启不用重填。
-              el('section', { 'data-dscw-sec': '' },
-                el('div', { 'data-dscw-head': '' }, el('h4', null, t('secBig'))),
-                el('div', { 'data-dscw-hint': '' }, t('secBigHint')),
-                el('div', { 'data-dscw-grid': '' },
-                  el('div', { 'data-dscw-toggle': '' },
-                    el('label', null, t('bigEnabled')),
-                    el(Switch, {
-                      checked: draft.bigEnabled !== false,
-                      onChange: (v) => setPath('bigEnabled', v),
-                      label: t('bigEnabled'),
-                    })
-                  ),
-                  el('div', { 'data-dscw-hint': '' }, t('bigEnabledHint')),
-                  ...(draft.bigEnabled !== false
-                    ? [
-                      ...modelTrio({ pKey: 'bigProvider', mKey: 'bigModel', eKey: 'bigReasoningEffort', state: bigEffortsState, allowEmptyProvider: true, providerPlaceholder: 'volces-ark' }),
-                      el('label', null, t('bigTokenBudget')),
-                      el('div', { 'data-dscw-field': '' },
-                        el(Input, {
-                          value: String(draft.bigTokenBudget ?? ''),
-                          onChange: (e) => setPath('bigTokenBudget', e.target.value === '' ? 0 : Number(e.target.value)),
-                          placeholder: '420000',
-                        }),
-                        el('div', { 'data-dscw-hint': '' }, t('bigTokenBudgetHint')),
-                      ),
-                      el('label', null, t('bigConcurrency')),
-                      el('div', { 'data-dscw-field': '' },
-                        el(Input, {
-                          type: 'number', min: 0, max: 8, step: 1,
-                          value: String(draft.bigConcurrency ?? 0),
-                          onChange: (e) => setPath('bigConcurrency', Number(e.target.value) || 0),
-                        }),
-                        el('div', { 'data-dscw-hint': '' }, t('bigConcurrencyHint')),
-                      ),
-                    ]
-                    : []),
                 ),
               ),
               // 调度与排除
@@ -1757,7 +1668,7 @@ window.__ModuleLoader__.load({
         // 六步步骤条（排队 + 五个真实阶段）：已完成绿点（title 带各阶段耗时）、
         // 当前阶段实心点+实时计时、失败/取消在最后计时段标红/黄。终态 done 全绿。
         const stepName = (s) => tBound(`step${s.charAt(0).toUpperCase()}${s.slice(1)}`)
-        // 阶段耗时按「当前阶段名」取：历史任务里的键可能是已退役的 plan/crosscut。
+        // 阶段耗时按「当前阶段名」取：历史任务里的键可能是 plan/crosscut。
         const timingsOf = (job) => {
           const out = {}
           for (const [k, v] of Object.entries(job.stageTimings ?? {})) out[LEGACY_STAGE[k] ?? k] = v
@@ -1815,7 +1726,7 @@ window.__ModuleLoader__.load({
         }
         // 准备段细分：只在「当前正处在 prepare」时展开。终态不展开的理由——
         // 终态的分段带按真实耗时定宽，prepare 整段只占一格，硬拆成三段后每段
-        // 都只有几个像素，反而看不清；且 nativeStageTimings 是 0.17.56 才有的
+        // 都只有几个像素，反而看不清；且 nativeStageTimings 只在较新的任务里才有
         // 字段，老任务根本没有，展开会得到三根 0 宽的线。
         const prepareRows = (job) => {
           const cur = job.nativeStage
@@ -1867,7 +1778,7 @@ window.__ModuleLoader__.load({
         const hasLiveSegments = (job) => ACTIVE_STAGES.some((s) => s !== 'queued' && stageWeight(job, s, true) > 0)
         // 阶段可视化：一条分段带，段宽的含义见 stageWeight。早先是每阶段一行独立轨道，
         // 一张卡就吃掉 300px 高度，同一个信息用分段带表达只占 5px。
-        // 0.17.46 起它不再另起一行——用户要的是「一条进度条，各截断按时间占比用不同颜色」，
+        // 它不另起一行——用户要的是「一条进度条，各截断按时间占比用不同颜色」，
         // 所以这条带直接就是主进度条本身，上面的 [data-dscw-p-bar] 只在没有分段信息时兜底。
         // 引擎子阶段（env/graph/cluster）在带子里画成一格 prepare 的三等分。
         // 色相从 prepare 的 196 往两侧各偏 12°，既能看出「都属于准备」，
@@ -1875,7 +1786,7 @@ window.__ModuleLoader__.load({
         const PREPARE_HUE = { env: 184, graph: 196, cluster: 208 }
         // 一条带子里只画**已经在跑或跑过**的阶段。未执行的阶段既不占宽度也不上色——
         // 早先按权重把 4 个未执行阶段也铺成浅色块，等于先摆出四条空槽，用户看到
-        // 的是一排「还没轮到」的颜色而不是「现在到哪了」（0.17.58）。
+        // 的是一排「还没轮到」的颜色而不是「现在到哪了」。
         // 为了让带子的总宽不随阶段推进而跳，未执行那部分的权重留成一段透明 spacer。
         const stageSegments = (job, running) => {
           const rows = stageRows(job)
@@ -2765,8 +2676,8 @@ window.__ModuleLoader__.load({
               const { q, run } = elapsedSplit(job, Date.now())
               meta.push(`${t('totalTimeLabel')} ${fmtMs(q + run)}（${t('queueWaitLabel')} ${fmtMs(q)} · ${t('runTimeLabel')} ${fmtMs(run)}）`)
             }
-            // 自动提交结果（0.10.9）：成功显示短 sha，无改动/失败各一句。
-            // 0.10.10：失败原因（可能是 git stderr 摘录，几十字）放进任务行 title，
+            // 自动提交结果：成功显示短 sha，无改动/失败各一句。
+            // 失败原因（可能是 git stderr 摘录，几十字）放进任务行 title，
             // 不塞进 meta——否则一行 meta 被原因撑爆，把阶段/用时挤出可视区。
             let acTitle = null
             if (!active && job.autoCommit) {
@@ -2778,7 +2689,7 @@ window.__ModuleLoader__.load({
                 if (ac.reason) acTitle = `${t('autoCommitPending')}：${ac.reason}`
               }
             }
-            // 完整性终态（0.14.0）：partial 表示「写成了部分文章，但有变化没被消化」，
+            // 完整性终态：partial 表示「写成了部分文章，但有变化没被消化」，
             // 把首个阻塞原因直接放进任务行——只说「部分完成」而不说为什么等于没说。
             // 阻塞原因是几十字的中文句子，塞进 meta 会撑爆一行，所以放 title 悬停看。
             let blockTitle = null
@@ -2831,7 +2742,7 @@ window.__ModuleLoader__.load({
               ),
               // 进度一行放完：大数字 · 进度条 · 当前阶段说明。早先数字块和进度条各占一行，
               // 加上七行轨道，一张卡能吃掉半屏——信息量没变，高度翻了四倍。
-              // 0.17.46 起只有一条进度条：分段带就是它。段宽=该阶段时间占比，色相=阶段身份。
+              // 只有一条进度条：分段带就是它。段宽=该阶段时间占比，色相=阶段身份。
               // 阶段身份用颜色表达，完成度用填充宽度表达，互不抢占同一通道。
               // 失败/取消的任务总进度是 null，但「时间花在哪一步」恰恰是它们最该看的，
               // 所以这一行在 pct 为 null 时只要还有耗时数据就照画，只是不报百分比数字。
@@ -2887,7 +2798,7 @@ window.__ModuleLoader__.load({
                         el('span', { 'data-text': '' }, row.text))
                     })))
                 : null,
-              // 引擎日志（0.17.1）：此前 job.nativeLogs 既不进 jobSummary 也不渲染，
+              // 引擎日志：此前 job.nativeLogs 既不进 jobSummary 也不渲染，
               // 一次 99 分钟的编译在界面上完全不可解释。这里给出「最近 40 条」的
               // 可展开视图，完整 NDJSON 引导到端点，避免把面板轮询变成大文件下载。
               engineLogBlock(job),

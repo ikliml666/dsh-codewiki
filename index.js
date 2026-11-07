@@ -13,15 +13,13 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
-import { runAgenticArticles, markBigAgenticTasks, sourceTokensOf } from './lib/articles-agentic.js'
-import { buildOpeningPrompt, TOOL_SCHEMAS, DEFAULT_MAX_STEPS } from './lib/agentic.js'
 import { collectChangeSet } from './lib/change-set.js'
 import { withQuotepathOff } from './lib/git-paths.js'
 import {
-  judgeOutcome, buildUpdateRecord, saveUpdateRecord, loadUpdateRecord,
-  describeOutcome, isTerminalStage, TERMINAL, UPDATE_RECORD_REL,
+  judgeOutcome, buildUpdateRecord, saveUpdateRecord,
+  describeOutcome, TERMINAL, UPDATE_RECORD_REL,
 } from './lib/update-record.js'
-import { inspectArticle, hasBlockingIssue, issueSummary } from './lib/article-contract.js'
+import { inspectArticle } from './lib/article-contract.js'
 // 阶段 4：原生引擎（FSoft Python）通道。整条裁决链在 native-run.js 里固定，
 // 这里只负责「起进程 / 收进度 / 按结果判终态」——绝不在 tick 里重写裁决。
 import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from './lib/engine/native-run.js'
@@ -41,17 +39,16 @@ const CW_SUBCOMMANDS = ['init', 'status', 'index', 'meta', 'path', 'projects', '
 const CONCURRENCY_HARD_CAP = 8
 // 默认并发：2 路并发足够，且不触发上游限流（glm-5.3-flash 实测无压力）
 const DEFAULT_CONCURRENCY = 2
-// 编译模型没有默认值（0.17.34）：provider/model 一律由用户在设置页选定。
+// 编译模型没有默认值：provider/model 一律由用户在设置页选定。
 // 早先默认 volces-ark/glm-5.3-flash，等于替用户拍板「用这个模型编译」——模型目录、
 // 凭证、上下文窗口都随环境不同，猜错的表现是上游 200 + 空内容静默空跑（见 effortError 注释）。
 // 留空的后果在提交任务时显式报错（见 submitJob 的唯一模型通道校验），不会静默失败。
 // 大档单请求输入预算：模型 512k 上下文，留出输出与系统提示余量后取 420k
-const DEFAULT_BIG_TOKEN_BUDGET = 420000
 // 单模块写作的 LLM 请求上限（上游叫 request_limit）：上游默认 100，但 1b4af43 起
 // 写作校验会为写不出页面的模块续发最多 2 次补写提醒，每次提醒各自吃一份预算；
 // 真机上 change_set_management 模块撞满 100 次请求后抛错，已写好的 31 篇被记成 partial。
 // 300 是「大模块一轮能写完」的经验上限，同时保留硬顶 1000 防止配置失误拖成一小时。
-const DEFAULT_REQUEST_LIMIT = 100  // 0.17.12 回退到上游默认值（用户要求先全部改为上游逻辑验证）
+const DEFAULT_REQUEST_LIMIT = 100  // 上游写作 agent 的默认单模块请求预算
 // 编译产物路径：自动提交、忽略检测、待提交提醒共用的唯一定义。永远只认这两个 pathspec，
 // 不扩成 -A / 整个工作树（否则会把用户手上的其它改动卷进自动提交）。
 const WIKI_PATHS = ['.codewiki', 'CodeWiki.md']
@@ -76,15 +73,9 @@ export const Config = z.object({
   batchModel: z.string().default('').volatile().description('编译模型（全部模型环节共用）：该 provider 下的模型 id。留空将无法提交任务'),
   batchReasoningEffort: z.string().default('').volatile().description('思考程度（该模型的 reasoning effort 档位 id）：留空=用模型的默认档；可选值由模型目录实时读取（/api/codewiki/model-efforts）'),
   effortByStage: z.dict(z.string()).default({}).volatile().description('按环节分别设思考档位：key 是阶段名（graph/cluster/articles/proofread/validate/index/baseline/commit），value 是该环节的 reasoning effort 档位。缺省用 batchReasoningEffort 兜底；留空的环节也走兜底'),
-  bigEnabled: z.boolean().default(false).volatile().description('大档模型（超长输入）开关：关闭后超过普通预算的请求不再换大上下文模型，直接按大档预算兜底或退回会话通道；大档的模型与预算配置保留，重新开启无需重填。只对 Node 兼容通道（nativeEngine=false）生效——原生通道的输入预算由 FSoft 引擎按模块切分，不经过这一档'),
-  bigProvider: z.string().default('').volatile().description('大档模型提供商（单批输入超过大档阈值时改用的模型，通常是长上下文更便宜的档）：bigEnabled 关闭时不生效，退回会话通道兜底。仅 Node 兼容通道使用'),
-  bigModel: z.string().default('').volatile().description('大档模型 id（该 provider 下，仅 Node 兼容通道使用）'),
-  bigReasoningEffort: z.string().default('').volatile().description('大档模型思考程度：留空=用模型默认档；可选值由模型目录实时读取（仅 Node 兼容通道使用）'),
-  bigTokenBudget: z.number().default(DEFAULT_BIG_TOKEN_BUDGET).volatile().description('大档单请求输入预算（token）：输入超 110k 普通预算的请求改用大档；模块源码总量超此值才拆观察→合成批，单文件超此值转会话通道兜底（仅 Node 兼容通道使用）'),
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
-  moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（与 bigConcurrency 同一约定，真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
+  moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
   requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 100（上游默认值）；调小能压住单模块成本，调大能减少大模块被预算中断的补写次数'),
-  bigConcurrency: z.number().default(0).volatile().description('大档并发上限（1–8），硬顶 8：留空或 0 = 跟随默认档并发。大档与默认档各自独立限流、同时推进，总在飞 = 两者之和'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -94,7 +85,7 @@ export const Config = z.object({
   autoUpdate: z.boolean().default(false).volatile().description('自动更新：定时扫描已编译过的工作区，检测到变更自动提交增量编译（scope=auto）'),
   autoUpdateMin: z.number().default(30).volatile().description('自动更新扫描间隔（分钟），最小 5'),
   workspaceOnly: z.boolean().default(true).volatile().description('任务页只显示属于已添加 dsh 工作区（宿主工作区列表）的任务'),
-  nativeEngine: z.boolean().default(true).volatile().description('编译通道（0.16.0 起默认开启）：原生引擎通道（上游 FSoft Python 引擎）走「环境→图→聚类→文章→校验→索引→基线→提交」原生流水线，终态由质量门+落地器严格裁决；关闭=退回内置 Node 流水线（0.16.0 起降级为兼容通道，不再接收新能力）。原生通道需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道'),
+  nativeEngine: z.boolean().default(true).volatile().description('编译开关：开启后走上游 FSoft Python 引擎的「环境→图→聚类→文章→校验→索引→基线→提交」流水线，终态由质量门+落地器严格裁决。引擎需要本机 Python 3.10+ 与闭合的依赖环境（tools/fsoft-engine/setup-env.sh），环境不闭合时以 engine-deps 明确失败'),
   nativeEnginePython: z.string().default('').volatile().description('原生引擎的 Python 解释器路径（装了 FSoft 引擎的 venv 里的 python）：留空依次用环境变量 DSH_CODEWIKI_PYTHON、PATH 里的 python'),
   nativeEngineEntry: z.string().default('').volatile().description('原生引擎入口脚本（默认插件自带 lib/engine/python/entry.py）'),
   nativeEngineTimeoutMs: z.number().default(0).volatile().description('原生引擎单次编译超时（毫秒）：0=用默认 180 分钟（真机全量实测约 174 分钟）；超时由进程树终止兜底，已写文章按 partial 抢救'),
@@ -145,15 +136,10 @@ export function updateOptionsOf(cfg) {
   return opts
 }
 
-// 配置 → 内部运行参数。大档开关在这里一次性收口：下游有五六处按「bigProvider 非空」
-// 决定要不要换大上下文模型，逐个判断迟早漏一处，所以关闭时直接清空 provider。
-// 模型 id 与预算保留——重新开启时不必重填。
+// 配置 → 内部运行参数。
 export function liveConfig(config) {
   const c = config ?? {}
   const concurrency = Number(val(c.maxConcurrency))
-  const bigConcurrency = Number(val(c.bigConcurrency))
-  // 大档默认关闭（0.17.34）：缺省即关闭，只有显式开成 true 才启用
-  const bigEnabled = val(c.bigEnabled) === true
   return {
     enabled: val(c.enabled) ?? true,
     binaryPath: String(val(c.binaryPath) ?? '').trim(),
@@ -172,20 +158,11 @@ export function liveConfig(config) {
       }
       return out
     })(),
-    bigEnabled,
-    bigProvider: bigEnabled ? String(val(c.bigProvider) ?? '').trim() : '',
-    bigModel: String(val(c.bigModel) ?? '').trim(),
-    bigReasoningEffort: String(val(c.bigReasoningEffort) ?? '').trim(),
-    bigTokenBudget: Math.max(BATCH_TOKEN_BUDGET, Number(val(c.bigTokenBudget)) || DEFAULT_BIG_TOKEN_BUDGET),
     maxConcurrency: Number.isFinite(concurrency) && concurrency >= 1
       ? Math.min(concurrency, CONCURRENCY_HARD_CAP)
       : DEFAULT_CONCURRENCY,
-    // 大档并发：0/未填 = 跟随默认档（与 0.12.1 前的单一池行为等价）
-    bigConcurrency: Number.isFinite(bigConcurrency) && bigConcurrency >= 1
-      ? Math.min(bigConcurrency, CONCURRENCY_HARD_CAP)
-      : 0,
     // 原生引擎的模块生成并行度：与 maxConcurrency（LLM 请求并发）是两个独立的设置项，
-    // 不能混用同一个值——但 0/未填 时按 bigConcurrency 的既有约定跟随默认档并发。
+    // 不能混用同一个值——0/未填 时跟随默认档并发。
     moduleConcurrency: (() => {
       const raw = Number(val(c.moduleConcurrency))
       return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), CONCURRENCY_HARD_CAP) : 0
@@ -226,21 +203,6 @@ export function liveConfig(config) {
   }
 }
 
-// 大档模型的运行参数（写文章与校对两条旧通道各拼一份，逐字相同）。
-// provider 留空 = 大档不可用，返回 null；模型留空也按不可用处理——拿空 model 去请求
-// 只会在上游换回 200 + 空内容，不如让调用方按「没有大档」走普通预算。
-export function bigTierOf(cfg) {
-  const provider = String(cfg?.bigProvider ?? '').trim()
-  const model = String(cfg?.bigModel ?? '').trim()
-  if (!provider || !model) return null
-  const effort = String(cfg?.bigReasoningEffort ?? '').trim()
-  return {
-    provider,
-    model,
-    ...(effort ? { reasoningEffort: effort } : {}),
-    budget: Math.max(BATCH_TOKEN_BUDGET, Number(cfg?.bigTokenBudget) || DEFAULT_BIG_TOKEN_BUDGET),
-  }
-}
 
 // ---------------------------------------------------------------------------
 // cw 进程
@@ -296,15 +258,14 @@ function runCw(binary, cwd, args, timeoutMs = 120000, signal) {
 }
 
 // ---------------------------------------------------------------------------
-// 原生引擎通道（0.16.0 起为默认通道）：上游 FSoft Python 引擎 + 薄适配层
+// 原生引擎通道：上游 FSoft Python 引擎 + 薄适配层
 //
 // 语义（务必分清，否则会「以为换了通道其实没换」）：
-//   nativeEngine          = 编译是否走原生通道（0.16.0 起默认 true；
-//                           false 显式退回内置 Node 流水线，即兼容通道）
+//   nativeEngine          = 编译开关（关掉后不编译，没有替代通道）
 //   nativeEnginePython    = 引擎解释器（装了 FSoft 的 venv python）
 // full 与 stale 增量都接管；具体走 generate 还是 update 由 native-run.js 依 change-set
 // 与受管状态决议，这里只如实把 scope 传下去。环境不闭合以 engine-deps 明确失败，
-// 绝不中途悄悄换成 Node 通道冒充成功。
+// 绝不中途换用其它实现冒充成功。
 // ---------------------------------------------------------------------------
 
 // 原生通道是否用于本次任务。只有「开关打开 + full 编译 + 有解释器」才走；
@@ -351,7 +312,7 @@ export function resolveNativePython(cfg) {
 // 真实凭证从不进入子进程环境，也从不进日志。
 // 注意：模型名必须由调用方显式传入。llm-bridge 的返回对象只有
 // {url, placeholderKey, port, stats, close}——它**不含** model 字段（桥只负责转发，
-// 不知道也不该知道模型选择）。曾经写成 `bridge.model`，实测得到 undefined → 
+// 不知道也不该知道模型选择）。不能用 `bridge.model`：它恒为 undefined → 
 // CODEWIKI_MAIN_MODEL 变成空串 → entry.py 的 _model_config 判「缺少模型通道」→
 // 每次原生编译都在 cluster 阶段以 engine-model 失败，且失败原因看起来像环境没配好。
 export function nativeEnginePlan(channel, { requestId = '', bridge = null, model = '', clusterModel = '' } = {}) {
@@ -384,17 +345,6 @@ export function nativeEnginePlan(channel, { requestId = '', bridge = null, model
 // vendor/codewiki/FORK.md。
 export function normalizeArticlePath(p) { return String(p ?? '').replace(/\\/g, '/') }
 
-// cw index 直接写盘 _index.md：把 [[link|title]] 链接内的 `\` 规范化为 `/`。
-// 只动链接头（`[[` 到 `|` 之间），不碰标题与正文；文件不存在时静默跳过。
-export function normalizeIndexLinks(cwd) {
-  const p = path.join(cwd, '.codewiki', '_index.md')
-  let text
-  try { text = fs.readFileSync(p, 'utf8') } catch { return false }
-  const fixed = text.replace(/\[\[([^\]|\n]*?)\|/g, (m, link) => `[[${link.replace(/\\/g, '/')}|`)
-  if (fixed === text) return false
-  fs.writeFileSync(p, fixed)
-  return true
-}
 
 export function parseStatus(stdout) {
   const s = stdout ?? ''
@@ -435,88 +385,7 @@ function countWikiArticles(wikiPath) {
   } catch { return null }
 }
 
-// 清理「成为孤儿」的模块文章。
-//
-// 背景（真实缺陷）：模块划分会随聚类结果变化——上一次编译产出 modules/plugin-core.md，
-// 下一次同样的代码被切成 modules/core-and-config.md + modules/core-application.md，
-// 旧的两篇就再也没人重写、也没人删除。它们留在 .codewiki/modules/ 下成为死文章：
-// 被 _index.md 遗漏、内容永久过期，还会让 test-wiki-anchors 一直拿过期的行号去校验
-// 已经挪位的源码（实测 251 处失败里有 169 处来自这类孤儿）。
-//
-// 安全边界（宁可留着也不能误删）：
-//   1. 只在**全量编译**（kind=full 且本次 modules 清单完整）时动手。增量编译只重写
-//      变化模块，拿它的清单当全集会把「本次没变的模块」全删掉。
-//   2. 只删 .codewiki/modules/*.md —— concepts/、_architecture.md
-//      等横切产物不归模块规划管，一律不碰。
-//   3. 只删「本次 modules 清单里没有、且不在本次 job.articles 里」的文件；本次写过但
-//      失败的也保留（失败可能是暂时的，不该顺手删证据）。
-//   4. 删除失败只记账不中断：写入 job.plan.prunedFailed 并 note，不抛错（一处删不掉
-//      不该让整轮编译失败），但也不能像旧实现那样 catch 空块静默吞掉——删不掉的孤儿
-//      会一直留在 modules/ 下，事后无从追溯。
-export function pruneOrphanModules(job) {
-  const removed = []
-  const failed = []
-  if (job?.kind !== 'full') return { removed, failed, skipped: '非全量编译，跳过孤儿清理' }
-  const modules = job.plan?.modules
-  if (!Array.isArray(modules) || !modules.length) return { removed, failed, skipped: '无完整模块清单，跳过孤儿清理' }
-  const dir = path.join(job.wikiPath, 'modules')
-  if (!fs.existsSync(dir)) return { removed, failed }
-  // 本次规划出的模块文章名（与组装任务的 slugify 规则保持一致）
-  const planned = new Set(modules.map((m) => `${slugify(m.name)}.md`))
-  // 本次 job 写过的（含失败）也保留：失败不该顺手删证据
-  const touched = new Set((job.articles ?? []).map((a) => path.basename(String(a.name ?? ''))))
-  let entries = []
-  try { entries = fs.readdirSync(dir) } catch { return { removed, failed } }
-  for (const name of entries) {
-    if (!name.endsWith('.md')) continue
-    if (planned.has(name) || touched.has(name)) continue
-    try {
-      fs.rmSync(path.join(dir, name), { force: true })
-      removed.push(name)
-    } catch (err) {
-      failed.push(`${name}（${String(err?.code ?? err?.message ?? err)}）`)
-    }
-  }
-  return { removed, failed }
-}
 
-// CodeWiki.md 入口：编译收尾时若仓库根缺失则自动生成。139052c 把收尾提醒门控收紧到入口文件，
-// 但流水线此前从未创建它——「编译过但无入口」的仓库永远收不到收尾提醒（不变量缺口）。
-// 已有入口（人工/模型速查手册）绝不覆盖；生成失败只影响入口存在性，不应让编译任务失败。
-export function ensureWikiEntry(cwd, language = '中文') {
-  if (!cwd) return false
-  const entryPath = path.join(cwd, 'CodeWiki.md')
-  if (fs.existsSync(entryPath)) return false
-  const wiki = path.join(cwd, '.codewiki')
-  if (/中文|zh/i.test(String(language))) {
-    fs.writeFileSync(entryPath, [
-      '# CodeWiki',
-      '',
-      '本仓库的活 wiki 由 dsh-codewiki 编译流水线自动维护（`codewiki_generate` 工具 / 编译面板）。',
-      '',
-      `- 入口与全部文章位于仓库根 \`${wiki}\`（在仓库根之外读写它们时一律用绝对路径）`,
-      '- 索引 .codewiki/_index.md · 模块与架构文章 .codewiki/modules/ · 系统总览即本文件',
-      '- 涉及代码改动的任务收尾必须运行 codewiki_generate（scope=auto）更新受影响文章；.codewiki/ 改动与代码一起提交',
-      '',
-      '> 本文件由编译流水线在缺失时自动生成；若改写为人工速查手册，流水线不会覆盖。',
-      '',
-    ].join('\n'), 'utf8')
-  } else {
-    fs.writeFileSync(entryPath, [
-      '# CodeWiki',
-      '',
-      'The living wiki of this repo is maintained by the dsh-codewiki pipeline (`codewiki_generate` tool / the CodeWiki panel).',
-      '',
-      `- Entry and all articles live at \`${wiki}\` (use absolute paths outside the repo root)`,
-      '- Index: .codewiki/_index.md · Modules: .codewiki/modules/ · System overview: this file',
-      '- After code changes, run codewiki_generate (scope=auto) at wrap-up; commit .codewiki/ together with the code',
-      '',
-      '> Auto-generated by the pipeline when missing; a hand-written entry is never overwritten.',
-      '',
-    ].join('\n'), 'utf8')
-  }
-  return true
-}
 
 // 排除清单：换行/分号/逗号分隔的绝对路径；cwd 等于某项或位于其子树内即被排除（Windows 大小写不敏感）。
 // excludedItem 返回命中的排除项原文（工具报错据此告诉模型是哪条排除项拒绝了此工作区）；
@@ -670,7 +539,6 @@ export function estimateTokens(text) {
 
 // 宿主 llm 服务通道：唯一通道。走 DSH 模型设置里已注册的 provider/model（含本地 OpenAI
 // 兼容端点，如 ollama/lmstudio/vllm），凭证由宿主按该 provider 的配置解析——插件不碰密钥、
-// 不再自带任何直连通道（0.10.1 起删除内置百炼兼容入口）。
 // reasoningEffort 是宿主 llm 的枚举档位（off/low/medium/high/xhigh/max），由模型目录
 // （resolveModel().reasoning.efforts）给出可选值；留空=用该模型默认档。
 // 失败统一抛错，由并发池按单任务失败记账。
@@ -703,803 +571,43 @@ async function llmChat({ llm, provider, model, reasoningEffort, prompt, signal, 
   return { content, outputTokens: Number(assembler.usage?.outputTokens) || 0 }
 }
 
-// 文章在 wiki 内的相对路径（modules/core.md 形态）：契约闸门要靠它推断文章类型
-// （type 与目录不匹配会让 cw index 分类错乱）。传进来的可能是绝对路径。
-// learnings/decisions 已无产出，但别处仓库的历史残留页仍要靠这里认出目录。
-function wikiRelOf(articlePath) {
-  const norm = String(articlePath ?? '').replace(/\\/g, '/')
-  for (const dir of ['modules', 'concepts', 'learnings', 'decisions', 'patterns', 'queries']) {
-    const i = norm.lastIndexOf(`/${dir}/`)
-    if (i >= 0) return norm.slice(i + 1)
-  }
-  return norm.slice(norm.lastIndexOf('/') + 1)
-}
 
 // 统一文章契约闸门（吸收自 FSoft 的文章质量门）：所有写盘点都过这里，不再各查一段。
 // 拒写判据只看 error 级——结构已破坏（重复 frontmatter/正文、围栏未闭合、source_files
 // 不存在或不是本次读取的证据、死链、正文空、必需章节空着）；warning 级（缺章节）放行
 // 但记账，由终态判定把本次编译降为 partial，不推进基线。
 // 返回 { blocking:[], warnings:[] }。
-const CONTRACT_FS = {
-  exists: (p) => { try { return fs.existsSync(p) } catch { return false } },
-  isDirectory: (p) => { try { return fs.statSync(p).isDirectory() } catch { return false } },
-}
 
-function contractCheck(content, { articlePath, cwd, sources, allowedLinks }) {
-  const issues = inspectArticle(content, {
-    cwd: cwd ?? null,
-    articlePath: wikiRelOf(articlePath),
-    readableSources: Array.isArray(sources) && sources.length ? sources : null,
-    allowedLinks: Array.isArray(allowedLinks) ? allowedLinks : null,
-    fsImpl: CONTRACT_FS,
-  })
-  return {
-    issues,
-    blocking: issues.filter((i) => (i.severity ?? 'error') === 'error'),
-    warnings: issues.filter((i) => (i.severity ?? 'error') !== 'error'),
-  }
-}
 
-// 允许的内部链接目标：现存 wiki 文章 + 本轮计划产出的文章，取相对路径与裸名两种形态
-// （交叉链接习惯写 `[[模块名|标题]]`，裸名必须能解析到 modules/模块名.md）。
-function allowedLinkTargets(job) {
-  const out = new Set()
-  const add = (rel) => {
-    const r = String(rel ?? '').replace(/\\/g, '/')
-    if (!r) return
-    out.add(r)
-    const bare = r.replace(/\.md$/, '')
-    out.add(bare)
-    out.add(path.posix.basename(bare))
-  }
-  const walk = (dir, prefix) => {
-    let ents = []
-    try { ents = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
-    for (const e of ents) {
-      if (e.isDirectory()) walk(path.join(dir, e.name), `${prefix}${e.name}/`)
-      else if (e.name.endsWith('.md')) add(`${prefix}${e.name}`)
-    }
-  }
-  if (job.wikiPath) walk(job.wikiPath, '')
-  for (const n of job.expectedNames ?? []) add(n)
-  for (const a of job.articles ?? []) if (a.name) add(a.name)
-  return [...out]
-}
 
-// 任务结果统一出口：keepInMemory 任务（校对）把 content 带回内存由服务侧消费，
-// 文章任务直接落盘。普通任务与超大任务兜底共用。
-function applyTaskResult(task, content, notes) {
-  if (task.keepInMemory) return { name: task.name, ok: true, stopReason: 'completed', content }
-  // 统一契约闸门（0.14.0）：坏文章不落盘。旧实现只查 frontmatter 开合，重复 frontmatter、
-  // 空章节、指向不存在文件的 source_files 全都能写进 wiki，随后被 cw index 收进索引。
-  const chk = contractCheck(content, {
-    articlePath: task.articlePath, cwd: task.cwd ?? null, sources: task.sources,
-    allowedLinks: task.allowedLinks,
-  })
-  if (chk.blocking.length) {
-    notes.push(`文章 ${task.name} 未过契约闸门，不落盘 —— ${chk.blocking.slice(0, 3).map((i) => i.detail).join('；')}`)
-    return { name: task.name, ok: false, stopReason: 'contract', contractIssues: chk.issues }
-  }
-  try {
-    fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
-    const fx = fixAnchors(content, task.cwd ?? null)
-    if (fx.fixed > 0) notes.push(`文章 ${task.name} 自动修正 ${fx.fixed} 处行号锚点`)
-    if (fx.unresolved.length) notes.push(`文章 ${task.name} 行号锚点存疑（未改）：${fx.unresolved.slice(0, 3).join('；')}${fx.unresolved.length > 3 ? ' 等' : ''}`)
-    fs.writeFileSync(task.articlePath, fx.text, 'utf8')
-    return { name: task.name, ok: true, stopReason: 'completed', contractIssues: chk.issues }
-  } catch (err) {
-    notes.push(`文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
-    return { name: task.name, ok: false, stopReason: 'error' }
-  }
-}
 
-// 并发池：唯一执行器。按 maxConcurrency 同时在飞地消费任务队列，全部走宿主 llm 服务
-// （唯一的模型通道，凭证由宿主按 provider 解析）。signal 用于取消时中断在飞请求。
-// onTaskDone 每任务上报 {outputTokens, durationMs} 供 tps 采样。
-// 每个任务可带自己的 model/provider/reasoningEffort（大档任务用），缺省回落到参数里的
-// 普通档模型——一期请求先按任务装填时的模型分派，不在运行期再改。
-// 大档与默认档并发上限分开（0.12.2）：t.bigTier === true 的任务进大档池（bigConcurrency），
-// 其余进默认档池（concurrency）。两个池各自独立计数、同时推进——大档模型常是付费长上下文档，
-// 与免费默认档的配额互不相干，共用一个上限会让「大档只多几个请求」把默认档全部堵住。
-// bigConcurrency 为 0 / 未传时回落到 concurrency（与 0.12.1 行为一致）。
-// 返回 Map(customId → 结果)（{ok, stopReason, content?}）。
-// onRequestStart(task)（可选）：每个请求发起前回调，返回 null 或
-// { onDelta(chunk), onDone(content, outputTokens), onError(err) }——会话记录器挂钩，
-// 让面板能看到「目前正在进行的会话内容」。
-export async function runRealtimeTasks(tasks, { model, reasoningEffort, concurrency, bigConcurrency = 0, notes, onTaskDone, signal, llm, provider, onRequestStart }) {
-  const results = new Map()
-  // 分池：大档任务与默认档任务各自独立限流。判定只看任务装填时打的 bigTier 标记
-  // （文章装填 markBig、横切/校对的大档标记都写它），不按 provider 猜——用户完全可能
-  // 把默认档也配成同一个 provider。
-  const bigTasks = []
-  const normalTasks = []
-  for (const t of tasks) {
-    if (t.bigTier === true) bigTasks.push(t)
-    else normalTasks.push(t)
-  }
-  const pools = []
-  if (normalTasks.length) {
-    pools.push({ tasks: normalTasks, limit: Math.max(1, Math.min(concurrency, normalTasks.length)) })
-  }
-  if (bigTasks.length) {
-    const bigLimit = Number.isFinite(Number(bigConcurrency)) && Number(bigConcurrency) >= 1
-      ? Number(bigConcurrency)
-      : concurrency
-    pools.push({ tasks: bigTasks, limit: Math.max(1, Math.min(bigLimit, bigTasks.length)) })
-  }
-  const runPool = async (pool) => {
-    let cursor = 0
-    const worker = async () => {
-      for (;;) {
-        if (signal?.aborted) return
-        const i = cursor++
-        if (i >= pool.tasks.length) return
-        const t = pool.tasks[i]
-        const rec = onRequestStart ? onRequestStart(t) : null
-        try {
-          const startedAt = Date.now()
-          const { content, outputTokens } = await llmChat({
-            llm,
-            provider: t.provider || provider,
-            model: t.model || model,
-            // 任务自带 provider+model（大档任务）时 effort 完全以任务为准（空=模型默认档），
-            // 不回落普通档配置——普通档的 effort（如 off）可能不被大档模型支持
-            reasoningEffort: (t.provider && t.model)
-              ? (t.reasoningEffort || undefined)
-              : (t.reasoningEffort || reasoningEffort),
-            prompt: t.batchPrompt,
-            signal,
-            onDelta: rec?.onDelta,
-          })
-          if (onTaskDone && outputTokens > 0) onTaskDone({ outputTokens, durationMs: Date.now() - startedAt })
-          results.set(t.customId, applyTaskResult(t, content, notes))
-          rec?.onDone?.(content, outputTokens)
-        } catch (err) {
-          notes.push(`${t.name} 请求失败 —— ${String(err?.message ?? err)}`)
-          results.set(t.customId, { name: t.name, ok: false, stopReason: 'error' })
-          rec?.onError?.(err)
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: pool.limit }, worker))
-  }
-  await Promise.all(pools.map(runPool))
-  return results
-}
 
 // ---------------------------------------------------------------------------
 // 模型执行（唯一通道：宿主 llm 服务）
-// 全部环节（写文章/横切/校对）都是单轮文本生成，统一走同一个后台并发池，
-// 模型/提供商/思考档位全部取自插件设置里选中的「模型设置」条目，
-// 凭证由宿主按该 provider 解析——插件不再有任何自带直连通道。
-// 输入按 token 预算（BATCH_TOKEN_BUDGET，默认 110k）装填；装不下的单文件升
-// BATCH_TOKEN_HARD_LIMIT 大档。请求随连接生死，宿主重启按 prompt 快照重跑。
+// 语义校对等单轮调用走这里，模型/提供商/思考档位全部取自插件设置里选中的
+// 「模型设置」条目，凭证由宿主按该 provider 解析。
 // ---------------------------------------------------------------------------
 
-// 单个请求的输入 token 预算：默认模型 glm-5.3-flash 上下文 512k，单请求输出上限 64k，
-// 输入侧留 128k 为兼容档（hy3 时代的窗口）；再扣输出与估算误差余量，取 110k。
-const BATCH_TOKEN_BUDGET = 110000
-// 超预算兜底装填上限：单文件/单任务装不进 110k 时按该大档再装一次；
-// 仍装不下才落到会话通道（最后的兜底，见 dispatchSessionTasks）。
-// 上限取 128k：即使回归到 192k 窗口的模型（输入+输出共享），
-// 128k 输入 + 64k 输出仍在界内（旧值 150k 输入 + 64k 输出 = 214k，已越界）。
-const BATCH_TOKEN_HARD_LIMIT = 128000
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function readJsonFile(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
 }
 
-// 源码行号前缀：每行加「N| 」grep 风格标注，让模型引用行号时以前缀为准而不是自己数行
-// （弱模型自己数行首尾常对、中段系统性错位）。尾部至多去一个换行——多去会把真实空行
-// 挤掉导致总行数偏小；split('\n') 后空文件得到 ['']，输出「1| 」可接受。
-export function numberLines(content) {
-  return content.replace(/\r?\n$/, '').split('\n').map((line, i) => `${i + 1}| ${line.replace(/\r$/, '')}`).join('\n')
-}
 
-// ---------------------------------------------------------------------------
-// 行号锚点自动修正（第四层兜底）：文章落盘前把「file:NN(-MM)」锚点对照源码确定性校正。
-// 语义与 test-wiki-anchors.mjs 的符号绑定一致：锚点起点行应包含该行反引号内符号（或其
-// 末段）；不包含时在源文件全文找符号出现行——恰好一处 → 修正；多处 → 取唯一的行首声明
-// 形态（function/class/const/let），仍歧义则不动；找不到 → 不动。全部修正只改行号数字，
-// 绝不动文章其他内容；source_files 之外的文件引用一律不碰。符号提取规则复制自
-// test-wiki-anchors.mjs symbolsOnLine（两处同源，改一处须同步另一处）。
-// CHANGELOG.md 是**追加式流水账**：每次发版在顶部插入一节，于是所有指向它的行号
-// 都必然单向漂移（0.13.2 那节今天在第 58 行，下个版本发布后就在第 80 行）。
-// 符号定位对这类锚点完全无效——CHANGELOG 里没有可声明的符号，而 fixAnchors 的符号分支
-// 遇到「行内无反引号符号」直接 return line，连尝试都不做。但这批锚点几乎都写了版本号
-// （`0.13.0（CHANGELOG.md:109）`），而版本标题 `## 0.13.0` 是**稳定锚**。
-// 重定位规则：同一版本 V 被引用的所有失效锚点里，取最小行号 Hmin 当作「写作时该节首的
-// 估计」，新行号 = 当前节首 S + (n - Hmin)。**必须保留这个相对偏移**——若一律改写成
-// 节首 S，`CHANGELOG.md:8` 与 `CHANGELOG.md:10` 会双双变成 `S`（拉平，正是 0.13.5
-// 修过的数据破坏）。无版本号的 CHANGELOG 锚点无从定位，只记 unresolved 不动。
-export function changelogSections(clLines) {
-  const secs = []
-  clLines.forEach((l, i) => {
-    const m = l.match(/^##\s+(\d+\.\d+(?:\.\d+)*)/)
-    if (m) secs.push({ ver: m[1], start: i + 1, end: clLines.length })
-  })
-  for (let i = 0; i < secs.length - 1; i++) secs[i].end = secs[i + 1].start - 1
-  return secs
-}
 
-export function fixChangelogAnchors(content, cwd) {
-  const unresolved = []
-  const anchorRe = /CHANGELOG\.md[:：](\d+)(?:-(\d+))?/g
-  if (!cwd || !content.includes('CHANGELOG.md')) return { text: content, fixed: 0, unresolved }
-  let clLines
-  try { clLines = fs.readFileSync(path.join(cwd, 'CHANGELOG.md'), 'utf8').split(/\r?\n/) } catch {
-    return { text: content, fixed: 0, unresolved }
-  }
-  const secs = changelogSections(clLines)
-  if (!secs.length) return { text: content, fixed: 0, unresolved }
-  const secOf = (v) => secs.find((s) => s.ver === v)
-  // 「已正确」判定不能只看「行号存在且非空」：CHANGELOG 每次发版顶部插新节，
-  // 于是 `CHANGELOG.md:109` 这类旧锚点今天必然仍在文件范围内、落在**别的版本节**里，
-  // 且大多非空——只按范围判会把它们全判为正确，重定位永远不触发（实测 34 条里
-  // 只有 6 条被认出失效，其余 28 条都被这种「技术有效」蒙过）。
-  // 正确语义：带版本号的锚点必须落在**该版本对应的节内**；不带版本号的才退回范围判定。
-  const isValid = (n, end, ver) => {
-    const sec = ver ? secOf(ver) : null
-    if (sec) {
-      return n >= sec.start && n <= sec.end && (clLines[n - 1] ?? '').trim().length > 0 &&
-        (end === null || (end >= n && end <= sec.end))
-    }
-    return n >= 1 && n <= clLines.length && (clLines[n - 1] ?? '').trim().length > 0 &&
-      (end === null || (end >= n && end <= clLines.length))
-  }
 
-  // 版本号归属：取锚点**左侧最近的版本号**（中文习惯「0.13.0 …（CHANGELOG.md:58）」）。
-  //
-  // 这条判据必须与 test-wiki-anchors.mjs 的 CHANGELOG 语义校验**完全同源**，
-  // 否则修正器与校验器各用一套归属规则，就会出现「修正器认为已对、校验器判错」
-  // 的死循环。曾试过两种偏离，都失败：
-  // ① 只认「同一括号内」的版本号——实测大量长段落里版本号在括号外
-  //    （「0.13.0 吸收……四个配置（index.js:79-82，默认全开，CHANGELOG.md:58）」），
-  //    括号内无版本号 → 判为「归属不明」跳过 → 44 条永远修不掉；
-  // ② 括号内优先、否则退回整行——归属会随锚点数字变化而翻转，来回振荡。
-  // 真正导致振荡的是 reloc 的 Map key 用锚点文本（同行重复文本互相覆盖，见下），
-  // 改用行内序号后，这个朴素判据就稳定收敛了（实测 2 轮收敛）。
-  const verOf = (line, at) => {
-    let ver = null
-    for (const m of line.matchAll(/\b(\d+\.\d+(?:\.\d+)*)\b/g)) {
-      if (!secOf(m[1]) || m.index >= at) continue
-      ver = m[1]
-    }
-    return ver
-  }
 
-  // 第一遍：收**本行全部**带版本号的锚点（不只是失效的）——基准必须由整行决定，
-  // 否则修好一部分后基准跟着变，第二次运行又会算出不同的偏移（实测不幂等：第二次
-  // 仍有 11 处被改写）。失效项与有效项一起参与行内 Hmin 计算，改写时跳过已有效的。
-  // ord = 该行内第几个 CHANGELOG 锚点（0 起）。用文本当 key 会出问题：实测同一行里常
-  // 出现两个**文本完全相同**的 `CHANGELOG.md:256`（分别属于 0.10.9 与 0.10.11 两个版本
-  // 子句），Map key 重复 → 后一个覆盖前一个 → 本该保持的有效锚点也被改成别人的行号，
-  // 下一轮又判失效改回来，无限振荡。行内序号是唯一能区分它们的坐标。
-  const items = []
-  content.split(/\r?\n/).forEach((line, i) => {
-    let ord = 0
-    for (const a of line.matchAll(anchorRe)) {
-      const n = Number(a[1]), end = a[2] ? Number(a[2]) : null
-      const ver = verOf(line, a.index)
-      items.push({ idx: i, ord: ord++, n, end, ver, whole: a[0], valid: isValid(n, end, ver) })
-    }
-  })
-  if (!items.some((it) => !it.valid)) return { text: content, fixed: 0, unresolved }
 
-  // Hmin 必须**按行内聚合**，不能全仓按版本取最小。跨行取最小会引入假偏移：
-  // 同一篇里 `:42` 引用 0.10.11 的 3-15、`:24` 又引用 0.10.11 的 8，全局 Hmin=3
-  // 于是 8 被算成「节首+5」，而 261（原本就是历史错锚点）会被算成「节首+258」直接越界。
-  // 只有**同一行内**的并列引用才有确定可推的相对关系（同一句话描述同一节的几处），
-  // 跨行各自独立引用时唯一安全的落点就是节首。
-  //
-  // 幂等的关键：基准必须由**该行该版本的全部锚点**（有效 + 失效）决定，不能只统计失效项。
-  // 只统计失效项会振荡——实测 `?:58→113`、下一轮 `113→58` 无限来回：第一轮把 58 改成 113，
-  // 于是 113 变成「有效」退出统计集，基准随之从 58 变 113，又把它算回 58。
-  // 用全集算基准则位移量恒定：整组同移 delta 后基准同步前移，第二轮算出 delta=0，自然收敛。
-  const rowHmin = new Map()
-  for (const it of items) {
-    if (!it.ver) continue
-    const k = `${it.idx}|${it.ver}`
-    rowHmin.set(k, Math.min(rowHmin.get(k) ?? Infinity, it.n))
-  }
-  const reloc = new Map()
-  for (const it of items) {
-    if (it.valid) continue // 已在该版本节内的不动
-    const sec = it.ver ? secOf(it.ver) : null
-    if (!sec) { unresolved.push(`CHANGELOG.md:${it.n} 版本归属不明未改`); continue }
-    const key = `${it.idx}|${it.ver}`
-    const base = rowHmin.get(key) ?? it.n
-    const nn = sec.start + (it.n - base)
-    const span = it.end === null ? 0 : Math.abs(it.end - it.n)
-    const ne = Math.min(nn + span, sec.end)
-    if (nn < sec.start || nn > sec.end || !(clLines[nn - 1] ?? '').trim() || ne > sec.end) {
-      unresolved.push(`CHANGELOG.md:${it.n} 版本 ${it.ver} 重定位越界未改`)
-      continue
-    }
-    reloc.set(`${it.idx}|${it.ord}`, { nn, ne: span ? ne : null })
-  }
-  if (!reloc.size) return { text: content, fixed: 0, unresolved }
 
-  const crlf = /\r\n/.test(content)
-  let fixed = 0
-  const text = content.split(/\r?\n/).map((line, i) => {
-    let cursor = 0
-    const out = []
-    let ord = 0
-    for (const a of line.matchAll(anchorRe)) {
-      const r = reloc.get(`${i}|${ord++}`)
-      out.push(line.slice(cursor, a.index))
-      cursor = a.index + a[0].length
-      if (!r) { out.push(a[0]); continue }
-      fixed += 1
-      out.push(`CHANGELOG.md:${r.nn}${r.ne ? `-${r.ne}` : ''}`)
-    }
-    out.push(line.slice(cursor))
-    return out.length > 1 ? out.join('') : line
-  }).join(crlf ? '\r\n' : '\n')
-  return { text, fixed, unresolved }
-}
 
-// 修复 frontmatter 未闭合（闭合 `---` 被写成空行、或在生成时被吃掉）。
-//
-// 三条判据同时满足才动手，避免误伤普通文章：
-// ① 首行恰好是 `---`；② 紧随其后至少一行**无缩进**的 `key: value` 元数据
-// （`title:` / `type:` / `source_files:` / `tags:` 这类）；③ 元数据块之后紧跟
-// 一个空行（原闭合符应出现的位置）。命中就把那个空行改写成 `---`。
-// 正文里的 `---` 分隔线、以及通篇没有元数据的普通 md 都不满足 ② 或 ③。
-export function repairUnclosedFrontmatter(content) {
-  const lines = content.split(/\r?\n/)
-  if (lines[0] !== '---') return null
-  const metaRe = /^[A-Za-z_][\w-]*:/
-  let meta = 0
-  let i = 1
-  for (; i < lines.length; i++) {
-    const l = lines[i]
-    if (metaRe.test(l)) { meta += 1; continue }
-    // 缩进续行（`  - index.js`、多行数组）属于上一行元数据
-    if (meta > 0 && /^[ \t]+\S/.test(l)) continue
-    break
-  }
-  if (meta === 0) return null
-  if (i >= lines.length || lines[i].trim() !== '') return null
-  lines[i] = '---'
-  return {
-    text: lines.join(/\r\n/.test(content) ? '\r\n' : '\n'),
-    note: `frontmatter 未闭合已补全（第 ${i + 1} 行）`,
-  }
-}
 
-export function fixAnchors(content, cwd) {
-  const unresolved = []
-  // frontmatter 未闭合的文章必须在这里就识别出来：`^---\r?\n([\s\S]*?)\r?\n---`
-  // 匹配不上时整篇所有锚点都会被静默跳过（下面第一行就 return），而文章照常落盘、
-  // 编译照常「成功」——失败完全不可见。
-  // 修复：首个 `---` 之后若在正文开始前存在一段连续 `key: value` 形态的元数据行、
-  // 紧接一个空行，就把那个空行改写成 `---`。只在「像 frontmatter 但没闭合」时动手，
-  // 普通文章（含正文里的 `---` 分隔线）不受影响。
-  let fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-  if (!fmMatch) {
-    const repaired = repairUnclosedFrontmatter(content)
-    if (repaired) {
-      content = repaired.text
-      fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-      unresolved.push(`${repaired.note}`)
-    }
-  }
-  if (!fmMatch || !cwd) return { text: content, fixed: 0, unresolved }
-  // CHANGELOG 锚点先单独修：它是流水账，只能按「版本节首 + 相对偏移」重定位，
-  // 符号归属那套在这里无解（CHANGELOG 里没有可声明的符号）。也因为它可能在
-  // source_files 之外，所以不依赖 srcs 判断。
-  const clRes = fixChangelogAnchors(content, cwd)
-  content = clRes.text
-  unresolved.push(...clRes.unresolved)
-  let fixed = clRes.fixed
-  const srcs = parseSourceFiles(fmMatch[1])
-  if (!srcs.length) return { text: content, fixed, unresolved }
-  const resolveFile = (f) => {
-    if (srcs.includes(f)) return f
-    // source_files 里写的是**模块相对路径**（article 生成时按模块目录拼的
-    // `modules/test-suite/index.js`），而文章正文引用的是**仓库根**路径
-    // （`index.js:941-954`）。两者 basename 相同 → 按 basename 匹配会把根锚点
-    // 映射到不存在的 `modules/test-suite/index.js` → loadSource 返回 null →
-    // 整行静默跳过，锚点永远修不掉（实测 test-suite.md 34 行 `localPlan` 与
-    // unreminder-entry-gap.md 19 处锚点都这样堆积）。仓库根真实存在的同路径
-    // 优先：文档锚点的语义永远是「仓库里的这个文件」，虚拟映射只是文章元数据。
-    try {
-      if (fs.existsSync(path.join(cwd, f))) return f
-    } catch { /* 探测失败按「无此文件」处理 */ }
-    const cands = srcs.filter((r) => r.split('/').pop() === f)
-    return cands.length === 1 ? cands[0] : null
-  }
-  const cache = new Map()
-  const loadSource = (rel) => {
-    if (!cache.has(rel)) {
-      try {
-        cache.set(rel, fs.readFileSync(path.join(cwd, rel), 'utf8').replace(/\r?\n$/, '').split(/\r?\n/))
-      } catch { cache.set(rel, null) }
-    }
-    return cache.get(rel)
-  }
-  // 返回 [{sym, at}]：带上反引号符号在行内的字符位置，供锚点就近绑定用。
-  // 文件名不算符号（与 test-wiki-anchors.mjs 的 symbolsOnLine 同源）：`package.json`
-  // （`package.json:1-28`）这类写法里反引号包的是文件路径，拿它去源文件里搜必然搜不到。
-  const FILE_LIKE = /\.(?:js|mjs|cjs|ts|tsx|jsx|md|json|yml|yaml|txt|log|toml|lock|cfg|ini)$/i
-  const symbolsWithPos = (line) => {
-    const out = []
-    for (const m of line.matchAll(/`([^`\n]+)`/g)) {
-      const sym = m[1].trim().replace(/\(.*\)$/, '').trim()
-      if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(sym)) continue
-      if (sym.length < 3 || sym.split('.').pop().length < 3) continue
-      if (FILE_LIKE.test(sym)) continue
-      out.push({ sym, at: m.index + 1 + m[1].indexOf(m[1].trim()) })
-    }
-    return out
-  }
-  const symbolsOnLine = (line) => symbolsWithPos(line).map((s) => s.sym)
-  const hasSym = (srcLine, s) => srcLine.includes(s) || srcLine.includes(s.split('.').pop())
-  const bodyStart = fmMatch[0].split(/\r?\n/).length // 正文首行（1-based 行号 ≤ bodyStart 是 frontmatter）
-  const crlf = /\r\n/.test(content)
-  const lines = content.split(/\r?\n/)
-  const anchorRe = /([A-Za-z0-9_\-./]+):(\d+)(?:-(\d+))?/g
-  const text = lines.map((line, idx) => {
-    if (idx + 1 <= bodyStart) return line
-    const syms = symbolsWithPos(line)
-    if (!syms.length) return line
-    const anchors = [...line.matchAll(anchorRe)]
-    if (!anchors.length) return line
-    // 多锚点行也修，但每个锚点只认**它自己之前**的就近符号（见下方 order 的注释）。
-    // 曾用「多锚点行一律跳过」来止血振荡，那是错的：行号漂移恰恰最常发生在这些
-    // 并列引用了大量符号的长行上（_patterns.md 一行十几次 index.js:N），跳过等于
-    // 让它们永远失效。振荡的真因是「锚点之后的符号也能被选中」，已在那里修掉。
-    // 逐锚点定位：一行里有 N 个锚点时必须各自绑定「离它最近的可解析符号」。
-    // 旧实现从 syms[0] 起找第一个能解析的符号，命中后把**整行所有锚点**都改成那一个行号，
-    // 于是 `A (index.js:11)、B (index.js:22)` 这种并列描述被拉平成 `A (index.js:11)、B (index.js:11)`
-    // （本仓 _patterns.md 曾出现同一行 15 处 index.js:49）。宁可不动也不能拉平——
-    // 拉平的锚点看起来「都指向非空代码行」，能把校验骗过去，却是更坏的数据。
-    const used = new Set()
-    const out = []
-    let cursor = 0
-    for (const a of anchors) {
-      const whole = a[0]
-      const f = a[1]
-      const n1 = a[2]
-      const n2 = a[3]
-      const atPos = a.index
-      out.push(line.slice(cursor, atPos))
-      cursor = atPos + whole.length
-      const rel = resolveFile(f)
-      if (!rel) { out.push(whole); continue }
-      // CHANGELOG 锚点已由 fixChangelogAnchors 按版本节重定位过，这里绝不能再交给符号
-      // 归属逻辑处理——CHANGELOG 里没有可声明的符号，落进来只可能被误改或重复计数。
-      if (rel === 'CHANGELOG.md') { out.push(whole); continue }
-      const src = loadSource(rel)
-      if (!src) { out.push(whole); continue }
-      const start = Number(n1)
-      const at = `${rel}:${start}${n2 ? `-${n2}` : ''}`
-      // 符号在源文件里的唯一归属行。返回 {line} 唯一归属 / {ambiguous:true} 多处出现
-      // 且无唯一声明行 / {} 未出现。归属规则：「只出现一次」即以该行为准；出现多次时
-      // 只认唯一的声明形态（function/class 直接跟符号；const/let 要求符号后跟 =，
-      // 排除 `const gamma = beta()` 这种「别的符号的声明」）。
-      // 「已正确」判定与「修正」共用同一个归属函数，两者否则会各说各话——见下面的注释。
-      const locate = (s) => {
-        const hits = []
-        src.forEach((l, i) => { if (hasSym(l, s)) hits.push(i + 1) })
-        if (hits.length === 0) return {}
-        if (hits.length === 1) return { line: hits[0] }
-        const tail = s.split('.').pop().replace(/[$]/g, '\\$')
-        const defRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:async\\s+)?(?:function|class)\\s+${tail}\\b|^[ \\t]*(?:export\\s+)?(?:const|let)\\s+${tail}\\s*=`)
-        const defs = hits.filter((n) => defRe.test(src[n - 1]))
-        if (defs.length === 1) return { line: defs[0] }
-        // 跨文件符号（本仓 lib/*.js 或第三方）在本文件里没有声明行，只有 import/require
-        // 与使用处。此时文档锚点指的必然是**使用处**，import 行不是它要引用的实现位置。
-        // 排除 import/require 行后若只剩唯一一处就取它——`clusterComponents` 在
-        // `index.js` 只有 import（17）与调用（1226）两处，不排除则永远 ambiguous、
-        // 锚点永远修不掉（实测 `_architecture.md:74` 稳定报「符号歧义未改」）。
-        const importRe = /^[ \t]*(?:import\b|(?:const|let|var)\s[^=]*=\s*require\s*\()/
-        const uses = hits.filter((n) => !importRe.test(src[n - 1]))
-        if (uses.length === 1) return { line: uses[0] }
-        return { ambiguous: true }
-      }
-      // 按与锚点的字符距离由近到远排序；已被前面的锚点占用的符号跳过。
-      //
-      // 但只在**锚点之前**的符号里选：中文行文的锚注写在「符号（锚点）」的括号里，
-      // 锚点**之后**出现的符号属于后文，不可能拥有这个锚点。曾经不设此约束，纯按
-      // 字符距离排，实测 `- \`articleMd(...)\`（test-orchestration.mjs:33-35）：…用
-      // \`makeBatchMock\` 生成…` 这行里，后文的 makeBatchMock（距 39）比主符号
-      // articleMd（距 40）只近 1 个字符就被选中，锚点被改到 145-147；下一轮行内
-      // 文本已变、距离关系翻转，又改回 33-35——无限来回、永不收敛（实测 5 轮不收敛）。
-      // 锚点之前没有符号时（「（index.js:11）见 \`foo\`」这类倒装写法）退回全部候选，
-      // 保持旧行为不变。
-      const free = syms.filter((s) => !used.has(`${rel}|${s.sym}`))
-      const leading = free.filter((s) => s.at < atPos)
-      const order = (leading.length ? leading : free)
-        .sort((p, q) => Math.abs(p.at - atPos) - Math.abs(q.at - atPos))
-      // 「已正确」快路径：锚点起始行提到了「离它最近、尚未被占用」的符号即认可。
-      // 防拉平靠的是 used 占用 + 就近排序，**不是**「符号在全文有唯一声明行」——
-      // 旧实现对多锚点行要求 `locate(sym).line === start`，而 locate 在符号多处出现
-      // 时返回 ambiguous（大量符号在文件里被引用多次），于是**本来正确的锚点被判为错**、
-      // 再被拿去改成别的行：实测因此引入 35 行真回归（例 `client.js:489` 与
-      // `client.js:495` 各自正确且指向不同行，修后都变成 495）。单锚点行一直用宽松
-      // 判定、从无此问题；多锚点行同样宽松即安全，因为每个符号只允许被一个锚点认领。
-      const nearest = order[0]
-      // 区间锚点的语义是「这段代码」（`index.js:1018-1045` 指整块），不是首行：
-      // 符号只要出现在区间内任何一行就算对上。校验器 test-wiki-anchors.mjs 正是这么
-      // 判的（`span.includes(sym) || span.includes(tail)` 在整段上搜）。修正器若不认，
-      // 就会把**校验器认可的正确锚点**判成错、再拿去重定位，实测 `_patterns.md:73`
-      // 的 `plan`（区间内多次出现但全文 42 处、无唯一声明行 → locate 返回 ambiguous）
-      // 每轮被记成「符号歧义未改」，永远留着不动而校验器一直报错。
-      if (n2) {
-        const end2 = Number(n2)
-        const span = src.slice(start - 1, Math.min(end2, src.length)).join('\n')
-        const hit = order.find((s) => span.includes(s.sym) || span.includes(s.sym.split('.').pop()))
-        // 终点越界（`a.js:1-99` 而文件只有 5 行）不能走「已正确」快路径：上面判断区间时
-        // 用 Math.min 把终点截到文件尾，于是符号「必然」落在区间内、锚点被原样放行，
-        // 而校验器 test-wiki-anchors.mjs 会一直报「区间终点在行数范围内」失败——这个锚点
-        // 就永远修不掉了。交给下面的重定位分支，它会按跨度把尾行钳到 src.length。
-        if (hit && start >= 1 && end2 <= src.length) {
-          used.add(`${rel}|${hit.sym}`)
-          out.push(whole)
-          continue
-        }
-      }
-      if (src[start - 1] && nearest && hasSym(src[start - 1], nearest.sym)) {
-        used.add(`${rel}|${nearest.sym}`)
-        out.push(whole)
-        continue
-      }
-      let R = null
-      let picked = null
-      let ambiguous = false
-      for (const cand of order) {
-        // 点分符号（如 Config.articleLanguage）歧义时退试首段——首段才是可声明的部分
-        const variants = cand.sym.includes('.') ? [cand.sym, cand.sym.split('.')[0]] : [cand.sym]
-        for (const s of variants) {
-          const loc = locate(s)
-          if (loc.line !== undefined) { R = loc.line; picked = cand.sym; break }
-          if (loc.ambiguous) ambiguous = true // 试下一个候选
-        }
-        if (R !== null) break
-      }
-      if (R === null) {
-        unresolved.push(`${at} ${ambiguous ? '符号歧义' : '符号未找到'}未改`)
-        out.push(whole)
-        continue
-      }
-      used.add(`${rel}|${picked}`)
-      if (n2) {
-        const end2 = Number(n2)
-        // 原文区间可能本身就是倒序（如 `index.js:902-901`，作者手误或前后行号写反）。
-        // 旧实现用 `R + (end2 - start)` 平移尾行，倒序时算出 R-1 → 产出 `902-901` 这种
-        // 起点大于终点的区间，校验必然报「区间起止有序」失败，且每轮编译都修不掉。
-        // 这里把倒序区间按「原文长度」翻正：先求区间跨度的绝对值，再保证终点 >= 起点。
-        const span = Math.abs(end2 - start)
-        const tail = Math.min(R + span, src.length)
-        fixed += 1
-        out.push(`${f}:${R}-${Math.max(R, tail)}`) // 区间尾越界钳到文件尾（修正起点是净改善）
-      } else {
-        fixed += 1
-        out.push(`${f}:${R}`)
-      }
-    }
-    out.push(line.slice(cursor))
-    return out.join('')
-  }).join(crlf ? '\r\n' : '\n') // 混合行尾按整文主风格规范化
-  return { text, fixed, unresolved }
-}
 
-// 文章信封校验：模型输出必须是一段 frontmatter（开头 --- 与结束 --- 成对）加正文。
-// 返回 null 表示合格，否则返回给 note 用的原因短语。
-// 只查开头不查闭合会放过半截 frontmatter 的文章：它们能落盘，但 fixAnchors 的
-// /^---\n([\s\S]*?)\n---/ 匹配不上，于是**整篇的行号锚点一次都不会被校正**。
-// 抽成导出函数是为了让它可被单测直接钉住
-// （此前这段只藏在 writeValidated 里，只能靠整轮 orchestration 间接覆盖）。
-export function validateArticleEnvelope(content) {
-  if (typeof content !== 'string' || !content.trimStart().startsWith('---')) return '模型输出缺 frontmatter'
-  // 结束标记必须**独占一行**：`---(?:\r?\n|$)` 而不是裸 `---`。否则正文里
-  // 「--- 出现在某一行的行首」（分隔线带说明、列表项下的横线）会被当成 frontmatter
-  // 闭合，把真正缺失的结束 --- 放过去——那正是这条闸门要挡的那类静默失效。
-  if (!/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(content.trimStart())) return 'frontmatter 未闭合（缺结束 ---）'
-  return null
-}
 
-// 把源文件内联成 markdown 文本；按 token 预算整文件装填（不做半文件截断——半截代码误导行号）。
-// 返回 { text, skipped, oversized }：skipped 是预算装不下的文件清单，oversized=true 表示
-// 连第一个文件都装不下（text 原样带这一个文件，任务整体转超预算兜底）。
-export function collectSources(cwd, files, budget = BATCH_TOKEN_BUDGET) {
-  const parts = []
-  const skipped = []
-  let used = 0
-  let first = true
-  for (const rel of files) {
-    const abs = path.join(cwd, rel)
-    let content = null
-    try { content = fs.readFileSync(abs, 'utf8') } catch { /* 缺文件在文内标注 */ }
-    const body = content === null
-      ? `### ${rel}\n\n（文件不存在或读取失败）\n`
-      : `### ${rel}\n\n\`\`\`\n${numberLines(content)}\n\`\`\`\n`
-    const size = estimateTokens(body)
-    if (used + size > budget) {
-      if (first) return { text: body, skipped: [], oversized: true }
-      skipped.push(rel)
-      continue
-    }
-    parts.push(body)
-    used += size
-    first = false
-  }
-  let text = parts.join('\n')
-  if (skipped.length) {
-    text += `\n（以下文件因单请求输入预算未内联，行号相关描述不得涉及它们：${skipped.join('、')}）\n`
-  }
-  return { text, skipped, oversized: false }
-}
 
-// 本地规划：按顶层目录分组生成模块清单（0.10.7 起是唯一规划路径——模型勘探的单独
-// 规划阶段已删，编译模型上下文足够大，模块划分不再值得一次独立请求）。
-// 宁可粗也不中断整条流水线。
-// 0.16.0 阶段 7 受控退役：原生引擎（默认通道）自带 AST 符号提取 + 语义聚类，
-// localPlan 只服务 nativeEngine=false 的兼容通道。
-export function localPlan(files) {
-  const groups = new Map()
-  for (const f of files) {
-    const top = f.path.split('/')[0]
-    const name = slugify(top === f.path ? 'root' : top)
-    if (!groups.has(name)) groups.set(name, [])
-    groups.get(name).push(f.path)
-  }
-  return {
-    project: '（本地规划：按顶层目录分组）',
-    modules: [...groups.entries()].map(([name, fs_]) => ({ name, summary: `${name} 目录下的源码`, files: fs_ })),
-    concepts: [],
-  }
-}
 
-// 横切输入装配：整篇装填成功文章；装不下的装头部（frontmatter + Overview 段）并标注截断。
-// articles: [{name, text}]；预算按 token 计（与批量单请求同预算）。
-export function packArticles(articles, budget = BATCH_TOKEN_BUDGET) {
-  const parts = []
-  let used = 0
-  for (const a of articles) {
-    let text = a.text
-    const size = estimateTokens(text)
-    if (used + size > budget && parts.length) {
-      const head = text.slice(0, Math.max(0, text.indexOf('## Key Components')))
-      const headSize = estimateTokens(head)
-      if (used + headSize <= budget) {
-        parts.push(`#### ${a.name}（超预算，仅头部）\n\n${head}`)
-        used += headSize
-      }
-      continue
-    }
-    parts.push(`#### ${a.name}\n\n${text}`)
-    used += size
-  }
-  return parts.join('\n\n')
-}
 
-// 文章格式条款：agentic 通道（读代码 → edit_article）与横切 prompt 共用。
-function articleFormatSection() {
-  return [
-    '文章格式（严格遵守）：',
-    '```',
-    '---',
-    'title: <模块名>',
-    'type: module',
-    'source_files:',
-    '  - path/to/file1',
-    '  - path/to/test_file',
-    'tags: [相关, 标签]',
-    '---',
-    '',
-    '## Overview',
-    '## Key Components',
-    '## Architecture',
-    '## Data Flow',
-    '## Connections',
-    '## Known Issues',
-    '```',
-    '- Key Components：列出该模块全部公开函数/类/常量及其行号与用途；每个 struct/model 的全部字段（含时间戳、自动生成字段）；全部方法（含属性方法、__str__、save() 等）',
-    '- 行号以源码「行号| 」前缀为准（如 12| let conf_path = ... 即第 12 行），禁止自行数行或猜测；行号区间覆盖完整函数/代码块，不得截断',
-    '- source_files 必须列出你为写本文读过的每一个文件（含测试文件），路径相对仓库根，POSIX 风格',
-    '- 功能被禁用/注释时写明具体位置（哪个文件哪一行），不许只写 "disabled"',
-    '- Architecture：组件 ≥3 或流程非平凡时，画 UTF-8 box-drawing 框图（┌ ┐ └ ┘ ─ │ ► ◄ ▼）放进 ```text 围栏，≤20 行，框内标注组件名与文件/类，箭头标注关系',
-    '- Markdown 规范：## 顶级、### 子级不跳级；行内代码用反引号；多行代码用带语言标签的围栏；结构化对比用 markdown 表；标题/代码块/列表前后留空行',
-    '- Connections 用 Obsidian [[backlinks]]（[[other-module]]）连接相关模块',
-    '- 写给对这个代码库零上下文的未来 agent：具体到文件名、函数名、类型、行号；宁可多细节，不许概括省略',
-  ].join('\n')
-}
 
-function crosscutIntro(language, what, requirements) {
-  return [
-    `你是 CodeWiki 横切文章作者。文章全文用${language}书写。`,
-    '',
-    `任务：${what}`,
-    '',
-    requirements,
-    '',
-    '直接输出完整文章：以 --- frontmatter 开始（title/type/source_files/tags）。',
-    '只输出文章本身——禁止用 markdown 代码围栏整体包裹、禁止任何解释文字。',
-    'source_files 列出你实际依据的下文模块文章 frontmatter 里出现的源文件（POSIX 相对路径）。',
-  ].join('\n')
-}
 
-function batchArchitecturePrompt(language, articlesText) {
-  return crosscutIntro(
-    language,
-    `基于下文全部模块文章，写系统总览 _architecture.md。必须含三张 UTF-8 box-drawing 图（┌ ┐ └ ┘ ─ │ ► ◄ ▼）放进 \`\`\`text 围栏：System Overview 总框图、Request/Data Flow 数据流、Dependency Graph 依赖方向，说明各模块职责与相互连接。frontmatter type: architecture。章节：## Overview / ## System Overview / ## Data Flow / ## Dependency Graph / ## Module Roles。`,
-    '行号可以引用模块文章中的行号；Markdown 规范；写给零上下文的未来 agent。',
-  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
-}
-
-function batchPatternsPrompt(language, articlesText) {
-  return crosscutIntro(
-    language,
-    '基于下文全部模块文章，总结仓库反复出现的模式 _patterns.md（命名约定、错误处理风格、构建/测试流程、目录约定等，每模式一节并给出处）。frontmatter type: pattern。章节：## Overview / ## Patterns。',
-    '每个模式必须引用具体模块文章中出现的文件/函数名作为证据。',
-  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
-}
-
-function batchConceptPrompt(language, concept, articlesText) {
-  return crosscutIntro(
-    language,
-    `基于下文模块文章，写跨模块概念「${concept}」一篇专文。讲清该概念涉及哪些模块、数据/控制如何在它们之间流动、实现位置（文件:行号）。frontmatter type: concept，title 用该概念名。章节：## Overview / ## Involved Modules / ## Flow / ## Implementation Map。`,
-    '只依据下文模块文章，不得发明未出现的文件。',
-  ) + `\n\n以下全部模块文章：\n\n${articlesText}`
-}
-
-function batchProofreadPrompt({ language, articleText, sourcesText }) {
-  return [
-    `你是 CodeWiki 审校员。文章全文用${language}书写。`,
-    '',
-    '任务：核对下文 wiki 文章与源码的一致性，输出修正后的完整文章。',
-    '核对项：',
-    '1. frontmatter 必有 title/type/source_files/tags，source_files 与正文实际引用一致',
-    '2. 抽查文中全部函数/类名与行号（上源码逐个核对；行号以源码「行号| 」前缀为准，禁止自行数行）：名字错改名字、行号错改行号、归属错改归属',
-    '3. 重大源码文件被引用但未列入 source_files 的，补进 frontmatter',
-    '4. 与源码不符的描述段落直接改写',
-    '',
-    '只输出修正后的完整文章（以 --- frontmatter 开始）——禁止围栏整体包裹、禁止解释文字。',
-    '文章与源码一致时也输出全文原样（不做无谓改写）。',
-    '',
-    '==== 待校对文章 ====', '',
-    articleText, '',
-    '==== source_files 对应源码 ====', '',
-    sourcesText,
-  ].join('\n')
-}
-
-// 批量校对 prompt（hy3 适配 0.10.8）：多篇文章+各自源码合并为一个请求，输出按固定
-// 标记分节，服务侧（settleProofread）拆回逐篇、writeValidated 校验后才落盘。
-function batchProofreadBatchPrompt(language, items) {
-  const parts = [
-    `你是 CodeWiki 审校员。文章全文用${language}书写。`,
-    '',
-    `任务：核对下文 ${items.length} 篇 wiki 文章与各自源码的一致性，逐篇输出修正后的完整文章。`,
-    '核对项（每篇各自核对）：',
-    '1. frontmatter 必有 title/type/source_files/tags，source_files 与正文实际引用一致',
-    '2. 抽查文中全部函数/类名与行号（上源码逐个核对；行号以源码「行号| 」前缀为准，禁止自行数行）：名字错改名字、行号错改行号、归属错改归属',
-    '3. 重大源码文件被引用但未列入 source_files 的，补进 frontmatter',
-    '4. 与源码不符的描述段落直接改写',
-    '',
-    '输出格式（严格遵守）：按输入顺序逐篇输出，每篇三段——一行「@@@article: 文章名」（文章名逐字照抄该篇输入开头标记），换行后是修正后的完整文章（以 --- frontmatter 开始），再一行「@@@end」。',
-    '文章与源码一致时该篇也输出全文原样（不做无谓改写）；禁止在标记与文章之外输出任何解释文字。',
-  ]
-  for (const it of items) {
-    parts.push(
-      '',
-      `@@@article: ${it.name}`,
-      '',
-      it.articleText,
-      '',
-      '==== 该篇 source_files 对应源码 ====',
-      '',
-      it.sourcesText,
-    )
-  }
-  return parts.join('\n')
-}
 
 // ---------------------------------------------------------------------------
 // 工具 1：cw CLI 封装
@@ -1574,11 +682,6 @@ function cwToolDefinition(cfg) {
 // 工具 2：codewiki_generate 编排
 // ---------------------------------------------------------------------------
 
-// 保留 CJK 字符（中文顶层目录名直接作模块 slug，避免多个中文目录全部塌缩成 'module'
-// 合并成单模块）；lowercase 只影响 ASCII，其他脚本字符清理后为空则回落 'module'
-function slugify(name) {
-  return String(name).toLowerCase().replace(/[^\p{Script=Han}a-z0-9\-_]+/gu, '-').replace(/^-+|-+$/g, '') || 'module'
-}
 
 // 读文章 frontmatter 的 source_files（缩进列表或行内数组），供 stale 流程取文件清单。
 // 从 frontmatter 文本解析 source_files 清单（inline [a,b] 与 block - a 两式），返回相对路径数组
@@ -1666,7 +769,7 @@ function readCompiledBaseline(wikiPath) {
 // 漏掉它们会让这些文章的源码变更变成「无人认领」（实际踩过：_architecture.md 声明
 // core/core.py，只扫子目录时增量规划只写了 1 篇而不是 2 篇）。
 // _index.md 是导航清单（无 frontmatter），不是文章，跳过。
-// learnings/decisions 已无产出（0.17.49），列进来是为了照看别的仓库里的历史残留页。
+// learnings/decisions 已无产出，列进来是为了照看别的仓库里的历史残留页。
 const ARTICLE_DIRS = ['modules', 'concepts', 'learnings', 'decisions', 'patterns']
 const ROOT_ARTICLE_SKIP = new Set(['_index.md', 'CodeWiki.md'])
 function collectWikiArticles(wikiPath) {
@@ -1699,58 +802,8 @@ function collectWikiArticles(wikiPath) {
   return out
 }
 
-// 存量文章体检（吸收自 FSoft 的文章质量门 + 本仓审计结论）：cw index 会把 .codewiki/
-// 下所有 .md 收进索引，包括历史遗留的坏文章——重复 frontmatter、必需章节空着、
-// source_files 指向早已删除的临时文件。这些文章不是本次编译写出来的，但它们在库里
-// 就是「坏文章已入库」，只体检新写的文章等于假装存量干净。
-// 返回 [{name, issue}]，交给 judgeOutcome 当 quality 阻塞（终态降 partial、基线不推进）。
-// 只查 error 级结构破坏；warning 级（缺非必需章节）不列，避免历史文章把所有编译都拖成 partial。
-function auditExistingArticles(wikiPath, cwd) {
-  const out = []
-  for (const a of collectWikiArticles(wikiPath)) {
-    let chk
-    try {
-      chk = contractCheck(a.content, { articlePath: a.articlePath, cwd: cwd ?? null, sources: null })
-    } catch { continue }
-    if (!chk.blocking.length) continue
-    out.push({ name: a.name, issue: `存量文章未过契约：${chk.blocking.slice(0, 2).map((i) => i.detail).join('；')}` })
-  }
-  return out
-}
 
-// 内部链接目标是否存在（stale scan 用）：`[[name]]` 与 `[x](rel.md)` 都要能解析到
-// 现存文章或本轮计划产出的文章。裸名先按 modules/ 猜，再按全库裸名匹配。
-function makeLinkExists(wikiPath, extraNames = []) {
-  const known = new Set()
-  const add = (rel) => {
-    const r = String(rel ?? '').replace(/\\/g, '/')
-    if (!r) return
-    known.add(r)
-    const bare = r.replace(/\.md$/, '')
-    known.add(bare)
-    known.add(path.posix.basename(bare))
-  }
-  for (const a of collectWikiArticles(wikiPath)) add(a.name)
-  for (const n of extraNames) add(n)
-  return (target) => {
-    const t = String(target ?? '').replace(/\\/g, '/').replace(/\.md$/, '')
-    if (!t) return false
-    if (known.has(t)) return true
-    const bare = path.posix.basename(t)
-    return known.has(bare) || known.has(`modules/${bare}`)
-  }
-}
 
-// 注：0.16.0 阶段 7 起本仓不再有增量 planner，job.updatePlan 恒为 null；终态判定改由 judgeOutcome 的 expectedNames 通道承担（见 lib/update-record.js）。
-// 当前 HEAD 短 sha（快照里记一下「这份图对应哪个提交」）；非 git 仓库返回 null。
-export function currentCommit(cwd) {
-  try {
-    const r = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd, encoding: 'utf8', timeout: 10000, windowsHide: true })
-    return r.status === 0 ? String(r.stdout ?? '').trim() || null : null
-  } catch {
-    return null
-  }
-}
 
 async function wikiPathFor(cwd, binary, signal) {
   const r = await runCw(binary, cwd, ['path'], 30000, signal)
@@ -1760,27 +813,15 @@ async function wikiPathFor(cwd, binary, signal) {
 }
 
 // ---------------------------------------------------------------------------
-// 编排服务：全批量流水线（零子代理）
-// codewiki_generate 只判态与提交；服务以 10s tick 推进各 job 的阶段机：
-//   full   = articles → crosscut → review → index（0.10.7 删规划阶段，0.17.5 删合成阶段）
-//   stale  = articles（任务在提交时预构建）→ review → index
-// 全部模型调用都是单轮文本生成，统一走插件内后台并发池（默认 volces-ark/glm-5.3-flash）；单文件超
-// 单请求预算先按大档重装继续，仍装不下则该任务转兜底通道（见下）。横切/校对结果
-// keepInMemory，服务侧校验 frontmatter 后才落盘，坏输出不写 wiki。
-// 兜底通道：只有单个源文件大到连 BATCH_TOKEN_HARD_LIMIT 都装不下时才启用——把完整写作
-// 指令写入任务文件，steer 发起会话模型派子智能体完成；本服务轮询目标文件收割入账。
-// 正常情况（单文件 ≤128k）全程在插件内完成，不惊动发起会话。
+// 编排服务：任务机
+// codewiki_generate 只判态与提交；服务以 10s tick 推进任务，编译本身交给原生引擎
+// （lib/engine/native-run.js 的裁决链），终态由质量门与落地器判决。
 // ---------------------------------------------------------------------------
 
 // 测试可设 DSH_CODEWIKI_JOBS_FILE 隔离到独立路径——默认路径与真实宿主实例共享，
 // 宿主周期 flush 会用其内存副本整写同一文件，测试期间互相洗掉对方的内存字段（tps 采样 flaky 的根因）
 const JOBS_FILE = process.env.DSH_CODEWIKI_JOBS_FILE || path.join(os.tmpdir(), 'dsh-codewiki-jobs.json')
 const TICK_MS = Math.max(250, Number(process.env.DSH_CODEWIKI_TICK_MS) || 10000)
-// 会话通道（0.9.0）：超批量预算的文章交发起会话模型派子智能体完成。
-// 超时默认 30 分钟（等子智能体产出，比批量请求长得多），可用
-// DSH_CODEWIKI_SESSION_TIMEOUT_MS 覆盖；任务文件与 job 记录同目录，宿主重启后仍可收割。
-const SESSION_TASK_TIMEOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.DSH_CODEWIKI_SESSION_TIMEOUT_MS) || 30 * 60 * 1000)
-const SESSION_TASK_DIR = path.join(path.dirname(JOBS_FILE), 'dsh-codewiki-session-tasks')
 // 原生通道的「更新记录」记账目录（仓库外）：落地器已在内部提交，记录只能在结果出来后
 // 才写得成，写进 .codewiki/ 就成了提交之后的未跟踪文件（每轮都脏工作区）。
 const NATIVE_RECORD_DIR = path.join(os.tmpdir(), 'dsh-codewiki-native-records')
@@ -1923,7 +964,7 @@ export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
   })
   return out.slice(0, Math.max(1, limit))
 }
-// 进行中任务（0.17.5）：会话页原本只读「LLM 请求记录」，而记录只在真的发出请求后才存在——
+// 进行中任务：会话页不能只读「LLM 请求记录」——记录只在真的发出请求后才存在，
 // 正在跑依赖图/聚类/落盘、或本轮无需写文章（增量直接命中）的任务在会话页完全不可见：
 // 面板任务页显示它在动，会话页却只有一堆旧记录。这里把仍在跑的任务本身也列出来，
 // requests 给出「已发几个请求」（0 表示此刻还没发），前端据此区分「进行中」与「尚未发请求」。
@@ -2083,40 +1124,7 @@ export function beginSessionRecord(job, task) {
   }
 }
 
-// 会话通道任务收割判定（纯函数，测试直接断言三态）：
-// 'timeout' 派发后超时未产出（按失败处理，不降级到插件内通道）；'harvest' 目标文件已产出，
-// 且 mtime ≥ 派发时间、以 frontmatter 开头（子智能体写完整了）；'wait' 尚未产出
-// （无文件/文件旧未更新/正在写一半）。
-export function classifySessionTask(task, nowMs = Date.now()) {
-  if (nowMs - Date.parse(task.dispatchedAt) > SESSION_TASK_TIMEOUT_MS) return 'timeout'
-  let st, content
-  try {
-    st = fs.statSync(task.articlePath)
-    content = fs.readFileSync(task.articlePath, 'utf8')
-  } catch { return 'wait' }
-  if (st.mtimeMs < Date.parse(task.dispatchedAt)) return 'wait'
-  if (!content.trimStart().startsWith('---')) return 'wait'
-  return 'harvest'
-}
 
-// 会话通道 steer 文本（纯函数，测试直接断言）。
-// 只有「超预算转会话通道」这一段经过 delegate，档位交给会话模型自己选路。
-export function buildSessionSteerText({ job, snapshots, resend = false }) {
-  const proofread = job.stage === 'review'
-  const lines = snapshots.map((s, i) => `${i + 1}. 模块 ${s.name}：任务文件 ${s.promptFile}，文章直接写到 ${s.articlePath}`)
-  const kind = proofread ? '校对' : '文章'
-  const head = resend
-    ? `【CodeWiki 超预算${kind}任务·重新派发】（宿主重启接管任务 ${job.id}，此前未产出）请调用子智能体（delegate/subagent）逐篇完成：`
-    : `【CodeWiki 超预算${kind}任务】任务 ${job.id}（${job.cwd}）有 ${snapshots.length} 篇${proofread ? '文章' : '模块文章'}超出批量通道预算，请调用子智能体（delegate/subagent）逐篇完成：`
-  const requirement = proofread
-    ? (resend
-        ? '子智能体要求：读取任务文件（完整校对指令，含旧文章全文与全部源码），写出校对后的完整文章（以 --- frontmatter 开头）后覆写对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
-        : '子智能体要求：任务文件是完整校对指令（含旧文章全文与全部源码，源码以「行号| 」前缀标注）；读出校对后的完整文章（以 --- frontmatter 开头）后用文件工具直接覆写对应目标路径（UTF-8）。编译服务会轮询目标文件收割，超时未产出按失败处理。')
-    : (resend
-        ? '子智能体要求：读取任务文件（完整写作指令，含源码与格式要求），写出完整文章（以 --- frontmatter 开头）后直接写入对应目标路径（UTF-8）。编译服务轮询收尾，超时未产出按失败处理。'
-        : '子智能体要求：任务文件是完整写作指令（含全部源码与文章格式要求，源码以「行号| 」前缀标注）；文件较大时用 read 的 offset/limit 分段读取。读出完整文章（以 --- frontmatter 开头）后用文件工具直接写入对应目标路径（UTF-8，覆盖旧文），无需另写标记文件。编译服务会轮询目标文件收割，超时未产出按失败处理。')
-  return [head, ...lines, '', requirement].join('\n')
-}
 // 孤儿接管阈值：另一实例的 job 停更超过该时长视为宿主重启遗留，本实例接管推进
 const ORPHAN_TAKEOVER_MS = Math.max(60000, Number(process.env.DSH_CODEWIKI_ORPHAN_TAKEOVER_MS) || 5 * 60 * 1000)
 const MAX_JOBS_KEPT = 30
@@ -2129,7 +1137,7 @@ const MAX_JOBS_KEPT = 30
 // `dsh-codewiki-jobs-test-<pid>-<token>.json` 做隔离，而 dirname 仍是系统临时目录——只按
 // 目录推导时，测试写出的清单与真实宿主的 `dsh-codewiki-repos.json` 是同一个文件，跑一次
 // 测试就会把 fixture 路径（如 %TEMP%/cw-orch-xxxxxx）塞进宿主的已知仓库清单，自动调度随后
-// 每轮都会去扫那些早已删除的目录（0.16.6 修复，真机见过宿主清单里躺着已删的 cw-orch-*）。
+// 每轮都会去扫那些早已删除的目录（真机见过宿主清单里躺着已删的 cw-orch-*）。
 // 命名规则：把 JOBS_FILE 基名里的 `-jobs` 段换成 `-repos`，默认形态
 // `dsh-codewiki-jobs.json` 仍推导出 `dsh-codewiki-repos.json`（保持旧清单兼容）；
 // 显式 DSH_CODEWIKI_REPOS_FILE 永远最优先。
@@ -2164,7 +1172,7 @@ export function forgetRepo(cwd) {
   try { fs.writeFileSync(REPOS_FILE, JSON.stringify({ repos: kept }, null, 2), 'utf8') } catch { return false }
   return true
 }
-// 终态集合（0.14.0 起新增 partial）：partial 表示「部分完成」——写成的文章可以入库，
+// 终态集合：partial 表示「部分完成」——写成的文章可以入库，
 // 但计划内必需文章没全成功、或有变更没归属、或质量闸门没过，因此**不得推进编译基线**。
 // 旧实现只有 done/failed/cancelled，且只要 writtenCount>0 就 done，1 篇成功 + 19 篇失败
 // 也报「已完成」，基线照推——未消化的变化从此永远不被再看一眼。
@@ -2209,12 +1217,6 @@ export function scanRepoFiles(cwd) {
   walk(cwd, '')
   return out
 }
-
-// 当前代码的符号图（stale 增量与 index 快照共用）。返回 { graph, byFile, ready, reason }；
-// 任何失败都返回 graph=null，由调用方退回文件级判定——符号级永远只是「更准的一档」，
-// 不是必需品。
-// 0.16.0 阶段 7 受控退役：lib/symbols.js 已删，本函数随之删除。符号级增量能力
-// 由原生引擎（默认通道）在 Python 侧完成，兼容通道退回文件级判定。
 
 const jobsStore = createJobsStore({ file: JOBS_FILE, maxKept: MAX_JOBS_KEPT, instanceTag: 'global' })
 
@@ -2279,7 +1281,7 @@ function jobSummary(job) {
     deliveryComplete: job.deliveryComplete === true,
     updateRecord: job.updateRecord ?? null,
     updatePlan: job.updatePlan ?? null,
-    // 插件自动提交结果（0.10.9）：面板与 codewiki_progress 共用同一份 jobSummary，
+    // 插件自动提交结果：面板与 codewiki_progress 共用同一份 jobSummary，
     // 缺了这个字段两处都拿不到，只能从 notes 里猜。
     autoCommit: job.autoCommit ?? null,
     // 原生通道（阶段 4）：channel 决定这条任务是「谁在跑」，nativeStage 是引擎自己
@@ -2292,14 +1294,13 @@ function jobSummary(job) {
     nativePercent: job.nativePercent ?? null,
     nativeMessage: job.nativeMessage ?? null,
     nativeTotal: job.nativeTotal ?? null,
-    // 原生通道结果（0.18.0 瘦身）：这份结构里 gate.articles（57 项、11KB）与
+    // 原生通道结果（已裁剪）：这份结构里 gate.articles（57 项、11KB）与
     // incremental.hydrated/stateCaptured（各 66 项、3.2KB）占了整个 payload 的大半，
     // 而面板只用 gate.outcome 与 apply.outcome 两个短字符串。2s 轮询下等于每秒
     // 重复推送十几倍无用数据，30 个任务时接口 600KB/285ms。裁剪在组装处，不改引擎侧。
     nativeResult: nativeResultBrief(job.nativeResult),
-    // 引擎事件日志（0.17.1）：内存里最近 40 条给面板即时看；完整 NDJSON 在仓库外的
+    // 引擎事件日志：内存里最近 40 条给面板即时看；完整 NDJSON 在仓库外的
     // 临时目录（见 lib/job-logs.js），端点 /api/codewiki/logs 按需翻全量。
-    // 此前这两个字段都不进 jobSummary，面板与 codewiki_progress 都看不到任何引擎日志。
     nativeLogs: (job.nativeLogs ?? []).slice(-40),
     logFile: job.channel === 'native' ? logFileFor(job.id) : null,
     logError: job.logError ?? null,
@@ -2311,17 +1312,9 @@ function jobSummary(job) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// agent 服务引用：apply() 经 ctx.inject(['agents']) 赋值。用途只剩「会话通道」——超批量
-// 预算的文章要 steer 给发起会话、由会话模型派子智能体写作（见 dispatchSessionTasks）。
-// 编译终态不再 steer 任何消息：0.17.63 去掉了那条唤醒（失败与「产物待提交」都不再主动
-// 打扰会话），终态只在面板、codewiki_progress 与系统提示 section 里体现。
-// ---------------------------------------------------------------------------
-let agentsRef = null
-
 // llm 服务引用：cordis 严格语义下直接访问 ctx.llm 会抛「cannot get property "llm"
 // without inject」（0.8.5 前的 typeof 守卫拦不住）。插件内全部模型环节都靠它，
-// 与 agentsRef 同款：apply 时经 ctx.inject(['llm']) 在注入时取服务。
+// apply 时经 ctx.inject(['llm']) 在注入时取服务。
 let llmRef = null
 
 // 编译产物的入库状态：自动提交的成功/无改动/失败三态由一处判定，commitHintText 与
@@ -2329,7 +1322,7 @@ let llmRef = null
 //   'committed'  → 产物已入库，不提
 //   'no-changes' → 没有未提交的产物（重编译无变化/提前提交过），不提
 //   'pending'    → 插件没能提交，需要会话模型代为提交一次（唯一该提的情形）
-// 旧 job（无 autoCommit 字段）按 pending 处理，与 0.10.9 之前的行为一致。
+// 没有 autoCommit 字段的 job 按 pending 处理。
 export function autoCommitState(job) {
   const ac = job?.autoCommit
   if (ac?.committed === true) return 'committed'
@@ -2370,8 +1363,8 @@ function createJobService(config) {
       saveJobs(jobs) // 立即落盘：仅 persist 标脏的话，tick 的 mergeFromDisk 会把磁盘残留吸回内存
     }
   }
-  // 编译对象残留清理（1.2.1）：worktree 目录与「没有可编译源码」的空壳目录上的历史任务
-  // 是 0.12.0 之前的噪音——同一个空壳目录能攒出十几条一模一样的「仓库没有可编译的源码文件」
+  // 编译对象残留清理：worktree 目录与「没有可编译源码」的空壳目录上的历史任务
+  // 是噪音——同一个空壳目录能攒出十几条一模一样的「仓库没有可编译的源码文件」
   // 失败记录，还占着面板任务列表。启动时一次性从作业历史里移除，并摘出已知仓库登记，
   // 仓库总览与任务列表同时干净。只在启动时做一次，判定缓存 10 分钟，不给启动路径加压。
   // 注意：这里删的是插件自己的作业记录（%TEMP%/dsh-codewiki-jobs.json），不碰用户磁盘上的目录。
@@ -2513,39 +1506,6 @@ function createJobService(config) {
     touch(job)
   }
 
-  // 阶段收割统一入口：返回 null = 阶段还在跑，下轮 tick 再看。
-  async function settleJob(job) {
-    // 执行器（后台并发池）：结果进 batchResults 等收割；null = 执行器整体失败（已 fail）
-    if (batchResults.has(job.id)) {
-      const rs = batchResults.get(job.id)
-      batchResults.delete(job.id)
-      if (rs) { job.batchProgress = null; job.batchSubmittedAt = null } // 已收割，中间进度作废
-      return rs ?? []
-    }
-    if (batchRuns.has(job.id)) return null // 执行器在跑
-    // agentic 任务没有 batchPrompt 快照（源码是模型现场读的），重跑依据是任务本身
-    // （mission + articlePath + sources）。宿主重启后按 agentic 通道整批重跑一次。
-    const agenticTasks = (job.tasks ?? []).filter((t) => t.agentic === true && t.mission && t.articlePath)
-    if (agenticTasks.length) {
-      note(job, `执行器丢失（宿主重启），按 agentic 通道重跑阶段 ${job.stage}（${agenticTasks.length} 篇）`)
-      job.batchProgress = { completed: 0, total: agenticTasks.length }
-      startAgenticRun(job, agenticTasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` })))
-      return null
-    }
-    // 执行器丢失（宿主重启）：请求随连接生死，无法续查——按 job.tasks
-    // 持久化的 batchPrompt 快照重跑本阶段，是唯一恢复路径（幂等：文章重写覆盖）。
-    const tasks = job.tasks ?? []
-    const runnable = tasks.filter((t) => typeof t.batchPrompt === 'string' && t.batchPrompt.length)
-    if (runnable.length && runnable.length === tasks.length) {
-      note(job, `执行器丢失（宿主重启），自动重跑阶段 ${job.stage}（${tasks.length} 个请求）`)
-      job.batchProgress = { completed: 0, total: tasks.length }
-      startBatchChatRun(job, tasks)
-      return null
-    }
-    fail(job, '请求因宿主重启丢失且无法重跑（任务缺少 prompt 快照），请重新提交')
-    return null
-  }
-
   // 更新记录落盘（吸收自 FSoft updater 的 record）：一次编译做了什么、为什么、哪些变化
   // 没人管、最终是否完整，写成可机读 JSON 存 .codewiki/temp/update-record.json。
   // job 里只留摘要与路径（整张图塞进 jobs 文件会让 /tmp 里的任务文件无限膨胀）。
@@ -2584,109 +1544,12 @@ function createJobService(config) {
     }
   }
 
-  // keepInMemory 结果的落盘闸门：输出必须以 frontmatter 开头且闭合，坏输出不写 wiki。
-  // keepInMemory 任务（横切/校对）在批量阶段不落盘，唯一写盘点落在这里——
-  // 不能再走 applyTaskResult（它对 keepInMemory 只回内存不落盘）。
-  function writeValidated(job, task, content) {
-    const why = validateArticleEnvelope(content)
-    if (why) {
-      note(job, `${task.name}：${why}，不落盘（原文件保留）`)
-      return { name: task.name, ok: false, stopReason: 'invalid' }
-    }
-    try {
-      fs.mkdirSync(path.dirname(task.articlePath), { recursive: true })
-      const fx = fixAnchors(content, job.cwd)
-      if (fx.fixed > 0) note(job, `${task.name}：自动修正 ${fx.fixed} 处行号锚点`)
-      if (fx.unresolved.length) note(job, `${task.name}：行号锚点存疑（未改）—— ${fx.unresolved.slice(0, 3).join('；')}${fx.unresolved.length > 3 ? ' 等' : ''}`)
-      fs.writeFileSync(task.articlePath, fx.text, 'utf8')
-      return { name: task.name, ok: true, stopReason: 'completed' }
-    } catch (err) {
-      note(job, `文章 ${task.name} 落盘失败 —— ${String(err?.message ?? err)}`)
-      return { name: task.name, ok: false, stopReason: 'error' }
-    }
-  }
 
-  // 结果记账。两个开关各管一件事，互不重叠：
-  //   replace=true（校对阶段）：同名条目一律覆盖——校对结果代表该文章的最终状态，
-  //     校对失败不推翻已写成功的原文（rec.ok 会被 prev 的 ok 兜住）。
-  //   mergeByName=true（文章/观察/合成的重跑路径）：同名条目合并而不是再 push 一条。
-  //     正常首次 tally 时 job.articles 里还没有同名条目，所以这个开关只在**真的重跑**
-  //     时起作用：· agentic 失败退回单轮重跑（shouldFallBackHere 分支）
-  //             · 宿主重启后 settleJob 的「执行器丢失」整批重跑
-  //     这两种情况不合并的话，writtenCount 会重复累加、job.articles 里留两条同名记录
-  //     （面板显示成两篇），进度也就对不上了。
-  function tally(job, results, tasks, { replace = false, mergeByName = false } = {}) {
-    const byName = new Map((tasks ?? job.tasks ?? []).map((t) => [t.name, t]))
-    for (const r of results) {
-      const t = byName.get(r.name)
-      let entry
-      if (t?.keepInMemory && r.ok) {
-        entry = writeValidated(job, t, r.content)
-      } else {
-        entry = { name: r.name, ok: r.ok === true, stopReason: r.stopReason }
-      }
-      const rec = { name: entry.name, ok: entry.ok, stopReason: entry.stopReason, path: t?.articlePath ?? null }
-      const prev = (replace || mergeByName)
-        ? (job.articles.find((a) => a.name === rec.name) ?? null)
-        : null
-      if (prev) {
-        const wasOk = prev.ok
-        if (!rec.ok && wasOk) rec.ok = true // 曾经的成就不被后续失败抹掉
-        const wasPath = prev.path
-        Object.assign(prev, rec)
-        if (!wasPath && rec.path) prev.path = rec.path
-        // 失败 -> 成功：计入写成功、从失败里减掉
-        if (!wasOk && prev.ok) {
-          job.writtenCount += 1
-          job.failedCount = Math.max(0, job.failedCount - 1)
-        }
-      } else {
-        job.articles.push(rec)
-        if (rec.ok) job.writtenCount += 1
-        else job.failedCount += 1
-      }
-    }
-  }
 
-  // 批量校对收割：一个结果覆盖多篇——按「@@@article: 名 / @@@end」标记拆回逐篇，
-  // writeValidated 校验通过才覆写；缺席或非法的文章保留原文（校对失败不推翻已写成功的文章）
-  function settleProofread(job, results, tasks) {
-    const byName = new Map()
-    for (const t of tasks ?? []) {
-      for (const it of t.proofreadItems ?? []) byName.set(it.name, it)
-    }
-    const done = new Map() // name → ok
-    for (const r of results) {
-      if (!r.ok || !r.content) continue
-      const re = /@@@article:[ \t]*(.+?)[ \t]*\r?\n([\s\S]*?)@@@end/g
-      let m
-      while ((m = re.exec(r.content)) !== null) {
-        const name = m[1].trim()
-        if (done.has(name) || !byName.has(name)) continue
-        const it = byName.get(name)
-        const entry = writeValidated(job, it, m[2].trim() + '\n')
-        done.set(name, entry.ok)
-        if (!entry.ok) note(job, `${name}：批量校对输出未通过校验，保留原文`)
-      }
-    }
-    for (const t of tasks ?? []) {
-      for (const it of t.proofreadItems ?? []) {
-        if (!done.has(it.name)) note(job, `${it.name}：批量校对输出缺席，保留原文`)
-      }
-    }
-  }
 
-  // 阶段执行器：后台并发池，结果进 batchResults 由 settleJob 收割，
-  // tick 不被长请求阻塞。batchRuns 是存活性标记，batchAborters 供取消中断在飞请求。
-  // 唯一通道：宿主 llm 服务（模型设置里已注册的 provider/model，含本地 OpenAI 兼容端点），
-  // 凭证由宿主按该 provider 解析，插件不碰密钥。
-  const batchRuns = new Map()     // jobId → 执行器 Promise
-  const batchResults = new Map()  // jobId → results[]（null = 执行器整体失败，已 fail）
-  const batchAborters = new Map() // jobId → AbortController
-
-  // ── 原生引擎通道（阶段 4）的执行器 ──────────────────────────────────────
-  // 与 batchRuns 同构：runNativeJob 是一条长任务（一次 generate 全跑完），
-  // 不能塞进 tick 的一步里——tick 是 10s 节拍，跑不完就返回会让下一次 tick 重复提交。
+  // ── 原生引擎通道的执行器 ──────────────────────────────────────────────
+  // runNativeJob 是一条长任务（一次 generate 全跑完），不能塞进 tick 的一步里——
+  // tick 是 10s 节拍，跑不完就返回会让下一次 tick 重复提交。
   // 所以「启动 → 等结果 → 收割」三段分开，结果为 null 表示已 fail（由执行器自己判）。
   const nativeRuns = new Map()     // jobId → Promise
   const nativeResults = new Map()  // jobId → EngineResult | null
@@ -2722,14 +1585,14 @@ function createJobService(config) {
   }
 
   // 原生通道单次编译：起一条长任务，结果为 EngineResult（含 gate/apply 现场）。
-  // 失败一律进 nativeResults=null 并由这里 fail()，与 batchRuns 的约定一致：
-  // 收割方（settleJob）只看「有没有结果」，不用自己猜执行器死活。
+  // 失败一律进 nativeResults=null 并由这里 fail()：
+  // 收割方只看「有没有结果」，不用自己猜执行器死活。
   function startNativeRun(job, channel) {
     const ac = new AbortController()
     nativeAborters.set(job.id, ac)
     const c = liveConfig(config)
     // 引擎原始产物目录必须放在**仓库外**（临时目录）。
-    // 曾经放在 .codewiki/temp/native-docs，实测会在首次编译时整批失败：落地器
+    // 不能放在 .codewiki/temp/native-docs，实测会在首次编译时整批失败：落地器
     // apply-plan.js:542-565 用「.codewiki 目录是否存在」判断要不要跑 cw init，
     // 而引擎写产物这一步已经先把 .codewiki/ 建出来了，于是被判成
     // 「.codewiki/ 存在但缺 _meta.yaml（人工删改过？）」→ wiki-missing → failed。
@@ -2751,7 +1614,7 @@ function createJobService(config) {
         // 文章语言：job 提交时已按「入参 > 插件设置」解析好（submit 的 language），
         // 原生通道必须显式带下去，否则引擎按英文写、设置项形同虚设。
         language: job.language,
-        // 同层模块并行度：独立设置项，0/未填 跟随默认档并发（与 bigConcurrency 同约定），
+        // 同层模块并行度：独立设置项，0/未填 跟随默认档并发，
         // 填 1 = 上游原本的严格串行。不复用同一个配置键，两者语义不同。
         moduleConcurrency: c.moduleConcurrency || c.maxConcurrency,
         // 单模块写作请求上限：上游写作 agent 的硬预算，不传就等于用引擎默认 100，
@@ -2875,7 +1738,7 @@ function createJobService(config) {
   // 原生阶段的任务推进：起一次（stage=articles 且没有在跑的），后续 tick 只等待。
   // 返回 true 表示本轮「有动作，别继续往下走」。
   async function tickNative(job, channel) {
-    // 结果已就绪 → 收割（与 batchResults 同一套约定：执行器只调一次，收割方删记录）
+    // 结果已就绪 → 收割（执行器只调一次，收割方删记录）
     if (nativeResults.has(job.id)) {
       const res = nativeResults.get(job.id)
       nativeResults.delete(job.id)
@@ -2960,8 +1823,8 @@ function createJobService(config) {
         note(job, '任务终态：已取消（产物未落地，基线未推进）')
         touch(job)
       } else {
-        // 不跑 tickCommit：原生通道的 commit 已在落地器里完成（提交失败会进 blockers，
-        // 终态不会是 done）。再调一次旧 tickCommit 只会重复提交同一批产物。
+        // 不在这里提交：commit 已在落地器里完成（提交失败会进 blockers，终态不会是
+        // done）。再提交一次只会重复提交同一批产物。
         finishJob(job, res.outcome, res.blockers ?? [])
       }
       return true
@@ -2993,670 +1856,6 @@ function createJobService(config) {
     return true
   }
 
-  function startBatchChatRun(job, prepared) {
-    const c = liveConfig(config)
-    const ac = new AbortController()
-    batchAborters.set(job.id, ac)
-    let doneCount = 0
-    const run = Promise.resolve()
-      .then(() => runRealtimeTasks(prepared, {
-        provider: c.batchProvider,
-        llm: llmRef,
-        model: c.batchModel,
-        reasoningEffort: c.batchReasoningEffort || undefined,
-        concurrency: c.maxConcurrency,
-        bigConcurrency: c.bigConcurrency, // 0 = 跟随默认档并发
-        notes: job.notes,
-        signal: ac.signal,
-        // 这两条通道的请求全部发生在写作阶段（文章与子智能体的任务池），
-        // 记录时显式带上，否则面板里它们会掉进「未标注」。
-        onRequestStart: (t) => beginSessionRecord(job, { ...t, stage: t.stage || job.stage || 'articles' }), // 会话内容记录（面板「会话」视图）
-        onTaskDone: (s) => {
-          doneCount += 1
-          job.batchProgress = { completed: doneCount, total: prepared.length }
-          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
-          addUsage(job, { outputTok: s.outputTokens ?? 0 }) // 输出 token 实测入账
-          touch(job)
-        },
-      }))
-      .then(
-        (rs) => batchResults.set(job.id, [...rs.values()]),
-        (err) => {
-          batchResults.set(job.id, null)
-          if (!JOB_TERMINAL.has(job.stage)) {
-            const msg = `阶段执行失败 —— ${String(err?.message ?? err)}`
-            note(job, msg)
-            fail(job, msg)
-          }
-        },
-      )
-      .finally(() => {
-        batchRuns.delete(job.id); batchAborters.delete(job.id)
-        if (JOB_TERMINAL.has(job.stage)) batchResults.delete(job.id) // 取消/失败后不残留未收割结果
-        touch(job)
-      })
-    batchRuns.set(job.id, run)
-    return run
-  }
-
-  // agentic 写作执行器：与 startBatchChatRun 并列的第二条通道。
-  // 结果同样进 batchResults，由 settleJob 统一收割；区别是任务里没有 batchPrompt——
-  // settleJob 的「执行器丢失重跑」分支需要认 agentic 标记（见 settleJob）。
-  function startAgenticRun(job, tasks) {
-    const c = liveConfig(config)
-    const ac = new AbortController()
-    batchAborters.set(job.id, ac)
-    let doneCount = 0
-    const run = Promise.resolve()
-      .then(() => runAgenticArticles(tasks, {
-        llm: llmRef,
-        provider: c.batchProvider,
-        model: c.batchModel,
-        reasoningEffort: c.batchReasoningEffort || '',
-        concurrency: c.maxConcurrency,
-        bigConcurrency: c.bigConcurrency, // 0 = 跟随默认档并发
-        cwd: job.cwd,
-        language: job.language,
-        articleFormat: articleFormatSection(),
-        maxSteps: DEFAULT_MAX_STEPS,
-        fixAnchors,
-        // agentic 通道的写集（吸收自 FSoft 的 write-set）：父任务只能写自己目标文章，
-        // 子模块只能写调度器分配的路径。不传时旧行为不变（供既有调用方沿用）。
-        allowedWritePaths: tasks.filter((t) => t.articlePath).map((t) => t.articlePath),
-        notes: job.notes,
-        signal: ac.signal,
-        onRequestStart: (t) => beginSessionRecord(job, { ...t, stage: t.stage || job.stage || 'articles' }),
-        onTaskDone: (s) => {
-          doneCount += 1
-          job.batchProgress = { completed: doneCount, total: tasks.length }
-          job.tpsSamples = [...(job.tpsSamples ?? []), s].slice(-20)
-          addUsage(job, { outputTok: s.outputTokens ?? 0 })
-          touch(job)
-        },
-      }))
-      .then(
-        (rs) => batchResults.set(job.id, [...rs.values()]),
-        (err) => {
-          batchResults.set(job.id, null)
-          if (!JOB_TERMINAL.has(job.stage)) {
-            const msg = `agentic 阶段执行失败 —— ${String(err?.message ?? err)}`
-            note(job, msg)
-            fail(job, msg)
-          }
-        },
-      )
-      .finally(() => {
-        batchRuns.delete(job.id); batchAborters.delete(job.id)
-        if (JOB_TERMINAL.has(job.stage)) batchResults.delete(job.id)
-        touch(job)
-      })
-    batchRuns.set(job.id, run)
-    return run
-  }
-
-  // 规划（兼容通道专用）：0.16.0 阶段 7 起语义规划（AST 聚类）随 nativeEngine 默认
-  // 开启而退役——原生引擎自己完成图提取与聚类。这条路径只在 nativeEngine=false 时
-  // 被 tickArticles 用到，模块清单退回到顶层目录分组。
-  async function buildPlan(job, files) {
-    const plan = localPlan(files)
-    note(job, `规划：${plan.modules.length} 个模块（按顶层目录分组，兼容通道 nativeEngine=false）`)
-    return plan
-  }
-
-  function submitBatchFor(job, prepared) {
-    const c = liveConfig(config)
-    // 请求实际输入超单请求预算（BATCH_TOKEN_BUDGET）的走兜底装填，提交前明示
-    const tier2 = prepared.filter((t) => estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET).length
-    addUsage(job, { inputTok: prepared.reduce((n, t) => n + estimateTokens(t.batchPrompt), 0), requests: prepared.length, realtime: true, overTier2: tier2 })
-    if (tier2) note(job, `${tier2} 个请求输入超单请求预算（${Math.round(BATCH_TOKEN_BUDGET / 1000)}k），按大档装填`)
-    job.batchRef = { batchId: `stage-${job.id}` } // 无服务端批次 id，仅标记「阶段在途」
-    job.batchSubmittedAt = new Date().toISOString() // 面板执行时长计时起点，收割时清空
-    job.tasks = prepared.map((t) => ({
-      customId: t.customId, name: t.name, articlePath: t.articlePath, keepInMemory: t.keepInMemory === true,
-      cwd: t.cwd, // 锚点自动修正的源码根（writeValidated 用 job.cwd，普通文章直写用 t.cwd）
-      batchPrompt: t.batchPrompt, // 宿主重启后重跑本阶段的唯一依据
-      // 大档任务：记录它该用哪个模型跑，重启接管后按同档重派（否则会掉回普通档装不下）。
-      // bigTier: true 必须一起持久化——它是并发分池的唯一依据，丢了会让重跑的请求
-      // 全部挤进默认档池，把默认档配额吃光。
-      ...(t.bigTier ? { bigTier: true, provider: t.provider, model: t.model, ...(t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}) } : {}),
-      // 观察→合成分割通道 0.17.5 已删除，任务不再带 splitFor/composePlan；
-      // 旧 jobs 里可能残留这两个字段，读侧按缺省处理即可，不需要迁移。
-      // 批量校对任务：逐篇回写清单（settleProofread 按标记拆回、宿主重启重跑都依赖）
-      ...(t.proofreadItems ? { proofreadItems: t.proofreadItems } : {}),
-    }))
-    job.batchProgress = { completed: 0, total: prepared.length }
-    startBatchChatRun(job, prepared)
-    const bigCount = prepared.filter((t) => t.bigTier).length
-    const modelText = bigCount
-      ? `${c.batchProvider}/${c.batchModel} + 大档 ${c.bigProvider}/${c.bigModel}（${bigCount} 个）`
-      : `${c.batchProvider}/${c.batchModel}`
-    // 并发文案：有大档任务时把两档上限都写清楚（大档 0 = 跟随默认档）
-    const concurrencyText = bigCount
-      ? `${c.maxConcurrency} + 大档 ${c.bigConcurrency || c.maxConcurrency}`
-      : `${c.maxConcurrency}`
-    note(job, `阶段已启动：${prepared.length} 个请求（模型 ${modelText}，并发 ${concurrencyText}）`)
-    touch(job)
-  }
-
-  // ---- 会话通道：超预算文章交发起会话模型派子智能体完成（0.9.0） ----
-  // 把完整写作指令写入任务文件，steer 一条短消息给发起会话；会话模型调用子智能体
-  // （delegate/subagent）读任务文件、把文章直接写到 articlePath。本服务每 tick 轮询目标
-  // 文件收割（frontmatter 校验 + 行号锚点校正后入账），超时（默认 30 分钟）按失败处理
-  // ——不降级到插件内通道回写（避免半成品覆盖）。派发快照随 job 持久化（sessionTasks），
-  // 宿主重启接管后重发一次 steer。
-  function dispatchSessionTasks(job, tasks) {
-    let agent = null
-    try { agent = job.sessionId && agentsRef?.get ? agentsRef.get(job.sessionId) : null } catch { /* 会话已关 */ }
-    if (!agent || typeof agent.steer !== 'function') {
-      fail(job, `${tasks.length} 个任务超批量预算需走会话通道（会话模型→子智能体），但发起会话不可用（面板/自动调度提交或会话已关闭）——请从会话内重新提交编译`)
-      return null
-    }
-    const dispatchedAt = new Date().toISOString()
-    const snapshots = []
-    try {
-      fs.mkdirSync(SESSION_TASK_DIR, { recursive: true })
-      for (const t of tasks) {
-        const safe = String(t.name).replace(/[^\w.-]+/g, '_')
-        const promptFile = path.join(SESSION_TASK_DIR, `${job.id}--${safe}.prompt.txt`)
-        fs.writeFileSync(promptFile, t.batchPrompt, 'utf8')
-        fs.mkdirSync(path.dirname(t.articlePath), { recursive: true })
-        snapshots.push({ name: t.name, articlePath: t.articlePath, promptFile, dispatchedAt })
-      }
-    } catch (err) {
-      fail(job, `会话通道任务文件写入失败 —— ${String(err?.message ?? err)}`)
-      return null
-    }
-    const minutes = Math.round(SESSION_TASK_TIMEOUT_MS / 60000)
-    const text = buildSessionSteerText({ job, snapshots })
-    try {
-      agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
-    } catch (err) {
-      fail(job, `会话通道 steer 失败 —— ${String(err?.message ?? err)}`)
-      return null
-    }
-    note(job, `${snapshots.length} 个超预算任务已转会话通道（会话模型→子智能体，档位自动选路），等待产出（超时 ${minutes} 分钟）`)
-    return snapshots
-  }
-
-  // 会话通道收割：'harvest' 的按 writeValidated 闸门落盘入账，'timeout' 记失败，
-  // 'wait' 留待下轮。返回 true = 全部终态（阶段可推进）。
-  function progressSessionTasks(job) {
-    const results = []
-    const left = []
-    for (const t of job.sessionTasks) {
-      const verdict = classifySessionTask(t)
-      if (verdict === 'timeout') {
-        results.push({ name: t.name, ok: false, stopReason: 'timeout' })
-        note(job, `${t.name}：会话通道超时（${Math.round(SESSION_TASK_TIMEOUT_MS / 60000)} 分钟未见产出），该篇按失败处理`)
-      } else if (verdict === 'harvest') {
-        results.push(writeValidated(job, t, fs.readFileSync(t.articlePath, 'utf8')))
-      } else {
-        left.push(t)
-      }
-    }
-    const before = job.sessionTasks
-    job.sessionTasks = left
-    // 校对阶段（review）的结果覆盖同名文章条目：校对失败不推翻已写成功的原文
-    if (results.length) tally(job, results, before, { replace: job.stage === 'review' })
-    return left.length === 0
-  }
-
-  // 宿主重启接管后重发一次 steer（旧进程的 steer 可能随会话丢失）；不重置 dispatchedAt，
-  // 超时计时保持原起点；子智能体重写同一文件，幂等。
-  function resendSessionSteer(job) {
-    let agent = null
-    try { agent = job.sessionId && agentsRef?.get ? agentsRef.get(job.sessionId) : null } catch { /* 会话已关 */ }
-    if (!agent || typeof agent.steer !== 'function') {
-      note(job, '会话通道任务接管后重发 steer 失败（发起会话不可用），等待超时按失败处理')
-      return
-    }
-    const text = buildSessionSteerText({ job, snapshots: job.sessionTasks, resend: true })
-    try {
-      agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin:codewiki' } }))
-      note(job, '会话通道任务已重新派发（宿主重启接管）')
-    } catch { /* 重发失败等超时 */ }
-  }
-
-  // ---- 阶段处理：每 tick 每 job 推进一步 ----
-
-  // 规划阶段已删（0.10.7）：全量编译提交后直接进 articles，模块清单由 localPlan
-  // 本地生成（顶层目录分组）——编译模型上下文足够大，不再值得为模块划分单独发
-  // 一次模型请求；stale 用文章 frontmatter 的 source_files，本就不经过规划。
-
-  async function tickArticles(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      const tasks = job.tasks
-      job.batchRef = null
-      job.tasks = []
-      tally(job, results, tasks, { mergeByName: true })
-    } else if (!job.sessionTasks?.length) {
-      // 组装文章任务并提交：stale 用预构建任务；full 就地本地规划生成清单；resume 不经此处（batchRef 已设）
-      let tasks
-      if (job.kind === 'stale') tasks = job.tasks
-      else {
-        if (!job.plan) {
-          const files = scanRepoFiles(job.cwd)
-          if (!files.length) { fail(job, '仓库没有可编译的源码文件'); return }
-          job.plan = await buildPlan(job, files)
-        }
-        const plan = job.plan
-        if (!plan?.modules?.length) { fail(job, '仓库没有可编译的源码文件'); return }
-        tasks = plan.modules.map((mod) => {
-          const slug = slugify(mod.name)
-          return {
-            name: `modules/${slug}.md`,
-            mission: `为模块「${mod.name}」撰写文章 modules/${slug}.md${mod.summary ? `：${mod.summary}` : ''}`,
-            sources: mod.files,
-            cwd: job.cwd,
-            articlePath: path.join(job.wikiPath, 'modules', `${slug}.md`),
-            prevArticlePath: path.join(job.wikiPath, 'modules', `${slug}.md`), // 已有旧文则作上下文
-          }
-        })
-      }
-      const c0 = liveConfig(config)
-      // 本阶段「应该产出什么」——完整性判定的分母。旧实现只在收尾看 writtenCount，
-      // 于是「计划 20 篇、写成 1 篇」也算成功；这里把清单固化下来，缺页才判得出。
-      if (tasks.length) job.expectedNames = tasks.map((t) => t.name)
-      // agentic 写作通道（吸收自 FSoft CodeWiki 的 module agent）：模型自己读源码、增量写文章。
-      // 它不需要「源码整包内联 → 超预算拆观察批 → 合成」这套装填，因此没有 sessionTasks。
-      // 单篇失败只记账；失败率过半且旧通道可用时退回单轮通道重跑一次（见下）。
-      if (tasks.length) {
-        // 按模块源文本量给超大模块打大档标记（与单轮通道 markBig 同语义：吃不下就换大上下文模型），
-        // 再交给双池执行器——大档任务走 bigProvider，其余走默认档，两池独立限流。
-        // 大档关闭（liveConfig 已把 bigProvider 清空）时 markBigAgenticTasks 原样返回。
-        const agenticTasks = markBigAgenticTasks(
-          tasks.map((t, i) => ({ ...t, customId: t.customId ?? `a${i}` })),
-          {
-            bigTier: {
-              provider: c0.bigProvider,
-              model: c0.bigModel,
-              reasoningEffort: c0.bigReasoningEffort,
-              budget: c0.bigTokenBudget,
-            },
-            sizeOf: (t) => sourceTokensOf(t, job.cwd),
-          },
-        )
-        job.tasks = agenticTasks.map((t) => ({
-          customId: t.customId, name: t.name, articlePath: t.articlePath,
-          mission: t.mission, sources: t.sources, cwd: t.cwd,
-          prevArticlePath: t.prevArticlePath ?? null,
-          agentic: true, // 宿主重启重跑时按 agentic 通道重跑，而不是找 batchPrompt
-        }))
-        job.batchRef = { batchId: `stage-${job.id}` }
-        job.batchSubmittedAt = new Date().toISOString()
-        job.batchProgress = { completed: 0, total: agenticTasks.length }
-        startAgenticRun(job, agenticTasks)
-        note(job, `阶段已启动：${agenticTasks.length} 篇 agentic 写作（模型 ${c0.batchProvider}/${c0.batchModel}，并发 ${c0.maxConcurrency}，单篇≤${DEFAULT_MAX_STEPS} 步）`)
-        touch(job)
-        return
-      }
-      fail(job, '没有可写的文章任务')
-      return
-    }
-    // 会话通道收割：全部终态才推进（超时/失败已在 progressSessionTasks 记账）
-    if (job.sessionTasks?.length) {
-      if (!progressSessionTasks(job)) return
-      job.sessionTasks = null
-    }
-    if (job.writtenCount === 0) { fail(job, '全部文章任务失败（wiki 基线不变，可重新提交）'); return }
-    setStage(job, job.kind === 'full' ? 'crosscut' : 'review')
-  }
-
-  // 横切合成任务（单批直出与拆分合成共用）：输入 pack = 模块文章全文或模块观察拼接
-  function crosscutTasks(job, pack) {
-    const lang = job.language
-    return [
-      {
-        customId: 'arch', name: '_architecture.md', keepInMemory: true,
-        articlePath: path.join(job.wikiPath, '_architecture.md'),
-        batchPrompt: batchArchitecturePrompt(lang, pack),
-      },
-      {
-        customId: 'patterns', name: '_patterns.md', keepInMemory: true,
-        articlePath: path.join(job.wikiPath, '_patterns.md'),
-        batchPrompt: batchPatternsPrompt(lang, pack),
-      },
-      ...job.plan.concepts.map((c, i) => ({
-        customId: `concept${i}`, name: `concepts/${slugify(c.name)}.md`, keepInMemory: true,
-        articlePath: path.join(job.wikiPath, 'concepts', `${slugify(c.name)}.md`),
-        batchPrompt: batchConceptPrompt(lang, c.name, pack),
-      })),
-    ]
-  }
-
-  async function tickCrosscut(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      const tasks = job.tasks
-      job.batchRef = null
-      job.tasks = []
-      tally(job, results, tasks, { mergeByName: true })
-      setStage(job, 'review')
-      return
-    }
-    // 输入 = 成功模块文章全文（packArticles 装不下截头部并标注）
-    const texts = []
-    for (const a of job.articles) {
-      if (!a.ok || !a.path) continue
-      try { texts.push({ name: a.name, text: fs.readFileSync(a.path, 'utf8') }) } catch { /* 丢文件在横切输入缺席 */ }
-    }
-    if (!texts.length) { note(job, '没有成功模块文章可作横切输入，跳过横切'); setStage(job, 'review'); return }
-    const lang = job.language
-    // 拆分判定用原始总量——packArticles 只截后续文章头部，pack 体积永远装得下，不能作依据。
-    // hy3 适配（0.10.8）：110k~大档预算之间单批直出（任务标大档），仅连大档都装不下才拆观察。
-    const c0 = liveConfig(config)
-    const bigTier = bigTierOf(c0)
-    const bigLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
-    const totalTokens = texts.reduce((n, a) => n + estimateTokens(a.text), 0)
-    // 单批直出：packArticles 保证装得下（超预算的文章只截头部并标注），不再有
-    // 「拆观察批 → 合成」那条路（0.17.5 随单轮通道退役）。总量超普通预算就换大档。
-    try {
-      const tasks = crosscutTasks(job, packArticles(texts, bigLimit))
-      if (bigTier && totalTokens > BATCH_TOKEN_BUDGET) {
-        for (const t of tasks) {
-          t.provider = bigTier.provider
-          t.model = bigTier.model
-          if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
-          t.bigTier = true // 分池依据：进大档并发池，不吃默认档配额
-        }
-      }
-      await submitBatchFor(job, tasks)
-      note(job, `横切批次已提交：_architecture/_patterns + ${job.plan.concepts.length} 个概念${bigTier && totalTokens > BATCH_TOKEN_BUDGET ? '（大档装填）' : ''}`)
-    } catch (err) {
-      fail(job, `横切批次提交失败 —— ${String(err?.message ?? err)}`)
-    }
-  }
-
-  // 本地核对：frontmatter 必填 + source_files 存在性（只记账，不删文）
-  function localReview(job) {
-    const problems = []
-    for (const a of job.articles) {
-      if (!a.ok || !a.path) continue
-      let text = null
-      try { text = fs.readFileSync(a.path, 'utf8') } catch { text = null }
-      if (text === null) {
-        problems.push(`${a.name}：文件丢失`)
-        a.ok = false
-        a.stopReason = 'missing'
-        if (job.writtenCount > 0) job.writtenCount-- // 文件已不在，成功写盘计数回退
-        continue
-      }
-      if (!text.trimStart().startsWith('---')) { problems.push(`${a.name}：缺 frontmatter`); a.skipProofread = true; continue }
-      const srcs = readSourceFiles(a.path)
-      const missing = srcs.filter((f) => !fs.existsSync(path.join(job.cwd, f)))
-      if (missing.length) problems.push(`${a.name}：source_files 缺 ${missing.slice(0, 3).join('、')}${missing.length > 3 ? ' 等' : ''}`)
-      a.skipProofread = srcs.length === 0
-    }
-    if (problems.length) note(job, `本地核对 ${problems.length} 处问题 —— ${problems.slice(0, 4).join('；')}${problems.length > 4 ? '…' : ''}`)
-  }
-
-  async function tickReview(job) {
-    if (job.batchRef) {
-      const results = await settleJob(job)
-      if (results === null) return
-      settleProofread(job, results, job.tasks)
-      job.batchRef = null
-      job.tasks = []
-      if (!job.sessionTasks?.length) { setStage(job, 'index'); return }
-      // 校对批次已收割，会话通道的校对任务仍在途：落到下方收割
-    } else if (!job.sessionTasks?.length) {
-      localReview(job)
-      // hy3 适配（0.10.8）：逐篇准备（文章+源码）后按普通预算贪心合并成批量校对请求，
-      // 输出按 @@@article/@@@end 标记分节拆回逐篇落盘——请求数从≈文章数降到≈总输入/110k
-      const c0 = liveConfig(config)
-      const bigTier = bigTierOf(c0)
-      const bigLimit = bigTier ? bigTier.budget : BATCH_TOKEN_HARD_LIMIT
-      const tasks = []
-      const sessionTasks = []
-      const items = []
-      for (const a of job.articles) {
-        if (!a.ok || !a.path || a.skipProofread) continue
-        let articleText = null
-        try { articleText = fs.readFileSync(a.path, 'utf8') } catch { continue }
-        const articleTokens = estimateTokens(articleText)
-        let srcs = collectSources(job.cwd, readSourceFiles(a.path), BATCH_TOKEN_BUDGET - articleTokens)
-        if (srcs.oversized) srcs = collectSources(job.cwd, readSourceFiles(a.path), bigLimit - articleTokens)
-        if (srcs.oversized) {
-          // 连大档都装不下：转会话通道兜底，由发起会话模型调用子智能体校对并覆写文章
-          sessionTasks.push({
-            name: a.name, articlePath: a.path,
-            batchPrompt: batchProofreadPrompt({ language: job.language, articleText, sourcesText: srcs.text }),
-          })
-          note(job, `${a.name}：源码超批量预算，校对转会话通道`)
-          continue
-        }
-        items.push({ name: a.name, articlePath: a.path, articleText, sourcesText: srcs.text })
-      }
-      const HEADER_ALLOWANCE = 1000
-      const markBigTask = (t) => {
-        if (!bigTier) return
-        t.provider = bigTier.provider
-        t.model = bigTier.model
-        if (bigTier.reasoningEffort) t.reasoningEffort = bigTier.reasoningEffort
-        t.bigTier = true // 分池依据：进大档并发池
-      }
-      let i = 0
-      const submitGroup = (group) => {
-        if (!group.length) return
-        const t = {
-          customId: `proof${i++}`, name: `proof-batch-${i}`, keepInMemory: true,
-          proofreadItems: group.map(({ name, articlePath }) => ({ name, articlePath })),
-          batchPrompt: batchProofreadBatchPrompt(job.language, group),
-        }
-        if (estimateTokens(t.batchPrompt) > BATCH_TOKEN_BUDGET) markBigTask(t)
-        tasks.push(t)
-      }
-      let group = []
-      let used = 0
-      for (const it of items) {
-        const size = estimateTokens(it.articleText) + estimateTokens(it.sourcesText) + HEADER_ALLOWANCE
-        if (used + size > BATCH_TOKEN_BUDGET && group.length) { submitGroup(group); group = []; used = 0 }
-        group.push(it)
-        used += size
-        // 单篇即超普通预算：独立成组（装得下大档就标大档，否则转会话通道）
-        if (size > BATCH_TOKEN_BUDGET) {
-          const solo = batchProofreadBatchPrompt(job.language, [it])
-          if (estimateTokens(solo) > bigLimit) {
-            sessionTasks.push({
-              name: it.name, articlePath: it.articlePath,
-              batchPrompt: batchProofreadPrompt({ language: job.language, articleText: it.articleText, sourcesText: it.sourcesText }),
-            })
-            note(job, `${it.name}：源码超批量预算，校对转会话通道`)
-            group = group.filter((g) => g !== it)
-            used = 0
-          } else { submitGroup(group); group = []; used = 0 }
-        }
-      }
-      submitGroup(group)
-      if (sessionTasks.length) {
-        const snap = dispatchSessionTasks(job, sessionTasks)
-        if (!snap) return // 发起会话不可用，已标失败
-        job.sessionTasks = snap
-      }
-      if (tasks.length) {
-        try {
-          await submitBatchFor(job, tasks)
-          note(job, `校对批次已提交：${items.length + sessionTasks.length} 篇合并为 ${tasks.length} 个请求${job.sessionTasks?.length ? `；另 ${job.sessionTasks.length} 篇走会话通道` : ''}`)
-        } catch (err) {
-          note(job, `校对批次提交失败（跳过校对）—— ${String(err?.message ?? err)}`)
-          job.batchRef = null
-          job.tasks = []
-        }
-        if (job.batchRef) return
-      } else if (!job.sessionTasks?.length) {
-        setStage(job, 'index')
-        return
-      }
-    }
-    // 会话通道校对收割：全部终态才进 index
-    if (job.sessionTasks?.length) {
-      if (!progressSessionTasks(job)) return
-      job.sessionTasks = null
-    }
-    setStage(job, 'index')
-  }
-
-  async function tickIndex(job) {
-    // 存量坏文章体检：wiki 里已有的结构破坏（重复 frontmatter/空章节/坏 source_files）
-    // 本身就是「坏文章已入库」。把它们并入质量阻塞——本次编译即使全成功，只要库里
-    // 还躺着坏文章，终态就是 partial 且基线不推进。这是有意的：假装干净 = 下次编译
-    // 继续在脏库上判定「已消化」，坏文章永远没人管。
-    try {
-      const audited = auditExistingArticles(job.wikiPath, job.cwd)
-      if (audited.length) {
-        job.qualityIssues = [...(job.qualityIssues ?? []), ...audited]
-        note(job, `存量文章体检：${audited.length} 篇未过契约（${audited.slice(0, 3).map((a) => a.name).join('、')}${audited.length > 3 ? ' 等' : ''}）`)
-      }
-    } catch (err) {
-      note(job, `存量文章体检异常（忽略）—— ${String(err?.message ?? err).slice(0, 200)}`)
-    }
-    // 完整性判定（吸收自 FSoft updater 的 record/终态不变量）：索引与基线之前先问一句
-    // 「这次编译是否把所有变化都消化了」。旧实现只数 writtenCount——1 篇成功 + 19 篇失败
-    // 照样 done + meta update，未消化的变化从此永久失明。
-    const judged = judgeOutcome({
-      plan: job.updatePlan ?? null,
-      results: job.articles ?? [],
-      options: {
-        expectedNames: job.expectedNames ?? [],
-        qualityIssues: job.qualityIssues ?? [],
-        extraBlockers: job.hardBlockers ?? [],
-      },
-    })
-    job.judged = { outcome: judged.outcome, blockers: judged.blockers, canAdvanceBaseline: judged.canAdvanceBaseline }
-    if (judged.outcome !== 'done') {
-      const why = judged.blockers.slice(0, 3).map((b) => String(b.detail ?? b.kind)).join('；')
-      note(job, `完整性未成立（${describeOutcome(judged.outcome, judged.blockers)}）—— ${why}`)
-    }
-    if (job.writtenCount > 0) {
-      // 清理模块改名后的孤儿文章。必须放在 cw index 之前：cw index 扫描 modules/ 生成
-      // _index.md，先删掉死文章，重建的索引才不会再收录它们。
-      try {
-        const pr = pruneOrphanModules(job)
-        if (pr.removed.length) {
-          note(job, `清理孤儿模块文章 ${pr.removed.length} 篇（模块划分已变，旧文件无人重写）—— ${pr.removed.slice(0, 5).join('、')}${pr.removed.length > 5 ? ' 等' : ''}`)
-        } else if (pr.skipped && job.kind === 'full') {
-          note(job, `孤儿清理跳过：${pr.skipped}`)
-        }
-        // 删不掉的孤儿必须留痕：它们会一直占着 modules/ 并被 cw index 收录，
-        // 静默吞掉的话下次编译仍然「成功」，无从知道有篇死文章还在。
-        if (pr.failed.length) {
-          note(job, `孤儿模块文章 ${pr.failed.length} 篇删除失败（下次编译重试）—— ${pr.failed.slice(0, 5).join('、')}${pr.failed.length > 5 ? ' 等' : ''}`)
-        }
-      } catch (err) {
-        note(job, `孤儿清理异常（忽略，不影响编译）—— ${String(err?.message ?? err).slice(0, 200)}`)
-      }
-      const binary = resolveBinary(liveConfig(config))
-      // 基线推进闸门：只有「完整性成立」才允许 cw meta update。
-      // partial/failed 时索引照建（面板/链接要能看），但基线**绝不前移**——
-      // 前移就等于宣布「这些变化已被消化」，而未消化的部分下次编译将永久失明。
-      let advance = job.judged?.canAdvanceBaseline === true
-      try {
-        // wiki 骨架必须先存在：`cw meta update` 要读 .codewiki/_meta.yaml，缺文件即 exit 1。
-        // 提交路径（codewiki_generate）在 state=missing 时会先 cw init，但接管/重放的旧任务
-        // 可能落在一个还没有库骨架的仓库上，此时走到这里必然整批 partial 且基线永远推不动。
-        // 与原生落地器（lib/engine/apply-plan.js 的 3b）保持同一判据：目录不在就 cw init，
-        // 目录在却缺 _meta.yaml（人工删改过的半截状态）不猜、不手写，直接记阻塞。
-        const metaAbs = path.join(job.wikiPath ?? path.join(job.cwd, '.codewiki'), '_meta.yaml')
-        if (!fs.existsSync(metaAbs)) {
-          if (fs.existsSync(job.wikiPath ?? path.join(job.cwd, '.codewiki'))) {
-            job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'wiki-missing', detail: 'wiki 目录存在但缺 _meta.yaml，拒绝自动初始化' }]
-            note(job, 'wiki 目录存在但缺 _meta.yaml（人工删改过？），跳过基线推进；请跑 cw init 或删除该目录后重试')
-            advance = false
-          } else {
-            const initRes = await runCw(binary, job.cwd, ['init'], 120000)
-            if (initRes.exitCode === 0) {
-              note(job, '仓库还没有 wiki，已先 cw init 建出库骨架（之后再 index/基线）')
-            } else {
-              job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'wiki-missing', detail: `cw init exit ${initRes.exitCode}` }]
-              note(job, `cw init exit ${initRes.exitCode} —— ${String(initRes.stderr || initRes.stdout || '').trim().slice(0, 200)}`)
-              advance = false
-            }
-          }
-        }
-        const idx = await runCw(binary, job.cwd, ['index'], 120000)
-        note(job, `cw index exit ${idx.exitCode}`)
-        if (idx.exitCode === 0 && normalizeIndexLinks(job.cwd)) note(job, '_index.md 链接路径已规范化（\\ → /）')
-        if (idx.exitCode !== 0) {
-          job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'index', detail: `cw index exit ${idx.exitCode}` }]
-        }
-        if (advance) {
-          const meta = await runCw(binary, job.cwd, ['meta', 'update'], 120000)
-          if (meta.exitCode === 0) {
-            note(job, 'cw meta update exit 0（基线已推进）')
-          } else {
-            note(job, `cw meta update exit ${meta.exitCode}（基线未推进）—— ${String(meta.stderr || meta.stdout || '').trim().slice(0, 200)}`)
-            job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'meta', detail: `cw meta update exit ${meta.exitCode}` }]
-          }
-        } else {
-          note(job, '编译基线未推进（完整性未成立：未消化的变化下次编译仍会被看见）')
-        }
-      } catch (err) {
-        note(job, `cw index/meta 执行异常 —— ${String(err?.message ?? err)}`)
-        job.hardBlockers = [...(job.hardBlockers ?? []), { kind: 'index', detail: String(err?.message ?? err).slice(0, 200) }]
-      }
-      // index/meta 是终态裁决的一部分，不能先冻结 judged 再追加 blocker。
-      const finalJudged = judgeOutcome({
-        plan: job.updatePlan ?? null,
-        results: job.articles ?? [],
-        options: {
-          expectedNames: job.expectedNames ?? [],
-          qualityIssues: job.qualityIssues ?? [],
-          extraBlockers: job.hardBlockers ?? [],
-        },
-      })
-      job.judged = { outcome: finalJudged.outcome, blockers: finalJudged.blockers, canAdvanceBaseline: finalJudged.canAdvanceBaseline }
-      job.baselineEligible = finalJudged.canAdvanceBaseline
-      job.baselineAdvanced = advance && !(job.hardBlockers ?? []).some((b) => b.kind === 'meta')
-      Object.assign(judged, { outcome: finalJudged.outcome, blockers: finalJudged.blockers, canAdvanceBaseline: finalJudged.canAdvanceBaseline })
-      // 符号快照：0.16.0 阶段 7 受控退役，随 lib/symbols.js + lib/incremental.js 一并删除。
-      // 原生引擎（默认通道）在 Python 侧自己维护受管状态与符号级增量，不需要 Node 侧快照。
-      try {
-        if (ensureWikiEntry(job.cwd, job.language)) note(job, '仓库根缺 CodeWiki.md 入口，已自动生成（已有入口不覆盖）')
-      } catch (err) {
-        note(job, `CodeWiki.md 入口生成失败（忽略）—— ${String(err?.message ?? err)}`)
-      }
-    } else {
-      note(job, '没有文章写成功，跳过 index/meta update（wiki 基线不变，可重新提交）')
-    }
-    // 编译产物由插件自己提交（0.10.9 直接提交；0.10.11 起独立 commit 阶段走分支合并式）：
-    // 把「等编译完成 → 提交 .codewiki/」从会话模型手里收回来。只在有文章写成功且开关
-    // 开启时进入 commit 阶段；提交失败不改变任务终态，只记录原因供「产物待提交」提醒与面板展示。
-    // partial 也允许入库（写成的文章有价值），但它的终态仍是 partial——不推进基线。
-    saveRecord(job, judged)
-    if (job.writtenCount > 0 && liveConfig(config).autoCommit) {
-      setStage(job, 'commit')
-      return // 提交在下个 tick 的 tickCommit 完成；完成后才置终态
-    }
-    finishJob(job, judged.outcome, judged.blockers)
-  }
-
-  async function tickCommit(job) {
-    // 提交产物（0.10.11 独立成阶段）：autoCommitWiki 走「主题分支提交 → 合并回原分支」。
-    // 失败不改变任务终态，只记录原因供「产物待提交」提醒与面板展示；
-    // 中途死在 commit 阶段的任务重启后重跑本阶段——autoCommitWiki 对已入库产物报 noChanges，幂等。
-    if (job.writtenCount > 0) {
-      const r = autoCommitWiki(job.cwd, { jobId: job.id, writtenCount: job.writtenCount })
-      job.autoCommit = r
-      if (r.committed) note(job, r.mode === 'branch'
-        ? `已自动提交编译产物（${r.sha}）：主题分支 ${r.branch} 提交后合并回原分支（只含 .codewiki/ 与 CodeWiki.md）`
-        : `已自动提交编译产物（${r.sha}）：docs(wiki)（直接提交：${r.fallback ?? '未知原因'}）`)
-      else if (r.noChanges) note(job, '产物无未提交改动，跳过自动提交')
-      else note(job, `自动提交未执行 —— ${r.reason}；需要入库时按提示手动处理`)
-    }
-    const judged = job.judged ?? { outcome: job.writtenCount > 0 ? 'done' : 'failed', blockers: job.blockers ?? [] }
-    finishJob(job, judged.outcome, judged.blockers ?? [])
-  }
-
-  const STAGE_HANDLER = {
-    articles: tickArticles,
-    crosscut: tickCrosscut,
-    review: tickReview,
-    index: tickIndex,
-    commit: tickCommit,
-  }
 
   // 项目闸门占位判定：非终态 ≠ 有实例在推进。宿主重启/实例退出后，磁盘上会留下
   // owner 已消失、lastSeenAt 不再前进的任务；把它们算作占位会让后续提交一直排队，
@@ -3720,7 +1919,6 @@ function createJobService(config) {
           note(job, `原实例 ${job.owner} 停更 ${Math.round(idleMs / 60000)} 分钟，本实例接管推进`)
           adoptOrphan(job, { instanceId })
           touch(job)
-          if (job.sessionTasks?.length) resendSessionSteer(job) // 在途会话通道任务：旧进程的 steer 可能已丢
         }
         if (job.stage === 'submitting') continue // 占位：submit 正在 await 凭证，阶段未定
         if (job.cancelRequested) {
@@ -3757,25 +1955,18 @@ function createJobService(config) {
           // 从 job 文件里读到「cancelled 且 canAdvanceBaseline 还是上一次的 true」。
           job.outcome = 'cancelled'
           job.canAdvanceBaseline = false
-          // 无服务端批次可保留：中断在飞请求（未完成请求不计费），丢弃未收割结果
-          const ac = batchAborters.get(job.id)
-          if (ac) ac.abort()
-          batchResults.delete(job.id)
-          // 原生通道：abort 会终止受管的 Python 进程树（client.js terminateProcessTree），
+          // abort 会终止受管的 Python 进程树（client.js terminateProcessTree），
           // 结果作废、不再 gate/apply。取消是终态，后续到达的 done 也不会覆盖。
           const nac = nativeAborters.get(job.id)
           if (nac) nac.abort()
           nativeResults.delete(job.id)
-          if (job.batchRef) note(job, '已取消：在途请求已中断（未完成请求不计费）')
-          if (job.channel === 'native') note(job, '已取消：原生引擎进程树已终止，未进入落地阶段')
+          note(job, '已取消：原生引擎进程树已终止，未进入落地阶段')
           touch(job)
           continue
         }
         // 排队中的项目：只有轮到它（activeIds）时才进入真正的首个阶段
         if (job.stage === 'queued') {
           if (!activeIds.has(job.id)) continue
-          // 0.10.7 删了 plan 阶段：唤醒恒进 articles（模块清单在 articles 开头就地
-          // 本地生成）；旧磁盘任务残留的 pendingStage='plan' 一并落到 articles。
           const next = 'articles'
           job.pendingStage = null
           note(job, `排队结束，开始编译（${next}）`)
@@ -3785,53 +1976,32 @@ function createJobService(config) {
         }
         // 项目闸门：非本轮推进项目跳过（不推进、不失败，等轮次）
         if (activeIds.size && !activeIds.has(job.id)) continue
-        // 0.10.7 前的旧任务卡在 plan 阶段：勘探员代码已删，旧任务快照不可重跑——
-        // 清掉规划批次引用与旧任务清单，按 articles 正常组装（full 由 localPlan 本地重建清单）
-        if (job.stage === 'plan') {
-          job.channel = 'legacy'
-          job.batchRef = null
-          job.tasks = []
-          job.plan = null
-          setStage(job, 'articles')
-          note(job, '旧版规划阶段任务迁移到 articles（本地规划重建清单）')
-          touch(job)
-        }
-        // ── 原生通道（阶段 4）──────────────────────────────────────────────
-        // 通道一旦锁定就跟着 job 走：原生任务的 stage 只是「引擎走到第几步」的展示，
-        // 若让它落进 STAGE_HANDLER，跑到 index/commit 时会去调旧流水线的同名 handler，
-        // 同一批产物被两套实现各写一遍。所以 native 任务一律只走 tickNative。
+        // ── 原生引擎通道 ───────────────────────────────────────────────
+        // 编译只有这一条通道。job.channel 只是「谁在跑」的记账，stage 是引擎走到第几步。
         const lc = liveConfig(config)
-        if (!job.channel) {
+        if (job.stage === 'articles' && !job.channel) {
           const want = nativeChannelFor(lc, { kind: job.kind, scope: job.scope })
-          if (want && job.stage === 'articles') {
-            job.channel = 'native'
-            job.nativeChannel = want
-            note(job, `编译通道：原生引擎（入口 ${path.basename(want.entry)}，解释器 ${want.python}）`)
-            persist()
-          }
-        }
-        if (job.channel === 'native') {
-          const ch = job.nativeChannel ?? nativeChannelFor(lc, { kind: job.kind, scope: job.scope })
-          if (!ch) {
-            fail(job, '原生通道缺少引擎快照（job 文件里没有 nativeChannel），无法续跑；请重新提交编译')
+          if (!want) {
+            fail(job, '原生引擎通道不可用（nativeEngine 已关闭或 scope 不受支持）；编译只走原生通道，请开启后重新提交')
             persist()
             continue
           }
-          try {
-            await tickNative(job, ch)
-          } catch (err) {
-            fail(job, `原生阶段异常 —— ${String(err?.message ?? err)}`)
-          }
-          if (JOB_TERMINAL.has(job.stage)) persist()
+          job.channel = 'native'
+          job.nativeChannel = want
+          note(job, `编译通道：原生引擎（入口 ${path.basename(want.entry)}，解释器 ${want.python}）`)
+          persist()
+        }
+        const ch = job.nativeChannel ?? nativeChannelFor(lc, { kind: job.kind, scope: job.scope })
+        if (!ch) {
+          fail(job, '原生通道缺少引擎快照（job 文件里没有 nativeChannel），无法续跑；请重新提交编译')
+          persist()
           continue
         }
-
-        const handler = STAGE_HANDLER[job.stage]
-        if (!handler) { fail(job, `未知阶段 ${job.stage}`); continue }
+        job.channel = 'native'
         try {
-          await handler(job)
+          await tickNative(job, ch)
         } catch (err) {
-          fail(job, `阶段 ${job.stage} 异常 —— ${String(err?.message ?? err)}`)
+          fail(job, `原生阶段异常 —— ${String(err?.message ?? err)}`)
         }
         if (JOB_TERMINAL.has(job.stage)) persist()
       }
@@ -3889,7 +2059,7 @@ function createJobService(config) {
       owner: instanceId,
       stage: 'submitting',
       auto: auto === true,
-      sessionId: sessionId ?? null, // 发起会话：超预算文章走会话通道时 steer 给它（面板/自动调度为 null）
+      sessionId: sessionId ?? null, // 发起会话记账（面板/自动调度为 null）
       plan: null,
       batchRef: null,
       tasks: [],
@@ -3910,7 +2080,7 @@ function createJobService(config) {
         deleted: changeSet.deleted,
         renamed: changeSet.renamed,
       } : null,
-      // 增量 planner 已退役（0.16.0 阶段 7）：字段保留以兼容已落盘的旧 jobs 与面板读法，值恒为 null。
+      // 已落盘的旧 jobs 里可能有这个字段，读侧按缺省处理，值恒为 null。
       updatePlan: null,
       qualityIssues: [],
       usage: { inputTok: 0, outputTok: 0, requests: 0, batchRequests: 0, realtimeRequests: 0, overTier2: 0 },
@@ -4107,7 +2277,7 @@ function generateToolDefinition(cfg, svc) {
       const auto = auto0
       const language = String(args.language ?? '').trim() || c.articleLanguage
       const notes = []
-      const sessionId = exec?.agent?.id ?? null // 发起会话：超预算文章走会话通道时 steer 给它（面板/自动调度无 agent 上下文=null）
+      const sessionId = exec?.agent?.id ?? null // 发起会话记账（面板/自动调度无 agent 上下文=null）
 
       const binary = resolveBinary(c)
       const statusRes = await runCw(binary, cwd, ['status'], 120000, exec?.signal)
@@ -4123,7 +2293,7 @@ function generateToolDefinition(cfg, svc) {
       // 幂等：同仓库已有活动任务直接返回
       const active = svc.findActive(cwd)
       if (active) {
-        if (sessionId) active.sessionId = sessionId // 最近一次关心该仓库的会话拿到会话通道
+        if (sessionId) active.sessionId = sessionId // 记为最近一次关心该仓库的会话
         notes.push(`该仓库已有进行中的编译任务 ${active.id}（stage ${active.stage}），本次调用直接返回现有任务`)
         result.jobId = active.id
         result.stage = active.stage
@@ -4140,7 +2310,7 @@ function generateToolDefinition(cfg, svc) {
 
       const needsFullCompile = effectiveScope === 'full' || status.state === 'missing' || status.state === 'uncompiled'
 
-      // 首次编译闸门（0.17.48）：仓库里原本没有 CodeWiki 时，要不要建它是一个需要用户
+      // 首次编译闸门：仓库里原本没有 CodeWiki 时，要不要建它是一个需要用户
       // 表态的决定——一次全量编译会在这个仓库里落下十几到几十篇文档，并自动提交一次。
       // 模型顺手调一次 codewiki_generate 就替用户做了这个决定，这不是它该做的事。
       // 判据用**用户原始 scope**而不是 effectiveScope：stale 遇到无 wiki 的仓库会在上面
@@ -4188,11 +2358,9 @@ function generateToolDefinition(cfg, svc) {
         return result
       }
 
-      // 文件级归属判定（0.16.0 阶段 7 受控退役后兼容通道唯一可用的判定）：
-      // 变更集里的每个源码路径，只要被某篇已存在文章的 source_files 认领（或它是
-      // 一次改名的源路径），就算「已消化」。返回未归属清单，调用方据此拒绝推进基线。
-      // 旧 planner 的符号级/依赖级判定已随 lib/{symbols,graph-diff,incremental,update-planner}.js
-      // 一并退役 —— 那套能力现在由原生引擎在 Python 侧完成。
+      // 文件级归属判定：变更集里的每个源码路径，只要被某篇已存在文章的 source_files
+      // 认领（或它是一次改名的源路径），就算「已消化」。返回未归属清单，调用方据此
+      // 拒绝推进基线。符号级/依赖级判定由原生引擎在 Python 侧完成。
       const attributeChanges = (changeSet, articles) => {
         const owned = new Set()
         for (const a of articles) {
@@ -4307,9 +2475,9 @@ function generateToolDefinition(cfg, svc) {
       // stale 但解析不出过期文章
       if (!needsFullCompile && status.state === 'stale' && !status.staleArticles.length) {
         if (status.changedFiles.length) {
-          // cw status 说有文件变更却没命中任何文章。旧实现直接 meta update 把基线前移，
-          // 等于把没读懂的变化永久丢弃；0.16.0 用文件级归属判定：只有每个变更都被某篇
-          // 文章的 source_files 认领，才允许推进基线，否则拒绝并报告未归属清单。
+          // cw status 说有文件变更却没命中任何文章。直接 meta update 会把没读懂的
+          // 变化永久丢弃；这里用文件级归属判定：只有每个变更都被某篇文章的
+          // source_files 认领，才允许推进基线，否则拒绝并报告未归属清单。
           const baseline = readCompiledBaseline(wikiPath)
           const articles = collectWikiArticles(wikiPath)
           if (baseline && articles.length) {
@@ -4379,8 +2547,8 @@ function generateToolDefinition(cfg, svc) {
 // ---------------------------------------------------------------------------
 // 工具 2b：codewiki_update（日常维护入口：提交更新请求即返回）
 // 与 codewiki_generate 的差别只在语义与引导文案：固定 scope=auto，返回值明确告诉
-// 模型「本步收尾、继续下一项、不要等待/轮询」。编译产物由插件在 tickIndex 顺带
-// autoCommit（0.10.9），因此成功后既不催模型提交、也不唤醒会话；只有自动提交
+// 模型「本步收尾、继续下一项、不要等待/轮询」。编译产物由插件在落地器里顺带
+// autoCommit，因此成功后既不催模型提交、也不唤醒会话；只有自动提交
 // 失败时才由 commitHintText 在系统提示 section 里给一条「产物待提交」提醒。
 // ---------------------------------------------------------------------------
 
@@ -4752,7 +2920,7 @@ export function installWebServer(ctx, service, extra = {}) {
           const wsPaths = wsFilterPaths()
           if (wsPaths) list = list.filter((j) => !JOB_TERMINAL.has(j.stage) || isExcluded(j.cwd, wsPaths))
           // 编译对象闸门（1.2.1）：worktree 目录与无可编译源码的空壳目录的任务一律不出现在
-          // 任务列表——这类任务本身就不该存在（submit 闸门已拦），历史遗留条目只会在面板上
+          // 任务列表——这类任务本身就不该存在（submit 闸门已拦），残留条目只会在面板上
           // 占位并干扰「在等谁」的队列可见性判断。判定带 60s/10min 缓存，2s 轮询不会打爆 git。
           list = list.filter((j) => !isDeadCompileTarget(j.cwd))
           // 排队可见性：queued 任务标注「在等谁」——正在跑的项目 + 排在它前面的 queued
@@ -5046,7 +3214,7 @@ export function installWebServer(ctx, service, extra = {}) {
           }
           return
         }
-        // 首次编译确认（0.17.27）：从待确认清单里摘掉并立即提交，语义等于用户手动点编译。
+        // 首次编译确认：从待确认清单里摘掉并立即提交，语义等于用户手动点编译。
         // 手动路径本来就不需要确认（用户按下按钮就是确认），所以这里不再二次校验。
         if (body?.action === 'confirm' && body?.cwd) {
           if (typeof compile !== 'function') { writeJson(res, 501, { error: '编译入口未初始化' }); return }
@@ -5080,7 +3248,7 @@ export function installWebServer(ctx, service, extra = {}) {
 // 判定不看 .codewiki/ 目录——半途建出的空骨架（只有空子目录）会骗过目录存在性检查，
 // 提醒却指向一个读不到的入口。无 CodeWiki.md = 无可维护的 wiki。text 回调每次组装时
 // 求值——cwd、入口文件存在性、开关全部实时读取，关闭开关/项目切换/删掉 wiki 都无需重启。
-// 编译完成后的提交提醒（0.10.9 起只在插件自动提交失败时出现）：最近一次成功编译
+// 编译完成后的提交提醒（只在插件自动提交失败时出现）：最近一次成功编译
 // （stage=done 且有文章写成功）的完成时间晚于 .codewiki/（与 CodeWiki.md）最后一次
 // git 提交时间 → 该次编译产物尚未入库，系统提示注入「产物待提交」（一次性，非催促）。
 // 自动提交成功时时间戳反超，提醒自动静默；零状态派生（jobs 文件 + git log 时间戳），
@@ -5088,7 +3256,7 @@ export function installWebServer(ctx, service, extra = {}) {
 const commitHintCache = new Map() // cwd -> { at, text }
 
 // ---------------------------------------------------------------------------
-// 编译产物自动提交（0.10.9 直接提交，0.10.11 升级为分支合并式）：把「等编译完成 →
+// 编译产物自动提交（分支合并式）：把「等编译完成 →
 // 提交 .codewiki/」整个责任从会话模型手里收回到插件侧。有产物时先在主题分支
 // codewiki/wiki-<jobId> 上提交 .codewiki/ 与 CodeWiki.md，再合并回原分支并删除主题
 // 分支——会话模型因此无需等待编译、无需轮询、无需代跑 git。
@@ -5149,8 +3317,8 @@ export function autoCommitWiki(cwd, { jobId = null, writtenCount = 0 } = {}) {
       if (commit.status !== 0) return { committed: false, reason: `git commit 失败：${(commit.stderr || commit.stdout || '').trim().slice(0, 200)}` }
       return { committed: true, sha: out(run('rev-parse', '--short', 'HEAD')), message }
     }
-    // 分支合并式（0.10.11）：主题分支上提交 → 合并回原分支 → 删主题分支。
-    // detached HEAD 没有「原分支」可回 → 降级为直接提交（与 0.10.9 行为一致）。
+    // 分支合并式：主题分支上提交 → 合并回原分支 → 删主题分支。
+    // detached HEAD 没有「原分支」可回 → 降级为直接提交。
     const cur = out(run('branch', '--show-current'))
     if (!cur) {
       const d = commitOn()
@@ -5268,11 +3436,10 @@ function installUpdateReminder(ctx, config) {
 }
 
 export function apply(ctx, config) {
-  if (typeof ctx.inject === 'function') ctx.inject(['agents'], (rc) => { agentsRef = rc?.agents ?? rc })
   if (typeof ctx.inject === 'function') ctx.inject(['llm'], (rc) => { llmRef = rc?.llm ?? rc })
   // 自动调度也要读宿主工作区注册表：workspaceOnly（默认开）的语义是「只处理已添加的
   // dsh 工作区」，如果只有面板过滤遵守它，被移出工作区的仓库仍会被后台定时编译并写入
-  // 产物——面板上看不见它在编译，用户也无从取消（0.16.3 修复）。
+  // 产物——面板上看不见它在编译，用户也无从取消。
   let schedWorkspaceRegistry = null
   if (typeof ctx.inject === 'function') ctx.inject(['workspaceRegistry'], (rc) => { schedWorkspaceRegistry = rc?.workspaceRegistry ?? rc })
   const service = createJobService(config)
@@ -5286,7 +3453,7 @@ export function apply(ctx, config) {
   // 必须合并持久仓库清单与 job 历史：后者最多保留 MAX_JOBS_KEPT 条，且启动会清理
   // Temp 终态；只扫历史会让清单里仍然过期的仓库永久退出自动更新。
   // execute 幂等（活动仓库直接返回现有任务），单仓库失败只记 lastError 不打断扫描。
-  // pendingConfirm（0.17.27）：自动调度**不得**替用户决定「这个仓库要不要有 wiki」。
+  // pendingConfirm：自动调度**不得**替用户决定「这个仓库要不要有 wiki」。
   // 从没有过任何编译任务的仓库先登记在这里，等用户在面板上点「确认编译」；不想要就点
   // 「排除」，进 excludePaths 后再也不会被扫到。判断依据只用 job 历史，不去跑 `cw status`：
   // wiki 只可能由本插件的任务产生，没有任何任务历史 = 从没编译过，这是可证伪的判据。
@@ -5335,11 +3502,11 @@ export function apply(ctx, config) {
         // 但在这里先跳掉更省事——不产生 job、不进 queueAhead 的「在等谁」名单。
         if (!hasCompilableSources(cwd)) continue
         schedState.lastScanRepos++
-        // 首次编译必须用户确认（0.17.27）：从没有过任何编译任务、磁盘上也没有 wiki 的仓库
+        // 首次编译必须用户确认：从没有过任何编译任务、磁盘上也没有 wiki 的仓库
         // 只登记，不提交。判据取两者的**交集**，两个单独都不够：
         //   · 只看任务历史：历史被 MAX_JOBS_KEPT 截断或手动清理后，编译过 wiki 的仓库会被
         //     当成首次，用户每次清历史都要重新点一遍确认；
-        //   · 只看 status：wiki 目录被删掉的仓库报 missing，但它曾经编译过，用户已经表过态。
+        //   · 只看 status：wiki 目录被删掉的仓库报 missing，但它编译过，用户已经表过态。
         // 只有「没历史 + 没 wiki」才真正是「这次要第一次为它生成 wiki」。有历史的仓库仍然
         // 走原路径，自动调度对它们的额外成本为零（不跑 cw status）。
         if (!compiledKeys.has(normPathKey(cwd))) {

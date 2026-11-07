@@ -48,8 +48,6 @@ A repository-level code-wiki compiler for DeepSeek Harness. It turns a repositor
 | 质量 | 逐篇体检（`source_files` 存在性、空证据、死链、frontmatter、重复章节）+ 基线判定；终态四态 | 产出 docs 目录（`module_tree.json` / `metadata.json` / `*.md` / `update_record.json`） |
 | 落地 | 写集封闭（只 `.codewiki/` 与根 `CodeWiki.md`）、pre-image 回滚、`cw index`、`cw meta update`、分支式自动提交、提交范围反查 | 不碰仓库 |
 
-`nativeEngine: false` 是一条**兼容通道**（插件内 Node 流水线），只服务「本机装不了 Python 依赖」这一种场景：按顶层目录分组 + 文件级 `source_files` 归属判定，没有符号级增量、没有语义聚类。两条通道互不回退——环境不闭合时以 `engine-deps` 明确失败，不会悄悄改用 Node 通道冒充成功。
-
 ### 运行要求
 
 1. **Python 3.10+ 独立 venv**，且 `python -m pip check` 必须零破损。上游依赖集（`openai` / `pydantic-ai-slim` / `pydantic`）正常解析必然 `ResolutionImpossible`，只能用锁定的 constraints 装——见 `tools/fsoft-engine/setup-env.sh` 与同目录的 `constraints.txt`（故意 `--no-deps -c`）。
@@ -67,8 +65,6 @@ A repository-level code-wiki compiler for DeepSeek Harness. It turns a repositor
 ### 增量判定
 
 原生通道的符号级 / 依赖级增量由上游 `updater/graph_diff.py` 完成：组件级 hash + 签名比对，区分 interface / added / deleted / renamed / body / edge，另有 ownership 与 stale scan。
-
-兼容通道只剩文件级归属判定：变更集里每个源码路径，只要被某篇既有文章的 `source_files` 认领（或它是一次 `git mv` 改名的源路径），就算「已消化」。有变更没有任何文章认领时不推进基线，并在 `blockers` 里列出来，下次编译还会重新看见它们。
 
 ### 终态与基线
 
@@ -183,17 +179,13 @@ URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自�
 - `batchProvider` / `batchModel`：编译模型（规划 / 写文章 / 横切 / 审校全部环节共用），默认 `volces-ark` / `glm-5.3-flash`（512k 上下文）。`batchProvider` 必须指向模型设置里已注册的提供商，留空直接提交失败；插件不保存任何 API Key。
 - `batchReasoningEffort`：该模型的思考程度档位 id。可选值从模型目录实时读取，留空 = 用该模型的默认档。
 - `effortByStage`：按环节单独指定档位——`graph`（依赖图 / 模块聚类）、`articles`（文章写作）、`proofread`（语义校对）、`validate`（质量门）。留空的环节用 `batchReasoningEffort` 兜底。
-- `bigEnabled`：大档模型总开关。关闭时 `liveConfig` 直接把 `bigProvider` 置空，所有按「大档是否配置」判定的路径一并退回默认档，设置页折叠整组大档字段；其余大档取值保留，重新打开即恢复。
-- `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget`：大档模型——模块源文本量超 `bigTokenBudget` 的写作任务、输入超 110k 普通预算的横切与批量校对请求改用它一次写完。默认 `volces-ark` / `glm-5.3-flash`，预算 420k token。
-- `sessionTier`：仅校对阶段的超大输入兜底时才用（单篇文章源码连大档都装不下时转给发起会话的模型）。填的是子代理档位 id；留空 = 让会话模型自动选路。
 - `requestLimit`：单个模块写作允许的 LLM 请求次数，默认 100。上游写作校验会给没写出页面的模块续发补写提醒，每次提醒都是一次独立调用、各吃一份预算；撞上限的模块以 `article-failed` 上报而不是被静默截断。
 
 **通道与并发**
 
-- `nativeEngine`：编译通道，默认 `true`（原生引擎）；`false` 走兼容通道。
+- `nativeEngine`：编译开关，默认 `true`。关闭后不编译。
 - `nativeEnginePython` / `nativeEngineEntry` / `nativeEngineTimeoutMs`：venv 解释器绝对路径 / 入口脚本（一般不用改）/ 单次引擎调用上限（默认 180 分钟）。
-- `maxConcurrency`：默认档请求并发上限，默认 2（1–8，硬顶 8）。
-- `bigConcurrency`：大档请求并发上限（1–8）；`0` / 留空 = 跟随 `maxConcurrency`。两档各自独立计数、同时推进。
+- `maxConcurrency`：请求并发上限，默认 2（1–8，硬顶 8）。
 - `serialProjects`：单项目串行，默认开。开启后同一时刻只推进一个仓库，其余进 `queued`。
 - `binaryPath`：cw 可执行路径；留空优先用 PATH 里的 `cw`，找不到再用插件自带 `bin/cw.exe`。
 
@@ -213,7 +205,6 @@ URL 里的空格写 `%20`。这条直挂条目由用户自己维护，插件自�
 - `doctor` 的 `engine.deps.ok` 在真机上恒为 `false`（该字段不带 `pip check` 明细，指纹也刻意不含它）；判定以 `engineLock.status === 'match'` 为准。
 - 上游 rung3 增量语义：**单模块内的方法级新增**通常不触发重写（component id 不在 tracked 集 → `untracked` → 不进 ownership）。要验增量真的改了文章，得用结构性变化（新增 / 删除 / 重命名文件或模块）。
 - `.codewiki/modules/` 的孤儿页清理只在**本轮真的落地**时执行；无变化轮不扫不删。
-- 兼容通道（`nativeEngine: false`）没有符号级增量与语义聚类；`planMode` 与 `symbolIncremental` 两个开关保留但已无实际效果（仅为兼容既有 `settings.json`）。
 
 ## 来源与许可
 

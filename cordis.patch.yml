@@ -25,34 +25,30 @@
 #   batchProvider:   编译模型提供商（必须是模型设置里已注册的 provider；默认 volces-ark，留空=提交失败）
 #   batchModel:      编译模型 id（默认 glm-5.3-flash，512k 上下文）
 #   batchReasoningEffort: 思考程度档位（取值来自模型目录 reasoning.efforts；留空=模型默认档）
-#   maxConcurrency:  默认档并发上限（1–8，默认 2）
-#   bigConcurrency:  大档并发上限（1–8，默认 0=跟随默认档）：与默认档各自独立限流、同时推进
+#   maxConcurrency:  并发上限（1–8，默认 2）
+#   moduleConcurrency: 原生引擎的模块生成并行度（1–8，0=跟随 maxConcurrency）
 #   serialProjects:  单项目串行（默认开；同一时刻只推进一个仓库的编译任务，其余排队）
 #   articleLanguage: 文章语言（默认中文）
-#   planMode:        模块划分：auto=AST 符号 + LLM 语义聚类（默认）｜dirs=顶层目录分组（旧行为）
-#   agenticArticles: 文章写作走 agentic 工具循环（默认开）：模型自己 read_code/edit_article，不整包内联
-#   agenticMaxSteps: agentic 单篇步数上限（默认 30，1–100）
-#   symbolIncremental: 增量按 AST 符号级判定（默认开）：只重写接口真变了的模块，注释/空白改动跳过
-#   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 .codewiki/；默认开）
+#   updateReminder:  会话系统提示注入 wiki 维护提醒（仅当会话仓库存在 CodeWiki.md；默认开）
 #   autoCommit:      编译完成后自动提交 wiki 产物（默认开）
-#   --- 原生引擎通道（0.15.0 引入，0.16.0 起默认开启；需要本机 Python 3.10+ 与闭合依赖环境）---
-#   nativeEngine:       true（默认）=编译交给上游 FSoft Python 引擎；false=走内置 Node 兼容通道
+#   techdocs:        导出 Backstage TechDocs 站点到 .codewiki/_techdocs/（默认关）
+#   --- 原生引擎（需要本机 Python 3.10+ 与闭合依赖环境）---
+#   nativeEngine:       true（默认）=编译交给上游 FSoft Python 引擎
 #   nativeEnginePython: venv 解释器绝对路径；留空 → 环境变量 DSH_CODEWIKI_PYTHON → 'python'
 #                       （不做「找一个能用的解释器」的启发式：猜错会把环境不闭合伪装成引擎坏了）
 #   nativeEngineEntry:  入口脚本路径（默认 lib/engine/python/entry.py，一般不用改）
-#   nativeEngineTimeoutMs: 单次引擎调用上限（默认 2700000 = 45 分钟）
-#   两条通道并存、互不回退：原生通道环境不闭合时以 engine-deps 明确失败，不会悄悄改用 Node 通道。
-#   装法见 README「原生引擎通道（0.15.0）」，环境脚本 tools/fsoft-engine/setup-env.sh。
+#   nativeEngineTimeoutMs: 单次引擎调用上限（默认 180 分钟）
+#   环境不闭合时以 engine-deps 明确失败。
+#   装法见 README「原生引擎」，环境脚本 tools/fsoft-engine/setup-env.sh。
 - insert:
     - id: codewiki
       name: "@ikliml666/dsh-codewiki"
       # 默认值不在这里重复声明：留空即用插件 Config schema 里的默认值（见 index.js 的 Config）。
       # 想改哪项就填哪项，未填的沿用默认。
       config: {}
-      # 例：换编译模型、调并发、关掉 agentic 写作
+      # 例：换编译模型、调并发
       # config:
       #   batchProvider: volces-ark
       #   batchModel: glm-5.3-flash
       #   maxConcurrency: 2
-      #   agenticArticles: true
-      #   agenticMaxSteps: 30
+      #   nativeEnginePython: E:/path/to/venv/Scripts/python.exe
