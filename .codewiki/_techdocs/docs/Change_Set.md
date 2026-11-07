@@ -6,7 +6,7 @@ description: ChangeSet（lib/change-set.js）是 dsh-codewiki 插件的变更采
 # Change_Set 变更集采集模块
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cb632cb2`](https://github.com/ikliml666/dsh-codewiki/commit/cb632cb24604c377177c2d46a74e217c30704263) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`9d08002f`](https://github.com/ikliml666/dsh-codewiki/commit/9d08002feba5ec5cd925796ba31c21de74a152ad) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -267,5 +267,5 @@ flowchart TB
 打包形式见 [Package_Manifest 包清单](Package_Manifest.md) 的 `package.json`：`"type": "module"`，纯 ESM，无外部依赖（唯一依赖 `@deepseek-ai/schemastery` 在编排层）。
 
 ??? abstract "Documented components (1)"
-    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/lib%5Cchange-set.js) — `lib\change-set.js`
+    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/lib%5Cchange-set.js) — `lib\change-set.js`
 

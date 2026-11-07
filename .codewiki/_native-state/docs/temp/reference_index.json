@@ -902,6 +902,7 @@
       "readSessionRecordDetail",
       "reassignSession",
       "rememberRepo",
+      "rememberSessionMeta",
       "resolveNativePython",
       "saveUpdateRecord",
       "sessionDeltaOf",
@@ -910,7 +911,8 @@
       "startNativeRun",
       "submit",
       "tickNative",
-      "updateOptionsOf"
+      "updateOptionsOf",
+      "writeSessionMeta"
     ]
   },
   "Job_Store": {

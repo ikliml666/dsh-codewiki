@@ -6,7 +6,7 @@ description: lib/engine/workspace-snapshot.js 是原生引擎通道的一个记�
 # 工作区快照（Engine_Workspace_Snapshot）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cb632cb2`](https://github.com/ikliml666/dsh-codewiki/commit/cb632cb24604c377177c2d46a74e217c30704263) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`9d08002f`](https://github.com/ikliml666/dsh-codewiki/commit/9d08002feba5ec5cd925796ba31c21de74a152ad) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -192,7 +192,7 @@ flowchart TB
 - 临时目录前缀为 `cw-snapshot-`，`finally` 块里 `rm -rf` 清理；清理失败不影响结果（tree / commit 对象已落盘）。
 
 ??? abstract "Documented components (3)"
-    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
 

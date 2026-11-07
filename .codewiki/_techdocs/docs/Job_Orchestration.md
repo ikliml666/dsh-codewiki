@@ -6,7 +6,7 @@ description: JobOrchestration 是 dsh-codewiki 插件的中枢编排模块，全
 # Job Orchestration（编译任务编排服务）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cb632cb2`](https://github.com/ikliml666/dsh-codewiki/commit/cb632cb24604c377177c2d46a74e217c30704263) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`9d08002f`](https://github.com/ikliml666/dsh-codewiki/commit/9d08002feba5ec5cd925796ba31c21de74a152ad) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 概述
 
@@ -165,10 +165,10 @@ flowchart LR
 
 读取侧的四个工程口径：
 
-- meta 读取走 `readSessionMetaCached`（同一 meta 文件进程内缓存，翻页与计数共用），TTL 淘汰（`pruneSessionRecords`）删掉文件时同步从缓存剔除，不留下指向已删文件的陈旧条目；
+- meta 读取走 `readSessionMetaCached`，进程内分两档缓存：非 `running`（done/error）的 meta 整体「冻结」（`sessionMetaFrozen`，内容不再变，直接返回、不再 stat/读盘）；仍在 `running` 的 meta 记为「live」（`sessionMetaLive`，只存内存对象与字节长度，复读时 stat 比对文件 size 未变即命中）。新写入的 meta 一律经 `rememberSessionMeta` 登记这两档：`writeSessionMeta` 落盘后立刻登记，避免「刚写完又读」再摸一次磁盘、也避免长度比对看到半截状态；`readSessionMetaCached` 从盘上读到内容后补登记。TTL 淘汰（`pruneSessionRecords`）删掉文件时同步从两档缓存剔除，不留下指向已删文件的陈旧条目；
 - 单条详情走 `readSessionRecordDetail`：full 全文与 meta 合并返回。生成中的 full 还没按节流落思考/工具快照时，计数以 meta 上内存里的最新值为准（`outputChars` / `reasoningChars` / `toolCalls` / `status` 缺省回落到 full 快照），`stage` 同样以 full 优先、meta 兜底；
 - 活跃任务的请求计数走 `countSessionRecords` / `countAllSessionRecords`——只数 `*.meta.json` 文件名、不读内容，不再为「数一下有多少请求」把全部 meta 整包读一遍；
-- 列表端点按 `limit` 分页（见下节「观测与 API」），不再一次把单任务几百条记录全量铺满。
+- 列表端点按 `limit` 分页（见下节「观测与 API」）：单任务列表直接取该目录倒序前 `limit` 条 meta；全局聚合（`listAllSessionRecords`）每个任务目录先按倒序文件名（零填充文件名即倒序 n）只留最新 `limit` 条——更早的不可能进全局前 `limit`——再按 `startedAt`（缺失退到 `n`）取前 `limit`（ISO 时间串只含数字与 `T/Z/./:`，词法序即时间序，刻意不用 `localeCompare`），不再一次把单任务几百条记录全量铺满。
 
 ### 自动提交 `autoCommitWiki(cwd, {jobId, writtenCount})`
 
@@ -314,23 +314,23 @@ flowchart TB
 5. **提交制**：`codewiki_generate` / `codewiki_update` 调用即返回，不等待、不轮询；进度只能由 `codewiki_progress` 或面板读取。
 
 ??? abstract "Documented components (19)"
-    - [`allowedLinkTargets`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`currentCommit`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`makeLinkExists`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`symbolsOnLine`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`tickArticles`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`tickCommit`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`tickCrosscut`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`tickIndex`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`tickReview`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`wakeCompileSession`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
-    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/index.js) — `index.js`
+    - [`allowedLinkTargets`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`currentCommit`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`makeLinkExists`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`symbolsOnLine`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`tickArticles`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`tickCommit`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`tickCrosscut`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`tickIndex`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`tickReview`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`wakeCompileSession`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
+    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/index.js) — `index.js`
 

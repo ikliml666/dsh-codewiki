@@ -6,7 +6,7 @@ description: EngineNativeRun 是原生引擎（native engine）通道的一次�
 # Engine_Native_Run（原生编译裁决编排层）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cb632cb2`](https://github.com/ikliml666/dsh-codewiki/commit/cb632cb24604c377177c2d46a74e217c30704263) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`9d08002f`](https://github.com/ikliml666/dsh-codewiki/commit/9d08002feba5ec5cd925796ba31c21de74a152ad) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -292,5 +292,5 @@ flowchart TD
 `Engine_Native_Run` 是原生编译通道的**裁决中枢**：它不亲自写文章、不亲自算图 diff，而是把「环境 → 增量决议 → 引擎 → 校对 → 质量门 → 状态采集 → 落地」这条链固定成直线，并以「最弱一环说了算」的原则产出一个任何单步都无法洗白的严格终态，从而从结构上杜绝「引擎说 done 就 done、产物没入库也报完成、基线悄悄前移、变化悄悄丢失」这一类缺陷。
 
 ??? abstract "Documented components (1)"
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/cb632cb24604c377177c2d46a74e217c30704263/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/9d08002feba5ec5cd925796ba31c21de74a152ad/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 
