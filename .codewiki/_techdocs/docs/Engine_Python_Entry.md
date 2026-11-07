@@ -6,7 +6,7 @@ description: EnginePythonEntry 是 FSoft 原生引擎（Python 侧）与 Node �
 # Engine_Python_Entry
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`d0adce52`](https://github.com/ikliml666/dsh-codewiki/commit/d0adce524f95d60d0bdb0d12ada263ed951b8fd9) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`937f8886`](https://github.com/ikliml666/dsh-codewiki/commit/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 概述
 
@@ -345,7 +345,7 @@ flowchart TB
 | `ACTIONS` | `doctor / generate / update / cancel` | 唯一登记的动作集合 |
 
 ??? abstract "Documented components (3)"
-    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/d0adce524f95d60d0bdb0d12ada263ed951b8fd9/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/937f8886b7361e8a0cf03cb79a9edd8f3ff664e6/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
 
