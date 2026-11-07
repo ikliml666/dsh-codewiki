@@ -6,7 +6,7 @@ description: JobOrchestration 是 dsh-codewiki 插件的中枢编排模块，全
 # Job Orchestration（编译任务编排服务）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`681efc8d`](https://github.com/ikliml666/dsh-codewiki/commit/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 概述
 
@@ -345,23 +345,23 @@ flowchart TB
 5. **提交制**：`codewiki_generate` / `codewiki_update` 调用即返回，不等待、不轮询；进度只能由 `codewiki_progress` 或面板读取。
 
 ??? abstract "Documented components (19)"
-    - [`allowedLinkTargets`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`currentCommit`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`makeLinkExists`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`symbolsOnLine`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`tickArticles`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`tickCommit`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`tickCrosscut`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`tickIndex`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`tickReview`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`wakeCompileSession`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
-    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/index.js) — `index.js`
+    - [`allowedLinkTargets`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`currentCommit`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`makeLinkExists`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`symbolsOnLine`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`tickArticles`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`tickCommit`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`tickCrosscut`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`tickIndex`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`tickReview`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`wakeCompileSession`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
+    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/index.js) — `index.js`
 

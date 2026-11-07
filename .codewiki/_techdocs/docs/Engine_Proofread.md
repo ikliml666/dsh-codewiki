@@ -6,7 +6,7 @@ description: EngineProofread（lib/engine/proofread.js）是原生引擎（FSoft
 # Engine_Proofread：原生引擎产物的死链语义校对
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`681efc8d`](https://github.com/ikliml666/dsh-codewiki/commit/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`57d63569`](https://github.com/ikliml666/dsh-codewiki/commit/57d635690667fc2f481ab95078e1a65fd6db9555) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 1. 这层是什么
 
@@ -280,5 +280,5 @@ sequenceDiagram
 | [Engine_Client（引擎进程客户端）](Engine_Client.md) / [Engine_Python_Entry](Engine_Python_Entry.md) | 被校对的产物来自它们驱动的原生引擎 |
 
 ??? abstract "Documented components (1)"
-    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/681efc8d4ca919edc00a76d5dc4a2a096a8ff79f/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
+    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/57d635690667fc2f481ab95078e1a65fd6db9555/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
 
