@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "cb7dda1277cfce7b125c45f4525ea42b890a6b24"
+    "headCommit": "57b082271f8f4912d3f4b009cef5821a39a738f2"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "cb7dda1277cfce7b125c45f4525ea42b890a6b24",
+    "headCommit": "57b082271f8f4912d3f4b009cef5821a39a738f2",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
@@ -82,7 +82,12 @@
     ],
     "staged": [],
     "unstaged": [],
-    "untracked": [],
+    "untracked": [
+      ".bench-sess.mjs",
+      ".bench2.mjs",
+      ".bench3.mjs",
+      ".bench4.mjs"
+    ],
     "deleted": [
       "docs/hy3-concurrency-handoff.md",
       "lib/agentic-host.js",
@@ -138,7 +143,12 @@
     "renamed": [],
     "reason": ""
   },
-  "unconsumed": [],
+  "unconsumed": [
+    ".bench-sess.mjs",
+    ".bench2.mjs",
+    ".bench3.mjs",
+    ".bench4.mjs"
+  ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
@@ -146,7 +156,9 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw685plb-0-native（44 个文件）"
+    "工作区未提交改动已合成临时 commit cb632cb24604（4 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw6aavmv-3-native（44 个文件）",
+    "本轮把 4 个未提交源码改动一并写进产物（快照 cb632cb24604）：.bench-sess.mjs、.bench2.mjs、.bench3.mjs、.bench4.mjs"
   ],
-  "updatedAt": "2026-11-07T09:54:40.800Z"
+  "updatedAt": "2026-11-07T10:55:50.867Z"
 }

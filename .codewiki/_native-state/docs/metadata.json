@@ -1,11 +1,11 @@
 {
   "generation_info": {
-    "timestamp": "2026-11-07T09:54:39.883100+00:00",
+    "timestamp": "2026-11-07T10:55:49.520373+00:00",
     "provider": "openai-compatible",
     "main_model": "doubao-seed-2.1-lite",
     "generator_version": "2.0.0",
     "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
-    "commit_id": "cb7dda1277cfce7b125c45f4525ea42b890a6b24",
+    "commit_id": "cb632cb24604c377177c2d46a74e217c30704263",
     "language": "中文",
     "layout": "hierarchical"
   },
@@ -71,14 +71,14 @@
     "calls": []
   },
   "last_update": {
-    "run_id": "6c960df4-8768-4be4-8e83-07b907c85dd4",
-    "started_at": "2026-11-07T17:54:39+0800",
+    "run_id": "05a13245-4f2c-4cc0-8515-ec5f60774417",
+    "started_at": "2026-11-07T18:55:49+0800",
     "outcome": "no_change",
-    "finished_at": "2026-11-07T17:54:39+0800",
+    "finished_at": "2026-11-07T18:55:49+0800",
     "rung": "3",
     "revision": {
-      "old_commit": "9f71069b1601dd2fce217a2f516b3c5306320ca6",
-      "new_commit": "cb7dda1277cfce7b125c45f4525ea42b890a6b24",
+      "old_commit": "cb7dda1277cfce7b125c45f4525ea42b890a6b24",
+      "new_commit": "cb632cb24604c377177c2d46a74e217c30704263",
       "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
     },
     "diff_counts": {
@@ -115,7 +115,7 @@
     },
     "pages_written": [],
     "pages_removed": [],
-    "wall_seconds": 0.06
+    "wall_seconds": 0.11
   },
   "update_history": [
     {
@@ -24029,6 +24029,53 @@
       "pages_written": [],
       "pages_removed": [],
       "wall_seconds": 0.06
+    },
+    {
+      "run_id": "05a13245-4f2c-4cc0-8515-ec5f60774417",
+      "started_at": "2026-11-07T18:55:49+0800",
+      "outcome": "no_change",
+      "finished_at": "2026-11-07T18:55:49+0800",
+      "rung": "3",
+      "revision": {
+        "old_commit": "cb7dda1277cfce7b125c45f4525ea42b890a6b24",
+        "new_commit": "cb632cb24604c377177c2d46a74e217c30704263",
+        "repo_path": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki"
+      },
+      "diff_counts": {
+        "added": 0,
+        "deleted": 0,
+        "interface": 0,
+        "body": 0,
+        "edge": 0,
+        "renamed": 0
+      },
+      "n_active": 0,
+      "n_adopted": 0,
+      "n_adopted_by_agent": 0,
+      "fallback": {},
+      "n_calls": 0,
+      "usage_total": {
+        "cost_usd": 0.0
+      },
+      "usage": {
+        "schema_version": 2,
+        "scope": "this run only (modules resumed from disk cost nothing)",
+        "currency": "USD",
+        "cost_status": "complete",
+        "incomplete": false,
+        "unknown_usage_calls": 0,
+        "n_calls": 0,
+        "totals": {
+          "cost_usd": 0.0
+        },
+        "by_phase": {},
+        "by_model": {},
+        "unpriced_models": [],
+        "calls": []
+      },
+      "pages_written": [],
+      "pages_removed": [],
+      "wall_seconds": 0.11
     }
   ]
 }
