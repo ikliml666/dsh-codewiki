@@ -6,7 +6,7 @@ description: AgenticEdit 是 dsh-codewiki 插件中负责智能体式文章编�
 # Agentic_Edit 模块
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6574afd0`](https://github.com/ikliml666/dsh-codewiki/commit/6574afd08e6fadf45fade44268aa46e687e49ad3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`fd3ef771`](https://github.com/ikliml666/dsh-codewiki/commit/fd3ef771f9b84b535086711edf2e6fc0b62c6940) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -208,5 +208,5 @@ flowchart LR
 - 插件配置与安装：[Cordis_Patch_Config（插件装配配置）](Cordis_Patch_Config.md)
 
 ??? abstract "Documented components (1)"
-    - [`edit`](https://github.com/ikliml666/dsh-codewiki/blob/6574afd08e6fadf45fade44268aa46e687e49ad3/lib%5Cagentic.js) — `lib\agentic.js`
+    - [`edit`](https://github.com/ikliml666/dsh-codewiki/blob/fd3ef771f9b84b535086711edf2e6fc0b62c6940/lib%5Cagentic.js) — `lib\agentic.js`
 

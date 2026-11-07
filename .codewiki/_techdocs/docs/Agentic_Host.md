@@ -6,7 +6,7 @@ description: AgenticHost 是 dsh-codewiki 插件中连接「agentic（LLM 自主
 # Agentic 宿主层（Agentic_Host）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6574afd0`](https://github.com/ikliml666/dsh-codewiki/commit/6574afd08e6fadf45fade44268aa46e687e49ad3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`fd3ef771`](https://github.com/ikliml666/dsh-codewiki/commit/fd3ef771f9b84b535086711edf2e6fc0b62c6940) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -161,5 +161,5 @@ flowchart LR
 要了解 agentic 操作「做什么」（自主编辑文章），见 [Agentic_Edit 模块](Agentic_Edit.md)；要了解 agentic 任务如何被编排与推进，见 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md)。
 
 ??? abstract "Documented components (1)"
-    - [`absOf`](https://github.com/ikliml666/dsh-codewiki/blob/6574afd08e6fadf45fade44268aa46e687e49ad3/lib%5Cagentic-host.js) — `lib\agentic-host.js`
+    - [`absOf`](https://github.com/ikliml666/dsh-codewiki/blob/fd3ef771f9b84b535086711edf2e6fc0b62c6940/lib%5Cagentic-host.js) — `lib\agentic-host.js`
 
