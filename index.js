@@ -850,11 +850,14 @@ function sessionDirFor(jobId) {
   return path.join(SESSIONS_DIR, String(jobId).replace(/[^\w-]/g, '_'))
 }
 function writeSessionMeta(jobId, meta) {
+  const p = path.join(sessionDirFor(jobId), `${String(meta.n).padStart(3, '0')}.meta.json`)
+  const text = JSON.stringify(meta)
   try {
-    const dir = sessionDirFor(jobId)
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, `${String(meta.n).padStart(3, '0')}.meta.json`), JSON.stringify(meta), 'utf8')
-  } catch { /* tmp 不可写则放弃记录，不影响编译 */ }
+    fs.mkdirSync(sessionDirFor(jobId), { recursive: true })
+    fs.writeFileSync(p, text, 'utf8')
+  } catch { /* tmp 不可写则放弃记录，不影响编译 */ return }
+  // 刚写完又读时不该再摸一次磁盘，也不该让长度比对看到半截状态。
+  rememberSessionMeta(p, meta, text.length)
 }
 function writeSessionFull(jobId, n, full) {
   try {
@@ -863,19 +866,37 @@ function writeSessionFull(jobId, n, full) {
     fs.writeFileSync(path.join(dir, `${String(n).padStart(3, '0')}.full.json`), JSON.stringify(full), 'utf8')
   } catch { /* 同上 */ }
 }
-// meta 文件的内容写一次就不再变（onDone/onError 各写一次），mtime+size 足以判定是否同一个版本。
-// 全局会话页每 5s 轮询要按 startedAt 跨任务取最新 200 条，必须读完全部 meta 才能排序：
-// 真机 1718 条时单次 70ms，而缓存命中后只剩 stat 成本。面板轮询打的是热路径，值得这一层。
-const sessionMetaCache = new Map() // 绝对路径 -> { key, meta }
+// 会话列表每 5s 轮询一次，而全库 meta 有两千多条：真机实测读全部（readdir + stat + read + parse）
+// 冷 125ms、热 46ms，其中 stat 38ms、read 56ms —— 轮询成本几乎全在这两处。
+//
+// 关键事实：终态 meta（status 不是 running）写完之后再不会被写——实测 2068 条终态记录的 mtime
+// 与 finishedAt 偏差全部为 0，写入路径也只有 onDone/onError 各一次。所以一旦读到终态，它永久有效；
+// 只有仍在跑的记录需要确认有没有更新，而它每次追加只会变大，比 size 就够，不用 mtime。
+const sessionMetaFrozen = new Map() // 绝对路径 -> 终态 meta，读到就不再碰磁盘
+const sessionMetaLive = new Map() // 绝对路径 -> { size, meta }，仅运行中的记录
 function readSessionMetaCached(p) {
-  let st
-  try { st = fs.statSync(p) } catch { return null }
-  const key = `${st.mtimeMs}:${st.size}`
-  const hit = sessionMetaCache.get(p)
-  if (hit && hit.key === key) return hit.meta
-  const meta = readJsonFile(p)
-  if (meta) sessionMetaCache.set(p, { key, meta })
+  const frozen = sessionMetaFrozen.get(p)
+  if (frozen) return frozen
+  const cur = sessionMetaLive.get(p)
+  let meta
+  if (cur) {
+    let st
+    try { st = fs.statSync(p) } catch { return null }
+    if (st.size === cur.size) return cur.meta
+    meta = readJsonFile(p)
+  } else {
+    meta = readJsonFile(p)
+  }
+  if (!meta) return null
+  rememberSessionMeta(p, meta, JSON.stringify(meta).length)
   return meta
+}
+// 运行中的记录按序列化长度判变化：它只会被追加内容，长度必然变大。
+function rememberSessionMeta(p, meta, size) {
+  sessionMetaLive.delete(p)
+  sessionMetaFrozen.delete(p)
+  if (meta.status !== 'running') sessionMetaFrozen.set(p, meta)
+  else sessionMetaLive.set(p, { size, meta })
 }
 // 列表：只读 meta 文件（轻量），按 n 倒序（最新在前）
 // limit：只解析最新的 N 条。文件名是零填充的 ${n}.meta.json，倒序文件名序即倒序 n，
@@ -941,6 +962,7 @@ export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
   let dirs
   try { dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }) } catch { return [] }
   const out = []
+  const cap = Math.max(1, limit)
   for (const d of dirs) {
     if (!d.isDirectory()) continue
     // 目录名是 jobId 的 sanitize 形式；jobId 本身只含 [\w-]，通常恒等
@@ -948,8 +970,10 @@ export function listAllSessionRecords({ limit = 200, jobIds = null } = {}) {
     const dir = path.join(SESSIONS_DIR, d.name)
     let names
     try { names = fs.readdirSync(dir) } catch { continue }
-    for (const f of names) {
-      if (!f.endsWith('.meta.json')) continue
+    // 每个目录只需保留最新 cap 条：结果按时间取前 cap，单个任务最多贡献 cap 条，
+    // 更早的不可能进前 cap。文件名零填充，倒序文件名即倒序 n。
+    const metas = names.filter((f) => f.endsWith('.meta.json')).sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+    for (const f of metas.slice(0, cap)) {
       const meta = readSessionMetaCached(path.join(dir, f))
       if (meta) out.push({ ...meta, jobId: d.name })
     }
@@ -1011,7 +1035,12 @@ export function pruneSessionRecords(nowMs = Date.now(), ttlMs = SESSION_TTL_MS) 
       const p = path.join(dir, f)
       try {
         const st = fs.statSync(p)
-        if (nowMs - st.mtimeMs > ttlMs) { fs.rmSync(p); removed += 1; sessionMetaCache.delete(p) } else left += 1
+        if (nowMs - st.mtimeMs > ttlMs) {
+          fs.rmSync(p)
+          removed += 1
+          sessionMetaFrozen.delete(p)
+          sessionMetaLive.delete(p)
+        } else left += 1
       } catch { /* 单文件失败不拖累整轮 */ }
     }
     if (!left) { try { fs.rmdirSync(dir) } catch { /* 非空/占用则留着 */ } }
