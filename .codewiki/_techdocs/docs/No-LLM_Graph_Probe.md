@@ -6,7 +6,7 @@ description: No-LLMGraphProbe 是一个 引擎侧验收探针，由单个脚本 
 # No-LLM_Graph_Probe（无 LLM 依赖图验收探针）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`b96a0b46`](https://github.com/ikliml666/dsh-codewiki/commit/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`1ff0d38a`](https://github.com/ikliml666/dsh-codewiki/commit/1ff0d38adcb30f68320e768b4e29b10ab8676126) on 2026-11-07 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 ## 简介
 
@@ -211,5 +211,5 @@ flowchart LR
 - **为什么 fixture 用「中文 空格」命名**：正是为了覆盖非 ASCII + 空格这类路径边界，验证 tree-sitter 扫描与 JSON artifact 落盘在 Unicode 路径下不出问题——这也是 [Job_Logs](Job_Logs.md) 中 `decodeGitPath`、fixture 目录与插件实际处理中文仓库名时共用的一类边界。
 
 ??? abstract "Documented components (1)"
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6/tools%5Cfsoft-engine%5Cprobe-no-llm-graph.py) — `tools\fsoft-engine\probe-no-llm-graph.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/1ff0d38adcb30f68320e768b4e29b10ab8676126/tools%5Cfsoft-engine%5Cprobe-no-llm-graph.py) — `tools\fsoft-engine\probe-no-llm-graph.py`
 

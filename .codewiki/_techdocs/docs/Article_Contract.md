@@ -6,7 +6,7 @@ description: ArticleContract 是 Wiki 文章的结构性最低质量契约模块
 # Article_Contract（文章契约闸门）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`b96a0b46`](https://github.com/ikliml666/dsh-codewiki/commit/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`1ff0d38a`](https://github.com/ikliml666/dsh-codewiki/commit/1ff0d38adcb30f68320e768b4e29b10ab8676126) on 2026-11-07 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 ## 简介
 
@@ -206,6 +206,6 @@ flowchart LR
 - `ARTICLE_CONTRACT_VERSION` 用于跨通道对齐判据口径；原生通道与 agentic 通道的口径差异通过 `NATIVE_ARTICLE_OPTS` 显式传入，而不是各自复制一份判据。
 
 ??? abstract "Documented components (2)"
-    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/b96a0b462d5e91e6a7f03b4ec47b345df7a505b6/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/1ff0d38adcb30f68320e768b4e29b10ab8676126/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/1ff0d38adcb30f68320e768b4e29b10ab8676126/lib%5Carticle-contract.js) — `lib\article-contract.js`
 
