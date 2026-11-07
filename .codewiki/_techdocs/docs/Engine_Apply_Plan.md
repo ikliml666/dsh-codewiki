@@ -6,7 +6,7 @@ description: '阶段 3 的原生产物落地器：把 EngineQualityGate（原生
 # Engine_Apply_Plan（原生产物落地器）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 阶段 3 的**原生产物落地器**：把 [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 给出的采用裁决（report）原子地应用到仓库里——写盘 → `cw index` → 基线推进（`cw meta update`）→ 自动提交。本模块只服务原生引擎通道（`nativeEngine: true`，见 [Package_Manifest 包清单](Package_Manifest.md) 中 `package.json` 的说明），单文件实现于 `lib/engine/apply-plan.js`。
 
@@ -47,7 +47,7 @@ flowchart TD
     I --> I2["Job_Orchestration 注入<br/>异步 runCw + 分支合并式<br/>autoCommitWiki"]
 ```
 
-关键设计：本模块**不 import `index.js`**（插件主入口）——加载它会连带拉起宿主服务与 webServer，单测就变成「为了测一个写盘函数启动整个插件」。`runCw` / `commit` / `normalizeIndexLinks` 全部由调用方注入，默认自带**同语义**实现：默认走内置 `commitWikiArtifacts`（直接提交，不建主题分支），分支合并式提交器留给阶段 4 注入（见 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md)）。
+关键设计：本模块**不 import `index.js`**（插件主入口）——加载它会连带拉起宿主服务与 webServer，单测就变成「为了测一个写盘函数启动整个插件」。`runCw` / `commit` 仍由调用方注入，默认自带**同语义**实现：默认走内置 `commitWikiArtifacts`（直接提交，不建主题分支），分支合并式提交器留给阶段 4 注入（见 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md)）。索引链接规范化则完全内置（`normalizeIndexLinksIn`）：index.js 里曾经的同名实现已整体删除，不再有「阶段 4 注入版」，该步恒走内置默认实现。
 
 ## 阶段流水线与回滚边界
 
@@ -169,7 +169,7 @@ flowchart LR
 | `deps.runCw` | `defaultRunCw`：`spawnSync` 同步通道，120s 超时 | 异步 `runCw`，签名一致返回 `{exitCode, stdout, stderr, timedOut}` |
 | `deps.commit` | `commitWikiArtifacts`：直接提交 | 分支合并式 `autoCommitWiki`（主题分支提交 → merge 回原分支） |
 | `deps.verifyCommit` | `verifyCommitScope` | 可替换为注入版 |
-| `deps.normalizeIndexLinks` | `normalizeIndexLinksIn`（其余读写错误抛出，不当作「无需规范化」） | index.js 同语义版本 |
+| `deps.normalizeIndexLinks` | `normalizeIndexLinksIn`（其余读写错误抛出，不当作「无需规范化」） | 无：index.js 里的同语义版本已整体删除；注入分支仍保留（测试可替换），生产路径恒回落到内置实现 |
 | `deps.cwBinary` | `process.env.DSH_CODEWIKI_CW ?? 'cw'` | 同左 |
 
 ## 上游与下游
@@ -178,13 +178,13 @@ flowchart LR
 - **下游影响**：基线是否真的推进（`baselineAdvanced`）直接决定下一轮 [Change_Set 变更集采集模块](Change_Set.md) 的增量起点；`ApplyResult.blockers` 经 [Engine_Contract 引擎契约](Engine_Contract.md) 的 `validateEngineResult` 校验后进入终态与面板展示（[Web_UI_Panel](Web_UI_Panel.md) 的步骤条按 `APPLY_STAGES` 对齐）。
 
 ??? abstract "Documented components (9)"
-    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`walkFiles`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
-    - [`walk`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
-    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`walkFiles`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`walk`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
 

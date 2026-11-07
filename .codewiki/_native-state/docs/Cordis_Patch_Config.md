@@ -109,7 +109,6 @@ flowchart TD
 
     IDX --> JO["Job_Orchestration<br/>maxConcurrency/bigConcurrency/<br/>serialProjects/autoCommit 生效"]
     IDX --> ENG["Engine_Python_Entry<br/>nativeEngine/nativeEnginePython/<br/>nativeEngineEntry/nativeEngineTimeoutMs 生效"]
-    IDX --> AGT["Agentic_Host / Agentic_Edit<br/>agenticArticles/agenticMaxSteps 生效"]
     IDX --> MAP["Engine_Mapping<br/>planMode=auto/dirs 生效"]
     IDX --> SYM["Engine_Workspace_Snapshot<br/>symbolIncremental 生效"]
 ```
@@ -122,7 +121,6 @@ flowchart TD
 - [Engine_Python_Entry](Engine_Python_Entry.md) —— `nativeEngine*` 系列配置决定子进程解释器、入口脚本与超时边界。
 - [FSoft_Engine_Setup_Script](FSoft_Engine_Setup_Script.md) —— 原生引擎通道所需的闭合 Python venv 由 `tools/fsoft-engine/setup-env.sh` 构建；`nativeEnginePython` 应指向该脚本产出的解释器。
 - Engine_LLM_Bridge / Engine_OpenAI_Bridge —— `batchProvider`、`batchModel`、`batchReasoningEffort` 在 LLM 桥接层被消费。
-- [Agentic_Host](Agentic_Host.md) / [Agentic_Edit](Agentic_Edit.md) —— `agenticArticles`、`agenticMaxSteps` 决定文章写作走工具循环还是整包内联。
 - Engine_Mapping —— `planMode` 控制模块划分策略。
 
 ## 版本沿革要点（来自 package.json）

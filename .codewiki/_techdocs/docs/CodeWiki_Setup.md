@@ -6,7 +6,7 @@ description: CodeWikiSetup 是 Rust 版 cw CLI（详见 CodeWiki 主入口（cw 
 # CodeWiki 安装配置（CodeWiki_Setup）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -118,8 +118,8 @@ flowchart TD
 - [CodeWiki 主入口（cw CLI）](CodeWiki_Main.md)：CLI 入口，把 `cw setup {claude-code|codex|qmd}` 与 `cw uninstall {claude-code|codex}` 子命令路由到本模块的函数。
 - 文章格式约定：安装到 Codex 的 `CODEX_AGENTS_SECTION` 要求文章带 YAML frontmatter（`title` / `type` / `source_files` / `tags`），该约定的运行时校验在 [Article_Contract（文章契约闸门）](Article_Contract.md) 中实现。
 - wiki 根目录定位依赖 `config::wiki_home()`（`~/.codewiki`），`setup_qmd()` 用它判断是否已有 wiki 可供索引。
-- 实际的 wiki 编译流水线（被本模块安装的规约所驱动的那套流程）由 Node.js 侧的 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) 与 [Article Agentic Pool 文章智能体执行池](Article_Agentic_Pool.md) 承担，本模块只负责把“何时该跑流水线”的规则讲给代理工具听。
+- 实际的 wiki 编译流水线（被本模块安装的规约所驱动的那套流程）由 Node.js 侧的 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) 与原生引擎通道（见 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md)）承担，本模块只负责把“何时该跑流水线”的规则讲给代理工具听。
 
 ??? abstract "Documented components (1)"
-    - [`claude_home`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/vendor%5Ccodewiki%5Csrc%5Csetup.rs) — `vendor\codewiki\src\setup.rs`
+    - [`claude_home`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/vendor%5Ccodewiki%5Csrc%5Csetup.rs) — `vendor\codewiki\src\setup.rs`
 

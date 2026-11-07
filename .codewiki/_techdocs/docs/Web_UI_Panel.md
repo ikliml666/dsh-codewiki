@@ -6,7 +6,7 @@ description: WebUIPanel 是 dsh-codewiki 插件（@local/dsh-codewiki）的浏�
 # Web_UI_Panel
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 模块定位
 
@@ -67,11 +67,11 @@ flowchart TB
 | 上游/下游模块 | 关系 |
 |---|---|
 | [Cordis_Patch_Config（插件装配配置）](Cordis_Patch_Config.md) | `cordis.patch.yml` 中 `id: codewiki` 的 patch 条目是本模块的注册前提；设置命名空间 `codewiki` 与 patch id 一致 |
-| [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) | 面板轮询的 `/api/codewiki/jobs` 数据源自其 `runPool` / `jobSummary`；取消按钮发 `POST /api/codewiki/control {action:'cancel'}` |
+| [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) | 面板轮询的 `/api/codewiki/jobs` 数据源自其 `jobSummary`；取消按钮发 `POST /api/codewiki/control {action:'cancel'}` |
 | [Job Store（作业持久化与跨实例协调层）](Job_Store.md) | 任务卡片读取的 `stageTimings` / `taskList` / `notes` / `usage` 等字段由其持久化并回读 |
 | [Job_Logs](Job_Logs.md) | `engineLogBlock` 渲染的 `job.nativeLogs`（NDJSON 最近 40 条）来自其日志写入 |
 | [Engine_Python_Entry](Engine_Python_Entry.md) / [Engine_Native_State（原生引擎跨轮受管状态）](Engine_Native_State.md) | `nativeStage` / `nativePercent` / `nativeResult.gate` 等字段反映八段引擎契约；设置页的「原生引擎」分组直接控制其启停 |
-| [Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）](Agentic_Host.md) | `SessionView` 展示的 LLM 请求记录由其 LLM 桥接层落盘 |
+
 | [Package_Manifest 包清单](Package_Manifest.md) | `package.json` 的 `dsh.client.platform: web` 声明本模块为 web 客户端；`exports['./client']` 指向本文件 |
 
 ---
@@ -150,7 +150,7 @@ flowchart LR
 | 原生引擎 (`secNative`) | nativeEngine / nativeEnginePython / nativeEngineEntry / nativeEngineTimeoutMs |
 | 增量策略 (`secIncremental`) | updateRung / updateTauNb / updateTauGrow / updateTauFull / updateTauTree |
 | 编译模型 (`secCompile`) | batchProvider / batchModel / batchReasoningEffort / requestLimit |
-| 大档模型 (`secBig`) | bigEnabled + bigProvider/bigModel/bigReasoningEffort/bigTokenBudget/bigConcurrency |
+| 调度与排除 (`secSchedule`) | autoUpdate / autoUpdateMin / excludePaths |
 | 调度与排除 (`secSchedule`) | autoUpdate / autoUpdateMin / excludePaths |
 
 **自动保存策略**（注释中详述）：
@@ -337,17 +337,17 @@ sequenceDiagram
 > 注：`/api/codewiki/control` 仅监听回环地址（见 `client.js` 头部注释），面板侧不做额外鉴权假设。
 
 ??? abstract "Documented components (13)"
-    - [`CodewikiCard`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`CodewikiPanel`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`PanelIcon`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`ReposTab`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`SessionView`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`Skeleton`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`Spark`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`byUpdated`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`en`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`line`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`mount`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`zh`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
-    - [`row`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/client.js) — `client.js`
+    - [`CodewikiCard`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`CodewikiPanel`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`PanelIcon`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`ReposTab`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`SessionView`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`Skeleton`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`Spark`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`byUpdated`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`en`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`line`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`mount`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`zh`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
+    - [`row`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/client.js) — `client.js`
 

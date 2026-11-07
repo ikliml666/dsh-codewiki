@@ -49,7 +49,7 @@ flowchart TD
     I --> I2["Job_Orchestration 注入<br/>异步 runCw + 分支合并式<br/>autoCommitWiki"]
 ```
 
-关键设计：本模块**不 import `index.js`**（插件主入口）——加载它会连带拉起宿主服务与 webServer，单测就变成「为了测一个写盘函数启动整个插件」。`runCw` / `commit` / `normalizeIndexLinks` 全部由调用方注入，默认自带**同语义**实现：默认走内置 `commitWikiArtifacts`（直接提交，不建主题分支），分支合并式提交器留给阶段 4 注入（见 [Job_Orchestration](job-orchestration.md)）。
+关键设计：本模块**不 import `index.js`**（插件主入口）——加载它会连带拉起宿主服务与 webServer，单测就变成「为了测一个写盘函数启动整个插件」。`runCw` / `commit` 仍由调用方注入，默认自带**同语义**实现：默认走内置 `commitWikiArtifacts`（直接提交，不建主题分支），分支合并式提交器留给阶段 4 注入（见 [Job_Orchestration](job-orchestration.md)）。索引链接规范化则完全内置（`normalizeIndexLinksIn`）：index.js 里曾经的同名实现已整体删除，不再有「阶段 4 注入版」，该步恒走内置默认实现。
 
 ## 阶段流水线与回滚边界
 
@@ -171,7 +171,7 @@ flowchart LR
 | `deps.runCw` | `defaultRunCw`：`spawnSync` 同步通道，120s 超时 | 异步 `runCw`，签名一致返回 `{exitCode, stdout, stderr, timedOut}` |
 | `deps.commit` | `commitWikiArtifacts`：直接提交 | 分支合并式 `autoCommitWiki`（主题分支提交 → merge 回原分支） |
 | `deps.verifyCommit` | `verifyCommitScope` | 可替换为注入版 |
-| `deps.normalizeIndexLinks` | `normalizeIndexLinksIn`（其余读写错误抛出，不当作「无需规范化」） | index.js 同语义版本 |
+| `deps.normalizeIndexLinks` | `normalizeIndexLinksIn`（其余读写错误抛出，不当作「无需规范化」） | 无：index.js 里的同语义版本已整体删除；注入分支仍保留（测试可替换），生产路径恒回落到内置实现 |
 | `deps.cwBinary` | `process.env.DSH_CODEWIKI_CW ?? 'cw'` | 同左 |
 
 ## 上游与下游

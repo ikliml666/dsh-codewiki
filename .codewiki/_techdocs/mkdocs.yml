@@ -8,11 +8,11 @@ nav:
 - Web_UI_Panel: Web_UI_Panel.md
 - Cordis_Patch_Config（插件装配配置）: Cordis_Patch_Config.md
 - Job Orchestration（编译任务编排服务）: Job_Orchestration.md
-- Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）: Agentic_Host.md
+- Agentic 宿主层（Agentic_Host）: Agentic_Host.md
 - Agentic_Edit 模块: Agentic_Edit.md
 - Article_Contract（文章契约闸门）: Article_Contract.md
 - 存量文章修复（Article_Repair）: Article_Repair.md
-- Article Agentic Pool 文章智能体执行池: Article_Agentic_Pool.md
+- 文章 Agentic 池（Article_Agentic_Pool）: Article_Agentic_Pool.md
 - Change_Set 变更集采集模块: Change_Set.md
 - Engine_Apply_Plan（原生产物落地器）: Engine_Apply_Plan.md
 - Engine_Client（引擎进程客户端）: Engine_Client.md

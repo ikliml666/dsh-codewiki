@@ -6,7 +6,7 @@ description: EngineFSoftRuntime 是对上游 FSoft-AI4Code/CodeWiki Python 引�
 # Engine_FSoft_Runtime：增量 Step 5 的受控并行与断点运行时
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 `Engine_FSoft_Runtime` 是对上游 FSoft-AI4Code/CodeWiki Python 引擎增量更新流程
 （`IncrementalUpdater._run`）**Step 5「串行叶子代理」环节的适配器模块**，
@@ -230,5 +230,5 @@ flowchart LR
 - [Update_Record（编译更新记录）](Update_Record.md) — `UpdateRecord` 的终端阶段与加载语义
 
 ??? abstract "Documented components (1)"
-    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
+    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
 

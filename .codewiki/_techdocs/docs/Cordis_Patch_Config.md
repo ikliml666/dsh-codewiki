@@ -6,7 +6,7 @@ description: CordisPatchConfig 是 dsh-codewiki 插件向 dsh（DeepSeek Harness
 # Cordis_Patch_Config（插件装配配置）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -117,7 +117,6 @@ flowchart TD
 
     IDX --> JO["Job_Orchestration<br/>maxConcurrency/bigConcurrency/<br/>serialProjects/autoCommit 生效"]
     IDX --> ENG["Engine_Python_Entry<br/>nativeEngine/nativeEnginePython/<br/>nativeEngineEntry/nativeEngineTimeoutMs 生效"]
-    IDX --> AGT["Agentic_Host / Agentic_Edit<br/>agenticArticles/agenticMaxSteps 生效"]
     IDX --> MAP["Engine_Mapping<br/>planMode=auto/dirs 生效"]
     IDX --> SYM["Engine_Workspace_Snapshot<br/>symbolIncremental 生效"]
 ```
@@ -130,7 +129,6 @@ flowchart TD
 - [Engine_Python_Entry](Engine_Python_Entry.md) —— `nativeEngine*` 系列配置决定子进程解释器、入口脚本与超时边界。
 - [FSoft 引擎环境搭建脚本（FSoft_Engine_Setup_Script）](FSoft_Engine_Setup_Script.md) —— 原生引擎通道所需的闭合 Python venv 由 `tools/fsoft-engine/setup-env.sh` 构建；`nativeEnginePython` 应指向该脚本产出的解释器。
 - Engine_LLM_Bridge / Engine_OpenAI_Bridge —— `batchProvider`、`batchModel`、`batchReasoningEffort` 在 LLM 桥接层被消费。
-- [Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）](Agentic_Host.md) / [Agentic_Edit 模块](Agentic_Edit.md) —— `agenticArticles`、`agenticMaxSteps` 决定文章写作走工具循环还是整包内联。
 - Engine_Mapping —— `planMode` 控制模块划分策略。
 
 ## 版本沿革要点（来自 package.json）
@@ -164,6 +162,6 @@ flowchart TD
 ```
 
 ??? abstract "Documented components (2)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/cordis.patch.yml) — `cordis.patch.yml`
-    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/_addcase2.py) — `_addcase2.py`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/cordis.patch.yml) — `cordis.patch.yml`
+    - [`__file__`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/_addcase2.py) — `_addcase2.py`
 

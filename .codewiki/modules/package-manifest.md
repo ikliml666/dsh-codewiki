@@ -157,7 +157,7 @@ flowchart LR
 - `load(wiki_path)` / `save(wiki_path)` 走 `_meta.yaml`，失败时用 `anyhow::Context` 带上文件路径。
 - 同文件还提供 `current_commit(repo_path)`：通过 `git rev-parse HEAD` 取当前 HEAD，失败时报「Not a git repository or no commits yet」。
 
-该结构是 Node 侧 [Job_Orchestration](job-orchestration.md) 中 `currentCommit`、增量编译判定与引擎 workspace 快照（[Engine_Workspace_Snapshot](engine-workspace-snapshot.md)）所依赖的持久化事实来源之一。
+该结构是 Node 侧 [Job_Orchestration](job-orchestration.md) 中增量编译判定与引擎 workspace 快照（[Engine_Workspace_Snapshot](engine-workspace-snapshot.md)）所依赖的持久化事实来源之一。
 
 ---
 

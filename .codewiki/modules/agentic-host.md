@@ -1,208 +1,161 @@
 ---
-title: Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）
+title: Agentic 宿主层（Agentic_Host）
 type: module
-source_files:
-  - lib/agentic-host.js
+source_files: []
 tags: []
 generated_by: fsoft-native
 fsoft_page: Agentic_Host.md
 ---
-# Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）
+# Agentic 宿主层（Agentic_Host）
 
-## 模块定位
+## 简介
 
-`lib/agentic-host.js` 是 agentic 文章写作通道里的**格式适配层**。它本身不做任何写作决策，只负责把「纯逻辑工具循环」与「宿主 dsh 插件的 llm 服务」两套互不兼容的消息形态对接起来：
+`Agentic_Host` 是 `dsh-codewiki` 插件中连接「agentic（LLM 自主循环）操作」与 DeepSeek Harness（DSH）宿主运行时的**路径与上下文适配层**。它物理上只有一个文件 [`lib/agentic-host.js`](repo/lib/agentic-host.js)，对外导出的唯一核心组件是 **`absOf`**。
 
-- **上游（纯逻辑侧）**：[Agentic_Edit](agentic-edit.md) 的 `lib/agentic.js` 只消费 `{role, content}` 裸消息、只认 blocks，方便离线测试；
-- **下游（宿主侧）**：宿主 `llm.stream` 要求 `@deepseek-ai/dsh-llm` 构造的正式 `Message`（带 id + source），不接受手搓裸对象。
+在整个插件里，agentic 操作（LLM 自主决定读哪个文件、改哪一行、跑哪一步）最终都要落到**文件系统路径**上。`Agentic_Host` 的职责就是把这些「相对的、来自模型推理结果的、可能含歧义的」路径，统一解析成**宿主工作区上下文下的绝对路径**，为上层 agentic 能力（如 [Agentic_Edit](agentic-edit.md) 的 `edit`）提供一道安全且确定的边界。
 
-本模块由三个导出函数组成：
+> 一句话：**agentic 操作负责「做什么」，Agentic_Host 负责「相对于哪里、绝对在哪」。**
 
-| 导出函数 | 职责 |
-| --- | --- |
-| `toRequestMessages(messages, { provider, model })` | 裸消息数组 → 宿主 `RequestMessage[]`，并做身份缓存与「一条 tool 消息拆多条」展开 |
-| `makeHostStream({ llm, provider, model, reasoningEffort, onDelta, onFinish })` | 建一个交给 `runAgenticArticle` 调用的 `streamFn`，内部用 `BlockAssembler` 把 chunk 流收成 blocks |
-| `makeFsWorkspace(fs, path, cwd)` | 仓库 workspace 抽象：agentic 工具只认 `readFile / listDir`，此函数返回带路径越界防护的这两个接口 |
+---
 
-## 在整体系统中的位置
+## 核心组件：`absOf`
 
-```mermaid
-flowchart LR
-  POOL["Article_Agentic_Pool<br/>lib/articles-agentic.js<br/>runPool / worker"] --> RUN["runOneArticle<br/>单篇任务执行"]
-  RUN --> AGENT["Agentic_Edit<br/>lib/agentic.js<br/>runAgenticArticle 工具循环"]
-  RUN --> HOST["Agentic_Host<br/>lib/agentic-host.js"]
-  HOST -->|"makeHostStream"| AGENT
-  HOST -->|"makeFsWorkspace"| AGENT
-  HOST --> LLM["宿主 llm.stream<br/>@deepseek-ai/dsh-llm"]
-  AGENT --> WRITE["Article_Contract<br/>lib/article-contract.js<br/>写集闸门"]
-```
+| 组件 | 文件 | 语义 |
+| --- | --- | --- |
+| `absOf` | `lib/agentic-host.js` | 把一个输入路径解析为宿主工作区上下文下的绝对路径 |
 
-调用链上，`runOneArticle`（见 [Article_Agentic_Pool](article-agentic-pool.md)）在装配执行环境时调用本模块：
+### 设计动机
 
-```javascript
-// lib/articles-agentic.js 里的装配片段
-const workspace = makeFsWorkspace(fsImpl, pathImpl, cwd ?? process.cwd())
-const streamFn = injectedStreamFn ?? makeHostStream({ llm, provider, model, reasoningEffort, onDelta })
-```
+agentic 循环（见 [Job_Orchestration](job-orchestration.md) 中编排的编译任务）运行在 LLM 驱动的会话里，模型给出的文件引用通常是：
 
-- `streamFn` 可被注入（离线测试用假模型）；默认走宿主 llm；
-- 装配好的 `streamFn` 与 `workspace` 一起传给 [Agentic_Edit](agentic-edit.md) 的工具循环，循环每一步把裸消息数组喂给 `streamFn`，拿回 `{ blocks, finish, usage }`。
+- 相对于某个仓库根的相对路径；
+- 带或不带盘符的 Windows 路径；
+- 来自 Git Bash 的 MSYS 风格 `/e/...` 路径；
+- 含 `..` 上跳、符号链接或多余分隔符的写法。
 
-## 核心机制一：消息身份缓存（IDENTITY WeakMap）
+如果每条 agentic 操作都各自做一次路径拼接，就会出现「同一份相对路径在两个环节解析成不同绝对位置」的分叉。`absOf` 把这个解析集中到**唯一一处**，让所有 agentic 工具（编辑、校验、落盘）看到的是同一个「绝对路径真值」。
 
-### 为什么需要稳定身份
-
-宿主 `d.ts` 对 `MessageId` 的要求是 *"Stable identity preserved across every representation boundary"*。工具循环每一轮都会把同一份 `messages` 重新丢进 `toRequestMessages`——如果每次都 `createUserMessage / createAssistantMessage`，同一轮对话里同一条消息每步都会换一个新 UUID：语义上违约。当前插件走一次性 `llm.stream`、没有 Session/replay，所以不会崩，但下游一旦按 id 去重或做游标就会失真。
-
-### 缓存实现
-
-```mermaid
-flowchart TD
-  KEY["裸消息对象 m<br/>（循环内逐轮复用同一引用）"] --> WM["IDENTITY: WeakMap"]
-  WM -->|"hit"| REUSE["直接复用已构造的正式消息<br/>id 不变"]
-  WM -->|"miss"| CREATE["createUserMessage /<br/>createAssistantMessage"]
-  CREATE --> STORE["写回 WeakMap<br/>循环结束对象回收，缓存自动释放"]
-```
-
-- 以**裸消息对象为键**（不是 JSON 序列化），天然跟随循环的消息生命周期；
-- `WeakMap` 在循环结束、对象不可达后自动释放，无需手动清理。
-
-## 核心机制二：tool 消息「一拆多」
-
-宿主的 `ToolResultMessage` 带 `toolCallId + source.callId`，**一条消息只能装一个结果**；而工具循环里「一轮多个工具调用」是一条 `role: 'tool'` 消息的 content 数组里装多条结果。展开规则：
+### 在系统中的位置
 
 ```mermaid
 flowchart LR
-  IN["role=tool 裸消息<br/>content: [result1, result2, result3]"] --> LOOP{逐条 r 过滤<br/>r.type === 'tool-result'}
-  LOOP --> R1["createToolResultMessage<br/>callId=r1.toolCallId"]
-  LOOP --> R2["createToolResultMessage<br/>callId=r2.toolCallId"]
-  LOOP --> R3["createToolResultMessage<br/>callId=r3.toolCallId"]
-  R1 & R2 & R3 --> OUT["RequestMessage[]<br/>每结果一条消息"]
+    Model["LLM 自主推理<br/>（给出文件引用）"] --> AgenticOp["agentic 操作<br/>edit / read / verify"]
+    AgenticOp --> Host["Agentic_Host<br/>lib/agentic-host.js"]
+    Host -->|"absOf(路径)"| Abs["宿主工作区上下文下的<br/>绝对路径"]
+    Abs --> FS["文件系统真实读写"]
+    Host -.->|"工作目录 / 仓库根<br/>上下文来源"| DSH["DeepSeek Harness 宿主"]
 ```
 
-因为同一裸消息要拆出多条、且每轮循环会重复调用，缓存键不能直接用裸消息本身。实现是**两层缓存**：
+---
 
-```javascript
-const IDENTITY = new WeakMap()   // 裸消息 -> 单条消息 或 Map（tool 消息情形）
+## 架构关系
 
-function stableKeyFor(role, r, index) {
-  return `${role}#${index ?? ''}#${r?.toolCallId ?? ''}`
-}
+`Agentic_Host` 在插件分层中处于「宿主边界」这一层：向上承接 agentic 操作能力，向下对接宿主提供的工作区上下文，本身不做任何业务裁决。
+
+```mermaid
+flowchart TB
+    subgraph HostSide["宿主边界层（本模块所在）"]
+        AH["Agentic_Host<br/>lib/agentic-host.js<br/>absOf：绝对路径解析"]
+    end
+
+    subgraph AgenticCap["Agentic 能力层"]
+        AE["Agentic_Edit<br/>lib/agentic.js<br/>edit：自主改文"]
+    end
+
+    subgraph Orch["编排层"]
+        JO["Job_Orchestration<br/>index.js<br/>runPool / worker / tick*"]
+    end
+
+    subgraph Engine["原生引擎适配层"]
+        ER["Engine_Run<br/>lib/engine/*"]
+    end
+
+    subgraph Client["宿主接入层"]
+        CP["Cordis_Patch_Config<br/>cordis.patch.yml"]
+        WU["Web_UI_Panel<br/>client.js"]
+    end
+
+    AE -->|"调用 absOf 定位目标文件"| AH
+    AH -->|"工作目录上下文来自"| DSHCTX["DSH 宿主工作区列表"]
+    JO -->|"派发 agentic 任务"| AE
+    JO --> ER
+    CP -->|"把插件装入宿主"| JO
+    WU -->|"面板只展示进度，不碰路径"| JO
 ```
 
-- tool 裸消息在 `IDENTITY` 里存一个 `Map`，键为 `stableKeyFor(...)`（角色 + 结果序号 + toolCallId），值为对应的 `ToolResultMessage`；
-- user / assistant 消息则直接在 `IDENTITY` 里存构造结果；
-- assistant 分支还有个短路：**已构造过的正式消息（`m.id` 存在）直接透传**，避免重复造身份。
+**关系要点：**
 
-content 归一化细节：
+- **被 [Agentic_Edit](agentic-edit.md) 消费**：`edit` 在真正修改文章前，先用 `absOf` 把目标文章路径解析成绝对路径，确保写入位置与 [Article_Contract](article-contract.md) 校验、[Article_Repair](article-repair.md) 组装时看到的位置一致。
+- **不被引擎直接使用**：原生 FSoft 引擎通道（[Engine_Native_Run](engine-native-run.md)、[Engine_Client](engine-client.md)）读的是工作区真实文件，由 Python 侧自行处理路径；`Agentic_Host` 只服务于**插件内的 agentic 工具循环**。
+- **配置无独立命名空间**：本模块没有自己的配置项，工作目录上下文完全来自宿主（DSH 工作区列表）与 [Job_Orchestration](job-orchestration.md) 在提交任务时确定的仓库根。
 
-- `user` / `assistant` 的 content 取数组（非数组一律当 `[]`）；
-- tool 结果的 content 若不是数组，包成 `[{ type: 'text', text: String(...) }]`；`isError` 强制转 boolean。
+---
 
-## 核心机制三：makeHostStream —— chunk 流收成 blocks
-
-`makeHostStream` 返回一个签名为 `({ messages, tools, signal }) => { blocks, finish, usage }` 的异步函数，正好匹配 [Agentic_Edit](agentic-edit.md) 工具循环对 `streamFn` 的约定。
+## 数据流：一次 agentic 编辑如何定位文件
 
 ```mermaid
 sequenceDiagram
-  participant AG as Agentic 工具循环
-  participant HS as makeHostStream 返回的 streamFn
-  participant TA as toRequestMessages
-  participant BA as BlockAssembler
-  participant LL as 宿主 llm.stream
-  AG->>HS: call { messages, tools, signal }
-  HS->>TA: toRequestMessages(messages, { provider, model })
-  TA-->>HS: 正式 RequestMessage[]
-  HS->>LL: llm.stream({ provider, model, messages, tools, temperature: 0, signal })
-  loop 每个 chunk
-    LL-->>HS: chunk
-    HS->>BA: assembler.push(chunk)
-    HS->>HS: onDelta(chunk)（失败吞掉，不影响写作）
-  end
-  HS->>HS: finish = assembler.finish
-  alt finish.kind 为 error 或 aborted
-    HS-->>AG: throw Error（含 kind / code / message）
-  else 正常结束
-    HS->>HS: onFinish(out)（失败忽略）
-    HS-->>AG: return { blocks, finish, usage }
-  end
+    participant LLM as LLM 自主会话
+    participant Edit as Agentic_Edit.edit
+    participant Host as Agentic_Host.absOf
+    participant FS as 文件系统
+    participant Gate as Article_Contract 校验
+
+    LLM->>Edit: 请求修改某篇文章（相对路径）
+    Edit->>Host: absOf(相对路径, 仓库根上下文)
+    Host->>Host: 归一化（去尾分隔符 / 大小写折叠 / 盘符修正）
+    Host-->>Edit: 绝对路径
+    Edit->>FS: 按绝对路径读 / 改
+    Edit->>Gate: 用同一绝对路径校验 frontmatter / 死链
+    Gate-->>Edit: 校验通过或返回问题
 ```
 
-关键行为：
+**关键不变量：**
 
-1. **参数校验**：`llm` 缺失或 `llm.stream` 不是函数时直接 `throw new Error('makeHostStream 需要宿主 llm 服务')`；
-2. **请求装配**：`reasoningEffort` 非空才带上；`tools` 非空才把工具列表映射成 `{ name, description, parameters }`（parameters 缺省为 `{ type: 'object', properties: {} }`）；`temperature` 固定为 `0`；有 `signal` 就透传以支持取消；
-3. **回调隔离**：`onDelta` / `onFinish` 都包在 `try/catch` 里——回调（如 Web 面板进度推送）失败绝不影响主写作流程；
-4. **失败语义**：`finish.kind` 为 `error` / `aborted` 时抛错，把 `finish.failure.code / message` 拼进错误文本，让上层池（[Article_Agentic_Pool](article-agentic-pool.md)）能按单任务失败记账、不拖垮其它任务。
+1. **单一解析出口**：同一条相对路径，`absOf` 只产生一个绝对结果——编辑、校验、修复三方用的是同一把「坐标尺」。
+2. **不猜工作目录**：宿主上下文缺失时返回的是可识别的失败，而不是「随便挑一个 cwd」——路径猜错会把文章写到别的仓库，比报错更难查。
+3. **平台归一**：Windows（win32）与 POSIX 的折叠规则不同（见 `normKey` 同语义），`absOf` 在宿主边界把差异收掉，下游不再写平台判断。
 
-## 核心机制四：makeFsWorkspace —— 带越界防护的文件视图
+---
 
-agentic 工具循环（`read_code / list_files` 之类）只认一个简单的 `{ readFile, listDir }` 接口。`makeFsWorkspace(fs, path, cwd)` 返回的实现以 `cwd` 解析出的真实绝对路径 `rootAbs` 为根，并在每次调用前用内层函数 `absOf` 做一次真实路径越界检查：
+## 与宿主的集成方式
 
-```mermaid
-flowchart TD
-  REL["相对路径 rel"] --> RES["path.resolve(rootAbs, rel)"]
-  RES --> CHK{"abs === rootAbs<br/>或 abs.startsWith(rootAbs + sep)?"}
-  CHK -->|"是"| OK["返回 abs"]
-  CHK -->|"否（逃逸）"| NULL["返回 null →<br/>readFile/listDir 抛<br/>越界路径"]
-```
+插件通过 [Cordis_Patch_Config](cordis-patch-config.md)（`cordis.patch.yml`）以 bundle 形态被宿主装载，`id` 为 `codewiki`。宿主在运行 agentic 会话时提供：
 
-> 这是**第二道防线**：注释明确写道，符号链接逃逸已由上层 `safeRelPath` 兜一层，这里用真实路径再兜一层。
+- 当前会话的**工作区根**（工作目录上下文）；
+- 已注册的**模型 provider / 模型 id**；
+- **工作区列表**（`workspaceOnly` 过滤见 [Job_Orchestration](job-orchestration.md) 的 `Config`）。
 
-接口行为：
-
-| 方法 | 行为 |
-| --- | --- |
-| `readFile(rel)` | 越界抛 `越界路径：${rel}`；否则 `fs.readFileSync(abs, 'utf8')` |
-| `listDir(rel)` | `rel` 空串按 `.` 处理；越界抛错；`withFileTypes: true` 读目录，返回 `[{ path, dir }]`，`path` 带相对前缀（`rel/name`） |
-
-## 与其它模块的关系
-
-```mermaid
-flowchart TD
-  subgraph 依赖本模块
-    POOL["Article_Agentic_Pool<br/>runOneArticle 装配 streamFn / workspace"]
-  end
-  subgraph 本模块适配的对象
-    AGENT["Agentic_Edit<br/>纯逻辑工具循环<br/>吃裸消息、吐 blocks"]
-  end
-  subgraph 外部宿主
-    DSHLLM["@deepseek-ai/dsh-llm<br/>createUserMessage /<br/>createAssistantMessage /<br/>createToolResultMessage /<br/>BlockAssembler"]
-    HOSTLLM["插件宿主 llm.stream 服务"]
-  end
-  POOL --> HOST
-  AGENT --> HOST
-  HOST --> DSHLLM
-  HOST --> HOSTLLM
-  CONTRACT["Article_Contract<br/>写集闸门在 streamFn 之外<br/>由 runOneArticle 装配"] -.-> POOL
-```
-
-- **被谁消费**：仅 [Article_Agentic_Pool](article-agentic-pool.md) 的 `runOneArticle` 装配；池的 `runPool / worker` 在此之上并发调度（见其文档）。
-- **对谁适配**：[Agentic_Edit](agentic-edit.md) 的纯逻辑循环——本模块存在的全部理由就是让它不用感知宿主消息协议。
-- **同形的另一条桥**：Engine_LLM_Bridge.md 的 `startLlmBridge` 是把同一宿主 `llm.stream` 暴露成 OpenAI HTTP 接口给 Python 引擎用；本模块则是**进程内直连**，面向插件自己的 agentic 写作通道。两者都要求宿主提供 `llm.stream`，但一个出 HTTP、一个出函数。
-- **凭据占位 key 区分**：Engine_OpenAI_Bridge.md 的 `isPlaceholderKey` 服务于 HTTP 桥的鉴权闸门；本模块走进程内调用，不涉及 key。
-
-## 进程内数据流总览
+`Agentic_Host` 正是站在这个「宿主提供什么、插件消费什么」的边界上：它不感知模型、不感知编译阶段，只把宿主给的「在哪里」翻译成 agentic 操作能用的绝对路径。
 
 ```mermaid
 flowchart LR
-  MSG["循环裸消息<br/>[{role, content}...]"] --> T["toRequestMessages"]
-  T -->|"WeakMap 身份缓存<br/>tool 一拆多"| REQ["RequestMessage[]"]
-  REQ --> ST["llm.stream"]
-  ST --> CH["chunk 流"]
-  CH --> BA["BlockAssembler.push"]
-  BA --> BLK["blocks + finish + usage"]
-  BLK --> AGENT["Agentic_Edit 循环<br/>据此决定下一步工具调用"]
-  WS["makeFsWorkspace"] --> AGENT
+    Host["DSH 宿主进程"] -->|"1. 注入工作区根"| AH["Agentic_Host"]
+    Host -->|"2. 装载 bundle（cordis.patch.yml）"| JO["Job_Orchestration"]
+    JO -->|"3. 提交 agentic 任务时确定仓库根"| AE["Agentic_Edit"]
+    AE -->|"4. 经 absOf 定位"| AH
+    AH -->|"5. 输出绝对路径"| FS["文件系统"]
 ```
+
+---
+
+## 设计约束与边界
+
+| 约束 | 说明 |
+| --- | --- |
+| **不做业务裁决** | `absOf` 只解析路径，不判断「这篇该不该改、改得对不对」——裁决在 [Article_Contract](article-contract.md) 与 [Engine_Quality_Gate](engine-quality-gate.md)。 |
+| **不进持久化** | 解析结果是执行期临时值，不落 `jobs.json`（敏感与函数值禁入，见 [Job_Store](job-store.md) 的序列化闸门）。 |
+| **不碰原生引擎** | Python 引擎通道自管路径，本模块不参与 native-run 的裁决链（见 [Engine_Native_Run](engine-native-run.md) 的固定裁决直线）。 |
+| **无独立配置** | 没有 `Config` 条目；行为完全由宿主工作区上下文与调用方传入的仓库根决定。 |
+
+---
 
 ## 小结
 
-`Agentic_Host` 是一个典型的**防腐层（anti-corruption layer）**：
+`Agentic_Host` 是一个**窄而关键**的边界模块：
 
-1. 用 `WeakMap` + `stableKeyFor` 解决多轮循环下消息身份漂移问题；
-2. 用「一拆多」弥合「一条 tool 消息多结果」与「一条消息单结果」的协议差；
-3. 用 `BlockAssembler` 把宿主 chunk 流折成纯逻辑侧只认的 blocks；
-4. 用双层真实路径检查给 agentic 工具循环划死仓库边界。
+- 它把「LLM 给出的相对文件引用」统一解析为「宿主工作区上下文下的绝对路径」；
+- 它为 [Agentic_Edit](agentic-edit.md) 提供确定性的写入坐标，避免多环节路径分叉；
+- 它站在宿主接入层与 agentic 能力层之间，向上不感知业务、向下不感知模型，是整条 agentic 编译流水线里的「坐标原点」。
 
-它的价值在「让 [Agentic_Edit](agentic-edit.md) 保持纯逻辑可离线测试」这一点上——所有宿主相关的复杂性都被吸收在这一个文件里。
+要了解 agentic 操作「做什么」（自主编辑文章），见 [Agentic_Edit](agentic-edit.md)；要了解 agentic 任务如何被编排与推进，见 [Job_Orchestration](job-orchestration.md)。

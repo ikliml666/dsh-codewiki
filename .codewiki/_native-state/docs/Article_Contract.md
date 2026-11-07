@@ -6,6 +6,8 @@
 
 该模块诞生于一次审计确认的缺陷：旧闸门 `validateArticleEnvelope`（`index.js`）只检查「frontmatter 有没有开头、有没有闭合」，导致以下坏文章都能入库——重复贴入第二份 frontmatter、必需章节存在但正文为空、`source_files` 列着不存在的文件或目录、正文 `[[链接]]` 指向已删除文章、代码围栏未闭合。本模块把这些判据集中到一处，并被**所有写入与校验通道共用**，避免各写各的导致判据漂移。
 
+> 背景口径注记：原生引擎通道（`nativeEngine=true`）已是**唯一编译通道**——`index.js` 里的旧 Node 兼容写作通道（单轮 prompt 与 agentic 双池）已整体删除，`articles-agentic.js`、`tickArticles` 等不再存在。下文提到的 agentic 通道写集语义（`makeWriteSet` / `isWritable`）仍是本模块导出的能力，但其调用方已随旧通道一并移除；原生通道的采用门（[Engine_Quality_Gate](Engine_Quality_Gate.md)）与存量体检（[Engine_Apply_Plan](Engine_Apply_Plan.md)）才是本模块当前的真实消费者。
+
 核心职责：
 
 - 解析并校验 frontmatter（含极简 YAML 解析，支持双引号/单引号标量转义还原）；
@@ -13,22 +15,22 @@
 - 校验 `source_files` 的格式、存在性与证据来源；
 - 扫描正文内部 wiki 链接并判死链（自动跳过代码围栏与行内代码中的「语法示例」）；
 - 输出分级（`error` 拒写 / `warning` 降级 partial）问题清单；
-- 提供写集（write-set）路径规范化与越界判定，服务 agentic 工具的写入白名单。
+- 提供写集（write-set）路径规范化与越界判定，曾服务 agentic 工具的写入白名单（调用方随旧通道删除后，导出能力本身保留）。
 
 ## 在系统中的位置
 
 ```mermaid
 flowchart TD
     subgraph Writers["文章生产通道"]
-        A["Agentic 通道<br/>articles-agentic.js / article-repair.js"]
-        B["原生引擎通道<br/>engine/output.js → quality-gate.js"]
+        A["原生引擎通道<br/>engine/output.js → quality-gate.js"]
+        C["存量体检<br/>engine/apply-plan.js"]
         C["存量体检<br/>engine/apply-plan.js"]
     end
 
     AC["Article_Contract<br/>article-contract.js<br/>inspectArticle / hasBlockingIssue / issueSummary"]
 
-    A -->|"渲染后先过契约"| AC
-    B -->|"quality-gate 复用同一判据<br/>NATIVE_ARTICLE_OPTS"| AC
+    A -->|"quality-gate 复用同一判据<br/>NATIVE_ARTICLE_OPTS"| AC
+    %% 旧 agentic 通道边已删除（articles-agentic.js 随旧通道移除）
     C -->|"auditExistingArticles<br/>判存量页好坏"| AC
 
     AC -->|"issues[].severity=error<br/>→ 拒写"| D["不落盘<br/>（防污染 wiki）"]
@@ -38,7 +40,7 @@ flowchart TD
     G["wiki-links.js<br/>scanPageLinks"] -.->|"collectWikiLinks 依赖"| AC
 ```
 
-`Article_Contract` 是典型的「被多处共用的底层纯函数库」：上游三个通道（agentic 写作、原生引擎采用门、存量体检）都 import 它，从而保证「判坏一篇文章的口径全系统一致」。这一点尤其关键——`quality-gate.js` 与 `apply-plan.js` 曾各自写过一遍同样的判据并发生过漂移，`NATIVE_ARTICLE_OPTS` 常量就是为了让两边共用同一份原生通道口径。
+`Article_Contract` 是典型的「被多处共用的底层纯函数库」：上游两个通道（原生引擎采用门、存量体检）都 import 它，从而保证「判坏一篇文章的口径全系统一致」。这一点尤其关键——`quality-gate.js` 与 `apply-plan.js` 曾各自写过一遍同样的判据并发生过漂移，`NATIVE_ARTICLE_OPTS` 常量就是为了让两边共用同一份原生通道口径。
 
 ## 核心数据模型
 
@@ -184,13 +186,13 @@ flowchart LR
   - [Engine_Quality_Gate](Engine_Quality_Gate.md)：把引擎映射结果渲染成真正的 wiki 文章后，走 `inspectArticle`（用 `NATIVE_ARTICLE_OPTS`）做采用门；`article-contract` 是其 `GATE_DEFECT_KINDS` 之一。
   - [Engine_Apply_Plan](Engine_Apply_Plan.md)：存量 `auditExistingArticles` 判坏页，配合 [Article_Repair](Article_Repair.md) 先修后删。
   - [Article_Repair](Article_Repair.md)：直接 import `TYPE_BY_DIR`、`parseFrontmatter`、`stripCode` 做修复推断。
-  - [Article_Agentic_Pool](Article_Agentic_Pool.md)：agentic 写作产出后由 `isWritable`/写集拦截越界路径。
+  - 旧 agentic 通道已随旧 Node 兼容通道整体删除；`isWritable`/写集导出（`makeWriteSet` / `normalizeWritePath` / `isWritable`）仍保留在本模块，当前无调用方。
 - **底层依赖**：
   - [Job_Logs](Job_Logs.md) 中的 `lib/engine/wiki-links.js` 提供 `scanPageLinks`（链接扫描规则门、校对、本模块三方共用同一份）。
 - **不在本模块职责内**：基线推进判定、写盘原子性、自动提交（属于 [Engine_Apply_Plan](Engine_Apply_Plan.md)）；git 状态与基线陈旧分类（属于 [Engine_Quality_Gate](Engine_Quality_Gate.md)）。
 
 ## 备注
 
-- 本模块为纯函数，不碰文件系统，因此可直接单测；真正的落盘闸门由调用方（`index.js` / `quality-gate.js`）在拿到 `issues` 后决定拒写或降级。
+- 本模块为纯函数，不碰文件系统，因此可直接单测；真正的落盘闸门由调用方（`quality-gate.js` / `apply-plan.js`）在拿到 `issues` 后决定拒写或降级（旧 `index.js` 调用路径已随通道统一移除）。
 - `SEVERITY` 表新增类别时只允许**追加**（下游按 `kind` 分派消费），不得改既有类别语义。
 - `ARTICLE_CONTRACT_VERSION` 用于跨通道对齐判据口径；原生通道与 agentic 通道的口径差异通过 `NATIVE_ARTICLE_OPTS` 显式传入，而不是各自复制一份判据。

@@ -68,11 +68,10 @@ flowchart TB
 | 上游/下游模块 | 关系 |
 |---|---|
 | [Cordis_Patch_Config](cordis-patch-config.md) | `cordis.patch.yml` 中 `id: codewiki` 的 patch 条目是本模块的注册前提；设置命名空间 `codewiki` 与 patch id 一致 |
-| [Job_Orchestration](job-orchestration.md) | 面板轮询的 `/api/codewiki/jobs` 数据源自其 `runPool` / `jobSummary`；取消按钮发 `POST /api/codewiki/control {action:'cancel'}` |
+| [Job_Orchestration](job-orchestration.md) | 面板轮询的 `/api/codewiki/jobs` 数据源自其 `jobSummary`；取消按钮发 `POST /api/codewiki/control {action:'cancel'}` |
 | [Job_Store](job-store.md) | 任务卡片读取的 `stageTimings` / `taskList` / `notes` / `usage` 等字段由其持久化并回读 |
 | [Job_Logs](job-logs.md) | `engineLogBlock` 渲染的 `job.nativeLogs`（NDJSON 最近 40 条）来自其日志写入 |
-| [Engine_Python_Entry](engine-python-entry.md) / [Engine_Native_State](engine-native-state.md) | `nativeStage` / `nativePercent` / `nativeResult.gate` 等字段反映八段引擎契约；设置页的「原生引擎」分组直接控制其启停 |
-| [Agentic_Host](agentic-host.md) | `SessionView` 展示的 LLM 请求记录由其 LLM 桥接层落盘 |
+| [Engine_Python_Entry](engine-python-entry.md) / [Engine_Native_State](engine-native-state.md) | `nativeStage` / `nativePercent` / `nativeResult.gate` 等字段反映八段引擎契约；设置页的「原生引擎」分组直接控制其启停 |
 | [Package_Manifest](package-manifest.md) | `package.json` 的 `dsh.client.platform: web` 声明本模块为 web 客户端；`exports['./client']` 指向本文件 |
 
 ---
@@ -151,7 +150,7 @@ flowchart LR
 | 原生引擎 (`secNative`) | nativeEngine / nativeEnginePython / nativeEngineEntry / nativeEngineTimeoutMs |
 | 增量策略 (`secIncremental`) | updateRung / updateTauNb / updateTauGrow / updateTauFull / updateTauTree |
 | 编译模型 (`secCompile`) | batchProvider / batchModel / batchReasoningEffort / requestLimit |
-| 大档模型 (`secBig`) | bigEnabled + bigProvider/bigModel/bigReasoningEffort/bigTokenBudget/bigConcurrency |
+| 调度与排除 (`secSchedule`) | autoUpdate / autoUpdateMin / excludePaths |
 | 调度与排除 (`secSchedule`) | autoUpdate / autoUpdateMin / excludePaths |
 
 **自动保存策略**（注释中详述）：

@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "d135ea42291511410de6fe1d13ad199d5529e1ed"
+    "headCommit": "8d87985d8a7f05b87556281b81e28f82bc471b1d"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "641275b9525567945e5dc37552d953222774ad54",
-    "headCommit": "d135ea42291511410de6fe1d13ad199d5529e1ed",
+    "headCommit": "8d87985d8a7f05b87556281b81e28f82bc471b1d",
     "committed": [
       ".npmignore",
       "CHANGELOG.md",
@@ -75,11 +75,18 @@
     ],
     "staged": [],
     "unstaged": [
-      "CHANGELOG.md"
+      "CHANGELOG.md",
+      "index.js",
+      "lib/agentic-host.js",
+      "lib/agentic.js",
+      "lib/articles-agentic.js"
     ],
     "untracked": [],
     "deleted": [
       "docs/hy3-concurrency-handoff.md",
+      "lib/agentic-host.js",
+      "lib/agentic.js",
+      "lib/articles-agentic.js",
       "patches/upstream-module-parallel.patch",
       "test-agentic-fallback.mjs",
       "test-agentic-host.mjs",
@@ -131,18 +138,21 @@
     "reason": ""
   },
   "unconsumed": [
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "index.js",
+    "lib/agentic-host.js",
+    "lib/agentic.js",
+    "lib/articles-agentic.js"
   ],
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "工作区未提交改动已合成临时 commit 2a82c7bf7a1b（1 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5uat1t-4-native（44 个文件）",
-    "本轮把 1 个未提交源码改动一并写进产物（快照 2a82c7bf7a1b）：CHANGELOG.md"
+    "工作区未提交改动已合成临时 commit 695bf7d0681f（5 个文件，不挂 ref）：本轮记账指向它，下一轮增量据此对齐",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw5wfyxj-7-native（44 个文件）"
   ],
-  "updatedAt": "2026-11-07T03:29:17.028Z"
+  "updatedAt": "2026-11-07T05:35:06.842Z"
 }

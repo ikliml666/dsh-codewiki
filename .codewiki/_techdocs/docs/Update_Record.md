@@ -6,7 +6,7 @@ description: lib/update-record.js 是 CodeWiki 编译流水线的终态裁决与
 # Update_Record（编译更新记录）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -40,7 +40,7 @@ flowchart TB
     end
 
     subgraph 下游消费
-        JOB["Job_Orchestration<br/>index.js：tickArticles / tickIndex / 面板文案"]
+        JOB["Job_Orchestration<br/>index.js：终态裁决 / 面板文案"]
         PANEL["Web_UI_Panel<br/>SessionView 展示终态与 blocker"]
         BASELINE{"canAdvanceBaseline?<br/>是 → 前移基线<br/>否 → 变化留到下一轮"}
     end
@@ -161,7 +161,7 @@ flowchart LR
         JUDGE["judgeOutcome"]
     end
     BUILD -->|record JSON| DISK["<wiki>/temp/update-record.json"]
-    DISK -->|loadUpdateRecord 回读| CONSUME["Job_Orchestration.tickIndex<br/>决定是否前移基线"]
+    DISK -->|loadUpdateRecord 回读| CONSUME["Job_Orchestration<br/>决定是否前移基线"]
     JUDGE -->|canAdvanceBaseline| CONSUME
     CONSUME -->|outcome + blockers| PANEL["Web_UI_Panel.SessionView<br/>done/partial/failed 三态文案"]
     CONSUME -->|qualityIssues 输入| GATE["Engine_Quality_Gate<br/>defect/degradation/stale 分类"]
@@ -169,7 +169,7 @@ flowchart LR
 
 - **Change_Set**（[Change_Set 变更集采集模块](Change_Set.md)）：提供 `baseCommit / headCommit / sourceChanges / 七路 counts`；其 `state='unreachable-base'` 这类前置失败会通过 `options.extraBlockers` 进入本模块的 blocker 列表。
 - **Engine_Quality_Gate**（[Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md)）：产出逐篇质量问题，作为 `qualityIssues` 传入；gate 说 `partial` 时终态不许是 `done`（该不变量在 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md) 的裁决链中固定）。
-- **Job_Orchestration**（[Job Orchestration（编译任务编排服务）](Job_Orchestration.md)）：`index.js` 从本模块导入 `judgeOutcome / buildUpdateRecord / saveUpdateRecord / loadUpdateRecord / describeOutcome / isTerminalStage / TERMINAL`，在 `tickArticles / tickIndex` 等阶段调用。
+- **Job_Orchestration**（[Job Orchestration（编译任务编排服务）](Job_Orchestration.md)）：`index.js` 从本模块导入 `judgeOutcome / buildUpdateRecord / saveUpdateRecord / loadUpdateRecord / describeOutcome / isTerminalStage / TERMINAL`，在 `finishJob / tickNative` 等终态收尾路径调用（旧 Node 兼容通道的 `tickArticles / tickIndex` 阶段处理器已整体删除）。
 - **Job_Store**（[Job Store（作业持久化与跨实例协调层）](Job_Store.md)）：`TERMINAL_STAGES`（`done/partial/failed/cancelled`）与本模块的 `TERMINAL` 集合同语义，用于跨进程任务的终态判定；job 快照本身不存本记录，只存路径。
 - **Web_UI_Panel**（[Web_UI_Panel](Web_UI_Panel.md)）：通过 `describeOutcome` 的文案与 `blockers` 明细渲染会话视图，取代旧实现的一句「完成」。
 
@@ -207,12 +207,12 @@ sequenceDiagram
 ## 设计要点与不变量
 
 1. **版本化读回**：`loadUpdateRecord` 对 `version !== UPDATE_RECORD_VERSION` 或任何读/解析错误一律返回 `null`——旧格式记录不得被当成「上次成功编译」，防止跨版本语义混淆。
-2. **基线判据宁可严不可松**：本模块服务的兼容通道（`tickIndex`），其 blocker 含「未归属变更」「缺页」这类「没消化完」语义；一旦放宽就会把未消化的变化记成已消化——下一轮这些变化不再触发文章更新，wiki 会静默落后于代码。因此本模块刻意保持比 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md) / [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 通道更严。
+2. **基线判据宁可严不可松**：本模块服务的是「基线只代表所有变化已消化」这条判据，其 blocker 含「未归属变更」「缺页」这类「没消化完」语义；一旦放宽就会把未消化的变化记成已消化——下一轮这些变化不再触发文章更新，wiki 会静默落后于代码。因此本模块刻意保持比 [Engine_Native_Run（原生编译裁决编排层）](Engine_Native_Run.md) / [Engine_Quality_Gate（原生引擎产物采用门）](Engine_Quality_Gate.md) 通道更严。
 3. **每个 action 必带原因**：记录中 `plan.actions[].reason` 是「可复盘」的最低要求——事后能回答「为什么这篇被重写/被 review」。
 4. **错误截断**：`error / detail` 一律 `slice(0, 300)`，防止单条异常堆栈撑爆 JSON；`notes` 只留最近 20 条。
 5. **IO 可注入**：`saveUpdateRecord / loadUpdateRecord` 的 `fsImpl` 参数默认用 `node:fs`，测试可注入假文件系统，配合纯函数裁决实现离线单测。
 
 ??? abstract "Documented components (2)"
-    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cupdate-record.js) — `lib\update-record.js`
-    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cupdate-record.js) — `lib\update-record.js`
 

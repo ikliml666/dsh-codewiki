@@ -1,235 +1,176 @@
 ---
-title: Article Agentic Pool 文章智能体执行池
+title: 文章 Agentic 池（Article_Agentic_Pool）
 type: module
-source_files:
-  - lib/articles-agentic.js
+source_files: []
 tags: []
 generated_by: fsoft-native
 fsoft_page: Article_Agentic_Pool.md
 ---
-# Article Agentic Pool 文章智能体执行池
-
-> 模块文件：`lib/articles-agentic.js`
-> 核心组件：`runPool`（并发池调度）、`worker`（池内任务执行单元）
+# 文章 Agentic 池（Article_Agentic_Pool）
 
 ## 简介
 
-Article_Agentic_Pool 是插件内置 Node 兼容通道的**第二条文章执行通道**，负责把「模块任务清单」并行跑成 wiki 文章。它与 `index.js` 里的单轮通道（把源码内联进 prompt、模型一次吐出全文）并列，但执行方式完全不同：
+`Article_Agentic_Pool` 是插件**内置 Node 通道**（零子代理）的文章写作并发池，源码位于 `lib/articles-agentic.js`，核心导出两个组件：
 
-- **单轮通道**：源码整包塞进 prompt → 模型一次输出全文 → 插件落盘。需要「装填超预算 → 拆观察批 → 合成」一整套缓冲逻辑。
-- **agentic 通道（本模块）**：模型自己用 `read_code` / `list_files` 读源码、用 `edit_article` 增量写文章，不整包内联源码，因此没有装填预算问题。
+- `runPool` —— 有界并发调度器：接收本阶段的文章清单、并发上限与逐篇执行上下文，把文章分发给并发槽位上的 `worker` 执行，并汇总逐篇结果；
+- `worker` —— 单篇写手：领取一篇文章，收集源码证据、调用宿主 LLM 生成/重写正文、过文章契约闸门、决定落盘或拒收，并把结果记账。
 
-本模块吸收自上游 FSoft-AI4Code/CodeWiki 的 module agent 设计，把「给模型一个可反复读代码、可精确编辑文章、可把子模块拆给子任务的工作台」搬成纯逻辑 + 可注入实现，既适配宿主 dsh-llm 服务，也能在离线测试里用假模型跑通。
+它与默认的原生 FSoft Python 引擎通道（见 [Engine_Native_Run.md](engine-native-run.md)）是两条平行通道：按 `package.json` 的描述，默认通道走上游 Python 引擎（需要本机 Python 3.10+ 闭合依赖环境），而「一条最小可用的内置 Node 通道保留给跑不起来它的宿主」。本模块就是这条内置通道的 articles 环节主体。
 
-## 架构总览
-
-```mermaid
-flowchart TB
-    subgraph 调度入口
-        ORCH["Job_Orchestration<br/>index.js tickArticles"]
-    end
-
-    subgraph 执行池["Article_Agentic_Pool（lib/articles-agentic.js）"]
-        RUNPOOL["runAgenticArticles<br/>并发池调度"]
-        WORKER["worker<br/>池内任务执行单元"]
-        RUNONE["runOneArticle<br/>单篇 agentic 循环 + 落盘"]
-        ROUTE["resolveTaskRoute<br/>任务选档"]
-        SIZE["sourceTokensOf<br/>源文本量估算"]
-        MARK["markBigAgenticTasks<br/>大档打标"]
-    end
-
-    subgraph 底层依赖
-        EDIT["Agentic_Edit<br/>lib/agentic.js<br/>runAgenticArticle / makeArticleEditor"]
-        HOST["Agentic_Host<br/>lib/agentic-host.js<br/>makeHostStream / makeFsWorkspace"]
-        CONTRACT["Article_Contract<br/>lib/article-contract.js<br/>makeWriteSet / isWritable"]
-    end
-
-    ORCH -->|"传入 tasks 与配置"| RUNPOOL
-    MARK -->|"打 bigTier 标记"| RUNPOOL
-    SIZE -->|"给 markBig 当判据"| MARK
-    RUNPOOL -->|"normal 池 + big 池双池"| WORKER
-    WORKER -->|"取任务"| ROUTE
-    WORKER -->|"调用"| RUNONE
-    RUNONE -->|"构建 editor"| EDIT
-    RUNONE -->|"构建 streamFn / workspace"| HOST
-    RUNONE -->|"写集闸门"| CONTRACT
-    RUNONE -.->|"递归派发子模块<br/>runOneArticle 自身"| RUNONE
-```
-
-## 核心组件详解
-
-### `runPool`（并发池调度）
-
-对应导出函数 `runAgenticArticles(tasks, opts)`。职责：
-
-1. **双池拆分**：把任务按 `bigTier` 标记分成两组——普通任务走默认档池（`concurrency`，默认 2），大档任务走大档池（`bigConcurrency`，缺省回落到 `concurrency`）。两池各自独立限流、同时推进，因为大档常是付费长上下文，与免费默认档配额互不相干。
-2. **池内限流**：每个池按 `limit = min(concurrency, tasks.length)` 个 worker 协程并发消费任务队列（游标 `cursor++` 取任务，无锁）。
-3. **结果记账**：每个任务完成后写入 `Map(customId → { name, ok, stopReason, steps, tools, subModules })`，单任务失败只记账、不影响其它任务。
-4. **钩子**：`onRequestStart(task)` 返回该任务的记录器钩子（`onDelta` / `onDone` / `onError`），`onTaskDone({ outputTokens, durationMs })` 用于进度统计，`signal.aborted` 时全池停止。
-
-```mermaid
-sequenceDiagram
-    participant Caller as 调用方（index.js）
-    participant Pool as runAgenticArticles
-    participant W1 as worker（默认档池）
-    participant W2 as worker（大档池）
-    participant One as runOneArticle
-
-    Caller->>Pool: runAgenticArticles(tasks, { concurrency, bigConcurrency })
-    Pool->>Pool: 按 bigTier 拆分 normalTasks / bigTasks
-    par 默认档池推进
-        Pool->>W1: 启动 limit 个 worker
-        W1->>One: resolveTaskRoute(t) → runOneArticle(t, route)
-        One-->>W1: { ok, stopReason, subModules }
-        W1->>Pool: results.set(customId, 结果)
-    and 大档池推进
-        Pool->>W2: 启动 bigLimit 个 worker
-        W2->>One: resolveTaskRoute(t) → runOneArticle(t, route)
-        One-->>W2: { ok, stopReason, subModules }
-        W2->>Pool: results.set(customId, 结果)
-    end
-    Pool-->>Caller: results: Map(customId → 结果)
-```
-
-### `worker`（池内任务执行单元）
-
-每个 worker 的循环体（`runPool` 内部闭包）：
-
-```
-for (;;) {
-  if (signal?.aborted) return
-  i = cursor++
-  if (i >= pool.tasks.length) return
-  t = pool.tasks[i]
-  rec = onRequestStart ? onRequestStart(t) : null
-  route = resolveTaskRoute(t, rest)
-  out = await runOneArticle(t, { ...rest, ...route, onDelta: rec?.onDelta })
-  results.set(t.customId, 收口后的结果)
-}
-```
-
-失败语义：任何环节抛错都被 catch 成一条 `notes` 记录 + `results.set(customId, { ok:false, stopReason:'error' })`，让调用方决定是否整体降级到单轮通道。
-
-### `runOneArticle`（单篇执行 + 落盘）
-
-`runOneArticle(task, opts)` 是单篇文章的完整执行链：
-
-1. **初始内容**：若 `task.prevArticlePath` 存在旧文，读入作为 editor 初始内容——模型用 `str_replace` 增量改，而不是从零重写。
-2. **装配依赖**：`makeArticleEditor(initialArticle)`（见 [Agentic_Edit](agentic-edit.md)）、`makeFsWorkspace(fs, path, cwd)`（见 [Agentic_Host](agentic-host.md)）、`makeWriteSet(allowedWritePaths)`（见 [Article_Contract](article-contract.md)）。
-3. **streamFn**：默认 `makeHostStream({ llm, provider, model, reasoningEffort, onDelta })`；离线测试可注入 `streamFn` 假模型。
-4. **子模块派发**：模型调 `generate_sub_module` 工具时，递归调 `runOneArticle` 写子模块文章，落盘到 `modules/<父 slug>/<子 slug>.md`。深度封顶 `subDepth`（默认 2），子模块名全局唯一（`_takenNames` 集合共享，重名加父前缀，仍重名跳过）。
-5. **空文兜底**：模型全程没写过正文但最后一段文本像文章时，`runAgenticArticle` 已收下；这里再校一次——空文章算失败（`stopReason='empty-article'`），不能写下去覆盖旧文。
-6. **写集闸门落盘**：`isWritable(task.articlePath, writeSet, { cwd })` 不通过则拒写，返回 `stopReason='write-set'` + `writeSetViolation`，不静默越界、也不静默丢。
+## 模块定位
 
 ```mermaid
 flowchart TB
-    A["runOneArticle(task)"] --> B["读旧文 prevArticlePath<br/>makeArticleEditor"]
-    B --> C["makeFsWorkspace + 写集 makeWriteSet"]
-    C --> D{"深度封顶?<br/>_depth >= subDepth"}
-    D -- 是 --> E["dispatchSub = null<br/>subModuleBlocked = 'max-depth'"]
-    D -- 否 --> F["构建 dispatchSub 闭包<br/>重名检查 + 递归派发"]
-    E --> G["runAgenticArticle(mission, streamFn, workspace, editor)"]
-    F --> G
-    G --> H{"article 为空?"}
-    H -- 是 --> I["ok:false<br/>stopReason: empty-article"]
-    H -- 否 --> J{"isWritable 通过?"}
-    J -- 否 --> K["ok:false<br/>stopReason: write-set"]
-    J -- 是 --> L["fixAnchors 修正 → writeFileSync 落盘"]
-    L --> M["返回 { ok:true, subModules, steps, usedTools }"]
+    subgraph 插件服务流水线
+        JO["Job_Orchestration 任务编排 (index.js)"]
+    end
+    subgraph 内置 Node 通道
+        POOL["Article_Agentic_Pool 文章写入池 (lib/articles-agentic.js)"]
+    end
+    subgraph 原生 Python 通道
+        NR["Engine_Native_Run 裁决链编排"]
+    end
+    JO -->|tickArticles 驱动| POOL
+    JO -->|nativeEngine=true 时改走| NR
+    NR -->|"引擎产物 → 闸门"| QG["Engine_Quality_Gate 采用门"]
+    QG -->|"裁决通过"| AP["Engine_Apply_Plan 落地器"]
+    POOL -->|"逐篇结果"| UR["Update_Record 终态裁决"]
+    UR -->|done / partial / failed / cancelled| JO
 ```
 
-### 辅助函数
+编排层（[Job_Orchestration.md](job-orchestration.md) 的 `tickArticles`）按「写文章 → 横切 → 审校 → 索引」的固定顺序推进一个编译任务；articles 这一步被下沉到本模块：`tickArticles` 只负责准备文章清单、模型上下文与回调，真正的并发循环在 `runPool` 里完成。这样编排层不必知道每篇文章是怎么写出来的，池也不必知道任务为什么要写这篇。
 
-| 函数 | 职责 |
-| --- | --- |
-| `sourceTokensOf(task, cwd)` | 估算模块源文本量（CJK 按 1、其余按 3.5 字符/token，与单轮通道 `estimateTokens` 同口径），读不到的文件按 0 计，不阻断。 |
-| `resolveTaskRoute(task, { provider, model, reasoningEffort })` | 任务自带 `provider`+`model`（大档任务）时完全以任务为准，effort 也不回落默认档；否则用参数里的默认档。 |
-| `markBigAgenticTasks(tasks, { bigTier, sizeOf })` | 按体量打大档标记：`size > budget` 时把 `bigTier = { provider, model, reasoningEffort? }` 写到任务上。未配置（无 provider）时原样返回。 |
-| `DEFAULT_MAX_STEPS` | 从 `lib/agentic.js` 再导出（= 30），保持 `index.js` / 测试的既有导入路径可用，避免又出现一份独立常量。 |
+## 核心组件
 
-## 关键设计决策
+### `runPool`（并发调度器）
 
-### 1. 子模块递归的深度判定
+- **输入**：本阶段要处理的文章清单（全量编译为全部模块页，增量编译为 [Change_Set.md](change-set.md) 裁决出的受影响页）、并发上限、每篇文章的执行上下文（证据文件清单、期望 type、允许链接集合、语言等）。
+- **并发模型**：槽位制。任一时刻在写文章数不超过并发上限，一篇完成后立即补上下一篇，直到清单清空或收到取消信号。
+- **取消语义**：取消是终态（与 [Update_Record.md](update-record.md) 的 `cancelled` 对齐）——已被 `worker` 领取的文章按中途失败记账，不再启动新的文章。
+- **输出**：逐篇结果数组 `[{ name, ok, error? }]`，交给 `judgeOutcome` 判终态。
 
-`dispatchSub` 是**本层**的闭包，其深度判定绑在本层 `_depth`。递归时必须把 `onSubModule` 传 `null`，让子层按自己的 `_depth + 1` 重建判定——否则原样下传会让子层永远用父层的深度判定（`_depth >= subDepth` 恒不成立），`subDepth` 封顶形同虚设、模型可以无限往下拆。
+并发上限由配置 `maxConcurrency` 决定（`index.js` 中 `DEFAULT_CONCURRENCY = 2`，硬顶 `CONCURRENCY_HARD_CAP = 8`），与原生引擎的 `moduleConcurrency`（模块生成并行度）是两个独立设置，不能混用。
 
-### 2. 到顶必须「说实话」
+### `worker`（单篇写手）
 
-深度到顶时 `dispatchSub = null`，同时用 `subModuleBlocked='max-depth'` 告诉工具层「是因为到顶了才不能派」——否则工具笼统回「已记录/已派发」，模型据此在父文里写「详见 xxx.md」，那个文件从未生成，形成死链且父任务仍记 `ok:true`。
+每篇文章的生命周期：
 
-### 3. 写集闸门
+```mermaid
+stateDiagram-v2
+    [*] --> 领取: runPool 分配一篇
+    领取 --> 生成中: worker 收集证据并调用宿主 LLM
+    生成中 --> 契约检查: 产出文章全文
+    契约检查 --> 落盘: error 级为 0 (warning 仅记账)
+    契约检查 --> 修复: error 级但格式可修
+    修复 --> 契约检查: 修复后重新过闸门
+    修复 --> 拒收: 正文被模型泄漏污染 (判删)
+    落盘 --> 已记账: Update_Record 记 ok
+    拒收 --> 已记账: 记 failed
+    生成中 --> 已记账: LLM 异常 / 取消信号
+    已记账 --> [*]: 释放并发槽位
+```
 
-agentic 通道里模型有自由工具循环，但**能写哪些文件**由调度器说了算：父任务只准写自己那一篇，子模块只准写调度器分配给它那一条路径。`allowedWritePaths` 三种语义：
+要点：
 
-- `undefined`（未给）→ 保持旧行为不设限（既有调用方与测试沿用）；
-- `null` / `[]` → 「谁都不许写」（有意收紧）；
-- 具体路径清单 → 编译成 writeSet，越界拒写并记账。
+- **证据先行**：`source_files` 必须是本次实际读取过的文件子集，否则契约闸门报 `source-not-evidence`（error）。worker 因此必须把「这次真正读过哪些文件」作为证据清单传给闸门。
+- **契约即闸门**：每篇产出先走 [Article_Contract.md](article-contract.md) 的 `inspectArticle`；`hasBlockingIssue` 为真（存在 error 级问题）即拒写，只有 warning 级（如缺非必需章节）允许落盘，但会把本轮终态降为 `partial`、阻止基线前移——「装绿」是不允许的。
+- **先修后删**：error 级中大量是纯格式缺陷（缺 frontmatter、前言污染、未闭合头、type 与目录不符），这类页先由 [Article_Repair.md](article-repair.md) 尝试装配修复；只有正文被模型思考/提示原文污染（泄漏指纹命中）才判删。
+- **链接白名单**：死链检查依赖调用方传入的 `allowedLinks`（编排层的 `allowedLinkTargets` / `makeLinkExists` 负责维护这张表），不在表内的 `[[链接]]` 会被判成 `dead-link`。
 
-详见 [Article_Contract](article-contract.md) 的 `makeWriteSet` / `isWritable`。
-
-### 4. 双池独立限流
-
-`bigConcurrency` 为 0/未传时回落到 `concurrency`。大档任务与默认档任务同时在飞，总并发 = 两者之和，互不抢占配额。
-
-## 与其它模块的关系
+## 依赖关系
 
 ```mermaid
 flowchart LR
-    subgraph 上游调度
-        JO["Job_Orchestration<br/>index.js tickArticles<br/>准备任务清单"]
-    end
+    AP["lib/articles-agentic.js"]
+    JO["index.js 编排层"]
+    CS["change-set.js 变更采集"]
+    AE["agentic.js 编辑工具"]
+    AH["agentic-host.js 宿主解析"]
+    AC["article-contract.js 契约闸门"]
+    AR["article-repair.js 修复器"]
+    UR["update-record.js 终态裁决"]
+    JS["job-store.js 任务持久化"]
 
-    subgraph 本模块
-        AP["Article_Agentic_Pool<br/>runAgenticArticles / runOneArticle"]
-    end
-
-    subgraph 底层
-        AE["Agentic_Edit<br/>工具循环本体<br/>read_code / edit_article"]
-        AH["Agentic_Host<br/>宿主 llm 适配<br/>makeHostStream"]
-        AC["Article_Contract<br/>写集闸门<br/>makeWriteSet / isWritable"]
-    end
-
-    subgraph 产物
-        AS["Article_Repair<br/>装配/修补"]
-        CS["Change_Set<br/>collect 变更集"]
-    end
-
-    JO -->|"import { runAgenticArticles, markBigAgenticTasks, sourceTokensOf }"| AP
-    AP -->|"import { runAgenticArticle, makeArticleEditor, DEFAULT_MAX_STEPS }"| AE
-    AP -->|"import { makeHostStream, makeFsWorkspace }"| AH
-    AP -->|"import { makeWriteSet, isWritable }"| AC
-    AP -.->|"落盘后由调度器继续"| AS
-    AP -.->|"产物经 collect"| CS
+    JO --> AP
+    AP -->|"增量清单来自"| CS
+    AP -->|"调 LLM 改写正文"| AE
+    AE -->|"路径/会话解析"| AH
+    AP -->|"每篇产物过闸门"| AC
+    AC -->|"error 级格式缺陷"| AR
+    AP -->|"逐篇结果记账"| UR
+    JO -->|"任务现场读写"| JS
 ```
 
-- **上游**：[Job_Orchestration](job-orchestration.md) 在 `tickArticles` 环节准备任务清单，调用 `runAgenticArticles` 推进文章写作。
-- **底层**：[Agentic_Edit](agentic-edit.md) 提供工具循环本体（`runAgenticArticle` / `makeArticleEditor`），[Agentic_Host](agentic-host.md) 提供宿主 llm 适配（`makeHostStream` / `makeFsWorkspace`），[Article_Contract](article-contract.md) 提供写集闸门（`makeWriteSet` / `isWritable`）。
-- **下游**：落盘后的文章进入 [Article_Repair](article-repair.md) 装配修补，最终由 Change_Set 收集变更集。
+- **[Agentic_Edit.md](agentic-edit.md)**（`agentic.js::edit`）：worker 写文章时实际调用的编辑工具，内部走宿主 `dsh-llm` 的消息装配（`BlockAssembler`），不直接发 HTTP 请求。
+- **[Agentic_Host.md](agentic-host.md)**（`agentic-host.js::absOf`）：把相对路径解析成宿主会话可理解的绝对路径，供编辑工具定位证据文件与写入目标。
+- **[Article_Contract.md](article-contract.md)**：`hasBlockingIssue` 决定拒写、`issueSummary` 把问题压成一行可读文案写进日志与面板。
+- **[Article_Repair.md](article-repair.md)**（`assemble`）：纯函数修复器，决定「修回合规」还是「判删」。
+- **[Change_Set.md](change-set.md)**（`collect`）：增量轮时回答「这篇要不要重写」——四路改动（committed/staged/unstaged/untracked）收成规范化 ChangeSet 后映射到受影响文章。
+- **[Update_Record.md](update-record.md)**（`isTerminalStage` / `loadUpdateRecord`）：池产出的 `results` 经 `judgeOutcome` 判成 `done / partial / failed / cancelled`，落成 `temp/update-record.json`；只有完整 `done` 才允许推进编译基线。
+- **[Job_Store.md](job-store.md)**（`normKey`）：任务跨进程持久层，池在其中一个已认领的 job 现场内运行；心跳与孤儿认领保证同一时刻只有一个宿主实例驱动该池。
 
-## 配置项关联
+## 时序与数据流
 
-本模块的行为由 `index.js` 的 `Config` 与 `cordis.patch.yml` 的设置驱动：
+```mermaid
+sequenceDiagram
+    participant J as Job_Orchestration tickArticles
+    participant P as runPool 调度器
+    participant W as worker
+    participant E as Agentic_Edit (宿主 LLM)
+    participant C as inspectArticle 闸门
+    participant R as Update_Record
 
-| 配置项 | 本模块中的作用 |
-| --- | --- |
-| `maxConcurrency` | 默认档池并发上限（默认 2，硬顶 8）。 |
-| `bigConcurrency` | 大档池并发上限（0 = 跟随默认档）。 |
-| `bigEnabled` / `bigProvider` / `bigModel` / `bigReasoningEffort` / `bigTokenBudget` | `markBigAgenticTasks` 的 `bigTier` 来源；关闭后大档标记不生效。 |
-| `batchProvider` / `batchModel` / `batchReasoningEffort` | `resolveTaskRoute` 缺省的默认档。 |
-| `articleLanguage` | `runOneArticle` 的 `language` 参数。 |
-| `agenticArticles` | 总开关：开启时 `tickArticles` 走本模块，否则走单轮通道（见 `cordis.patch.yml`）。 |
+    J->>P: 文章清单 + 并发上限 + 证据/链接上下文
+    loop 每篇文章 (并发数 <= 上限)
+        P->>W: 领取一篇 (占用槽位)
+        W->>W: 收集 source_files 证据
+        W->>E: 生成/重写文章正文
+        E-->>W: 文章全文 (frontmatter + 正文)
+        W->>C: inspectArticle(content, opts)
+        alt error 级阻塞
+            W->>W: 先 repair, 修不动则拒收
+        else 通过或仅 warning
+            W->>W: 落盘 .codewiki/
+        end
+        W->>R: 追加逐篇结果 (name, ok, error?)
+        W-->>P: 释放槽位
+    end
+    P-->>J: results 汇总
+    J->>R: judgeOutcome(plan, results, options)
+    R-->>J: outcome + blockers + 是否可推进基线
+```
 
-## 失败与降级语义
+数据要点：
 
-- **单任务失败**：只在 `results` 里记 `ok:false` + `notes` 追加一条原因（越界写入 / 未产出正文 / 请求失败），不影响其它任务。
-- **整体降级**：缺 `llm` / 无 `workspace` / agentic 循环抛错时，由调用方（`index.js`）决定是否整体降级到单轮通道。
-- **中止**：`signal.aborted` 时所有 worker 立即返回，已完成任务的结果照常返回。
+- **输入数据**：文章清单（全量 / ChangeSet 增量映射）、证据文件可读性清单、`allowedLinks` 链接白名单、书写语言（配置 `articleLanguage`，默认「中文」）。
+- **输出数据**：每篇落盘的 wiki 文章（`.codewiki/modules|concepts|.../*.md`）、逐篇结果列表、写入 `temp/update-record.json` 的终态记录。
+- **不落盘即不记账**：契约闸门未过的文章不会进入 `.codewiki/`，但它的失败会进 `results`——这是「1 篇成功 + 19 篇失败也报 done」类缺陷被根治后的记账口径。
 
-## 相关页面
+## 配置旋钮
 
-- [Agentic_Edit](agentic-edit.md) — 工具循环本体与文章编辑器。
-- [Agentic_Host](agentic-host.md) — 宿主 llm 适配与文件系统 workspace。
-- [Article_Contract](article-contract.md) — 写集闸门与文章结构契约。
-- [Job_Orchestration](job-orchestration.md) — 上游任务编排。
-- [Article_Repair](article-repair.md) — 落盘后的装配修补。
-- Change_Set — 变更集收集。
+以下配置（定义见 [Package_Manifest.md](package-manifest.md) 的 `index.js::Config` 与 [Cordis_Patch_Config.md](cordis-patch-config.md)）直接影响本池行为：
+
+| 配置项 | 默认值 | 对本池的影响 |
+| --- | --- | --- |
+| `maxConcurrency` | 2（硬顶 8） | `runPool` 的并发槽位数；调大缩短墙钟，代价是同批 LLM 请求更密集 |
+| `batchProvider` / `batchModel` | 空 | worker 调用宿主 LLM 用的模型通道；留空会在提交任务时显式报错，不静默空跑 |
+| `batchReasoningEffort` / `effortByStage.articles` | 空 | articles 环节的思考档位；缺省回落到模型默认档 |
+| `articleLanguage` | 中文 | 写入正文的语言 |
+| `excludePaths` | 空 | 这些目录（含子目录）不进入文章清单 |
+| `nativeEngine` | true | 开启时 articles 环节改由原生引擎承担（见下节），本池仅在该通道不可用/关闭时兜底 |
+
+## 与原生通道的关系
+
+默认配置 `nativeEngine: true` 时，编译任务走 [Engine_Native_Run.md](engine-native-run.md) 固定的裁决链（`env → 增量决议 → 引擎 → 质量门 → 落地器`），articles 由上游 Python 引擎在子进程内完成，本池不参与。此时 [Engine_LLM_Bridge.md](engine-llm-bridge.md) 以 loopback 桥把引擎的 OpenAI-compatible 请求翻译成宿主模型调用，凭证不出宿主。
+
+本池（内置 Node 通道）的定位是**兜底通道**：当宿主无法满足原生引擎的环境前提（Python 3.10+ 闭合依赖、`tools/fsoft-engine/setup-env.sh` 安装的 venv）时，插件仍能在插件内完成「写文章 → 横切 → 审校 → 索引」全流程。两条通道共享同一套文章契约判据（[Article_Contract.md](article-contract.md) 的 `inspectArticle` 与 `NATIVE_ARTICLE_OPTS`），保证「刚渲染出来的页」与「库里躺着的存量页」用同一把尺子。
+
+## 相关模块
+
+- 任务驱动：[Job_Orchestration.md](job-orchestration.md)
+- 逐篇写作工具：[Agentic_Edit.md](agentic-edit.md) · [Agentic_Host.md](agentic-host.md)
+- 质量闸门与修复：[Article_Contract.md](article-contract.md) · [Article_Repair.md](article-repair.md)
+- 增量来源与终态记账：[Change_Set.md](change-set.md) · [Update_Record.md](update-record.md)
+- 任务现场：[Job_Store.md](job-store.md)
+- 平行通道：[Engine_Native_Run.md](engine-native-run.md) · [Engine_Quality_Gate.md](engine-quality-gate.md) · [Engine_Apply_Plan.md](engine-apply-plan.md) · [Engine_LLM_Bridge.md](engine-llm-bridge.md)
+- 配置与打包：[Package_Manifest.md](package-manifest.md) · [Cordis_Patch_Config.md](cordis-patch-config.md)

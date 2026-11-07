@@ -66,6 +66,7 @@ flowchart LR
     subgraph 采集管线
         P1["rev-parse HEAD<br/>验证仓库有效性"]
         P2["cat-file -e<br/>基线可达性"]
+        PC["collect(label, args)<br/>三路 diff 统一包装<br/>失败带桶名抛错"]
         P3["parseNameStatus<br/>解析 --name-status"]
         P4["normChangePath<br/>路径归一 + 安全过滤"]
         P5["decodeGitPath<br/>八进制转义还原"]
@@ -75,12 +76,13 @@ flowchart LR
         OUT["ChangeSet<br/>all / sourceChanges /<br/>deleted / renamed / ignored"]
     end
 
-    D1 --> P3
-    D2 --> P3
-    D3 --> P3
+    D1 --> PC
+    D2 --> PC
+    D3 --> PC
     D4 --> P5
     P1 --> P2
-    P2 --> P3
+    P2 --> PC
+    PC --> P3
     P3 --> P5
     P5 --> P4
     P4 --> OUT
@@ -93,6 +95,8 @@ flowchart LR
 模块唯一的主入口。输入仓库工作目录与上次成功编译的基线 commit（来自 `.codewiki/_meta.yaml:last_compiled_commit`），返回 `ChangeSet`。
 
 **注入式执行器**：`opts.execFile(cmd, args)` 可替换真实 git 调用，离线单测给假执行器；默认实现用 `execFileSync`（16MB 输出上限）。
+
+**内部包装 `collect(label, args)`**：三路 `git diff --name-status -M`（committed / staged / unstaged）统一经过这个闭包——先跑 git 再喂 `parseNameStatus`，任何一路抛错都带上桶名重新抛出（如 `staged 采集失败：...`），统一被外层接住降级为 `state='git-error'`。
 
 **返回结构**（成功路径）：
 

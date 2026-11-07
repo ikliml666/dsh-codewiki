@@ -6,7 +6,7 @@ description: lib/engine/python/fullparallelruntime.py 是 FSoft 全量文档生�
 # 全量并行运行时（Engine_Full_Parallel_Runtime）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -229,5 +229,5 @@ sequenceDiagram
 | [FSoft 引擎安装脚本](FSoft_Engine_Setup_Script.md) | venv 与依赖闭合，本模块运行的环境前提 |
 
 ??? abstract "Documented components (1)"
-    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
 

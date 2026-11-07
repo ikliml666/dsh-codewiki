@@ -6,7 +6,7 @@ description: EngineOpenAIBridge（lib/engine/openai-bridge.js）是原生引擎�
 # Engine OpenAI 桥转换层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 ## 简介
 
@@ -173,12 +173,12 @@ sequenceDiagram
 - [Engine_Client（引擎进程客户端）](Engine_Client.md)：以子进程方式拉起 Python 引擎，引擎向桥发 OpenAI 协议 HTTP 调用。
 - [Engine_Contract 引擎契约](Engine_Contract.md)：引擎终态契约；桥相关失败（`engine-model` / `upstream_error`）如何被裁决链吸收。
 - [Web_UI_Panel](Web_UI_Panel.md)：「会话」视图消费 `onRequestStart` 会话记录（prompt 文本与模型输出），全程不含 Authorization 与占位 key。
-- [Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）](Agentic_Host.md)：宿主侧 `llm.stream` 接口与 `message.source.replayState` 语义的持有方，`messageToDsh` 的 source 规则正是为它而设。
+- 宿主层语义：`messageToDsh` 里 assistant 历史消息必须带 `source.kind='model'` 的规则，源自 DSH 宿主 `LlmRuntime.forAdapter()` 对 `message.source.replayState` 的读取语义，而非本转换层自身的要求。
 
 ## 运行环境
 
 插件包 `@local/dsh-codewiki`（见仓库 `package.json`）要求 Node `>=24.9.0`、DSH 宿主 `>=0.2.0-rc.0`；桥服务器监听 `127.0.0.1` 随机端口，不对外暴露，也不新增任何外部网络依赖。
 
 ??? abstract "Documented components (1)"
-    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
 

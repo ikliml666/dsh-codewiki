@@ -2,9 +2,8 @@
 
 ## Module
 
+- [[modules/agentic-host|Agentic 宿主层（Agentic_Host）]]
 - [[modules/agentic-edit|Agentic_Edit 模块]]
-- [[modules/agentic-host|Agentic_Host（agentic 工具循环 ↔ 宿主 llm 服务适配层）]]
-- [[modules/article-agentic-pool|Article Agentic Pool 文章智能体执行池]]
 - [[modules/article-contract|Article_Contract（文章契约闸门）]]
 - [[modules/change-set|Change_Set 变更集采集模块]]
 - [[modules/codewiki-main|CodeWiki 主入口（cw CLI）]]
@@ -37,3 +36,4 @@
 - [[modules/engine-workspace-snapshot|工作区快照（Engine_Workspace_Snapshot）]]
 - [[modules/engine-llm-bridge|引擎 LLM 桥（Engine_LLM_Bridge）]]
 - [[modules/engine-manifest|引擎清单（Engine_Manifest）]]
+- [[modules/article-agentic-pool|文章 Agentic 池（Article_Agentic_Pool）]]

@@ -15,15 +15,15 @@ fsoft_page: Job_Orchestration.md
 
 - 对会话模型暴露三个工具：`cw`（薄封装 Rust CLI）、`codewiki_generate` / `codewiki_update`（提交制编译入口）、`codewiki_progress`（只读查进度）；
 - 对宿主侧边栏暴露一组回环 HTTP API（`/api/codewiki/jobs`、`/api/codewiki/repos`、`/api/codewiki/sessions`、`/api/codewiki/logs`、`/api/codewiki/control`、`/api/codewiki/models` 等）；
-- 用一个常驻 `createJobService` 实例以 10s 节拍（`TICK_MS`）驱动一个有限阶段机：排队 → articles（写文章）→ crosscut（横切）→ review（校对）→ index（索引/基线）→ commit（自动提交）→ 终态（done / partial / failed / cancelled）；
-- 支持两条编译通道：**原生引擎通道**（默认，`nativeEngine=true`，调用上游 FSoft Python 引擎子进程，见 [Engine_Native_Run.md](engine-native-run.md)）与**Node 兼容通道**（`nativeEngine=false`，插件内自跑 agentic 写作 + 单轮批量请求）。
+- 用一个常驻 `createJobService` 实例以 10s 节拍（`TICK_MS`）驱动一个有限阶段机：排队 → articles（引擎写作）→ prepare/articles/validate/index/commit（面板六步映射）→ 终态（done / partial / failed / cancelled）；
+- 只有一条编译通道：**原生引擎通道**（`nativeEngine=true`，调用上游 FSoft Python 引擎子进程，见 [Engine_Native_Run.md](engine-native-run.md)）。`job.channel` 只是「谁在跑」的记账，stage 是引擎走到第几步的展示。
 
 配置 schema 由 `Config`（schemastery 对象）定义并通过 [Cordis_Patch_Config.md](cordis-patch-config.md) 的 `cordis.patch.yml` 装配；包身份与依赖见 [Package_Manifest.md](package-manifest.md)（`package.json`，`@local/dsh-codewiki`，Node ≥ 24.9）。
 
 ```mermaid
 flowchart TB
   subgraph Entry["插件入口 apply(ctx, config)"]
-    A1["apply()<br/>注入 agents / llm / workspaceRegistry"]
+    A1["apply()<br/>注入 llm / workspaceRegistry"]
     A2["createJobService()<br/>常驻编排服务"]
     A3["四个工具注册<br/>cw / generate / update / progress"]
     A4["installWebServer()<br/>回环 API"]
@@ -52,14 +52,15 @@ Job 是一个纯普通对象，落盘到 `JOBS_FILE`（默认 `%TMP%/dsh-codewik
 | --- | --- |
 | `id` / `cwd` / `wikiPath` / `kind` / `scope` | 任务标识与编译范围（`kind`=full/stale；`scope`=auto/full/stale） |
 | `owner` / `heartbeatAt` / `sessionId` | 实例所有权、心跳、发起会话（终态唤醒目标） |
-| `stage` | 当前阶段：`queued` → `articles` → `crosscut` → `review` → `index` → `commit`，或终态 `done` / `partial` / `failed` / `cancelled` |
-| `channel` | `'native'`（原生引擎）或 `'legacy'`（Node 兼容） |
-| `batchRef` / `batchProgress` / `tasks` / `articles` / `writtenCount` / `failedCount` | 执行器在途标记、逐篇结果与计数 |
+| `stage` | 当前阶段：`queued` → `articles`（引擎启动点），随后由引擎进度帧映射为 `prepare` / `articles` / `validate` / `index` / `commit`，或终态 `done` / `partial` / `failed` / `cancelled` |
+| `channel` | 恒为 `'native'`（原生引擎通道），作为「谁在跑」的记账 |
+| `nativeChannel` | 原生通道快照（入口、解释器、超时），宿主重启后据此重放 |
+| `batchRef` / `batchProgress` / `tasks` / `articles` / `writtenCount` / `failedCount` | 执行器在途标记、逐篇结果与计数（原生通道以引擎自报计数为准） |
 | `outcome` / `blockers` / `canAdvanceBaseline` | 完整性终态与基线推进判据（由 `judgeOutcome` 裁决） |
 | `nativeStage` / `nativePercent` / `nativeStageTimings` / `nativeLogs` / `nativeResult` | 原生引擎自报阶段、百分比、引擎各阶段真实耗时（ms）、事件日志与落地结果。`nativeResult` 在进 jobSummary 时经 `nativeResultBrief` 瘦身，只留 `outcome` / `stage` / `gate.outcome` / `apply.outcome` 四个短字段（原结构里的 `gate.articles`、`incremental.hydrated/stateCaptured` 占 payload 大半而面板从不读） |
 | `autoCommit` / `usage` / `notes` | 自动提交结果、token 用量、运行注释（最近 50 条） |
 
-### 阶段机（Node 兼容通道）
+### 阶段机（原生引擎通道）
 
 ```mermaid
 stateDiagram-v2
@@ -67,12 +68,10 @@ stateDiagram-v2
   submitting --> queued: 项目闸门忙碌
   submitting --> articles: 直接放行
   queued --> articles: 轮到本项目
-  articles --> crosscut: kind=full 且写成功
-  articles --> review: kind=stale 且写成功
-  crosscut --> review
-  review --> index
-  index --> commit: 有文章写成功且 autoCommit
-  index --> done: 无产物开关
+  articles --> prepare: 引擎进度帧映射<br/>（env/graph/cluster）
+  articles --> validate: 引擎写作/校对
+  validate --> index: 落地器写盘/建索引
+  index --> commit: 落地器自动提交
   commit --> done
   done --> [*]
   partial --> [*]
@@ -80,50 +79,44 @@ stateDiagram-v2
   cancelled --> [*]
 ```
 
+tick 在 `stage === 'articles'` 且尚无 `channel` 时经 `nativeChannelFor` 锁定原生通道并 `startNativeRun`；此后每轮 tick 只看 `nativeResults` 是否就绪——收割后由落地器（内含 gate/apply/commit）的真实结果经 `finishJob` 落终态。
+
 ### 阶段处理器
 
-| 处理器 | 职责 |
-| --- | --- |
-| `tickArticles` | 本地规划（`localPlan` 顶层目录分组）→ agentic 写作（`runAgenticArticles`），或 stale 预构建任务收割；超预算文章经 `dispatchSessionTasks` 转发起会话子智能体兜底 |
-| `tickCrosscut` | 读成功模块文章全文，`packArticles` 装填后一次性写 `_architecture.md` / `_patterns.md` / 概念文章（`keepInMemory` 结果在 `writeValidated` 校验后才落盘） |
-| `tickReview` | `localReview` 本地核对 → 按 110k 预算贪心合并成批量校对请求（`@@@article:` / `@@@end` 分节）→ `settleProofread` 拆回逐篇落盘；装不下转会话通道 |
-| `tickIndex` | 存量文章体检（`auditExistingArticles`）→ `judgeOutcome` 完整性裁决 → `pruneOrphanModules` 清理孤儿模块页 → `cw index` → 满足条件才 `cw meta update` 推进基线 → `ensureWikiEntry` |
-| `tickCommit` | `autoCommitWiki` 分支合并式提交 `.codewiki/` 与 `CodeWiki.md` |
+旧 Node 兼容通道的 `STAGE_HANDLER`（`tickArticles` / `tickCrosscut` / `tickReview` / `tickIndex` / `tickCommit`）已整体删除——编译只有原生引擎一条通道，`job.stage` 只是引擎走到第几步的展示，不再有插件自跑的写作/横切/校对/索引/提交阶段。原生任务一律只走 `tickNative`：起一次（`stage=articles` 且没有在跑的），后续 tick 等待收割。
 
-原生通道任务（`job.channel === 'native'`）**不进 `STAGE_HANDLER`**，一律只走 `tickNative`，避免同一批产物被两套实现各写一遍。
-
-## 双编译通道
+## 编译通道
 
 ```mermaid
 flowchart LR
-  Submit["submit() 提交任务"] --> Gate{"nativeChannelFor()<br/>nativeEngine=true<br/>且 scope ∈ full/stale/auto"}
-  Gate -->|"原生通道"| Native["tickNative()<br/>startNativeRun()"]
-  Gate -->|"Node 兼容通道"| Legacy["STAGE_HANDLER<br/>tickArticles → tickCrosscut → tickReview → tickIndex → tickCommit"]
+  Submit["submit() 提交任务"] --> Queue{"项目闸门<br/>忙碌?"}
+  Queue -->|"是"| Queued["queued 排队"]
+  Queue -->|"否"| Articles["stage=articles"]
+  Queued -->|"轮到本项目"| Articles
+  Articles --> Gate{"nativeChannelFor()<br/>nativeEngine=true<br/>且 scope ∈ full/stale/auto"}
+  Gate -->|"通道就绪"| Native["tickNative()<br/>startNativeRun()"]
+  Gate -->|"通道不可用"| Fail["fail：原生引擎通道不可用<br/>（nativeEngine 已关闭或 scope 不受支持）"]
 
   Native --> Engine["runNativeJob()<br/>见 Engine_Native_Run.md"]
   Engine --> Res{"原生结果就绪?"}
   Res -->|"有结果"| Settle["收割 nativeResults<br/>gate/apply/commit 已由<br/>native-run 内部完成"]
   Res -->|"在跑"| Wait["等下一轮 tick"]
   Settle --> Finalize["finishJob() 或<br/>cancelled 终态"]
-
-  Legacy --> Finalize
 ```
 
-**原生通道**（生产默认）的关键适配：
+**原生引擎通道是唯一通道**（生产默认）的关键适配：
 
-- `nativeChannelFor(cfg, {kind, scope})` 决定本次任务走哪条通道；任一条件不成立返回 `null`，调用方据此走旧路径——绝不中途悄悄换通道。
+- `nativeChannelFor(cfg, {kind, scope})` 决定本次任务走哪条通道；不可用时直接 fail——编译只走原生通道，没有备用路径。
 - `resolveNativePython(cfg)` 按 `配置 → 环境变量 DSH_CODEWIKI_PYTHON → PATH` 顺序找解释器，不做启发式探测。
 - `nativeEnginePlan(channel, {bridge, model})` 拼装子进程环境变量（`PYTHONIOENCODING`、`CODEWIKI_BASE_URL`、`CODEWIKI_API_KEY`=占位 key、`CODEWIKI_MAIN_MODEL` 等），真实凭证从不进子进程环境、也从不进日志。
 - 进度帧记账：每帧 `onProgress(p)` 除回写 `nativeStage` / `nativePercent` 外，还在引擎阶段切换时把上一段的墙钟耗时（`Date.now() - nativeStageAt`）累加进 `job.nativeStageTimings`；job 初始化为 `nativeStageTimings: {}` / `nativeStageAt: null`。面板粗粒度 `stageTimings` 的 `prepare` 一格吞了 `env`/`graph`/`cluster` 三段，`nativeStageTimings` 单独按引擎九段记账（`env`/`graph`/`cluster`/`articles`/`proofread`/`validate`/`index`/`baseline`/`commit`），供终态分段带与 `codewiki_progress` 工具拆分「时间花在哪一段」。
-- 环境不闭合时原生通道以 `engine-deps` 明确失败，不回退 Node 通道冒充成功。
-
-**Node 兼容通道**（`nativeEngine=false`）只保留最小能力：顶层目录分组规划 + 文件级 `source_files` 归属判定，不再接收新能力（符号图/AST 聚类/增量规划已在 0.16.0 阶段 7 受控退役）。
+- 环境不闭合时原生通道以 `engine-deps` 明确失败，不存在回退路径。
 
 ## 关键组件详解
 
 ### `apply(ctx, config)` — 插件入口
 
-注入 `agents` / `llm` / `workspaceRegistry` 三个宿主服务（cordis 严格语义下必须经 `ctx.inject`，直接访问属性会抛错），创建并启动 `createJobService`，注册四个工具与回环 API，安装会话提醒与自动调度心跳。返回的清理函数由 `ctx.effect` 收集。
+注入 `llm` / `workspaceRegistry` 两个宿主服务（cordis 严格语义下必须经 `ctx.inject`，直接访问属性会抛错），创建并启动 `createJobService`，注册四个工具与回环 API，安装会话提醒与自动调度心跳。返回的清理函数由 `ctx.effect` 收集。
 
 ### `submit({kind, cwd, wikiPath, scope, language, prebuiltTasks, auto, sessionId, changeSet})`
 
@@ -149,37 +142,16 @@ flowchart LR
 
 `cancel` 只置 `cancelRequested=true`，由下一轮 tick 实际中断：
 
-- Node 通道：abort 在飞 `AbortController`，丢弃未收割 `batchResults`，置 `cancelled` 终态，`canAdvanceBaseline=false`；
 - 原生通道：abort 终止引擎进程树；但若取消到达时结果已落地，**按真实结果收尾而不丢弃产物**（落地器事务不可中断，故意不传 `ac.signal`）。
 
-### `wakeCompileSession(job, outcome, agents)`
+### `wakeCompileSession(job, outcome)`
 
 终态回调。只有两种情形打扰发起会话：
 
 1. 编译失败（`outcome === 'failed'`）；
 2. 自动提交未成功（`autoCommitState(job) === 'pending'`）。
 
-成功且已提交（`committed` / `no-changes`）一律静默。`agentsRef` 由 `apply` 注入，无 agent 上下文（面板/自动调度提交）或冷会话时静默跳过。
-
-### `runPool` / `worker`（`runRealtimeTasks`）
-
-插件内唯一的 LLM 并发执行器。按 `bigTier` 标记把任务拆成两个独立限流的池（默认档池 vs 大档池），各自按 `maxConcurrency` / `bigConcurrency` 派 `worker` 循环消费队列。每个请求统一走 `llmChat`（宿主 llm 服务单通道），失败只记账不打断其它任务。`onRequestStart` 回调把每个请求挂到会话记录器（`beginSessionRecord`）。
-
-### 文章质量闸门（`applyTaskResult` / `writeValidated` / `fixAnchors`）
-
-- `applyTaskResult`：批量结果落盘前过 `contractCheck`（[Article_Contract.md](article-contract.md) 的 `inspectArticle`），`error` 级问题拒绝落盘；
-- `fixAnchors`：落盘前对 `file:NN(-MM)` 行号锚点做确定性校正（符号就近绑定、CHANGELOG 按版本节首+相对偏移重定位、frontmatter 未闭合自动修复），全部修正只改行号数字；
-- `writeValidated`：`keepInMemory` 结果（横切/校对）用 `validateArticleEnvelope` 校验 frontmatter 开合后才落盘。
-
-### `allowedLinkTargets(job)` / `makeLinkExists(wikiPath, extraNames)`
-
-构造 wiki 内部链接白名单：现存文章相对路径 + 裸名 + basename 三种形态，供契约闸门校验 `[[链接]]` 是否指向真实存在的文章。
-
-### `currentCommit(cwd)` / `reposFileFor(jobsFile, explicit)` / `symbolsOnLine(line)`
-
-- `currentCommit`：`git rev-parse --short HEAD`，非 git 仓库返回 null；
-- `reposFileFor`：由 `JOBS_FILE` 基名推导已知仓库清单路径（`-jobs` → `-repos`），保证测试隔离时清单也隔离；
-- `symbolsOnLine`：从文章行内反引号提取可绑定符号（与 `fixAnchors` 同源）。
+成功且已提交（`committed` / `no-changes`）一律静默。无 agent 上下文（面板/自动调度提交）或冷会话时静默跳过。
 
 ### 会话记录（`beginSessionRecord` / `listSessionRecords` / `listAllSessionRecords` / `activeSessionJobs` / `pruneSessionRecords`）
 
@@ -187,7 +159,7 @@ flowchart LR
 
 **记录内容**：
 
-- 每条记录带 `stage` 字段标注请求发生在哪个引擎阶段：写作通道（batch / agentic，文章与子智能体任务池）的请求显式兜底为 `'articles'`，否则它们会掉进面板的「未标注」；原生通道请求的 `stage` 取自任务本身（桥在 `onRequestStart` 入参里带上 `stage: currentStage || null`），缺失时兜底到 `job.nativeStage`——阶段刚切换、桥还没收到 `setStage` 时 `task.stage` 为 `null`（falsy），而 `job.nativeStage` 由同一份进度帧直接赋值，是当时唯一可靠的阶段事实。
+- 每条记录带 `stage` 字段标注请求发生在哪个引擎阶段：原生通道请求的 `stage` 取自任务本身（桥在 `onRequestStart` 入参里带上 `stage: currentStage || null`），缺失时兜底到 `job.nativeStage`——阶段刚切换、桥还没收到 `setStage` 时 `task.stage` 为 `null`（falsy），而 `job.nativeStage` 由同一份进度帧直接赋值，是当时唯一可靠的阶段事实。
 - 流式增量由 `sessionDeltaOf` 统一抽取（替代旧的 `textDeltaOf`）：正文（`text`）、思考（`reasoning`）与工具调用（`tool`）三类分片分开累积；tool-call-delta 按分片的 `id` 合并成整条调用（`name` + 逐片拼接的 `arguments`），否则一次调用会被记成几十条半截 JSON。
 - meta 上三个计数分开记：`outputChars`（正文字符数）、`reasoningChars`（思考字符数）、`toolCalls`（合并后的工具调用数）。思考档打开时正文可能为空，光看 `outputChars` 会把「想了 1000 段」的请求显示成空，面板需要三个计数才能如实说明「这条请求的内容在思考里」。
 - `full` 文件按 `SESSION_FLUSH_MS` 节流落盘正文，并另存 `reasoning` 与 `tools` 快照；`onDone` 时以完成全文为权威值（流式没抽到正文、只吐了思考时保留思考，不把它当空），并补记 `outputTokens`；`onError` 时同样刷出三类计数与截断 300 字符的 `error`。
@@ -218,9 +190,7 @@ flowchart TB
   JO1 --> UR["Update_Record<br/>judgeOutcome 终态裁决"]
   JO1 --> CS["Change_Set<br/>四路 git 变更采集"]
   JO1 --> AC["Article_Contract<br/>inspectArticle 文章闸门"]
-  JO1 --> AP["Article_Agentic_Pool<br/>runAgenticArticles 执行器"]
   JO1 --> Engine["Engine_Native_Run<br/>runNativeJob 原生编译"]
-  JO1 --> AG["Agentic_Host / Agentic_Edit<br/>read_code / edit_article 工具"]
   JO1 --> WP["Web_UI_Panel<br/>client.js 侧边栏"]
 
   Engine --> EClient["Engine_Client<br/>runEngine"]
@@ -235,7 +205,6 @@ flowchart TB
 - 终态与更新记录：[Update_Record.md](update-record.md)（`judgeOutcome` / `buildUpdateRecord` / `saveUpdateRecord` / `TERMINAL` / `UPDATE_RECORD_REL`）。
 - 增量变更采集：[Change_Set.md](change-set.md)（`collectChangeSet`）。
 - 文章结构闸门：[Article_Contract.md](article-contract.md)（`inspectArticle` / `hasBlockingIssue` / `issueSummary`）。
-- Agentic 写作执行器：[Article_Agentic_Pool.md](article-agentic-pool.md)（`runPool` / `worker` / `markBigAgenticTasks`），底层工具见 [Agentic_Host.md](agentic-host.md) 与 [Agentic_Edit.md](agentic-edit.md)。
 - 原生引擎通道全套：从 [Engine_Native_Run.md](engine-native-run.md) 开始，向下串 [Engine_Client.md](engine-client.md)、[Engine_Contract.md](engine-contract.md)、[Engine_LLM_Bridge.md](engine-llm-bridge.md)、[Engine_Manifest.md](engine-manifest.md)、[Engine_Quality_Gate.md](engine-quality-gate.md)、[Engine_Apply_Plan.md](engine-apply-plan.md) 等。
 - 配置装配：[Cordis_Patch_Config.md](cordis-patch-config.md)；包与运行时要求：[Package_Manifest.md](package-manifest.md)。
 - 面板前端：[Web_UI_Panel.md](web-ui-panel.md)（`client.js` 消费 `/api/codewiki/*`）。
@@ -328,7 +297,7 @@ flowchart TB
 
 | 配置 | 默认 | 影响 |
 | --- | --- | --- |
-| `nativeEngine` | `true` | 编译通道开关；关闭后退 Node 兼容通道 |
+| `nativeEngine` | `true` | 编译通道开关；关闭时任务直接 fail（编译只走原生通道） |
 | `batchProvider` / `batchModel` | 空 | 编译模型（必须已在宿主模型设置注册）；留空提交时显式报错 |
 | `maxConcurrency` | 2 | 默认档 LLM 请求并发（硬顶 8） |
 | `moduleConcurrency` | 0（跟随默认档） | 原生引擎同层模块并行度 |
@@ -342,5 +311,5 @@ flowchart TB
 1. **终态不被后续步骤洗白**：`done` / `partial` / `failed` / `cancelled` 一旦落定，迟到的取消或结果都不能改写已落盘产物（原生通道尤其如此）。
 2. **基线只代表「所有变化已被消化」**：任何 blocker（缺页、逐篇失败、未归属变更、质量门、索引失败）都禁止 `cw meta update`；partial 可以入库文章但不推进基线。
 3. **凭证不入盘**：job 持久化遇函数值或疑似凭证字段直接抛错；原生桥只用占位 key。
-4. **通道不悄悄回退**：原生环境不闭合以 `engine-deps` 明确失败；Node 兼容通道只在 `nativeEngine=false` 显式选择时使用。
+4. **通道不悄悄回退**：原生环境不闭合以 `engine-deps` 明确失败；编译只有原生引擎一条通道，不存在备用路径。
 5. **提交制**：`codewiki_generate` / `codewiki_update` 调用即返回，不等待、不轮询；进度只能由 `codewiki_progress` 或面板读取。

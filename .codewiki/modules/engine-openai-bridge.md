@@ -174,7 +174,7 @@ sequenceDiagram
 - [Engine_Client](engine-client.md)：以子进程方式拉起 Python 引擎，引擎向桥发 OpenAI 协议 HTTP 调用。
 - [Engine_Contract](engine-contract.md)：引擎终态契约；桥相关失败（`engine-model` / `upstream_error`）如何被裁决链吸收。
 - [Web_UI_Panel](web-ui-panel.md)：「会话」视图消费 `onRequestStart` 会话记录（prompt 文本与模型输出），全程不含 Authorization 与占位 key。
-- [Agentic_Host](agentic-host.md)：宿主侧 `llm.stream` 接口与 `message.source.replayState` 语义的持有方，`messageToDsh` 的 source 规则正是为它而设。
+- 宿主层语义：`messageToDsh` 里 assistant 历史消息必须带 `source.kind='model'` 的规则，源自 DSH 宿主 `LlmRuntime.forAdapter()` 对 `message.source.replayState` 的读取语义，而非本转换层自身的要求。
 
 ## 运行环境
 

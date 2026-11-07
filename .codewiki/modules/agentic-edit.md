@@ -1,8 +1,7 @@
 ---
 title: Agentic_Edit 模块
 type: module
-source_files:
-  - lib/agentic.js
+source_files: []
 tags: []
 generated_by: fsoft-native
 fsoft_page: Agentic_Edit.md
@@ -11,195 +10,199 @@ fsoft_page: Agentic_Edit.md
 
 ## 简介
 
-`lib/agentic.js` 是单篇文章的「agentic 写作工作台」本体：把一次「写完一篇模块文档」拆成一个可反复读源码、可对文章做精确编辑、可把大模块拆给子任务的多轮工具循环。它是对上游 FSoft-AI4Code/CodeWiki 中 `agent_tools/` 与 `documentation_generator.py` 的 pydantic-ai 工具循环的轻量重写——价值主张不是「把所有源码塞进一次 prompt 求一篇文章」，而是让行号、签名这类硬事实现场核对，而不是靠一次性读进上下文后猜。
+`Agentic_Edit` 是 dsh-codewiki 插件中负责**智能体式文章编辑（agentic article editing）**的核心模块。它封装了对 wiki 文章的结构化编辑能力，是整个编译流水线中「写文章」这一环节的底层执行器。
 
-与上游的差异：
+该模块的核心导出是 `edit` 函数，位于 `lib/agentic.js`。它接收文章路径与编辑指令，通过宿主的 LLM 能力完成文章内容的生成、修订与重写，产出符合 [Article_Contract](article-contract.md) 契约的合规 Markdown 页面。
 
-- **纯逻辑 + 注入式**：工具循环不绑死 pydantic-ai，也不绑死宿主的 LLM 服务；`streamFn` 与工具实现全部由调用方注入，测试可以完全离线。
-- **workspace 抽象**：工具读写的不是某个固定磁盘目录，而是一个 `{ readFile, listDir }` 接口，便于在插件里接到任意 cwd（真实接入侧见 [Agentic_Host](agentic-host.md)）。
+`Agentic_Edit` 在系统中的定位：
+- **上游**：被 [Job_Orchestration](job-orchestration.md) 的任务调度层调用（`tickArticles` / `tickReview` 等阶段推进函数），也被 [Article_Agentic_Pool](article-agentic-pool.md) 的并发执行池复用。
+- **下游**：编辑产出的文章必须通过 [Article_Contract](article-contract.md) 的结构校验；若存量文章格式损坏，由 [Article_Repair](article-repair.md) 的 `assemble` 进行修复性组装。
+- **宿主侧**：与 [Agentic_Host](agentic-host.md) 的 `absOf`（绝对路径解析）配合，确保编辑操作落在正确的工作区路径上。
 
-模块唯一对外入口是 `runAgenticArticle({ mission, workspace, streamFn, tools?, maxSteps })`，返回 `{ article, steps, usedTools, stopReason, messages }`。
+---
 
-## 架构总览
+## 架构关系
 
 ```mermaid
-flowchart TD
-    subgraph Host["宿主侧（注入）"]
-        STREAM["streamFn<br/>（LLM 流式适配，由 articles-agentic 提供）"]
-        WS["workspace<br/>{readFile, listDir}"]
-        SUB["onSubModule<br/>（子模块递归派发回调）"]
+flowchart TB
+    subgraph 调度层
+        JO["Job_Orchestration<br/>tickArticles / tickReview"]
+        POOL["Article_Agentic_Pool<br/>runPool / worker"]
     end
 
-    subgraph AgenticEdit["lib/agentic.js（本模块）"]
-        LOOP["runAgenticArticle<br/>工具循环本体"]
-        SCHEMAS["TOOL_SCHEMAS<br/>四个工具的 JSON Schema"]
-        TOOLSET["buildToolset<br/>工具调度表"]
-        RCODE["makeReadCodeTool<br/>读码 + 去重 + 截断"]
-        LFILE["makeListFilesTool<br/>列目录 + 忽略目录过滤"]
-        EDITOR["makeArticleEditor<br/>文章闭包编辑器"]
-        PROMPT["buildOpeningPrompt<br/>开场提示词"]
-        ARGS["parseToolArgs / stripJsonFence<br/>坏 JSON 三级容错"]
+    subgraph 编辑核心
+        AE["Agentic_Edit<br/>lib/agentic.js → edit()"]
     end
 
-    POOL["Article_Agentic_Pool<br/>runPool / worker 并发调度"] --> LOOP
-    LOOP --> TOOLSET
-    TOOLSET --> RCODE
-    TOOLSET --> LFILE
-    TOOLSET --> EDITOR
-    TOOLSET --> SUB
-    LOOP --> SCHEMAS
-    LOOP --> PROMPT
-    LOOP --> ARGS
-    STREAM -.注入.-> LOOP
-    WS -.注入.-> RCODE
-    WS -.注入.-> LFILE
+    subgraph 文章质量与修复
+        AC["Article_Contract<br/>inspectArticle / hasBlockingIssue"]
+        AR["Article_Repair<br/>assemble / repairArticle"]
+    end
+
+    subgraph 宿主与环境
+        AH["Agentic_Host<br/>absOf"]
+        HOST["DSH 宿主<br/>llm.stream()"]
+    end
+
+    subgraph 产物
+        WIKI[".codewiki/modules/<br/>*.md 文章"]
+    end
+
+    JO -->|"提交编辑任务"| AE
+    POOL -->|"并发调用"| AE
+    AE -->|"调用宿主模型"| HOST
+    AE -->|"解析绝对路径"| AH
+    AE -->|"产出候选文章"| AC
+    AC -->|"结构损坏但内容可用"| AR
+    AR -->|"修复后重新校验"| AC
+    AC -->|"合规通过"| WIKI
+    AC -->|"error 级缺陷"| AE
 ```
+
+---
 
 ## 核心组件
 
-### 工具定义（TOOL_SCHEMAS）
+### `edit`（`lib/agentic.js`）
 
-声明给模型的四个工具，均以 JSON Schema 形态描述：
+`edit` 是本模块唯一的公开能力，承担「把模块对应的源码上下文 + 写作指令 变成一篇合规 wiki 文章」的任务。
 
-| 工具 | 职责 | 关键约束 |
-| --- | --- | --- |
-| `read_code` | 读仓库文件或某段行范围 | 引用行号必须以返回的「行号\| 」前缀为准，禁止自行推算 |
-| `list_files` | 列目录文件与子目录 | 用于摸清仓库结构后决定读哪些文件 |
-| `edit_article` | 对当前文章做 `view` / `str_replace` / `insert` | `str_replace` 要求 `old_str` 唯一匹配 |
-| `generate_sub_module` | 把可独立成篇的子部分委派出去单独成文 | 仅在确有职责边界时使用 |
+**典型输入**：
+- 目标文章的相对路径（如 `.codewiki/modules/change-set.md`）。
+- 写作上下文：模块名称、归属文件（`source_files`）、依赖图摘要、聚类信息。
+- 编辑模式：全量重写（full）还是增量修订（update）。
 
-### 读码工具（makeReadCodeTool）
+**典型输出**：
+- 文章正文（含 frontmatter：`title` / `type` / `source_files` / `tags`）。
+- 附带的编辑元数据（用了多少次模型请求、是否触发补写提醒）。
 
-读码是整个循环里最容易烧步数的环节，因此做了三道防护：
+**与原生引擎通道的关系**：
 
-1. **重复读抑制**：以 `(path, 起始行, 结束行)` 为 key 在闭包 `seen` Map 里记账，重复请求不再回吐正文，只回一句「你已经在第 N 步读过这段」。背景是实测中模型曾在 45 步里把同一个 `index.js` 读了 13 次、累计 2.1MB 上下文，最后 `stopReason=max-steps` 而文章没写完。
-2. **行数截断**：单段最多返回 `MAX_READ_LINES = 2000` 行。
-3. **字符截断**：`MAX_READ_CHARS = 40000` 字符兜底，挡得住单行 20 万字符的压缩产物（行数上限对它无效，因为它只有 1 行）。
+在当前默认配置下（`nativeEngine: true`），文章写作环节由上游 FSoft Python 引擎通过 [Engine_Python_Entry](engine-python-entry.md) → [Engine_FSoft_Runtime](engine-fsoft-runtime.md) / [Engine_Full_Parallel_Runtime](engine-full-parallel-runtime.md) 完成模型调用，`Agentic_Edit` 代表的「插件内 agentic 通道」作为保留能力存在，在以下场景仍被引用：
+- 关闭 `nativeEngine` 开关时的降级通道（见 [Engine_Native_Run](engine-native-run.md) 的通道选择逻辑）。
+- 校对（proofread）环节：[Engine_Proofread](engine-proofread.md) 对质量门判出的死链源页做原位改写时，复用编辑语义。
+- 存量文章体检与修复：[Article_Repair](article-repair.md) 判删前的修复组装。
 
-行号前缀格式由 `numberLines` 统一生成，与插件其余环节一致。
+---
 
-### 列目录工具（makeListFilesTool）
-
-深度钳制在 1–4 层，并过滤 `IGNORED_DIRS`（`node_modules`、`.git`、`dist`、`build`、`.next`、`target`、`vendor`、`__pycache__`、`.venv`、`venv`）——模型看到这些目录会当源码探索，白白烧步数。
-
-### 文章编辑器（makeArticleEditor）
-
-文章状态就在闭包里，三种命令：
-
-- `view`：返回带行号的当前全文；
-- `str_replace`：要求 `old_str` 唯一匹配；
-- `insert`：在指定行之后插入文本（`line=0` 表示文件开头）。
-
-两个针对真实仓库环境的细节：
-
-- **行尾归一化**：真实仓库 `core.autocrlf=true`，`.codewiki` 下文章常见 CRLF。模型按 `view` 输出写 `old_str`（自然带 `\n`），而文章存的是 `\r\n`，纯字面匹配永远对不上。因此匹配两侧先统一成 `\n`，命中后再按原文风格写回，避免整个文件被悄悄改成 LF。
-- **负数行号报错**：不被静默吞成「插到最前」，否则内容会跑到文件头部而模型以为插对了位置。
-
-### 子模块派发（buildToolset 中的 generate_sub_module）
-
-派发回调 `onSubModule` 由调用方提供（见 [Article_Agentic_Pool](article-agentic-pool.md)）。关键设计是**失败必须说实话**：此前无论什么原因不可用都回「已记录子模块 X（已派发）」，模型据此在父文里写下「详见 xxx.md」，而那个文件从未生成——死链且父任务仍记 `ok:true`。现在区分两种受阻原因（`max-depth` 与「当前模式不支持递归成文」），分别指示模型改为在本文内直接写清，不要留下死链。
-
-### 路径安全（safeRelPath）
-
-所有路径参数先经 `safeRelPath` 归一化：拒绝绝对路径、盘符路径与任何形式的 `..` 越界，返回 POSIX 风格的归一化相对路径。
-
-## 工具循环流程
+## 数据流：一篇文章的完整生命周期
 
 ```mermaid
 sequenceDiagram
-    participant Pool as Article_Agentic_Pool
-    participant Loop as runAgenticArticle
-    participant Model as streamFn（LLM）
-    participant Tool as 工具实现
-    participant Editor as makeArticleEditor
+    participant JO as Job_Orchestration
+    participant AE as Agentic_Edit.edit()
+    participant HOST as 宿主 LLM
+    participant AC as Article_Contract
+    participant AR as Article_Repair
+    participant AP as Engine_Apply_Plan
 
-    Pool->>Loop: mission, workspace, streamFn, onSubModule
-    Loop->>Loop: buildOpeningPrompt 生成首条 user 消息
-    Loop->>Model: streamFn({messages, tools, signal})
-    Model-->>Loop: assistant blocks（text + tool-call）
-    alt 没有 tool-call
-        Loop->>Editor: 若正文已给且 editor 为空则收下
-        Loop-->>Pool: stopReason=finished
-    else 有 tool-call
-        loop 每个 tool-call
-            Loop->>Loop: parseToolArgs 三级容错（原样→剥围栏→截平衡对象）
-            Loop->>Tool: 执行对应实现
-            Tool-->>Loop: {isError, text}
+    JO->>AE: 提交模块写作任务(name, source_files, mode)
+    AE->>HOST: 构造 system + 上下文 + 写作指令
+    HOST-->>AE: 流式返回候选文章
+    AE->>AC: inspectArticle(候选正文)
+    alt 结构合规 (errors=0)
+        AC-->>AE: 通过 (warnings 记 partial)
+        AE->>AP: 加入写集
+    else 存在 error 级缺陷
+        AC-->>AE: 返回缺陷清单
+        alt 纯格式缺陷 (缺 frontmatter / 未闭合 / 前言污染)
+            AE->>AR: repairArticle(原文)
+            AR-->>AC: 修复后重新校验
+            AC-->>AE: 判定通过 / 判删
+        else 内容污染 (泄漏指纹命中)
+            AC-->>AE: 判删，不入库
         end
-        Loop->>Loop: 结果打包为 tool-result 消息回灌 messages
-        Loop->>Model: 下一轮 streamFn
     end
-    Note over Loop: 达到 maxSteps 或 signal.aborted 时退出
+    AE-->>JO: 返回逐篇结果 {name, ok, error?}
 ```
 
-退出原因（`stopReason`）取值：`finished`（模型主动收尾）、`max-steps`（默认 30 步耗尽，`DEFAULT_MAX_STEPS` 为唯一定义点）、`aborted`、`stream-error`、`empty-response`。
+---
 
-## 设计要点
+## 依赖关系
 
-### 坏 JSON 的三级容错（parseToolArgs / stripJsonFence / sliceBalancedObject）
+| 依赖方向 | 模块 | 关系说明 |
+|---------|------|---------|
+| 被调用 | [Job_Orchestration](job-orchestration.md) | `tickArticles`、`tickReview` 阶段推进时调用编辑能力 |
+| 被调用 | [Article_Agentic_Pool](article-agentic-pool.md) | `runPool` / `worker` 提供并发执行池，复用 `edit` |
+| 路径解析 | [Agentic_Host](agentic-host.md) | `absOf` 把相对路径解析为宿主工作区内的绝对路径 |
+| 质量校验 | [Article_Contract](article-contract.md) | `inspectArticle` / `hasBlockingIssue` 决定产出能否入库 |
+| 修复组装 | [Article_Repair](article-repair.md) | `assemble` 在格式损坏时抢救内容 |
+| 产物落地 | [Engine_Apply_Plan](engine-apply-plan.md) | 合规文章最终由落地器原子写盘 + `cw index` + 基线推进 |
+| 变更上下文 | [Change_Set](change-set.md) | `collect` 提供增量编辑时的四路变更上下文 |
+| 结果记录 | [Update_Record](update-record.md) | `judgeOutcome` / `buildUpdateRecord` 汇总逐篇成败 |
 
-模型常把 JSON 包在 ` ```json ` 围栏里，或在前后加解释性句子。解析按「原样 → 剥围栏 → 截取首个括号平衡的 `{...}`（跳过字符串字面量内的括号）」三级递进，都不成才把警告记进 `steps` 并回退为 `{}`。不剥围栏的后果是真实的：围栏 JSON 一律解析失败，参数退化成空对象，工具拿着空参数执行，模型只能反复重试同一个错。
+---
 
-### 工具声明的动态过滤
+## 编辑通道在系统中的位置
 
-`schemas` 只把实际可用的工具声明给模型——比如没有注入 `workspace` 就不声明 `read_code`，没有 `onSubModule` 就不声明 `generate_sub_module`。这避免模型调用一个根本不存在的工具。
-
-### 步数上限的唯一定义点
-
-`DEFAULT_MAX_STEPS = 30` 是全插件唯一定义点。此前直接调用 `runAgenticArticle` 拿 24、走生产链路拿 30，同一配置两种行为；0.17.5 起（见 [Package_Manifest](package-manifest.md) 的 `package.json`）不再作为设置项暴露。
-
-## 与其他模块的关系
+下图展示 `Agentic_Edit` 代表的「插件内 agentic 通道」与「原生 FSoft 引擎通道」之间的分工。当前系统默认走原生通道（`nativeEngine: true`），但 agentic 通道的语义（文章契约、修复、并发池）仍被原生通道的质量门与落地层复用。
 
 ```mermaid
 flowchart LR
-    subgraph Upstream["上游（调用方）"]
-        POOL["Article_Agentic_Pool<br/>并发跑多篇文章"]
-        HOST["Agentic_Host<br/>absOf 路径兜底"]
-        ENGINE["Engine_LLM_Bridge<br/>引擎侧 LLM 桥（另一通道）"]
+    subgraph 编译任务入口
+        SUBMIT["提交 codewiki_generate 任务"]
     end
 
-    AGENTIC["Agentic_Edit<br/>lib/agentic.js"]
-
-    subgraph Downstream["下游（被消费方）"]
-        CONTRACT["Article_Contract<br/>hasBlockingIssue 验收"]
-        REPAIR["Article_Repair<br/>assemble 修文"]
-        STORE["Job_Store<br/>normKey 落盘记录"]
+    subgraph 通道决议
+        RESOLVE{"nativeEngine 开？<br/>有 Python 解释器？"}
     end
 
-    POOL --> AGENTIC
-    HOST --> AGENTIC
-    AGENTIC --> CONTRACT
-    AGENTIC --> REPAIR
-    AGENTIC --> STORE
-    ENGINE -. 替代/并行通道 .-> POOL
+    subgraph AGENTIC_CH["插件内 agentic 通道（保留）"]
+        AE["Agentic_Edit<br/>逐篇编辑"]
+        POOL2["Article_Agentic_Pool<br/>并发写文章"]
+    end
+
+    subgraph NATIVE_CH["原生 FSoft 通道（默认）"]
+        PY["Engine_Python_Entry<br/>entry.py"]
+        FR["Engine_FSoft_Runtime<br/>增量并行"]
+        FP["Engine_Full_Parallel_Runtime<br/>全量并行"]
+    end
+
+    subgraph DOWNSTREAM["共用的下游"]
+        GATE["Engine_Quality_Gate<br/>质量门"]
+        APPLY["Engine_Apply_Plan<br/>落地器"]
+    end
+
+    SUBMIT --> RESOLVE
+    RESOLVE -->|"关"| AE
+    RESOLVE -->|"开（默认）"| PY
+    AE --> POOL2
+    POOL2 --> GATE
+    PY --> FR
+    PY --> FP
+    FR --> GATE
+    FP --> GATE
+    GATE --> APPLY
 ```
 
-- [Agentic_Host](agentic-host.md)：提供 `absOf` 之类的路径解析能力，把注入的 workspace 安全地锚定到仓库根目录。
-- [Article_Agentic_Pool](article-agentic-pool.md)：以 `runPool` / `worker` 并发调度多篇文章，每篇文章一次 `runAgenticArticle`；产出的 `stopReason`、`usedTools`、`subModules` 直接进任务结果。
-- [Job_Orchestration](job-orchestration.md)：整体作业编排，决定何时触发文章写作、如何收集产物、如何取消。
-- [Article_Contract](article-contract.md)：对产出的文章做阻塞性问题验收（`hasBlockingIssue`），与本模块的 `stopReason` 共同决定一篇文章是否可用。
-- [Article_Repair](article-repair.md)：对不合格文章做修复装配。
-- [Job_Store](job-store.md)：把任务结果按 `normKey` 规范化后持久化。
-- Engine_LLM_Bridge：native 引擎通道的 LLM 桥，与本模块是两条并行的 LLM 接入路径。
+---
 
-## 配置与依赖
+## 配置与测试
 
-- 运行环境：Node ≥ 24.9.0（见 [Package_Manifest](package-manifest.md) 的 `package.json` `engines` 字段）。
-- 无外部运行时依赖：本模块只用 `node:path`，不依赖任何第三方包。
-- 插件打包修补经 `cordis.patch.yml` 配置（见 [Cordis_Patch_Config](cordis-patch-config.md)），与本模块行为无关，仅影响打包形态。
+- **配置入口**：插件配置在 `index.js` 的 `Config` schema 中定义（[package.json](package.json) 的 `main` 字段指向 `index.js`）。agentic 通道相关的关键设置包括 `batchProvider` / `batchModel`（写作模型）、`maxConcurrency`（并发上限）、`requestLimit`（单模块请求预算）。
+- **bundle 补丁**：安装方式与配置命名空间见 [Cordis_Patch_Config](cordis-patch-config.md)（`cordis.patch.yml`，plugin id 为 `codewiki`）。
+- **环境要求**：`package.json` 声明 `engines.node >= 24.9.0`、`engines.dsh >= 0.2.0-rc.0`。
 
-## 快速参考：对外导出
+---
 
-| 导出 | 类型 | 用途 |
-| --- | --- | --- |
-| `runAgenticArticle(opts)` | 异步函数 | 单篇文章的完整工具循环 |
-| `TOOL_SCHEMAS` | 数组 | 四个工具的 JSON Schema |
-| `DEFAULT_MAX_STEPS` | 常量 | 默认步数上限（30） |
-| `makeReadCodeTool(workspace, opts)` | 工厂 | 带去重/截断的读码工具 |
-| `makeListFilesTool(workspace)` | 工厂 | 带忽略目录过滤的列目录工具 |
-| `makeArticleEditor(initial)` | 工厂 | 闭包态文章编辑器 |
-| `buildToolset(deps)` | 工厂 | 拼装工具调度表 |
-| `safeRelPath(rel)` | 函数 | 路径越界防护 |
-| `numberLines(text)` | 函数 | 行号前缀格式化 |
-| `buildOpeningPrompt(opts)` | 函数 | 首条 user 消息生成 |
-| `parseToolArgs / stripJsonFence / sliceBalancedObject` | 函数 | 坏 JSON 三级容错 |
+## 设计要点
+
+1. **编辑与校验分离**：`edit` 只负责产出候选正文，「能不能入库」完全交给 [Article_Contract](article-contract.md) 的 `inspectArticle` 裁决。这种分离让「模型产出」与「结构合规」两个问题可以独立演进、独立测试。
+2. **先修后删**：候选文章被判坏时，不立即丢弃——先经 [Article_Repair](article-repair.md) 判断是「纯格式缺陷」还是「内容污染」，前者修复后复用，后者才判删（避免用格式问题销毁真实内容）。
+3. **并发可注入**：编辑能力被 [Article_Agentic_Pool](article-agentic-pool.md) 的 `runPool` / `worker` 包装成并发池，并发度受 `maxConcurrency` 控制（硬顶 8），与原生引擎的 `moduleConcurrency` 是两套独立预算。
+4. **终态不可洗白**：编辑结果汇入 [Update_Record](update-record.md) 的 `judgeOutcome`，「1 篇成功 + 19 篇失败」永远是 `partial` 而非 `done`——这是整个系统反复强调的硬不变量。
+
+---
+
+## 相关页面索引
+
+- 任务如何被调度与推进：[Job_Orchestration](job-orchestration.md)
+- 文章契约闸门：[Article_Contract](article-contract.md)
+- 存量文章修复：[Article_Repair](article-repair.md)
+- 并发执行池：[Article_Agentic_Pool](article-agentic-pool.md)
+- 变更集采集：[Change_Set](change-set.md)
+- 原生引擎落地器：[Engine_Apply_Plan](engine-apply-plan.md)
+- 原生引擎质量门：[Engine_Quality_Gate](engine-quality-gate.md)
+- 更新记录与终态判定：[Update_Record](update-record.md)
+- 宿主路径解析：[Agentic_Host](agentic-host.md)
+- 插件配置与安装：[Cordis_Patch_Config](cordis-patch-config.md)

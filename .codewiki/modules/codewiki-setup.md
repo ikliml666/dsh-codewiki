@@ -119,4 +119,4 @@ flowchart TD
 - [CodeWiki_Main](codewiki-main.md)：CLI 入口，把 `cw setup {claude-code|codex|qmd}` 与 `cw uninstall {claude-code|codex}` 子命令路由到本模块的函数。
 - 文章格式约定：安装到 Codex 的 `CODEX_AGENTS_SECTION` 要求文章带 YAML frontmatter（`title` / `type` / `source_files` / `tags`），该约定的运行时校验在 [Article_Contract](article-contract.md) 中实现。
 - wiki 根目录定位依赖 `config::wiki_home()`（`~/.codewiki`），`setup_qmd()` 用它判断是否已有 wiki 可供索引。
-- 实际的 wiki 编译流水线（被本模块安装的规约所驱动的那套流程）由 Node.js 侧的 [Job_Orchestration](job-orchestration.md) 与 [Article_Agentic_Pool](article-agentic-pool.md) 承担，本模块只负责把“何时该跑流水线”的规则讲给代理工具听。
+- 实际的 wiki 编译流水线（被本模块安装的规约所驱动的那套流程）由 Node.js 侧的 [Job_Orchestration](job-orchestration.md) 与原生引擎通道（见 [Engine_Native_Run](engine-native-run.md)）承担，本模块只负责把“何时该跑流水线”的规则讲给代理工具听。

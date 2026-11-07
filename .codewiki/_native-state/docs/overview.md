@@ -3,14 +3,14 @@
 ## 仓库定位与核心目标
 `dsh-codewiki` 是 DeepSeek Harness（dsh）宿主环境下的本地代码文档插件，npm 包名为 `@local/dsh-codewiki`。它的核心目标是将任意代码仓库自动编译为结构化、可追溯的 Wiki 文档体系，替代手工维护文档的低效模式。
 核心能力包括：
-- 服务化编译流水线：将同步编译动作改造为后台有限阶段机驱动的任务流，覆盖排队、文章写作、横切校验、文本校对、索引构建、自动提交全流程，提供实时进度反馈；
-- 双编译通道：默认调用上游 FSoft Python 原生引擎完成依赖图分析、模块聚类与文章生成，同时内置可完全离线运行的 Node 兼容 agentic 写作通道，适配不同运行环境；
+- 服务化编译流水线：将同步编译动作改造为后台有限阶段机驱动的任务流，覆盖排队、引擎写作、质量校验、落地（写盘/索引/基线/自动提交）全流程，提供实时进度反馈；
+- 原生引擎通道：编译默认且唯一走上游 FSoft Python 原生引擎，完成依赖图分析、模块聚类与文章生成，模型凭证全程不出宿主、由 loopback 桥接注入引擎；
 - 严格质量保障：全链路统一的文章结构契约、写集边界防护、终态裁决机制，彻底避免"单篇成功、多篇失败却上报编译成功"的历史缺陷；
 - 增量记忆能力：通过跨轮持久化的受管状态实现组件级增量编译，避免每轮全量重算带来的时间与 token 成本；
 - 配套工具链：Rust 实现的 `cw` CLI 负责 Wiki 生命周期管理，侧边栏 Web 面板提供全流程交互，模型凭证全程不出宿主、由 loopback 桥接注入引擎。
 
 ## 端到端架构
-仓库整体分为五层，交互层请求最终在中枢编排层被分流到两条编译通道，底座层提供装配、校验与工具支撑：
+仓库整体分为四层，交互层请求最终在中枢编排层被分流到原生引擎通道，底座层提供装配、校验与工具支撑：
 ```mermaid
 flowchart TB
     subgraph Interaction["交互接入层"]
@@ -27,15 +27,15 @@ flowchart TB
         UPDATE_REC["Update_Record<br/>终态裁决与记账"]
     end
 
-    subgraph NodeChannel["Node 兼容编译通道"]
-        POOL["Article_Agentic_Pool<br/>双池并发调度"]
-        AGENTIC["Agentic_Edit<br/>工具循环写作"]
-        HOST["Agentic_Host<br/>宿主 LLM 适配"]
-        CONTRACT["Article_Contract<br/>结构质量闸门"]
-        REPAIR["Article_Repair<br/>存量坏页修复"]
+    subgraph NativeChannel["原生 FSoft 引擎通道"]
+        NATIVE_RUN["Engine_Native_Run<br/>线性裁决链编排"]
+        MANIFEST["Engine_Manifest<br/>引擎环境校验"]
+        SNAPSHOT["Engine_Workspace_Snapshot<br/>未提交改动对齐"]
+        CLIENT["Engine_Client<br/>子进程协议适配"]
+        BRIDGE["Engine_LLM_Bridge / OpenAI_Bridge<br/>无凭证模型桥接"]
     end
 
-    subgraph NativeChannel["原生 FSoft 引擎通道（默认）"]
+    subgraph NativeChannel["原生 FSoft 引擎通道"]
         NATIVE_RUN["Engine_Native_Run<br/>线性裁决链编排"]
         MANIFEST["Engine_Manifest<br/>引擎环境校验"]
         SNAPSHOT["Engine_Workspace_Snapshot<br/>未提交改动对齐"]
@@ -66,13 +66,13 @@ flowchart TB
     JOB_ORCH --> CHANGE_SET
     JOB_ORCH --> UPDATE_REC
 
-    JOB_ORCH -->|"Node 兼容模式"| POOL
-    POOL --> AGENTIC
-    AGENTIC --> HOST
-    POOL --> CONTRACT
-    POOL --> REPAIR
+    JOB_ORCH --> NATIVE_RUN
+    NATIVE_RUN --> MANIFEST
+    NATIVE_RUN --> SNAPSHOT
+    NATIVE_RUN --> CLIENT
+    NATIVE_RUN --> NATIVE_STATE
 
-    JOB_ORCH -->|"默认原生模式"| NATIVE_RUN
+    CLIENT --> BRIDGE
     NATIVE_RUN --> MANIFEST
     NATIVE_RUN --> SNAPSHOT
     NATIVE_RUN --> CLIENT
@@ -105,10 +105,9 @@ flowchart TB
 - [Job_Logs](Job_Logs.md)：NDJSON 持久化事件日志、Wiki 链接扫描、Git 路径归一
 - [Change_Set](Change_Set.md)：四路 Git 变更采集（已提交/暂存/未暂存/未跟踪）
 - [Update_Record](Update_Record.md)：编译终态裁决、基线推进判定、可复盘的更新记录
-### Node 兼容编译通道
-- [Article_Agentic_Pool](Article_Agentic_Pool.md)：双池并发的 agentic 文章执行调度
-- [Agentic_Edit](Agentic_Edit.md)：单篇文章写作的多轮工具循环，支持读码、列文件、增量编辑
-- [Agentic_Host](Agentic_Host.md)：agentic 循环与宿主 LLM 服务的消息格式适配层
+### 文章契约与修复（原生通道共用）
+- [Article_Contract](Article_Contract.md)：全通道共用的文章结构最低质量契约闸门
+- [Article_Repair](Article_Repair.md)：存量坏页的格式修复裁决，避免误删有价值内容
 - [Article_Contract](Article_Contract.md)：全通道共用的文章结构最低质量契约闸门
 - [Article_Repair](Article_Repair.md)：存量坏页的格式修复裁决，避免误删有价值内容
 ### 原生 FSoft 引擎通道（默认）

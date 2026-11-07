@@ -6,7 +6,7 @@ description: PackageManifest 是 dsh-codewiki 插件的包级元数据清单模�
 # Package_Manifest 包清单
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`2a82c7bf`](https://github.com/ikliml666/dsh-codewiki/commit/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`695bf7d0`](https://github.com/ikliml666/dsh-codewiki/commit/695bf7d0681fd06c15e63a731761d443a069a9e3) on 2026-11-07 with `doubao-seed-2.1-lite`. Check the code before relying on details.
 
 `Package_Manifest` 是 dsh-codewiki 插件的**包级元数据清单**模块，承载三类互相独立、但同属「包身份与跨语言口径」的资产：
 
@@ -154,7 +154,7 @@ flowchart LR
 - `load(wiki_path)` / `save(wiki_path)` 走 `_meta.yaml`，失败时用 `anyhow::Context` 带上文件路径。
 - 同文件还提供 `current_commit(repo_path)`：通过 `git rev-parse HEAD` 取当前 HEAD，失败时报「Not a git repository or no commits yet」。
 
-该结构是 Node 侧 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) 中 `currentCommit`、增量编译判定与引擎 workspace 快照（[工作区快照（Engine_Workspace_Snapshot）](Engine_Workspace_Snapshot.md)）所依赖的持久化事实来源之一。
+该结构是 Node 侧 [Job Orchestration（编译任务编排服务）](Job_Orchestration.md) 中增量编译判定与引擎 workspace 快照（[工作区快照（Engine_Workspace_Snapshot）](Engine_Workspace_Snapshot.md)）所依赖的持久化事实来源之一。
 
 ---
 
@@ -199,8 +199,8 @@ flowchart TD
 5. **配置默认值集中**：`cordis.patch.yml` 的 `config: {}` 留空即回落 `index.js` 的 Config schema 默认值，覆盖条目采用同 id 整对象替换。
 
 ??? abstract "Documented components (4)"
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/package.json) — `package.json`
-    - [`WikiMeta`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/vendor%5Ccodewiki%5Csrc%5Cmeta.rs) — `vendor\codewiki\src\meta.rs`
-    - [`test`](https://github.com/ikliml666/dsh-codewiki/blob/2a82c7bf7a1b2b8b5b27622740b3a295b0732d8e/package.json) — `package.json`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/package.json) — `package.json`
+    - [`WikiMeta`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/vendor%5Ccodewiki%5Csrc%5Cmeta.rs) — `vendor\codewiki\src\meta.rs`
+    - [`test`](https://github.com/ikliml666/dsh-codewiki/blob/695bf7d0681fd06c15e63a731761d443a069a9e3/package.json) — `package.json`
 
