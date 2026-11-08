@@ -1,5 +1,5 @@
 {
-    "Web_UI_Panel": {
+    "ui-client": {
         "path": "client.js",
         "components": [
             "client.js::CodewikiCard",
@@ -13,90 +13,57 @@
             "client.js::en",
             "client.js::line",
             "client.js::mount",
-            "client.js::zh",
-            "client.js::row"
+            "client.js::row",
+            "client.js::toOption",
+            "client.js::zh"
         ],
         "children": {}
     },
-    "Cordis_Patch_Config": {
-        "path": "cordis.patch.yml",
-        "components": [
-            "cordis.patch.yml::cordis.patch.yml",
-            "_addcase2.py::__file__"
-        ],
-        "children": {}
-    },
-    "Job_Orchestration": {
+    "Job_Orchestration___State_Management": {
         "path": "index.js",
         "components": [
-            "index.js::allowedLinkTargets",
+            "index.js::addUsage",
             "index.js::apply",
             "index.js::cancel",
-            "index.js::currentCommit",
             "index.js::jobSummary",
             "index.js::list",
-            "index.js::makeLinkExists",
             "index.js::onAbort",
             "index.js::progressView",
             "index.js::reposFileFor",
-            "index.js::runPool",
-            "index.js::symbolsOnLine",
-            "index.js::tickArticles",
-            "index.js::tickCommit",
-            "index.js::tickCrosscut",
-            "index.js::tickIndex",
-            "index.js::tickReview",
-            "index.js::wakeCompileSession",
-            "index.js::worker"
+            "lib\\job-logs.js::removeLog",
+            "lib\\job-store.js::normKey",
+            "lib\\update-record.js::isTerminalStage",
+            "lib\\update-record.js::loadUpdateRecord"
         ],
-        "children": {}
+        "children": {
+            "plugin-orchestration": {
+                "path": "index.js",
+                "components": [
+                    "index.js::addUsage",
+                    "index.js::apply",
+                    "index.js::cancel",
+                    "index.js::jobSummary",
+                    "index.js::list",
+                    "index.js::onAbort",
+                    "index.js::progressView",
+                    "index.js::reposFileFor"
+                ],
+                "children": {}
+            },
+            "job-and-state": {
+                "path": "",
+                "components": [
+                    "lib\\job-logs.js::removeLog",
+                    "lib\\job-store.js::normKey",
+                    "lib\\update-record.js::isTerminalStage",
+                    "lib\\update-record.js::loadUpdateRecord"
+                ],
+                "children": {}
+            }
+        }
     },
-    "Agentic_Host": {
-        "path": "lib\\agentic-host.js",
-        "components": [
-            "lib\\agentic-host.js::absOf"
-        ],
-        "children": {}
-    },
-    "Agentic_Edit": {
-        "path": "lib\\agentic.js",
-        "components": [
-            "lib\\agentic.js::edit"
-        ],
-        "children": {}
-    },
-    "Article_Contract": {
-        "path": "lib\\article-contract.js",
-        "components": [
-            "lib\\article-contract.js::hasBlockingIssue",
-            "lib\\article-contract.js::issueSummary"
-        ],
-        "children": {}
-    },
-    "Article_Repair": {
-        "path": "lib\\article-repair.js",
-        "components": [
-            "lib\\article-repair.js::assemble"
-        ],
-        "children": {}
-    },
-    "Article_Agentic_Pool": {
-        "path": "lib\\articles-agentic.js",
-        "components": [
-            "lib\\articles-agentic.js::runPool",
-            "lib\\articles-agentic.js::worker"
-        ],
-        "children": {}
-    },
-    "Change_Set": {
-        "path": "lib\\change-set.js",
-        "components": [
-            "lib\\change-set.js::collect"
-        ],
-        "children": {}
-    },
-    "Engine_Apply_Plan": {
-        "path": "lib\\engine\\apply-plan.js",
+    "Documentation_Generation_Engine": {
+        "path": "",
         "components": [
             "lib\\engine\\apply-plan.js::applyNativeOutput",
             "lib\\engine\\apply-plan.js::defaultRunCw",
@@ -104,210 +71,254 @@
             "lib\\engine\\apply-plan.js::findOrphanPages",
             "lib\\engine\\apply-plan.js::findStaleModulePages",
             "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
-            "lib\\engine\\techdocs.js::walkFiles",
-            "lib\\engine\\techdocs.js::walk",
-            "lib\\engine\\techdocs.js::captureSite"
-        ],
-        "children": {}
-    },
-    "Engine_Client": {
-        "path": "lib\\engine\\client.js",
-        "components": [
-            "lib\\engine\\client.js::runEngine"
-        ],
-        "children": {}
-    },
-    "Engine_Contract": {
-        "path": "lib\\engine\\contract.js",
-        "components": [
+            "lib\\engine\\client.js::runEngine",
             "lib\\engine\\contract.js::describeEngineResult",
             "lib\\engine\\contract.js::normalizeBlocker",
-            "lib\\engine\\contract.js::validateEngineResult"
-        ],
-        "children": {}
-    },
-    "Engine_LLM_Bridge": {
-        "path": "lib\\engine\\llm-bridge.js",
-        "components": [
+            "lib\\engine\\contract.js::validateEngineResult",
             "lib\\engine\\llm-bridge.js::setStage",
-            "lib\\engine\\llm-bridge.js::startLlmBridge"
-        ],
-        "children": {}
-    },
-    "Engine_Manifest": {
-        "path": "lib\\engine\\manifest.js",
-        "components": [
+            "lib\\engine\\llm-bridge.js::startLlmBridge",
             "lib\\engine\\manifest.js::doctor",
-            "lib\\engine\\manifest.js::writeLock"
-        ],
-        "children": {}
-    },
-    "Engine_Mapping": {
-        "path": "lib\\engine\\mapping.js",
-        "components": [
-            "lib\\engine\\mapping.js::findMissingModuleDocs"
-        ],
-        "children": {}
-    },
-    "Engine_Native_Run": {
-        "path": "lib\\engine\\native-run.js",
-        "components": [
-            "lib\\engine\\native-run.js::noop"
-        ],
-        "children": {}
-    },
-    "Engine_Native_State": {
-        "path": "lib\\engine\\native-state.js",
-        "components": [
-            "lib\\engine\\native-state.js::stateDocFiles"
-        ],
-        "children": {}
-    },
-    "Engine_OpenAI_Bridge": {
-        "path": "lib\\engine\\openai-bridge.js",
-        "components": [
-            "lib\\engine\\openai-bridge.js::isPlaceholderKey"
-        ],
-        "children": {}
-    },
-    "Engine_Output": {
-        "path": "lib\\engine\\output.js",
-        "components": [
-            "lib\\engine\\output.js::add"
-        ],
-        "children": {}
-    },
-    "Engine_Process_Tree": {
-        "path": "",
-        "components": [
+            "lib\\engine\\manifest.js::writeLock",
+            "lib\\engine\\mapping.js::findMissingModuleDocs",
+            "lib\\engine\\native-run.js::noop",
+            "lib\\engine\\native-state.js::stateDocFiles",
+            "lib\\engine\\openai-bridge.js::isPlaceholderKey",
+            "lib\\engine\\output.js::add",
             "lib\\engine\\process-tree.js::isAlive",
-            "lib\\engine\\python\\tree_coverage.py::file_owner"
+            "lib\\engine\\proofread.js::proofreadPages",
+            "lib\\engine\\quality-gate.js::gateNativeOutput",
+            "lib\\engine\\quality-gate.js::toQualityIssues",
+            "lib\\engine\\techdocs.js::captureSite",
+            "lib\\engine\\wiki-links.js::isExternalTarget",
+            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+            "lib\\engine\\workspace-snapshot.js::shortSha",
+            "lib\\engine\\workspace-snapshot.js::snapshotExists",
+            "lib\\article-contract.js::hasBlockingIssue",
+            "lib\\article-contract.js::isWritable",
+            "lib\\article-contract.js::issueSummary",
+            "lib\\article-contract.js::makeWriteSet",
+            "lib\\article-repair.js::assemble",
+            "lib\\change-set.js::collect"
         ],
-        "children": {}
+        "children": {
+            "engine-core": {
+                "path": "",
+                "components": [
+                    "lib\\engine\\apply-plan.js::applyNativeOutput",
+                    "lib\\engine\\apply-plan.js::defaultRunCw",
+                    "lib\\engine\\apply-plan.js::findDeprecatedConceptPages",
+                    "lib\\engine\\apply-plan.js::findOrphanPages",
+                    "lib\\engine\\apply-plan.js::findStaleModulePages",
+                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+                    "lib\\engine\\client.js::runEngine",
+                    "lib\\engine\\contract.js::describeEngineResult",
+                    "lib\\engine\\contract.js::normalizeBlocker",
+                    "lib\\engine\\contract.js::validateEngineResult",
+                    "lib\\engine\\llm-bridge.js::setStage",
+                    "lib\\engine\\llm-bridge.js::startLlmBridge",
+                    "lib\\engine\\manifest.js::doctor",
+                    "lib\\engine\\manifest.js::writeLock",
+                    "lib\\engine\\mapping.js::findMissingModuleDocs",
+                    "lib\\engine\\native-run.js::noop",
+                    "lib\\engine\\native-state.js::stateDocFiles",
+                    "lib\\engine\\openai-bridge.js::isPlaceholderKey",
+                    "lib\\engine\\output.js::add",
+                    "lib\\engine\\process-tree.js::isAlive",
+                    "lib\\engine\\proofread.js::proofreadPages",
+                    "lib\\engine\\quality-gate.js::gateNativeOutput",
+                    "lib\\engine\\quality-gate.js::toQualityIssues",
+                    "lib\\engine\\techdocs.js::captureSite",
+                    "lib\\engine\\wiki-links.js::isExternalTarget",
+                    "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+                    "lib\\engine\\workspace-snapshot.js::shortSha",
+                    "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                ],
+                "children": {
+                    "engine-orchestration": {
+                        "components": [
+                            "lib\\engine\\apply-plan.js::applyNativeOutput",
+                            "lib\\engine\\apply-plan.js::defaultRunCw",
+                            "lib\\engine\\apply-plan.js::findDeprecatedConceptPages",
+                            "lib\\engine\\apply-plan.js::findOrphanPages",
+                            "lib\\engine\\apply-plan.js::findStaleModulePages",
+                            "lib\\engine\\apply-plan.js::findSupersededLegacyPages",
+                            "lib\\engine\\client.js::runEngine",
+                            "lib\\engine\\native-run.js::noop"
+                        ],
+                        "children": {
+                            "apply-plan": {
+                                "components": [
+                                    "lib\\engine\\apply-plan.js::applyNativeOutput",
+                                    "lib\\engine\\apply-plan.js::defaultRunCw",
+                                    "lib\\engine\\apply-plan.js::findDeprecatedConceptPages",
+                                    "lib\\engine\\apply-plan.js::findOrphanPages",
+                                    "lib\\engine\\apply-plan.js::findStaleModulePages",
+                                    "lib\\engine\\apply-plan.js::findSupersededLegacyPages"
+                                ],
+                                "children": {}
+                            },
+                            "engine-runner": {
+                                "components": [
+                                    "lib\\engine\\client.js::runEngine",
+                                    "lib\\engine\\native-run.js::noop"
+                                ],
+                                "children": {
+                                    "engine-runner_process-protocol": {
+                                        "components": [
+                                            "lib\\engine\\client.js::runEngine"
+                                        ],
+                                        "children": {}
+                                    },
+                                    "engine-runner_native-pipeline": {
+                                        "components": [
+                                            "lib\\engine\\native-run.js::noop"
+                                        ],
+                                        "children": {}
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "engine-contract-quality": {
+                        "components": [
+                            "lib\\engine\\contract.js::describeEngineResult",
+                            "lib\\engine\\contract.js::normalizeBlocker",
+                            "lib\\engine\\contract.js::validateEngineResult",
+                            "lib\\engine\\proofread.js::proofreadPages",
+                            "lib\\engine\\quality-gate.js::gateNativeOutput",
+                            "lib\\engine\\quality-gate.js::toQualityIssues",
+                            "lib\\engine\\wiki-links.js::isExternalTarget"
+                        ],
+                        "children": {}
+                    },
+                    "engine-integrations": {
+                        "components": [
+                            "lib\\engine\\llm-bridge.js::setStage",
+                            "lib\\engine\\llm-bridge.js::startLlmBridge",
+                            "lib\\engine\\openai-bridge.js::isPlaceholderKey",
+                            "lib\\engine\\techdocs.js::captureSite"
+                        ],
+                        "children": {}
+                    },
+                    "engine-state-manifest": {
+                        "components": [
+                            "lib\\engine\\manifest.js::doctor",
+                            "lib\\engine\\manifest.js::writeLock",
+                            "lib\\engine\\mapping.js::findMissingModuleDocs",
+                            "lib\\engine\\native-state.js::stateDocFiles",
+                            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
+                            "lib\\engine\\workspace-snapshot.js::shortSha",
+                            "lib\\engine\\workspace-snapshot.js::snapshotExists"
+                        ],
+                        "children": {}
+                    },
+                    "engine-runtime-utils": {
+                        "components": [
+                            "lib\\engine\\output.js::add",
+                            "lib\\engine\\process-tree.js::isAlive"
+                        ],
+                        "children": {}
+                    }
+                }
+            },
+            "article-pipeline": {
+                "path": "",
+                "components": [
+                    "lib\\article-contract.js::hasBlockingIssue",
+                    "lib\\article-contract.js::isWritable",
+                    "lib\\article-contract.js::issueSummary",
+                    "lib\\article-contract.js::makeWriteSet",
+                    "lib\\article-repair.js::assemble",
+                    "lib\\change-set.js::collect"
+                ],
+                "children": {}
+            }
+        }
     },
-    "Engine_Proofread": {
-        "path": "lib\\engine\\proofread.js",
-        "components": [
-            "lib\\engine\\proofread.js::proofreadPages"
-        ],
-        "children": {}
-    },
-    "Engine_Python_Entry": {
-        "path": "lib\\engine\\python\\entry.py",
+    "Execution_Runtime___Vendored_Engine": {
+        "path": "",
         "components": [
             "lib\\engine\\python\\entry.py::_ProtocolOnly",
             "lib\\engine\\python\\entry.py::_popen_init_utf8",
-            "lib\\engine\\python\\entry.py::main"
+            "lib\\engine\\python\\entry.py::main",
+            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
+            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+            "lib\\engine\\python\\stage_map.py::articles_ceiling",
+            "lib\\engine\\python\\tree_coverage.py::file_owner",
+            "vendor\\codewiki\\src\\config.rs::project_name",
+            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+            "vendor\\codewiki\\src\\main.rs::Cli",
+            "vendor\\codewiki\\src\\main.rs::capitalize",
+            "vendor\\codewiki\\src\\main.rs::main",
+            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+            "vendor\\codewiki\\src\\setup.rs::claude_home"
         ],
-        "children": {}
+        "children": {
+            "engine-python-runtime": {
+                "path": "",
+                "components": [
+                    "lib\\engine\\python\\entry.py::_ProtocolOnly",
+                    "lib\\engine\\python\\entry.py::_popen_init_utf8",
+                    "lib\\engine\\python\\entry.py::main",
+                    "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents",
+                    "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO",
+                    "lib\\engine\\python\\stage_map.py::articles_ceiling",
+                    "lib\\engine\\python\\tree_coverage.py::file_owner"
+                ],
+                "children": {}
+            },
+            "codewiki-vendor": {
+                "path": "",
+                "components": [
+                    "vendor\\codewiki\\src\\config.rs::project_name",
+                    "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter",
+                    "vendor\\codewiki\\src\\main.rs::Cli",
+                    "vendor\\codewiki\\src\\main.rs::capitalize",
+                    "vendor\\codewiki\\src\\main.rs::main",
+                    "vendor\\codewiki\\src\\meta.rs::WikiMeta",
+                    "vendor\\codewiki\\src\\setup.rs::claude_home"
+                ],
+                "children": {}
+            }
+        }
     },
-    "Engine_FSoft_Runtime": {
-        "path": "lib\\engine\\python\\fsoft_runtime.py",
-        "components": [
-            "lib\\engine\\python\\fsoft_runtime.py::run_leaf_agents"
-        ],
-        "children": {}
-    },
-    "Engine_Full_Parallel_Runtime": {
-        "path": "lib\\engine\\python\\full_parallel_runtime.py",
-        "components": [
-            "lib\\engine\\python\\full_parallel_runtime.py::_SharedTreeIO"
-        ],
-        "children": {}
-    },
-    "Engine_Quality_Gate": {
-        "path": "lib\\engine\\quality-gate.js",
-        "components": [
-            "lib\\engine\\quality-gate.js::gateNativeOutput",
-            "lib\\engine\\quality-gate.js::toQualityIssues"
-        ],
-        "children": {}
-    },
-    "Engine_Workspace_Snapshot": {
-        "path": "lib\\engine\\workspace-snapshot.js",
-        "components": [
-            "lib\\engine\\workspace-snapshot.js::createWorkspaceSnapshot",
-            "lib\\engine\\workspace-snapshot.js::shortSha",
-            "lib\\engine\\workspace-snapshot.js::snapshotExists"
-        ],
-        "children": {}
-    },
-    "Job_Logs": {
+    "Build___Development_Infrastructure": {
         "path": "",
         "components": [
-            "lib\\engine\\wiki-links.js::isExternalTarget",
+            "cordis.patch.yml::cordis.patch.yml",
+            "package.json::package.json",
+            "tools/fsoft-engine/setup-env.sh::setup-env.sh",
             "lib\\git-paths.js::decodeGitPath",
-            "lib\\job-logs.js::removeLog",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\scripts\\run.py::main",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\handler.py::Handler",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue",
             "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push",
-            "vendor\\codewiki\\src\\config.rs::project_name",
-            "vendor\\codewiki\\src\\frontmatter.rs::ArticleFrontmatter"
-        ],
-        "children": {}
-    },
-    "Job_Store": {
-        "path": "lib\\job-store.js",
-        "components": [
-            "lib\\job-store.js::normKey"
-        ],
-        "children": {}
-    },
-    "Update_Record": {
-        "path": "lib\\update-record.js",
-        "components": [
-            "lib\\update-record.js::isTerminalStage",
-            "lib\\update-record.js::loadUpdateRecord"
-        ],
-        "children": {}
-    },
-    "Package_Manifest": {
-        "path": "",
-        "components": [
-            "lib\\engine\\python\\stage_map.py::articles_ceiling",
-            "package.json::package.json",
-            "vendor\\codewiki\\src\\meta.rs::WikiMeta",
-            "package.json::test"
-        ],
-        "children": {}
-    },
-    "Graphdiff_Golden_Generator": {
-        "path": "test-fixtures\\gen-graphdiff-golden.py",
-        "components": [
-            "test-fixtures\\gen-graphdiff-golden.py::main"
-        ],
-        "children": {}
-    },
-    "FSoft_Engine_Setup_Script": {
-        "path": "tools/fsoft-engine/setup-env.sh",
-        "components": [
-            "tools/fsoft-engine/setup-env.sh::setup-env.sh"
-        ],
-        "children": {}
-    },
-    "No-LLM_Graph_Probe": {
-        "path": "tools\\fsoft-engine\\probe-no-llm-graph.py",
-        "components": [
             "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
         ],
-        "children": {}
-    },
-    "CodeWiki_Main": {
-        "path": "vendor\\codewiki\\src\\main.rs",
-        "components": [
-            "vendor\\codewiki\\src\\main.rs::Cli",
-            "vendor\\codewiki\\src\\main.rs::capitalize",
-            "vendor\\codewiki\\src\\main.rs::main"
-        ],
-        "children": {}
-    },
-    "CodeWiki_Setup": {
-        "path": "vendor\\codewiki\\src\\setup.rs",
-        "components": [
-            "vendor\\codewiki\\src\\setup.rs::claude_home"
-        ],
-        "children": {}
+        "children": {
+            "build-configuration": {
+                "path": "",
+                "components": [
+                    "cordis.patch.yml::cordis.patch.yml",
+                    "package.json::package.json",
+                    "tools/fsoft-engine/setup-env.sh::setup-env.sh"
+                ],
+                "children": {}
+            },
+            "fsoft-engine-tools": {
+                "path": "",
+                "components": [
+                    "lib\\git-paths.js::decodeGitPath",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\scripts\\run.py::main",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\core\\engine.py::Engine",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\handler.py::Handler",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue",
+                    "tools\\fsoft-engine\\fixtures\\中文 空格 fixture\\src\\web\\task.ts::TaskQueue.push",
+                    "tools\\fsoft-engine\\probe-no-llm-graph.py::main"
+                ],
+                "children": {}
+            }
+        }
     }
 }
