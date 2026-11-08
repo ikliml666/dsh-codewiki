@@ -78,6 +78,8 @@ window.__ModuleLoader__.load({
       autoCommitHint: '由插件在主题分支提交并合并回原分支，只动 .codewiki/ 与 CodeWiki.md。',
       workspaceOnly: '只显示工作区任务',
       workspaceOnlyHint: '任务页只显示已添加工作区里的任务。',
+      techdocs: '导出 TechDocs 站点',
+      techdocsHint: '每轮额外导出 Backstage TechDocs 站点到 .codewiki/_techdocs/（约 37 个文件，不进 cw 索引）。',
       maxConcurrency: '默认档并发上限',
       maxConcurrencyHint: '默认档请求并发 1–8。',
       moduleConcurrency: '模块生成并行度',
@@ -342,6 +344,8 @@ window.__ModuleLoader__.load({
       autoCommitHint: 'The plugin commits the artifacts on a topic branch and merges them back, touching only .codewiki/ and CodeWiki.md. Falls back to an "artifacts pending" reminder when a branch workflow or the commit is impossible.',
       workspaceOnly: 'Workspace tasks only',
       workspaceOnlyHint: 'The jobs tab shows only tasks belonging to added dsh workspaces.',
+      techdocs: 'Export TechDocs site',
+      techdocsHint: 'Also exports a Backstage TechDocs site to .codewiki/_techdocs/ every run (about 37 files, kept out of the cw index).',
       maxConcurrency: 'Default-tier concurrency',
       maxConcurrencyHint: 'In-flight requests for the default tier (batchModel), 1–8.',
       moduleConcurrency: 'Module parallelism',
@@ -980,7 +984,7 @@ window.__ModuleLoader__.load({
         const SAVE_KEYS = [
           'enabled', 'binaryPath', 'maxConcurrency', 'moduleConcurrency',
           'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit',
-          'workspaceOnly', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
+          'workspaceOnly', 'techdocs', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
           'excludePaths',
           'autoUpdate', 'autoUpdateMin', 'requestLimit',
           'nativeEngine', 'nativeEnginePython', 'nativeEngineEntry', 'nativeEngineTimeoutMs',
@@ -1311,6 +1315,15 @@ window.__ModuleLoader__.load({
                     })
                   ),
                   el('div', { 'data-dscw-hint': '' }, t('workspaceOnlyHint')),
+                  el('div', { 'data-dscw-toggle': '' },
+                    el('label', null, t('techdocs')),
+                    el(Switch, {
+                      checked: draft.techdocs === true,
+                      onChange: (v) => setPath('techdocs', v),
+                      label: t('techdocs'),
+                    })
+                  ),
+                  el('div', { 'data-dscw-hint': '' }, t('techdocsHint')),
                 ),
               ),
               // 并发与语言：决定同时开多少条请求、同时推进几个仓库、写什么语言的文章。

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.18.2 — 2026-11-08
+
+### 设置页补上 TechDocs 开关
+
+`techdocs` 在 0.17.62 就进了 Config，但面板一直没渲染它、也没进 `SAVE_KEYS`。后果是它只能在
+profile 的 `cordis.patch.yml` 里手写，而设置页看着像「这个功能没有开关」——用户在页面上找不到
+它，`SAVE_KEYS` 里也没有这个键，即使手工渲染了也存不下去。
+
+补法是把它接到「产物与提醒」段（`updateReminder` / `autoCommit` / `workspaceOnly` 之后），
+文案说明它每轮会多导出约 37 个文件、并且不进 cw 索引——这个量级应该让人在打开前就知道。
+
+```
+Config 字段: 28 | SAVE_KEYS: 28
+SAVE_KEYS 里但 Config 没有（会静默丢值）: 无
+Config 有但 SAVE_KEYS 没有（面板改不了）: 无
+```
+
+`SAVE_KEYS` 是自动保存的字段表（`client.js:1229` 逐键比对 draft 与 base 生成 `form.mutate` 的
+set 操作），所以键进表才会真正落盘。
+
+**未验证**：浏览器里点一次开关看它落盘（需要重启宿主加载新 client bundle）。
+
 ## 0.18.1 — 2026-11-07
 
 ### 会话列表：终态记录不再摸磁盘，轮询从 40ms 降到 5ms
