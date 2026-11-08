@@ -7,8 +7,8 @@
 | 文件 | 职责 | 对外核心导出 |
 | --- | --- | --- |
 | `lib/job-store.js` | `jobs.json` 的跨进程持久化 / 现场合并 / 所有权判定 / 原生通道可重放快照 | `createJobsStore`、`normKey`、`isTerminalStage`、`mergeJobLists`、`findActiveJob`、`classifyOwnership`、`planForeignJob`、`heartbeat`、`adoptOrphan`、`reassignSession`、`snapshotNativeRun`、`planNativeReplay`、`serializeJobs` |
-| `lib/job-logs.js` | 引擎事件日志（NDJSON，一个任务一个文件，落在仓库外） | `appendLog`、`readLogTail`、`logStats`、`logFileOf`、`removeLog` |
-| `lib/update-record.js` | 一次编译「做了什么、为什么、够不够完整」的版本化记录与终态裁决 | `judgeOutcome`、`buildUpdateRecord`、`saveUpdateRecord`、`loadUpdateRecord`、`isTerminalStage`、`describeOutcome` |
+| `lib/job-logs.js` | 引擎事件日志（NDJSON，一个任务一个文件，落在仓库外） | `appendLog`、`readLogTail`、`logStats`、`logFileOf` |
+| `lib/update-record.js` | 一次编译「做了什么、为什么、够不够完整」的版本化记录与终态裁决 | `judgeOutcome`、`buildUpdateRecord`、`saveUpdateRecord`、`isTerminalStage`、`describeOutcome` |
 
 上层调用者只有一个：`index.js` 里的 `createJobService`（见 [Job_Orchestration___State_Management.md](../Job_Orchestration___State_Management.md) 与 [plugin-orchestration.md](plugin-orchestration.md)）。它把这些能力组装成 10 秒节拍的阶段机。
 
@@ -241,9 +241,10 @@ flowchart TB
 | `appendLog(jobId, entry)` | 追加一行；写失败返回 `false` 而**不抛** |
 | `readLogTail(jobId, limit = 200)` | 读最近 N 条，`limit` 夹在 1..5000；**坏行跳过**（文件被外部改动或写入不完整时，能读多少给多少比抛错更有用） |
 | `logStats(jobId)` | `{ path, bytes, updatedAt }`，文件不存在时 `bytes: 0, updatedAt: null` |
-| `removeLog(jobId)` | `rmSync(..., { force: true })`，删不掉就留着，不影响任何判定 |
 
 `appendLog` 不抛错的理由：日志是**观测**，不能因为它把编译打断。但调用方必须把失败如实报出去——`index.js` 的 `recordNativeLog()` 在 `appendLog` 返回 `false` 时写 `job.logError` 并 `note()`，绝不静默。
+
+本模块也**不提供删除日志的助手**：NDJSON 落在系统临时目录，由操作系统/临时目录清理策略回收；任务记录被 `MAX_JOBS_KEPT` 截断时日志仍在，这正是它存在的意义。
 
 ### 4.4 消费路径
 
@@ -347,8 +348,9 @@ IO 助手：
 
 - `recordPath(wikiPath)` → `<wikiPath>/temp/update-record.json`（`UPDATE_RECORD_REL`）。
 - `saveUpdateRecord(wikiPath, record, fsImpl = fs)` → `{ ok, path }` 或 `{ ok: false, reason }`，**从不抛**（记录失败只记 note）。
-- `loadUpdateRecord(wikiPath, fsImpl = fs)` → 版本不符返回 `null`，读不到/坏 JSON 也返回 `null`。
 - `describeOutcome(outcome, blockers)` → 面板/工具文案：`完成（所有变化已消化）` / `部分完成（N 项未满足：…）` / `已取消` / `失败（…）`。
+
+记录**只写不读**：本模块不再提供回读记录的助手，落盘文件是给人/审计脚本看的复盘证据，程序侧的消费路径是 `job.updateRecord` 里那份摘要（见 5.6）。
 
 ### 5.6 两条落盘通道
 
@@ -365,7 +367,7 @@ flowchart LR
 
 ### 5.7 版本与兼容
 
-`UPDATE_RECORD_VERSION = 1`，`loadUpdateRecord()` 遇到版本不符**直接返回 `null`** 而不是尝试兼容迁移：记录是「事后复盘证据」，读到一个半懂不懂的旧结构比读不到更危险。升级记录结构时只需把版本号 +1，旧文件自然失效（`job.updateRecord` 里的摘要仍在 `jobs.json` 里可查）。
+`UPDATE_RECORD_VERSION = 1` 写进每条记录，升级记录结构时只需把版本号 +1，旧文件自然与新一轮记录区分开（`job.updateRecord` 里的摘要仍在 `jobs.json` 里可查）。本模块**不再读回记录**，因此也没有「版本不符时要不要兼容迁移」这个问题：记录是「事后复盘证据」，文件躺在那里供人读，不会成为下一轮的输入，读到半懂不懂的旧结构也不会影响任何判定。
 
 `notes` 只保留最近 20 条、`error`/`issue` 截断到 300 字符，这是为了让记录本身保持「可提交、可 diff、可机读」的体量；完整细节留在 job 的 `notes`（最多 50 条）与引擎 NDJSON 日志里。
 
@@ -490,7 +492,7 @@ stateDiagram-v2
 
 | 注入点 | 位置 | 用途 |
 | --- | --- | --- |
-| `fsImpl` | `saveUpdateRecord(wikiPath, record, fsImpl)`、`loadUpdateRecord(wikiPath, fsImpl)` | 换掉文件系统，直接测「写失败只返回 reason」「版本不符返回 null」 |
+| `fsImpl` | `saveUpdateRecord(wikiPath, record, fsImpl)` | 换掉文件系统，直接测「写失败只返回 reason」 |
 | `keyOf` | `findActiveJob(jobs, cwd, { keyOf })` | 换掉路径归一化，测大小写敏感 / 不敏感两种平台语义 |
 | `exists` | `planNativeReplay(job, { exists })` | 伪造 `resumeDocsDir` 是否仍存在 |
 | `now` | `classifyOwnership`、`planForeignJob`、`heartbeat`、`adoptOrphan`、`reassignSession` | 固定时钟，把「停更 4 分钟 vs 6 分钟」钉死 |

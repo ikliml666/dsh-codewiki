@@ -307,5 +307,5 @@ sequenceDiagram
 | 引擎锁、指纹与受管状态 | [engine-state-manifest](engine-state-manifest.md) |
 | Python 入口、阶段映射、树覆盖补齐 | [engine-python-runtime](engine-python-runtime.md) |
 | `cw` 的 vendored 源码与索引规则 | [codewiki-vendor](codewiki-vendor.md) |
-| 文章契约闸门与写集 | [article-pipeline](article-pipeline.md) |
+| 文章契约闸门与变更采集 | [article-pipeline](article-pipeline.md) |
 | 任务队列、排队与自动调度 | [Job_Orchestration___State_Management](job-orchestration-state-management.md) |

@@ -6,7 +6,7 @@ description: 本模块是原生引擎通道的外部边界层：它把上游 FSo
 # 引擎外部集成层（模型桥与 TechDocs 回读）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是原生引擎通道的**外部边界层**：它把上游 FSoft Python 引擎与两个「外部世界」接起来——
 一是宿主的模型服务（`llm.stream`），二是上游自己写盘产出的 TechDocs 站点。它不参与任何编译
@@ -15,7 +15,7 @@ description: 本模块是原生引擎通道的外部边界层：它把上游 FSo
 | 文件 | 角色 | 关键导出 |
 | --- | --- | --- |
 | `lib/engine/llm-bridge.js` | 进程内 loopback HTTP 桥（有 I/O、有端口、有生命周期） | `startLlmBridge`、返回对象的 `setStage` |
-| `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**（无 I/O、无网络、无密钥） | `isPlaceholderKey`、`PLACEHOLDER_KEY_PATTERN`、`toLlmRequest`、`chunksToCompletion`、`streamChunkToSse` |
+| `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**（无 I/O、无网络、无密钥） | `PLACEHOLDER_KEY_PATTERN`、`toLlmRequest`、`chunksToCompletion`、`streamChunkToSse` |
 | `lib/engine/techdocs.js` | 仓库外 TechDocs 站点目录 → 写集项 | `captureSite`、`TECHDOCS_DIR` |
 
 三个文件被 [引擎编排](engine-orchestration/engine-runner.md) 的 `native-run.js` 直接接线：
@@ -344,9 +344,22 @@ DSH `>=0.2.0-rc.0`，打包时 `bin/cw`、`lib`、`tools/fsoft-engine/*` 一并�
 - 上游锁 commit、依赖闭合与 venv 重建见 [构建与配置](../../Build___Development_Infrastructure/build-configuration.md) 与
   [vendored 引擎](../../Execution_Runtime___Vendored_Engine.md)。
 
-??? abstract "Documented components (4)"
-    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+??? abstract "Documented components (17)"
+    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`textBlock`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`contentToBlocks`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`toolsToSchemas`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`messageToDsh`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`toLlmRequest`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`finishReasonToOpenAI`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`usageToOpenAI`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`foldChunks`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`chunksToCompletion`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`sseFrame`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`streamChunkToSse`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`base`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`withRole`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
 

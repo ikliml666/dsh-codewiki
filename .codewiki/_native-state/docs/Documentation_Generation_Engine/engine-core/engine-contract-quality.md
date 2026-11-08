@@ -31,14 +31,14 @@
 | 组件 | 文件 | 作用 |
 | --- | --- | --- |
 | `validateEngineResult` | `lib/engine/contract.js` | 校验「可能来自外部/旧版本/磁盘」的结果对象，返回逐条 errors（不抛错） |
-| `describeEngineResult` | `lib/engine/contract.js` | 把结果翻成四态可一眼分清的中文终态文案 |
+| ~~`describeEngineResult`~~（已删除） | `lib/engine/contract.js` | 四态终态文案改由 `lib/update-record.js` 的 `describeOutcome` 唯一提供 |
 | `normalizeBlocker` | `lib/engine/contract.js`（内部） | 阻塞原因归一：未登记的 `kind` 降级为 `engine-error`，detail 截断 |
 | `gateNativeOutput` | `lib/engine/quality-gate.js` | 采用门主入口，产出 GateReport |
 | `toQualityIssues` | `lib/engine/quality-gate.js` | 把 GateReport 翻成 `judgeOutcome` 的 `qualityIssues` 输入 |
 | `proofreadPages` | `lib/engine/proofread.js` | 对死链源页做单轮语义校对并写回 |
 | `isExternalTarget` | `lib/engine/wiki-links.js` | 判外部协议链接（`http:`、`mailto:` 等），不参与页内解析 |
 
-同文件内的其它导出（`engineResult`、`engineProgress`、`engineError`、`renderArticle`、`assessBaseline`、`readCommittedBaseline`、`rewritePageLinks`、`yamlScalar`、`deadLinkSources`、`scanPageLinks` 等）也是本层的公开面，下文按主题说明。
+同文件内的其它导出（`engineResult`、`engineProgress`、`engineError`、`renderArticle`、`assessBaseline`、`readCommittedBaseline`、`rewritePageLinks`、`yamlScalar`、`deadLinkSources`、`scanPageLinks` 等）也是本层的公开面，下文按主题说明。终态文案不在此列：它由 `lib/update-record.js` 的 `describeOutcome` 提供（`contract.js` 原先的 `describeEngineResult` 已删除）。
 
 ---
 
@@ -167,12 +167,12 @@ flowchart TD
 
 ### 4.5 终态文案
 
-`describeEngineResult` 与 `lib/update-record.js` 的 `describeOutcome` 同一口径，四态可一眼分清：
+四态终态文案现在**只有一处实现**：`lib/update-record.js` 的 `describeOutcome(outcome, blockers)`。`contract.js` 原先并列提供的 `describeEngineResult` 已删除——同一口径写两份正是文案漂移的来源；契约层只保留可机读字段（`outcome` / `blockers` / `error`），给人看的措辞统一由 `describeOutcome` 提供。
 
-- `done` → `完成（写入 N 篇）`
-- `partial` → `部分完成（写入 N 篇，M 篇未完成）：<首条 blocker 的 detail>`
-- `failed` → `失败：<error.message>`
-- `cancelled` → `已取消（已写入 N 篇）`
+- `done` → `完成（所有变化已消化）`
+- `partial` → `部分完成（N 项未满足：<首条 blocker 的 detail 或 kind，截断 120 字符>）`
+- `failed` → `失败（<首条 blocker 的 detail 或 kind，截断 160 字符；无 blocker 时为「无可用成果」>）`
+- `cancelled` → `已取消`
 
 ---
 

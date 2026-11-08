@@ -6,7 +6,7 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 # engine-python-runtime：FSoft 原生引擎的 Python 侧运行时
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-python-runtime` 是本插件在 **Python 进程内**运行的那一半引擎运行时。它不实现任何文档算法——
 依赖图、模块聚类、文章写作、增量 diff 全部由 vendored 的上游 FSoft（CodeWiki）引擎完成。
@@ -128,9 +128,8 @@ flowchart TD
 | `main` | `lib/engine/python/entry.py` | 协议主循环：hello → 读一行请求 → 分派 → 写 result |
 | `_ProtocolOnly` | `lib/engine/python/entry.py` | `sys.stdout` 替身：只放行协议写出，其余改道 stderr |
 | `_popen_init_utf8` | `lib/engine/python/entry.py` | `subprocess.Popen` 默认 UTF-8 补丁（仅 text 模式） |
-| `articles_ceiling` | `lib/engine/python/stage_map.py` | articles 槽位的百分比上限（阶段 3 完成时） |
 | `run_leaf_agents` | `lib/engine/python/fsoft_runtime.py` | 增量 Step 5 入口：排序活跃叶子 → 补挂归属 → 隔离并行执行 |
-| `_SharedTreeIO` | `lib/engine/python/full_parallel_runtime.py` | `module_tree.json` 读改写串行化 + 并行分支增量合并 |
+| `_install_shared_tree_io` | `lib/engine/python/full_parallel_runtime.py` | 在 `FileManager` 类上串行化 `module_tree.json` 读改写 + 并行分支增量合并 |
 | `file_owner` | `lib/engine/python/tree_coverage.py` | 查询某文件被哪个叶子认领 |
 
 文件间依赖（箭头 = import / 调用）：
@@ -527,8 +526,7 @@ FSoft 自己的 `ProgressTracker` 只有五段。两边一旦漂移，表现是"
 | --- | --- |
 | `map_stage(fsoft_stage)` | 阶段号 → 引擎阶段名；未知阶段归 `DEFAULT_ENGINE_STAGE`（`articles`），**不抛错**——进度上报是旁路，任何时刻都不该因版本差异打断编译 |
 | `percent_of(fsoft_stage, stage_progress)` | 与上游 `get_overall_progress` 同构（已完成权重和 + 当前权重×进度），再乘 90 并夹到 [0,100]。自己重算而非调上游方法，是为了在不持有 tracker 实例时也能算（测试与日志回放） |
-| `articles_percent(written, total)` | articles 槽位内的百分比：`lo = percent_of(3, 0.0)`，`hi = percent_of(3, 1.0)`，按 `written/total` 线性插值 |
-| `articles_ceiling()` | `percent_of(3, 1.0)`，阶段 3 完成时的上限 |
+| `articles_percent(written, total)` | articles 槽位内的百分比：`lo = percent_of(3, 0.0)`，`hi = percent_of(3, 1.0)`，按 `written/total` 线性插值（阶段 3 完成时的上限即 `hi`） |
 | `is_incremental(description)` | description 是否含 `incremental update` |
 
 ```mermaid
@@ -575,13 +573,16 @@ flowchart TD
 根总览在所有顶层模块写完后统一生成（与上游顺序一致）。收尾三件事必须保留：**覆盖校验**（`validate_module_file_coverage`）、
 **页面归位**（`organize_docs`）、**失败上抛**（`RuntimeError("Documentation failed for modules: ...")`）。
 
-#### `_SharedTreeIO` 与 `_merge_tree`：并发读改写
+#### `_install_shared_tree_io` 与 `_merge_tree`：并发读改写
 
 并行分支各自 `from codewiki.src.utils import file_manager` 拿到的是同一个类对象，因此必须在**类方法**上串行化读写；只替换
 `documentation_generator` 模块里的名字，真实后端（`pydantic_ai_backend` / `caw_backend`）仍会用自己 import 的那份，
 两条分支的 read-modify-write 会互相覆盖，后写者的子模块直接丢失。
 
-`_SharedTreeIO` 只接管 `module_tree.json`（其它文件走原实现），在 `_TREE_LOCK`（`threading.RLock`）内做 read-merge-write。
+`_install_shared_tree_io`（由 `install_full_runtime` 调用，全进程只装一次）直接把 `file_manager.__class__` 的
+`save_json` / `load_json` 换成 `staticmethod` 包装：只接管 `module_tree.json`（其它文件走原实现），在 `_TREE_LOCK`（`threading.RLock`）内做 read-merge-write。
+原始两个方法保存在模块级的 `_ORIG_SAVE` / `_ORIG_LOAD` 里，`write_tree_exclusive` 与合并逻辑都靠它们绕过包装直接读写磁盘。
+
 `_merge_tree` 的冲突判据分三类：
 
 | 情形 | 处置 | 理由 |
@@ -604,8 +605,8 @@ flowchart TD
 | `install_full_runtime(concurrency=None)` | 安装并行 `_generate_modules_in_order`；`concurrency` 为 `None` 时沿用已配置值 |
 | `configure_full_runtime(concurrency)` | 设置模块级并发度（1 = 上游串行），夹到 `>=1` |
 | `current_concurrency()` | 读当前并发度（加锁读取） |
-| `write_tree_exclusive(filepath, mutate)` | 在树锁内做「读 → mutate → 覆盖写」，跳过合并语义 |
-| `_SharedTreeIO` | 只接管 `module_tree.json` 的 `save_json` / `load_json`，其余委托原实现 |
+| `write_tree_exclusive(filepath, mutate)` | 在树锁内做「读 → mutate → 覆盖写」，跳过合并语义；需在 `install_full_runtime()` 之后调用 |
+| `_install_shared_tree_io()` | 在 `file_manager` 类上装 `module_tree.json` 的串行化读写（全进程一次），原始方法存进 `_ORIG_SAVE` / `_ORIG_LOAD` |
 
 `_CONCURRENCY` 用 `threading.Lock` 保护：`configure_full_runtime` 由 `entry.py` 在构造 generator **之前**调用，
 但并行分支是协程，读取可能发生在任意时刻，因此不能裸读全局变量。
@@ -831,7 +832,7 @@ sequenceDiagram
 | 7 | 进度上限 90%，留给 Node 侧 `index`/`baseline`/`commit` | 引擎说 100% 但 wiki 未提交的假完成 | `FSOFT_PROGRESS_CEILING` |
 | 8 | `ENGINE_STAGES` 必须与 `contract.js` 完全一致 | 面板阶段错位，且错得不响 | `stage_map.py` + 双向对账测试 |
 | 9 | 运行时补丁的源码锚点不匹配必须显式失败 | 增量/并行语义静默变成别的样子 | `install_*_runtime` |
-| 10 | `module_tree.json` 读改写必须在锁内且做合并 | 并行分支互相覆盖，子模块丢失 | `_SharedTreeIO` / `_TREE_LOCK` |
+| 10 | `module_tree.json` 读改写必须在锁内且做合并 | 并行分支互相覆盖，子模块丢失 | `_install_shared_tree_io` / `_TREE_LOCK` |
 | 11 | 叶子 `components` 真冲突必须抛错 | 静默丢内容且无法回溯 | `_merge_tree` |
 | 12 | 断点签名变化且无基线时拒绝续跑 | 账本与页面来自两个现场 | `_load_completed` |
 | 13 | 空产物不得伪装 `partial` | 基线与面板失真 | `_salvage` |
@@ -860,12 +861,26 @@ sequenceDiagram
 | `增量断点签名已变化，且没有可恢复的受管基线` | 上游/选项/树/图变了但没给 `resumeBaselineDocsDir` | `_load_completed` |
 | 整轮报 `done` 但文章明显没写 | agent 异常被上游吞成 `no-op` | `_failed_calls_of` |
 
-??? abstract "Documented components (7)"
-    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
-    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+??? abstract "Documented components (21)"
+    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
+    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+    - [`configure_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`current_concurrency`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_merge_tree`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`write_tree_exclusive`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_node_at`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_module`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_walk`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_parallel`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_install_shared_tree_io`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`install_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`is_incremental`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`articles_percent`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`map_stage`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`percent_of`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
 

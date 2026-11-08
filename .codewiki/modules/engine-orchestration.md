@@ -5,6 +5,8 @@ source_files:
   - lib/engine/apply-plan.js
   - lib/engine/client.js
   - lib/engine/native-run.js
+  - lib/article-contract.js
+  - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Documentation_Generation_Engine/engine-core/engine-orchestration.md

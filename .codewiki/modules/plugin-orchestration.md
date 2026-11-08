@@ -65,7 +65,6 @@ flowchart TB
     REC["lib/update-record.js"]
     CS["lib/change-set.js"]
     GP["lib/git-paths.js"]
-    AC["lib/article-contract.js"]
     NS["lib/engine/native-state.js"]
     NR["lib/engine/native-run.js"]
   end
@@ -92,7 +91,6 @@ flowchart TB
   API --> SESS
   API --> LOGS
   COMMIT --> GP
-  TOOLS --> AC
 
   LLMSVC -.注入.-> APPLY
   TOOLREG -.注册.-> TOOLS

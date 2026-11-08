@@ -107,6 +107,6 @@ flowchart LR
 | 进程与协议层 | [engine-runner](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner.md) |
 | Python 入口、阶段映射 | [engine-python-runtime](Execution_Runtime___Vendored_Engine/engine-python-runtime.md) |
 | `cw` 的 vendored 源码与索引规则 | [codewiki-vendor](Execution_Runtime___Vendored_Engine/codewiki-vendor.md) |
-| 文章契约闸门与写集 | [article-pipeline](Documentation_Generation_Engine/article-pipeline.md) |
+| 文章契约闸门与变更采集 | [article-pipeline](Documentation_Generation_Engine/article-pipeline.md) |
 | 设置卡片与侧边栏面板 | [ui-client](ui-client.md) |
 | 任务队列、排队与自动调度 | [Job_Orchestration___State_Management](Job_Orchestration___State_Management.md) |

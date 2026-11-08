@@ -3,6 +3,8 @@ title: apply-plan 落地器
 type: module
 source_files:
   - lib/engine/apply-plan.js
+  - lib/article-contract.js
+  - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Documentation_Generation_Engine/engine-core/engine-orchestration/apply-plan.md

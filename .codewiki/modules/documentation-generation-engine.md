@@ -21,6 +21,7 @@ source_files:
   - lib/article-contract.js
   - lib/article-repair.js
   - lib/change-set.js
+  - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Documentation_Generation_Engine.md

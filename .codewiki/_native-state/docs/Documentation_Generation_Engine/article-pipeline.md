@@ -4,7 +4,7 @@
 
 | 文件 | 职责 | 是否碰文件系统 |
 |------|------|----------------|
-| `lib/article-contract.js` | 文章结构契约：frontmatter、必填字段、章节、围栏、死链、`source_files` 证据；写集白名单判定 | 否（`fsImpl` 由调用方注入） |
+| `lib/article-contract.js` | 文章结构契约：frontmatter、必填字段、章节、围栏、死链、`source_files` 证据 | 否（`fsImpl` 由调用方注入） |
 | `lib/article-repair.js` | 存量页修复器：格式坏了但内容还在的页就地修好，只有内容本身是模型输出泄漏才判删 | 否（纯字符串变换） |
 | `lib/change-set.js` | 变更采集：把 committed / staged / unstaged / untracked 四路 git 改动合成一个可序列化的 ChangeSet | 是（`execFileSync` 调 git，可注入替身） |
 
@@ -70,7 +70,7 @@ flowchart TD
 
 旧闸门 `validateArticleEnvelope` 只查「frontmatter 有没有开头、有没有闭合」，于是下面这些都能入库：同一篇里贴了两份 frontmatter 与两段正文；必需章节存在但正文只有标题；`source_files` 列着不存在的文件或列着目录；`[[链接]]` 指向早已删掉的文章；代码围栏没闭合导致后半篇全被当成代码块。
 
-本模块把这些判据统一成一个**纯函数** `inspectArticle(content, opts)`，返回 `issues[]`（空数组 = 通过）。因为不碰文件系统，它能被逐条单测；真正的落盘闸门在 `index.js` / `apply-plan.js` 里调用它。
+本模块把这些判据统一成一个**纯函数** `inspectArticle(content, opts)`，返回 `issues[]`（空数组 = 通过）。因为不碰文件系统，它能被逐条单测；真正的落盘闸门在 `quality-gate.js`（判刚渲染出来的页）与 `apply-plan.js`（判库里躺着的存量页）里调用它。
 
 ### 2.2 类型与目录的对应
 
@@ -137,7 +137,7 @@ flowchart TD
 
 「放行 warning」不是宽松，而是必要：旧通道的整包装填产出天然是「一段正文」，硬拒会把存量文章全判死；但「装绿」同样不允许，所以 warning 会进 `qualityIssues` 并压住基线。
 
-对外三个便捷函数：`hasBlockingIssue(issues)`（是否含 error 级）、`issueSummary(issues)`（压成一行人类可读文案，通过返回 `null`）、`makeWriteSet(paths)` / `isWritable(target, writeSet, {cwd})`（agentic 工具的 `allowedWritePaths` 闸门；写集按规范化 POSIX 路径比对，相对路径以 `cwd` 为基准解析，防 `../` 越界）。
+对外只暴露 `inspectArticle` 这一个判据入口（外加 `parseFrontmatter` / `stripCode` / `fencesBalanced` / `collectWikiLinks` 等纯字符串助手）。**「这批 issues 里有没有阻塞项」「压成一行文案」不再由本模块提供封装**：`severity` 已经逐条挂在每个 issue 上，消费方按需自行过滤——`quality-gate.js` 按 `issue.severity ?? 'error'` 把 error 分流进 defects、其余进 degradations；`apply-plan.js` 的 `auditExistingArticles` 同样只取 `(i.severity ?? 'error') === 'error'` 的条目并拼成 detail。写集白名单判定（`allowedWritePaths` 那类）也不在本模块：落地器有自己的一套写集/删除集共用尺子（见 [apply-plan](engine-core/engine-orchestration/apply-plan.md)），`index.js` 的增量通道另按 `source_files` 做归属判定。
 
 ### 2.5 `NATIVE_ARTICLE_OPTS`：两处共用的一口径
 
@@ -308,7 +308,7 @@ sequenceDiagram
 
 | 消费方 | 使用的导出 | 用途 |
 |--------|-----------|------|
-| `index.js` | `inspectArticle`、`collectChangeSet` | 文件级增量归属判定、写盘前兜底校验 |
+| `index.js` | `collectChangeSet` | 文件级增量归属判定（变更集里每个源码路径是否被某篇文章的 `source_files` 认领） |
 | `quality-gate.js` | `inspectArticle`、`parseFrontmatter`、`fencesBalanced`、`stripCode`、`NATIVE_ARTICLE_OPTS` | 渲染后逐篇契约检查（`checkRendered`）、入口页围栏检查 |
 | `output.js` | `stripCode` | `relativeLinks` 跳过代码里的链接示例 |
 | `proofread.js` | `stripCode` | 校对时只改正文里的真链接 |

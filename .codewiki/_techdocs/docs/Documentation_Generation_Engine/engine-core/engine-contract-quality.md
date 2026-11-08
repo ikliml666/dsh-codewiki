@@ -6,7 +6,7 @@ description: 本模块是 DocumentationGenerationEngine 中负责「判据」的
 # engine-contract-quality：引擎契约与质量裁决层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 Documentation_Generation_Engine 中负责「**判据**」的那一层：它定义 Node 与 Python 引擎之间的跨进程结果契约，并把引擎交回来的产物裁决成可机读的终态（`done` / `partial` / `failed` / `cancelled`）、阻塞原因与「基线能不能推进」。它本身**不跑引擎、不写文件、不改文章正文**，只做纯数据校验与判定，因此可以被逐条测试钉死。
 
@@ -39,14 +39,14 @@ description: 本模块是 DocumentationGenerationEngine 中负责「判据」的
 | 组件 | 文件 | 作用 |
 | --- | --- | --- |
 | `validateEngineResult` | `lib/engine/contract.js` | 校验「可能来自外部/旧版本/磁盘」的结果对象，返回逐条 errors（不抛错） |
-| `describeEngineResult` | `lib/engine/contract.js` | 把结果翻成四态可一眼分清的中文终态文案 |
+| ~~`describeEngineResult`~~（已删除） | `lib/engine/contract.js` | 四态终态文案改由 `lib/update-record.js` 的 `describeOutcome` 唯一提供 |
 | `normalizeBlocker` | `lib/engine/contract.js`（内部） | 阻塞原因归一：未登记的 `kind` 降级为 `engine-error`，detail 截断 |
 | `gateNativeOutput` | `lib/engine/quality-gate.js` | 采用门主入口，产出 GateReport |
 | `toQualityIssues` | `lib/engine/quality-gate.js` | 把 GateReport 翻成 `judgeOutcome` 的 `qualityIssues` 输入 |
 | `proofreadPages` | `lib/engine/proofread.js` | 对死链源页做单轮语义校对并写回 |
 | `isExternalTarget` | `lib/engine/wiki-links.js` | 判外部协议链接（`http:`、`mailto:` 等），不参与页内解析 |
 
-同文件内的其它导出（`engineResult`、`engineProgress`、`engineError`、`renderArticle`、`assessBaseline`、`readCommittedBaseline`、`rewritePageLinks`、`yamlScalar`、`deadLinkSources`、`scanPageLinks` 等）也是本层的公开面，下文按主题说明。
+同文件内的其它导出（`engineResult`、`engineProgress`、`engineError`、`renderArticle`、`assessBaseline`、`readCommittedBaseline`、`rewritePageLinks`、`yamlScalar`、`deadLinkSources`、`scanPageLinks` 等）也是本层的公开面，下文按主题说明。终态文案不在此列：它由 `lib/update-record.js` 的 `describeOutcome` 提供（`contract.js` 原先的 `describeEngineResult` 已删除）。
 
 ---
 
@@ -175,12 +175,12 @@ flowchart TD
 
 ### 4.5 终态文案
 
-`describeEngineResult` 与 `lib/update-record.js` 的 `describeOutcome` 同一口径，四态可一眼分清：
+四态终态文案现在**只有一处实现**：`lib/update-record.js` 的 `describeOutcome(outcome, blockers)`。`contract.js` 原先并列提供的 `describeEngineResult` 已删除——同一口径写两份正是文案漂移的来源；契约层只保留可机读字段（`outcome` / `blockers` / `error`），给人看的措辞统一由 `describeOutcome` 提供。
 
-- `done` → `完成（写入 N 篇）`
-- `partial` → `部分完成（写入 N 篇，M 篇未完成）：<首条 blocker 的 detail>`
-- `failed` → `失败：<error.message>`
-- `cancelled` → `已取消（已写入 N 篇）`
+- `done` → `完成（所有变化已消化）`
+- `partial` → `部分完成（N 项未满足：<首条 blocker 的 detail 或 kind，截断 120 字符>）`
+- `failed` → `失败（<首条 blocker 的 detail 或 kind，截断 160 字符；无 blocker 时为「无可用成果」>）`
+- `cancelled` → `已取消`
 
 ---
 
@@ -487,11 +487,11 @@ flowchart TD
 - 构建与打包：[构建与配置（build-configuration）](../../Build___Development_Infrastructure/build-configuration.md)、[FSoft 引擎工具链（fsoft-engine-tools）](../../Build___Development_Infrastructure/fsoft-engine-tools.md)
 
 ??? abstract "Documented components (7)"
-    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
-    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
+    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
+    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
 

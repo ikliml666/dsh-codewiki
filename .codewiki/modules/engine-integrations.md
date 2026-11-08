@@ -18,7 +18,7 @@ fsoft_page: Documentation_Generation_Engine/engine-core/engine-integrations.md
 | 文件 | 角色 | 关键导出 |
 | --- | --- | --- |
 | `lib/engine/llm-bridge.js` | 进程内 loopback HTTP 桥（有 I/O、有端口、有生命周期） | `startLlmBridge`、返回对象的 `setStage` |
-| `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**（无 I/O、无网络、无密钥） | `isPlaceholderKey`、`PLACEHOLDER_KEY_PATTERN`、`toLlmRequest`、`chunksToCompletion`、`streamChunkToSse` |
+| `lib/engine/openai-bridge.js` | OpenAI-compatible ↔ DSH LLM 的**纯转换**（无 I/O、无网络、无密钥） | `PLACEHOLDER_KEY_PATTERN`、`toLlmRequest`、`chunksToCompletion`、`streamChunkToSse` |
 | `lib/engine/techdocs.js` | 仓库外 TechDocs 站点目录 → 写集项 | `captureSite`、`TECHDOCS_DIR` |
 
 三个文件被 [引擎编排](engine-runner.md) 的 `native-run.js` 直接接线：

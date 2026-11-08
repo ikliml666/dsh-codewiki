@@ -18,6 +18,8 @@ source_files:
   - lib/engine/techdocs.js
   - lib/engine/wiki-links.js
   - lib/engine/workspace-snapshot.js
+  - lib/article-contract.js
+  - lib/job-logs.js
 tags: []
 generated_by: fsoft-native
 fsoft_page: Documentation_Generation_Engine/engine-core.md
