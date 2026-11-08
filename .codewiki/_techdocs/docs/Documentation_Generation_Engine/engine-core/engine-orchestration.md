@@ -6,7 +6,7 @@ description: engine-orchestration 是原生（FSoft）CodeWiki 编译通道的�
 # engine-orchestration 模块概览
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-orchestration` 是原生（FSoft）CodeWiki 编译通道的**执行与裁决层**。它不负责文章生成算法，也不定义跨层契约；它负责把一次编译请求从“调用方说开始”推进到“可机读的终态结论”，并把质量门允许入库的产物真正落到仓库中。其核心问题是：**每一步的结论都不能被下一步洗白**。
 
@@ -135,12 +135,12 @@ sequenceDiagram
 - 上层模块概览：[engine-core 模块概览](../engine-core.md) / [Documentation_Generation_Engine 模块概览](../../Documentation_Generation_Engine.md)
 
 ??? abstract "Documented components (8)"
-    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

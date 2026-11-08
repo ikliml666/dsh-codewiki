@@ -126,7 +126,7 @@ flowchart TD
 - **`source_files` 只判格式，不猜类型**：绝对路径、盘符、`..` 上跳、尾斜杠一律 `bad-source`。**不**用「有没有扩展名」判文件——`Dockerfile` / `Makefile` / `LICENSE` 是合法文件名，按扩展名判会把它们全判坏。`src/util` 这种不带尾斜杠的目录只能靠调用方提供的 `fsImpl.isDirectory` 发现。
 - **章节**：`## 标题` 提取时跳过代码围栏（围栏里的 `##` 是示例）。必需章节按类型配置——`module` / `architecture` 要求 `Overview` 与 `Key Components`，其余类型只要 `Overview`，`index` 不要求。**`missing-section` 与 `empty-section` 必须分开**：「压根没写这一章」与「写了标题却空着」是两种缺陷。
 - **重复 frontmatter**：只判围栏外、且成对 `---` 之间 40 行内出现 `title:` / `type:` / `source_files:` 的情形。文章里用 ```` ```yaml ```` 演示 frontmatter 契约是常见写法，围栏里的 `---` 是示例不是文档自己的头。
-- **死链**：`collectWikiLinks` 同时收集 `[[target]]` 与 `[文字](x.md)`，且**先剥代码**——文章里写 `[[target]]` 往往是在讲链接语法，那是字面量而不是引用。不剥就会得到「文档在解释契约、却被契约判违规」的荒谬结论。目标解析支持「原样名 / 加 `.md` / 相对当前文章目录 / 相对目录加 `.md`」四种写法。
+- **死链**：`collectWikiLinks` 同时收集 `[[target]]` 与 `[文字](链接目标)`，且**先剥代码**——文章里写 `[[target]]` 往往是在讲链接语法，那是字面量而不是引用。不剥就会得到「文档在解释契约、却被契约判违规」的荒谬结论。目标解析支持「原样名 / 加 `.md` / 相对当前文章目录 / 相对目录加 `.md`」四种写法。
 
 ### 2.4 问题分级：error 与 warning 是行为分界
 

@@ -6,7 +6,7 @@ description: 本模块是原生引擎通道的外部边界层：它把上游 FSo
 # 引擎外部集成层（模型桥与 TechDocs 回读）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是原生引擎通道的**外部边界层**：它把上游 FSoft Python 引擎与两个「外部世界」接起来——
 一是宿主的模型服务（`llm.stream`），二是上游自己写盘产出的 TechDocs 站点。它不参与任何编译
@@ -345,8 +345,8 @@ DSH `>=0.2.0-rc.0`，打包时 `bin/cw`、`lib`、`tools/fsoft-engine/*` 一并�
   [vendored 引擎](../../Execution_Runtime___Vendored_Engine.md)。
 
 ??? abstract "Documented components (4)"
-    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
 

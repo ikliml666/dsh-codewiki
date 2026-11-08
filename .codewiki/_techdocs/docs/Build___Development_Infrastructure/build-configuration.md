@@ -6,7 +6,7 @@ description: 本模块是 dsh-codewiki 的构建面与配置面：它不含编�
 # 构建与配置（build-configuration）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `dsh-codewiki` 的**构建面与配置面**：它不含编译算法，只决定「这个包长什么样、怎么被宿主装载、装载后拿到哪些默认配置、以及运行原生引擎所需的 Python 环境怎么造出来」。三个工件构成完整闭环：
 
@@ -186,7 +186,7 @@ flowchart TD
 
 ### 3.4 设置页与补丁的等价性
 
-设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（28 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。CHANGELOG 0.18.2 记录了一次这类缺口（`techdocs` 进了 `Config` 却没进 `SAVE_KEYS`）。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client（浏览器半侧客户端）](../ui-client.md)。
+设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（28 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。`techdocs` 曾经进过 `Config` 却没进 `SAVE_KEYS`、也没在表单里渲染（CHANGELOG 0.18.2 记录的缺口），现在它已接到「运行」分组的 `workspaceOnly` 之后，两侧对齐。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client（浏览器半侧客户端）](../ui-client.md)。
 
 ---
 
@@ -332,7 +332,7 @@ sequenceDiagram
 子进程环境由 `nativeEnginePlan()` 固定：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`CODEWIKI_NO_KEYRING=1`，模型通道只用桥生成的占位 key（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），真实凭证从不进入子进程环境或日志。
 
 ??? abstract "Documented components (3)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/cordis.patch.yml) — `cordis.patch.yml`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/package.json) — `package.json`
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/cordis.patch.yml) — `cordis.patch.yml`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/package.json) — `package.json`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
 

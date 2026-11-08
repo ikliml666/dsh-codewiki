@@ -178,7 +178,7 @@ flowchart TD
 
 ### 3.4 设置页与补丁的等价性
 
-设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（28 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。CHANGELOG 0.18.2 记录了一次这类缺口（`techdocs` 进了 `Config` 却没进 `SAVE_KEYS`）。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client](../ui-client.md)。
+设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（28 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。`techdocs` 曾经进过 `Config` 却没进 `SAVE_KEYS`、也没在表单里渲染（CHANGELOG 0.18.2 记录的缺口），现在它已接到「运行」分组的 `workspaceOnly` 之后，两侧对齐。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client](../ui-client.md)。
 
 ---
 

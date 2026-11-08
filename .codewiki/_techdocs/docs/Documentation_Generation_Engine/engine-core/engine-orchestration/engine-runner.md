@@ -6,7 +6,7 @@ description: engine-runner 是 DocumentationGenerationEngine/engine-core/engine-
 # engine-runner：原生引擎执行与裁决编排
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-runner` 是 `Documentation_Generation_Engine/engine-core/engine-orchestration` 下的执行层，负责把「一次 CodeWiki 编译」从一句请求变成**可机读的终态结论**。它只包含两个文件，却承担两类完全不同性质的职责：
 
@@ -326,6 +326,6 @@ flowchart LR
 单测还依赖 `client.js` 的两处纯函数式设计：`createProtocolReader` 不碰进程（可逐字节喂，模拟管道任意切分），以及 `DSH_CODEWIKI_ENGINE_SILENCE_MS` 允许把静默阈值压到 30 秒以上便于快速验证。
 
 ??? abstract "Documented components (2)"
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

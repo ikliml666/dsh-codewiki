@@ -175,7 +175,7 @@ graph LR
 - **快照订阅**：`pull()` 读快照并按 `snap.revision` 覆盖草稿——只有宿主值真的换了修订号才覆盖，避免保存回读时把用户正在输入的内容冲掉。
 - **可自动保存字段**由 `SAVE_KEYS` 白名单控制（新增字段必须同时进 `SAVE_KEYS` 与渲染，否则改了不会落盘）：
 
-  `enabled`、`binaryPath`、`maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`、`articleLanguage`、`updateReminder`、`autoCommit`、`workspaceOnly`、`batchProvider`、`batchModel`、`batchReasoningEffort`、`effortByStage`、`excludePaths`、`autoUpdate`、`autoUpdateMin`、`requestLimit`、`nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs`、`updateRung`、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree`
+  `enabled`、`binaryPath`、`maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`、`articleLanguage`、`updateReminder`、`autoCommit`、`workspaceOnly`、`techdocs`、`batchProvider`、`batchModel`、`batchReasoningEffort`、`effortByStage`、`excludePaths`、`autoUpdate`、`autoUpdateMin`、`requestLimit`、`nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs`、`updateRung`、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree`
 
 - **校验**：`maxConcurrency` 必须是 1–8 的整数；`requestLimit` 必须是 1–1000 的整数。校验不过的草稿不提交，错误常显在底部状态行并提供「立即重试」。
 - **串行提交**：`savingRef` 保证同一时刻只有一次 `mutate` 在飞；`pendingRef` 保留最新草稿，保存期间再改动会在 finally 里重新排期。
@@ -203,7 +203,7 @@ stateDiagram-v2
 
 | 分组 | 字段 |
 | --- | --- |
-| 运行（`secRun`） | `enabled`、`updateReminder`、`autoCommit`、`workspaceOnly` |
+| 运行（`secRun`） | `enabled`、`updateReminder`、`autoCommit`、`workspaceOnly`、`techdocs` |
 | 并发与语言（`secScale`） | `maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`（串行时禁用）、`articleLanguage`、`binaryPath` |
 | 原生引擎（`secNative`） | `nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs` |
 | 增量策略（`secIncremental`） | `updateRung`（空/3/3b/2/1/0）、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree` |
@@ -211,6 +211,8 @@ stateDiagram-v2
 | 调度与排除（`secSchedule`） | `autoUpdate`、`autoUpdateMin`、`excludePaths`（textarea） |
 
 **模型级联**：`/models` 可用时提供商与模型是下拉（目录外的值保留为 `__custom` 选项，避免静默丢配置）；不可用时整组退化为手填 `Input`，`catalogUnavailable` 提示错误但不阻断保存。`/model-efforts` 返回的档位是 `{ id, name, description }` 对象；若模型目录未声明档位，则回退到 `GENERIC_EFFORTS`（`off`、`low`、`medium`、`high`、`xhigh`、`max`）——选了模型不支持的档位由宿主侧 `llmChat` 剥档重试，不会失败。
+
+**`techdocs` 开关**：与同组其它开关的判定方向相反——其余开关只在显式关掉时才关（`!== false`），它只在显式 `true` 时才开（默认关闭）。开启后每轮额外导出一份 Backstage TechDocs 站点到 `.codewiki/_techdocs/`（约 37 个文件，不进 `cw` 索引），属于附加产物而非正式文章。
 
 ---
 

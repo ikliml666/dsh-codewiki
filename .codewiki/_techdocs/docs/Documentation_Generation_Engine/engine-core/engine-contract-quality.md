@@ -6,7 +6,7 @@ description: 本模块是 DocumentationGenerationEngine 中负责「判据」的
 # engine-contract-quality：引擎契约与质量裁决层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 Documentation_Generation_Engine 中负责「**判据**」的那一层：它定义 Node 与 Python 引擎之间的跨进程结果契约，并把引擎交回来的产物裁决成可机读的终态（`done` / `partial` / `failed` / `cancelled`）、阻塞原因与「基线能不能推进」。它本身**不跑引擎、不写文件、不改文章正文**，只做纯数据校验与判定，因此可以被逐条测试钉死。
 
@@ -362,7 +362,7 @@ sequenceDiagram
 ### 6.3 关键判据
 
 - **`deadLinkSources`** 必须认两种来源：`kind === 'dead-link'`（`output.js` 判引擎原始页之间的引用）与 `kind === 'article-contract' && issue === 'dead-link'`（契约层判落地后 wiki 页的链接，被 quality-gate 统一改名成 `article-contract`，真实类别留在 `issue` 字段）。只认前者会漏掉「渲染期把链接降级成纯文字」那条兜底路径。
-- **`missingLinksOf`** 两种链接形态都认：`[文字](x.md)` 与 `[[x]]` / `[[x|文字]]`。只认前者会有个哑口：门因 `[[x]]` 判了死链，校对却看不见这条链接，拿到源页之后仍然为空直接跳过，白跑一次门。目标不带 `.md` 的按 `.md` 补一次再判（wiki 词条约定就是省略后缀），任一写法命中已知页就算有效。
+- **`missingLinksOf`** 两种链接形态都认：标准行内链接（`[文字]` + `(目标.md)`）与 `[[x]]` / `[[x|文字]]`。只认前者会有个哑口：门因 `[[x]]` 判了死链，校对却看不见这条链接，拿到源页之后仍然为空直接跳过，白跑一次门。目标不带 `.md` 的按 `.md` 补一次再判（wiki 词条约定就是省略后缀），任一写法命中已知页就算有效。
 - **写回门槛**：模型若把 frontmatter 吃掉或改坏，这篇宁可不动（原样保留，问题留给质量门如实上报）；校对后失效链接数必须**下降**（`after.length < missing.length`）才写盘。
 - **`maxPages`** 默认 6（`DEFAULT_MAX_PAGES`），每篇一次模型请求。再多就变成整轮重跑。
 - **失败不致命**：任何单篇失败只进 `failed`/`notes`，不影响本轮终态——门会如实上报死链。
@@ -487,11 +487,11 @@ flowchart TD
 - 构建与打包：[构建与配置（build-configuration）](../../Build___Development_Infrastructure/build-configuration.md)、[FSoft 引擎工具链（fsoft-engine-tools）](../../Build___Development_Infrastructure/fsoft-engine-tools.md)
 
 ??? abstract "Documented components (7)"
-    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
-    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
+    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
+    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
 

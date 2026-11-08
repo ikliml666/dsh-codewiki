@@ -6,7 +6,7 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 # engine-python-runtime：FSoft 原生引擎的 Python 侧运行时
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-python-runtime` 是本插件在 **Python 进程内**运行的那一半引擎运行时。它不实现任何文档算法——
 依赖图、模块聚类、文章写作、增量 diff 全部由 vendored 的上游 FSoft（CodeWiki）引擎完成。
@@ -861,11 +861,11 @@ sequenceDiagram
 | 整轮报 `done` 但文章明显没写 | agent 异常被上游吞成 `no-op` | `_failed_calls_of` |
 
 ??? abstract "Documented components (7)"
-    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
-    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
+    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
 

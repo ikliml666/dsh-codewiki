@@ -6,7 +6,7 @@ description: 本模块是 DocumentationGenerationEngine/engine-core 下的最小
 # 引擎运行时工具层（engine-runtime-utils）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`cc1116c4`](https://github.com/ikliml666/dsh-codewiki/commit/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`eea7ea80`](https://github.com/ikliml666/dsh-codewiki/commit/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `Documentation_Generation_Engine/engine-core` 下的**最小公共底座**，只包含两个文件、两类完全不相干的能力：
 
@@ -177,7 +177,7 @@ flowchart TD
 2. **`pageAliases` 别名**：只在别名**唯一命中**且目标真的在落地方案里时才成立。否则会把「别名指向一篇没进落地方案的页」也放过，而那正是真死链。
 3. **仓库源文件链接**（`../src/x.py`）不在 docs 内，交给阶段 3 的 source 校验，这里跳过。
 
-另一个易错点：**代码块里的 `[文字](x.md)` 是语法示例，不是引用**。本仓库自己的文章就在讲链接形态，真机 `job-mw32wsci-h` 因此把示例判成死链、整轮从 `done` 掉成 `partial`。`relativeLinks` 先 `stripCode`（等长替换，偏移与原文一一对应）再扫描。
+另一个易错点：**代码块里的相对链接写法（`[文字](…)` 形态）是语法示例，不是引用**。本仓库自己的文章就在讲链接形态，真机 `job-mw32wsci-h` 因此把示例判成死链、整轮从 `done` 掉成 `partial`。`relativeLinks` 先 `stripCode`（等长替换，偏移与原文一一对应）再扫描。
 
 ### 3.4 `pageAliases`：三条固定命名分歧
 
@@ -355,6 +355,6 @@ sequenceDiagram
 - **`isAlive` 无法区分僵尸进程**：僵尸仍返回 `true`，这是刻意的保守选择（仍视为占用，避免在回收未完成时提前判定成功）。
 
 ??? abstract "Documented components (2)"
-    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
-    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/cc1116c4ad9e359fc739203aed18b8ba6fd73e7a/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
+    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
+    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
 
