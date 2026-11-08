@@ -6,7 +6,7 @@ description: 本模块是 DocumentationGenerationEngine/engine-core 下的最小
 # 引擎运行时工具层（engine-runtime-utils）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `Documentation_Generation_Engine/engine-core` 下的**最小公共底座**，只包含两个文件、两类完全不相干的能力：
 
@@ -355,6 +355,6 @@ sequenceDiagram
 - **`isAlive` 无法区分僵尸进程**：僵尸仍返回 `true`，这是刻意的保守选择（仍视为占用，避免在回收未完成时提前判定成功）。
 
 ??? abstract "Documented components (2)"
-    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
-    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
+    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
+    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
 

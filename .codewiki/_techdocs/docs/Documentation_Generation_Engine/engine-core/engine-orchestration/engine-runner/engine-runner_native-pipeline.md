@@ -6,7 +6,7 @@ description: 本页描述 lib/engine/native-run.js 的 runNativeJob：插件生�
 # engine-runner 原生编译流水线
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本页描述 `lib/engine/native-run.js` 的 `runNativeJob`：插件生产通道中**一次完整编译的编排与裁决**。它把分散在各层的组件（环境清单、Python 引擎、质量门、落地器、跨轮受管状态、模型桥）串成一条不可回退的直线，并给出一个**严格终态**——任何一环没走完，终态都不会被后续步骤洗白成 `done`。
 
@@ -769,5 +769,5 @@ sequenceDiagram
 - 任务存储与终态落账：[作业状态与持久化层（job-and-state）](../../../../Job_Orchestration___State_Management/job-and-state.md)。
 
 ??? abstract "Documented components (1)"
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

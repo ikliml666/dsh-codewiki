@@ -6,7 +6,7 @@ description: 本模块是 dsh-codewiki 的构建面与配置面：它不含编�
 # 构建与配置（build-configuration）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `dsh-codewiki` 的**构建面与配置面**：它不含编译算法，只决定「这个包长什么样、怎么被宿主装载、装载后拿到哪些默认配置、以及运行原生引擎所需的 Python 环境怎么造出来」。三个工件构成完整闭环：
 
@@ -332,7 +332,7 @@ sequenceDiagram
 子进程环境由 `nativeEnginePlan()` 固定：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`CODEWIKI_NO_KEYRING=1`，模型通道只用桥生成的占位 key（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），真实凭证从不进入子进程环境或日志。
 
 ??? abstract "Documented components (3)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/cordis.patch.yml) — `cordis.patch.yml`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/package.json) — `package.json`
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/cordis.patch.yml) — `cordis.patch.yml`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/package.json) — `package.json`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
 

@@ -6,7 +6,7 @@ description: 'ui-client 是 @ikliml666/dsh-codewiki 插件的浏览器半侧，�
 # ui-client（浏览器半侧客户端）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `ui-client` 是 `@ikliml666/dsh-codewiki` 插件的**浏览器半侧**，实现文件只有一个：`client.js`。它通过 `window.__ModuleLoader__.load({ id: '@ikliml666/dsh-codewiki', factory })` 注册到宿主前端的模块加载器，向外提供两个界面挂载点：
 
@@ -431,18 +431,18 @@ sequenceDiagram
 6. **组件 id 一致性**：`NS`、`KEY`、`package.json` 的 `name`、`cordis.patch.yml` 的 `id` 必须保持 `codewiki` 语义一致；bundle 装法下 `name` 必须是裸包名（不带子路径），因为 client 半边的激活扫描只认裸包名行。
 
 ??? abstract "Documented components (14)"
-    - [`CodewikiCard`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`CodewikiPanel`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`PanelIcon`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`ReposTab`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`SessionView`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`Skeleton`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`Spark`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`byUpdated`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`en`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`line`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`mount`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`row`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`toOption`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
-    - [`zh`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/client.js) — `client.js`
+    - [`CodewikiCard`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`CodewikiPanel`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`PanelIcon`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`ReposTab`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`SessionView`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`Skeleton`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`Spark`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`byUpdated`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`en`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`line`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`mount`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`row`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`toOption`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
+    - [`zh`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/client.js) — `client.js`
 

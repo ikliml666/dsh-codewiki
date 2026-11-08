@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96",
-    "headCommit": "f824657b0de5972f39a52be0a2b9600347997915"
+    "headCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96",
-    "headCommit": "f824657b0de5972f39a52be0a2b9600347997915",
+    "headCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85",
     "committed": [
       "CHANGELOG.md",
       "index.js",
@@ -42,12 +42,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 641275b 与本次 cw 基线 eea7ea8 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw7i420r-3-native（31 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw7rdkof-6-native（31 个文件）"
   ],
-  "updatedAt": "2026-11-08T07:49:03.648Z"
+  "updatedAt": "2026-11-08T11:40:24.297Z"
 }

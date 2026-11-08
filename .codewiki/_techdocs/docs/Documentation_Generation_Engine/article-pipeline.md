@@ -6,7 +6,7 @@ description: article-pipeline 是 DocumentationGenerationEngine 里最靠近磁�
 # 文章流水线（article-pipeline）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `article-pipeline` 是 `Documentation_Generation_Engine` 里**最靠近磁盘的那一层**：它不生成内容、不调用模型、不编排阶段，只回答三个问题——「这一轮到底有哪些改动」「这篇文章能不能写进 wiki」「库里已经躺着的坏文章该修还是该删」。三个问题各由一个纯函数模块承担，合起来构成「产物落盘前的最后一道闸门」与「落盘时的变更依据」。
 
@@ -354,10 +354,10 @@ sequenceDiagram
 - `git-paths.js` 路径归一与解码：[FSoft 引擎工具链（fsoft-engine-tools）](../Build___Development_Infrastructure/fsoft-engine-tools.md)
 
 ??? abstract "Documented components (6)"
-    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`isWritable`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`makeWriteSet`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Carticle-repair.js) — `lib\article-repair.js`
-    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/f824657b0de5972f39a52be0a2b9600347997915/lib%5Cchange-set.js) — `lib\change-set.js`
+    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`isWritable`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`makeWriteSet`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-repair.js) — `lib\article-repair.js`
+    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cchange-set.js) — `lib\change-set.js`
 

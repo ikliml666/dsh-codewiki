@@ -6,7 +6,7 @@ description: dsh-codewiki 是 DSH 插件 @ikliml666/dsh-codewiki，目标是把�
 # dsh-codewiki 仓库概览
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`f824657b`](https://github.com/ikliml666/dsh-codewiki/commit/f824657b0de5972f39a52be0a2b9600347997915) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `dsh-codewiki` 是 DSH 插件 `@ikliml666/dsh-codewiki`，目标是把“为仓库生成或更新 CodeWiki”从一次同步调用，变成一条**可观测、可恢复、可取消的后台任务**。插件由宿主 Node 半侧与浏览器半侧组成：前者负责任务编排、引擎裁决、质量门、状态持久化与本机 HTTP 端点；后者提供设置卡片和侧边栏面板。真正的文档理解、聚类与写作由随包分发的 FSoft Python 引擎完成，索引与基线由 Rust `cw` 工具完成，只有经过质量门裁决的产物才会写入目标仓库的 `.codewiki/` 与 `CodeWiki.md`。
 
