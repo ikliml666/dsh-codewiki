@@ -6,7 +6,7 @@ description: CodeWikiMain 是 cw 命令行工具的 Rust 入口层，位于 vend
 # CodeWiki 主入口（cw CLI）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`49c39f44`](https://github.com/ikliml666/dsh-codewiki/commit/49c39f4493ac5c32df577599cdb2aef517dfa483) on 2026-11-07 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`fc5ec58b`](https://github.com/ikliml666/dsh-codewiki/commit/fc5ec58bc78a1039f6004c552bb124323e70706d) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 ## 简介
 
@@ -167,7 +167,7 @@ flowchart TD
 - 文章解析失败的条目被静默跳过（`filter_map(|e| e.ok())` 与 `if let Ok(...)`），保证单个坏文件不阻断 `status` / `index` 的整体执行。
 
 ??? abstract "Documented components (3)"
-    - [`Cli`](https://github.com/ikliml666/dsh-codewiki/blob/49c39f4493ac5c32df577599cdb2aef517dfa483/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
-    - [`capitalize`](https://github.com/ikliml666/dsh-codewiki/blob/49c39f4493ac5c32df577599cdb2aef517dfa483/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/49c39f4493ac5c32df577599cdb2aef517dfa483/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
+    - [`Cli`](https://github.com/ikliml666/dsh-codewiki/blob/fc5ec58bc78a1039f6004c552bb124323e70706d/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
+    - [`capitalize`](https://github.com/ikliml666/dsh-codewiki/blob/fc5ec58bc78a1039f6004c552bb124323e70706d/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/fc5ec58bc78a1039f6004c552bb124323e70706d/vendor%5Ccodewiki%5Csrc%5Cmain.rs) — `vendor\codewiki\src\main.rs`
 
