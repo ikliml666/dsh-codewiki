@@ -6,7 +6,7 @@ description: ArticleAgenticPool 是插件内置 Node 通道（零子代理）的
 # 文章 Agentic 池（Article_Agentic_Pool）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`fc5ec58b`](https://github.com/ikliml666/dsh-codewiki/commit/fc5ec58bc78a1039f6004c552bb124323e70706d) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`4240a3bb`](https://github.com/ikliml666/dsh-codewiki/commit/4240a3bb975281e7d3d47e6cc77f5b2a8276d57b) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 ## 简介
 
@@ -176,6 +176,6 @@ sequenceDiagram
 - 配置与打包：[Package_Manifest 包清单](Package_Manifest.md) · [Cordis_Patch_Config（插件装配配置）](Cordis_Patch_Config.md)
 
 ??? abstract "Documented components (2)"
-    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/fc5ec58bc78a1039f6004c552bb124323e70706d/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
-    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/fc5ec58bc78a1039f6004c552bb124323e70706d/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
+    - [`runPool`](https://github.com/ikliml666/dsh-codewiki/blob/4240a3bb975281e7d3d47e6cc77f5b2a8276d57b/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
+    - [`worker`](https://github.com/ikliml666/dsh-codewiki/blob/4240a3bb975281e7d3d47e6cc77f5b2a8276d57b/lib%5Carticles-agentic.js) — `lib\articles-agentic.js`
 
