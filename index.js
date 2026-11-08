@@ -16,10 +16,9 @@ import { createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { collectChangeSet } from './lib/change-set.js'
 import { withQuotepathOff } from './lib/git-paths.js'
 import {
-  judgeOutcome, buildUpdateRecord, saveUpdateRecord,
+  buildUpdateRecord, saveUpdateRecord,
   describeOutcome, TERMINAL, UPDATE_RECORD_REL,
 } from './lib/update-record.js'
-import { inspectArticle } from './lib/article-contract.js'
 // 阶段 4：原生引擎（FSoft Python）通道。整条裁决链在 native-run.js 里固定，
 // 这里只负责「起进程 / 收进度 / 按结果判终态」——绝不在 tick 里重写裁决。
 import { runNativeJob, DEFAULT_ENGINE_ENTRY, DEFAULT_ENGINE_TIMEOUT_MS } from './lib/engine/native-run.js'
@@ -1475,18 +1474,6 @@ function createJobService(config) {
     job.stageStartedAt = new Date().toISOString()
     touch(job)
   }
-  // 用量累计：输入为提交时估算（estimateTokens），输出为响应回传 usage 实测。
-  const addUsage = (job, { inputTok = 0, outputTok = 0, requests = 0, batch = false, realtime = false, overTier2 = 0 } = {}) => {
-    job.usage ??= { inputTok: 0, outputTok: 0, requests: 0, batchRequests: 0, realtimeRequests: 0, overTier2: 0 }
-    job.usage.inputTok += inputTok
-    job.usage.outputTok += outputTok
-    job.usage.requests += requests
-    job.usage.batchRequests += batch ? requests : 0
-    job.usage.realtimeRequests += realtime ? requests : 0
-    job.usage.overTier2 += overTier2
-    touch(job)
-  }
-
   // 跨实例取消：另一实例 cancel 的 job 不在本实例内存现场（dirtyIds 之外才允许被磁盘覆盖，
   // 但本实例若正在推进它，内存对象永远不被磁盘覆盖）——每轮 tick 开头从磁盘拾取取消标记。
   function syncCancelFlags() {

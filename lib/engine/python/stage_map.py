@@ -99,10 +99,6 @@ def articles_percent(written, total):
     return int(round(lo + (hi - lo) * ratio))
 
 
-def articles_ceiling():
-    """articles 槽位的百分比上限（阶段 3 完成时的值）。"""
-    return percent_of(INCREMENTAL_FSOFT_STAGE, 1.0)
-
 # 引擎内部进度只占到 90%，见模块 docstring。
 FSOFT_PROGRESS_CEILING = 90
 

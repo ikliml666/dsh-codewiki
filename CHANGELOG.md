@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.18.3 — 2026-11-08
+
+### 清理死代码：14 个符号 + 10 个空转的 default 导出
+
+全仓扫了一遍「定义后无人引用」的符号（JS 按导出/顶层声明统计跨文件引用，Python 按顶层
+def/class 统计全包引用），删掉 14 个完全没人用的符号，以及 10 个模块里无人 import 的
+`export default` 块。净减 213 行，未新增任何行（两处 +1 行是 import 列表重排）。
+
+完全无人引用的（跨文件 + 本文件都是零引用）：
+
+```
+lib/article-contract.js  ARTICLE_CONTRACT_VERSION / issueSummary / hasBlockingIssue
+                         makeWriteSet / isWritable / normalizeWritePath   ← agentic 写集闸门，通道已下线
+lib/engine/contract.js   CONSUMING_UPDATE_OUTCOMES / describeEngineResult
+lib/engine/openai-bridge.js  isPlaceholderKey
+lib/job-logs.js          removeLog
+lib/update-record.js     loadUpdateRecord
+index.js                 addUsage                                        ← 旧批通道的用量累加器
+lib/engine/python/full_parallel_runtime.py  _SharedTreeIO               ← 被 _install_shared_tree_io 的闭包取代
+lib/engine/python/stage_map.py              articles_ceiling
+```
+
+其中三处是「旧通道下线后的遗留」：`makeWriteSet`/`isWritable` 服务的是 agentic 工具的
+`allowedWritePaths`（该通道 0.17.49 起不再产），`addUsage` 服务的是已删除的批通道用量统计，
+`_SharedTreeIO` 是被 `_install_shared_tree_io()` 里的同名闭包取代的旧类——它一旦被实例化就会
+绕过 `_ORIG_LOAD`/`_ORIG_SAVE` 的空值检查，留着比删掉更危险。
+
+`loadUpdateRecord` 删掉后 `UPDATE_RECORD_VERSION` 仍被写入侧使用（`buildUpdateRecord` 落
+`version: 1`），所以只降级了读侧，版本号本身保留。
+
+10 个模块的 `export default { ... }` 块无人 import（全部用命名导出），删除；块内每个符号
+在文件内仍被使用，删除后没有产生新的死代码。
+
+验证：
+
+- 全部 lib 模块 + `index.js` 逐个动态 import 成功（40 个导出不变）
+- `node --check` 覆盖 30 个 JS 文件，`ast.parse` 覆盖 5 个 Python 文件
+- 真实调用：`collectChangeSet` / `judgeOutcome` / `buildUpdateRecord` / `engineResult` +
+  `validateEngineResult`（含非法 outcome 被拒）/ `inspectArticle` 四类判定（空文、合规、
+  重复 frontmatter、围栏未闭合）行为不变
+- `stage_map` 运行时：`map_stage(1)=graph`、`percent_of(2,0.5)=45`、`articles_percent(3,10)=62`
+- `bin/cw.exe status` 正常输出变更清单
+
+**未验证**：一次真实编译全流程（需 Python venv，约 174 分钟）。
+
 ## 0.18.2 — 2026-11-08
 
 ### 设置页补上 TechDocs 开关

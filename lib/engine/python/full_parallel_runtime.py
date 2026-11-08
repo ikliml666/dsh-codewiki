@@ -133,33 +133,6 @@ def write_tree_exclusive(filepath: str, mutate) -> Any:
         return updated
 
 
-class _SharedTreeIO:
-    """串行化 module_tree.json 的读改写，并把并行分支的增量合并回主树。"""
-
-    def __init__(self, original: Any) -> None:
-        self._original = original
-
-    def save_json(self, data: Any, filepath: str) -> None:
-        if os.path.basename(str(filepath)) != "module_tree.json":
-            return self._original.save_json(data, filepath)
-        with _TREE_LOCK:
-            existing = self._original.load_json(filepath)
-            merged = _merge_tree(
-                existing if isinstance(existing, dict) else {},
-                data if isinstance(data, dict) else {},
-            )
-            self._original.save_json(merged, filepath)
-
-    def load_json(self, filepath: str):
-        if os.path.basename(str(filepath)) != "module_tree.json":
-            return self._original.load_json(filepath)
-        with _TREE_LOCK:
-            return self._original.load_json(filepath)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._original, name)
-
-
 def _node_at(tree: dict[str, Any], module_path: list[str]) -> dict[str, Any] | None:
     node: Any = tree
     for part in module_path:
