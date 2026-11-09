@@ -3117,6 +3117,34 @@ export function installWebServer(ctx, service, extra = {}) {
         try {
           const url = new URL(req.url ?? '', 'http://localhost')
           const jobId = String(url.searchParams.get('jobId') ?? '').trim()
+          const sessionId = String(url.searchParams.get('sessionId') ?? '').trim()
+          if (sessionId) {
+            // 按会话取：一个会话可能发起了多次编译（多个 job），把它们下面的请求
+            // 合并返回。面板点开一个会话时走这条路——会话是列表的一行，任务与请求
+            // 都在它内部，对齐 DSH 侧边栏「一行一个会话」的形态。
+            const all = service.list()
+            const jobsInSession = all.filter((j) => (j.sessionId ?? '') === sessionId)
+            const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get('limit')) || 200))
+            const merged = []
+            for (const j of jobsInSession) {
+              for (const s of listSessionRecords(j.id, limit)) {
+                merged.push({ ...s, cwd: j.cwd ?? '', sessionId: j.sessionId ?? null })
+              }
+            }
+            merged.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
+            writeJson(res, 200, {
+              sessions: merged.slice(0, limit),
+              total: merged.length,
+              limit,
+              active: activeSessionJobs(jobsInSession, { requestCount: countSessionRecords }),
+              jobs: jobsInSession.map((j) => ({
+                id: j.id, cwd: j.cwd ?? '', stage: j.stage ?? null,
+                writtenCount: j.writtenCount ?? 0, failedCount: j.failedCount ?? 0,
+                scope: j.scope ?? null, kind: j.kind ?? null, updatedAt: j.updatedAt ?? null,
+              })),
+            })
+            return
+          }
           if (jobId) {
             // 单任务会话视图同样要能看出「任务在跑但还没有请求」
             const job = service.list().find((j) => j.id === jobId)
