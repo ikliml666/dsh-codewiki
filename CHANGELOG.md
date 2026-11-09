@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.19.2 — 2026-11-09
+
+### 修复「依赖图 / 模块聚类」档位对聚类阶段无效
+
+面板那一格写入的 `effortByStage` key 是 `graph`，但引擎上报的聚类阶段叫 `cluster`。
+桥按 `effortOf(currentStage)`（`lib/engine/llm-bridge.js:139`）取档位，`currentStage` 由
+`native-run.js:723` 的 `bridge?.setStage?.(p.stage)` 直接透传引擎上报值——真机日志确认
+引擎报的是 `cluster`。于是这一格选什么都不影响聚类，只影响 `graph`，而 `graph` 是不调
+LLM 的纯解析段。
+
+改成一格管理一组阶段：`[['graph', 'cluster'], 'effortByStageGraph']`，写入与删除都遍历
+整组，避免同格内两个 key 分叉成不同档位。显示时取组内第一个有值的（两个都没值才显示兜底）。
+
+四格里只有这一格需要多 key——`articles`/`proofread`/`validate` 与引擎阶段名本来就一致。
+数组形态统一应用到四格，是为了让写入逻辑只有一条路径，不用为「哪格是特殊的」写分支。
+
+验证：`.dbg-stage-effort-keys.mjs` 5 条——静态确认该格含 graph+cluster、四格都是数组、
+写入遍历整组；用真机桥日志取引擎实际上报的阶段（articles/baseline/cluster/commit/env/
+graph/index/validate）交叉校验 cluster 已被覆盖。反向验证把该格改回 `['graph']` → 4 条 FAIL。
+Node 侧 6 套回归全绿。
+
 ## 0.19.1 — 2026-11-09
 
 ### 修复启动崩溃：`pruneSessionRecords is not defined`

@@ -1425,12 +1425,18 @@ window.__ModuleLoader__.load({
                   el('div', { 'data-dscw-field': '' },
                     el('div', { 'data-dscw-stages': '' },
                       ...[
-                        ['graph', 'effortByStageGraph'],
-                        ['articles', 'effortByStageArticles'],
-                        ['proofread', 'effortByStageProofread'],
-                        ['validate', 'effortByStageValidate'],
-                      ].map(([stage, labelKey]) => {
-                        const current = String(draft.effortByStage?.[stage] ?? '')
+                        // 一格管多个引擎阶段用数组表示。graph 与 cluster 都归「依赖图 / 模块聚类」：
+                        // graph 不调 LLM，真正吃档位的是 cluster；只写 graph 会让这一格对聚类
+                        // 完全无效（引擎上报的 stage 是 cluster，桥按 effortOf(currentStage) 取）。
+                        [['graph', 'cluster'], 'effortByStageGraph'],
+                        [['articles'], 'effortByStageArticles'],
+                        [['proofread'], 'effortByStageProofread'],
+                        [['validate'], 'effortByStageValidate'],
+                      ].map(([stages, labelKey]) => {
+                        const stage = stages[0]
+                        // 组内任一阶段有值就用它显示；两个都没值才显示兜底。
+                        const current = String(
+                          stages.map((k) => draft.effortByStage?.[k]).find((v) => v != null && v !== '') ?? '')
                         // 目录档位是 { id, name, description } 对象（见 index.js resolveModelEfforts），
                         // 通用档位是裸字符串；两种都要能进下拉，所以先统一取 id。
                         const efforts = Array.isArray(effortsState.efforts) ? effortsState.efforts : []
@@ -1453,8 +1459,11 @@ window.__ModuleLoader__.load({
                                 if (!prev) return prev
                                 const out = structuredClone(prev)
                                 const map = { ...(out.effortByStage && typeof out.effortByStage === 'object' ? out.effortByStage : {}) }
-                                if (next) map[stage] = next
-                                else delete map[stage]
+                                // 一组阶段一起写/一起删，避免同格内两个 key 分叉成不同档位。
+                                for (const k of stages) {
+                                  if (next) map[k] = next
+                                  else delete map[k]
+                                }
                                 out.effortByStage = map
                                 return out
                               })
