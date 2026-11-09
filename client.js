@@ -90,7 +90,6 @@ window.__ModuleLoader__.load({
       runTimeLabel: '执行',
       queueAheadLabel: '在等',
       // 会话分组：与 DSH 的会话概念对齐，一个会话发起的编译放一起。
-      tabSessions: '会话',
       // 阶段分组（1.3.0）：请求按「仓库 → 编译阶段 → 请求」三层排，组头要能一眼看出这一步在做什么、
       // 跑完了几条、有没有失败。历史记录没有阶段字段，单独归一组并说明原因，不假装它属于某一步。
       // 循环分组：同一轮 agentic 工作里会有几十上百次工具往返，面板把它们平铺时
@@ -329,7 +328,6 @@ window.__ModuleLoader__.load({
       queueWaitLabel: 'queued',
       runTimeLabel: 'running',
       queueAheadLabel: 'waiting for',
-      tabSessions: 'Sessions',
       secCompile: 'Compile model',
       secCompileHint: 'Articles and proofreading share this model; all inside the plugin.',
       requestLimit: 'Per-module request cap',
@@ -797,22 +795,6 @@ window.__ModuleLoader__.load({
 
       // 循环层：阶段内的 agentic 往返分组。比阶段层再淡一档——它解释「为什么这么多条」，
       // 不承担流程语义，所以用点线而不是实线，字号也更小。
-      // 会话行：对齐 DSH 侧边栏的会话行规格（一行一个会话、状态点 + 标题 + 元信息，
-      // 不展开成请求列表）。尺寸按 DSH 的 32px 行高，点开才进入会话内部。
-      // 会话内的任务摘要：一次编译一行，比请求行稍重，作为「明细之前的一层概括」。
-
-      // 请求层：一行一次请求。状态只用一个点表达，行本身不加边框——阶段竖线已经是边界。
-      '[data-dscw-p-sessrow] { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; border: 0; border-radius: 5px; background: transparent; padding: 5px 6px; cursor: pointer; font: inherit; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-secondary); transition: background-color .14s ease; }',
-      '[data-dscw-p-sessrow]:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 70%, transparent); }',
-      '[data-dscw-p-sessrow]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
-      '[data-dscw-p-sessrow] [data-mark] { flex: none; width: 10px; text-align: center; font-size: 9px; color: var(--dsw-alias-label-tertiary); }',
-      '[data-dscw-p-sessrow][data-status="running"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); animation: dscw-pulse 1.2s ease-in-out infinite; }',
-      '[data-dscw-p-sessrow][data-status="done"] [data-mark] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-tertiary)); }',
-      '[data-dscw-p-sessrow][data-status="error"] [data-mark] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }',
-      '[data-dscw-p-sessrow] [data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }',
-      '[data-dscw-p-sessrow][data-empty="true"] [data-name] { color: var(--dsw-alias-label-secondary); }',
-      '[data-dscw-p-sessrow] [data-hint] { flex: none; font-size: 10px; line-height: 15px; padding: 0 4px; border-radius: 3px; color: var(--dsw-alias-label-tertiary); background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 90%, transparent); }',
-      '[data-dscw-p-sessrow] [data-sub] { flex: none; margin-left: auto; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
 
       // 详情：一条信息栏 + 页签 + 一个滚动的正文区。三块都不设固定高度，
       // 正文区吃满剩余空间自己滚——不再有「半屏内容 + 半屏空白 + 滚外层」。
@@ -2165,41 +2147,6 @@ window.__ModuleLoader__.load({
           }
         }
 
-        // 会话视图（1.1.0 单任务 / 1.2.0 全局 / 1.3.0 分层）：并发池的每一次 LLM 请求，
-        // 像给 codewiki 专门开的会话。job 为 null 时走全局聚合接口，跨任务列出全部请求。
-        //
-        // 三层信息按「仓库 → 编译阶段 → 请求」组织。此前只有「仓库」一层，组内几十条请求
-        // 全是同一个名字（「原生请求 · doubao-seed-2.1-lite」），看不出哪条在解析代码图、
-        // 哪条在写文章、哪条在校对——阶段现在随请求一起记录（index.js beginSessionRecord），
-        // 于是能按真实流程分组，而不是靠名字去猜。
-        //
-        // 详情用宿主自己的 MarkdownText 渲染：prompt 是 [system]/[user] 分块的指令，输出是
-        // Markdown 正文，塞进 <pre> 等于把结构化内容压成一坨等宽文本。
-        const STAGE_ORDER = ['queued', 'env', 'graph', 'cluster', 'prepare', 'articles', 'proofread', 'validate', 'index', 'baseline', 'commit', 'done']
-        const STAGE_LABEL_OF = (stage) => {
-          if (!stage) return tBound('sessStageUnknown')
-          if (stage === 'queued') return tBound('stageQueued')
-          return nativeStageName(stage) ?? stageLabel(stage) ?? stage
-        }
-        // 提示词按 [role] 头切块：记录侧就是按 `[system]\n…\n\n[user]\n…` 拼的，
-        // 一条巨型 Markdown 里混着系统指令与用户任务，读的人分不清边界。
-        const splitPrompt = (text) => {
-          const raw = String(text ?? '')
-          if (!raw) return []
-          const parts = raw.split(/\n\n(?=\[(?:system|user|assistant|tool)\]\n)/i)
-          return parts.map((chunk) => {
-            const m = chunk.match(/^\[(system|user|assistant|tool)\]\n?/i)
-            return m ? { role: m[1].toLowerCase(), body: chunk.slice(m[0].length) } : { role: null, body: chunk }
-          })
-        }
-        // MarkdownText 的 labels 不是可选的装饰：代码块头直接读 labels.code.copyLabel，
-        // 模型输出里出现一段 ``` 就会踩空。只给真正会被读到的几项，多余键它不用。
-        const MD_LABELS = {
-          copy: '复制',
-          copied: '已复制',
-          code: { copyLabel: '复制', copiedLabel: '已复制' },
-          footnotes: '脚注',
-        }
         function CodewikiPanel() {
           const t = tBound
           const [jobs, setJobs] = React.useState(null) // null = 尚未拿到首轮

@@ -1579,11 +1579,6 @@ function createJobService(config) {
     if (!tickLockToken) return // 另一实例正在推进，本轮让路
     ticking = true
     try {
-      // 会话记录过期清理（保留一天）：每 10 分钟一轮足够，不用每 tick 扫目录
-      if (!tick.lastPruneAt || Date.now() - tick.lastPruneAt > 10 * 60 * 1000) {
-        tick.lastPruneAt = Date.now()
-        pruneSessionRecords()
-      }
       mergeFromDisk()
       syncCancelFlags()
       for (const job of jobs) {

@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.19.1 — 2026-11-09
+
+### 修复启动崩溃：`pruneSessionRecords is not defined`
+
+0.19.0 删会话视图时删掉了 `pruneSessionRecords` 的定义，但 `tick` 里的调用漏了。
+每轮 tick（每 10 分钟一次清理分支）走到那里就抛 `ReferenceError`，宿主把它当成致命
+加载失败（`dsh: fatal load failure`），整个插件不可用。
+
+这个错误本该在删除那一轮就被拦住，但当时的完整性检查只查了「被删的符号是否还有人用」，
+没查「剩下的代码是否还在调用已删的符号」——方向反了。
+
+同时清掉同批遗留的死代码（都是删除会话视图后没人引用的）：
+
+```
+client.js  [data-dscw-p-sessrow] 相关 CSS 11 条
+           STAGE_ORDER / STAGE_LABEL_OF / splitPrompt / MD_LABELS
+           会话视图的注释块
+           tabSessions（中英文两条文案）
+index.js   tick 里的 pruneSessionRecords 调用与 lastPruneAt 状态
+```
+
+`STAGE_LABEL_OF`、`splitPrompt`、`MD_LABELS` 都是「定义后无人使用」，`MD_LABELS` 尤其
+容易误判——它看着像 MarkdownText 的必需参数，但渲染组件早已随会话视图一起删了。
+
+验证：
+
+```
+定向检查：17 个已删除符号（pruneSessionRecords / SESSIONS_DIR / writeSessionMeta /
+          listSessionRecords / readSessionRecordDetail / beginSessionRecord /
+          estimateTokens / sessionNameOf / messagesToPrompt / MAX_SESSION_PROMPT_CHARS 等）
+          在 index.js / client.js / lib 全仓零残留
+语法：index.js、client.js、三个 Python 模块全部通过
+冒烟：index.js 可加载、Config 核心项仍在、压缩与熔断模块可导入、apply 不抛
+回归：Node 5 套（i18n 静态/动态键、冒烟、熔断、行提示）、
+      Python 7 套（熔断 19、端到端 16、entry 15、补丁顺序 7、桥引擎 9、压缩单元 18、压缩端到端 6）全绿
+```
+
+顺带删掉两个过时测试：`.dbg-loop-grouping.mjs`（测的是随会话视图一起删掉的 `loopGroups`）、
+`.dbg-i18n-dyn.mjs` 里针对 `sessRole*` 的清单项。
+
 ## 0.19.0 — 2026-11-09
 
 ### 历史压缩：把已读文件的全文从后续每轮请求里摘掉（实测省 37%）
