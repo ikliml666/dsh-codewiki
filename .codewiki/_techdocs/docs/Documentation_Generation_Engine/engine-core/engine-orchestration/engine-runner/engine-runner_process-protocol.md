@@ -6,7 +6,7 @@ description: 本页描述 lib/engine/client.js：DSH 插件与 FSoft 原生 Pyth
 # engine-runner 进程与协议层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d16751f5`](https://github.com/ikliml666/dsh-codewiki/commit/d16751f5dd58ee0741d861266965e322cbe7a60d) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本页描述 `lib/engine/client.js`：DSH 插件与 FSoft 原生 Python 引擎之间**唯一的跨语言边界**。它只做两件事——启动一个受管子进程，并按「一行 JSON 请求 / JSON-lines 响应」的协议收发消息，再把引擎消息归一成 `contract.js` 定义的 `EngineResult` / `EngineProgress` / `EngineError`。
 
@@ -409,5 +409,5 @@ CODEWIKI_MAIN_MODEL / CODEWIKI_CLUSTER_MODEL
 - `onProgress` 抛出的异常**必须**冒泡（`runEngine` 不吞），否则契约阶段名写错会变成「某一帧悄悄丢了、任务照样报成功」。
 
 ??? abstract "Documented components (1)"
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
 

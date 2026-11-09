@@ -6,7 +6,7 @@ description: engine-orchestration 是原生（FSoft）CodeWiki 编译通道的�
 # engine-orchestration 模块概览
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d16751f5`](https://github.com/ikliml666/dsh-codewiki/commit/d16751f5dd58ee0741d861266965e322cbe7a60d) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-orchestration` 是原生（FSoft）CodeWiki 编译通道的**执行与裁决层**。它不负责文章生成算法，也不定义跨层契约；它负责把一次编译请求从“调用方说开始”推进到“可机读的终态结论”，并把质量门允许入库的产物真正落到仓库中。其核心问题是：**每一步的结论都不能被下一步洗白**。
 
@@ -135,30 +135,30 @@ sequenceDiagram
 - 上层模块概览：[engine-core 模块概览](../engine-core.md) / [Documentation_Generation_Engine 模块概览](../../Documentation_Generation_Engine.md)
 
 ??? abstract "Documented components (26)"
-    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
-    - [`parseFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`parseYamlLite`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`unquote`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`extractSections`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`fencesBalanced`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`collectWikiLinks`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`stripCode`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`blank`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`hasDuplicateFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`isRepoRelativeFile`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`inspectArticle`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`push`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`logFileOf`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`serialize`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`appendLog`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`trimIfNeeded`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`readLogTail`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`logStats`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`parseFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`parseYamlLite`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`unquote`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`extractSections`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`fencesBalanced`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`collectWikiLinks`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`stripCode`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`blank`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`hasDuplicateFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`isRepoRelativeFile`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`inspectArticle`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`push`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`logFileOf`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`serialize`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`appendLog`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`trimIfNeeded`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`readLogTail`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`logStats`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
 

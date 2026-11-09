@@ -3,14 +3,15 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26",
-    "headCommit": "6589001428bc8eb6662303a05b6be49bacbd4061"
+    "headCommit": "d16751f5dd58ee0741d861266965e322cbe7a60d"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26",
-    "headCommit": "6589001428bc8eb6662303a05b6be49bacbd4061",
+    "headCommit": "d16751f5dd58ee0741d861266965e322cbe7a60d",
     "committed": [
       "CHANGELOG.md",
+      "lib/engine/contract.js",
       "lib/engine/llm-bridge.js",
       "lib/engine/native-run.js",
       "lib/engine/python/channel_breaker.py",
@@ -28,11 +29,11 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "incremental",
+  "updateOutcome": "no_change",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw8qqyk5-1-native（31 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw8s9um1-4-native（32 个文件）"
   ],
-  "updatedAt": "2026-11-09T04:41:58.075Z"
+  "updatedAt": "2026-11-09T05:34:40.397Z"
 }

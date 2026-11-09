@@ -6,7 +6,7 @@ description: JobOrchestrationStateManagement 是 dsh-codewiki 插件的控制面
 # 作业编排与状态管理（Job Orchestration & State Management）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`d16751f5`](https://github.com/ikliml666/dsh-codewiki/commit/d16751f5dd58ee0741d861266965e322cbe7a60d) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `Job_Orchestration___State_Management` 是 `dsh-codewiki` 插件的**控制面**：它把「一个仓库的整轮 wiki 编译」从一次同步工具调用，变成一条**可观测、可恢复、可取消的后台任务**。模块自身**不做编译裁决**——真正的编译判断（增量决议、质量门、落地）在引擎侧完成；本模块只负责「起进程 / 收进度 / 按结果判终态 / 安全落盘」，并把现场持久化到仓库之外，保证多宿主实例共享、崩溃后可重放。
 
@@ -133,16 +133,16 @@ stateDiagram-v2
 | 侧边栏面板（消费本模块的 `/api/codewiki/*`） | [ui-client（浏览器半侧客户端）](ui-client.md) |
 
 ??? abstract "Documented components (12)"
-    - [`addUsage`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/index.js) — `index.js`
-    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cjob-store.js) — `lib\job-store.js`
-    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cupdate-record.js) — `lib\update-record.js`
-    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`addUsage`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/index.js) — `index.js`
+    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cjob-store.js) — `lib\job-store.js`
+    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/d16751f5dd58ee0741d861266965e322cbe7a60d/lib%5Cupdate-record.js) — `lib\update-record.js`
 
