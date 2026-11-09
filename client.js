@@ -98,8 +98,6 @@ window.__ModuleLoader__.load({
       sessGroupCount: '{n} 条请求',
       // 会话分组：与 DSH 的会话概念对齐，一个会话发起的编译放一起。
       sessGroupSession: '会话 {id}',
-      sessGroupNoSession: '非会话发起（面板/自动调度）',
-      sessGroupRepos: '{n} 个仓库',
       sessSessionJobs: '本会话发起的编译 · {n} 次',
       sessSessionJobsHint: '同一会话里的每次编译；下面才是逐条模型请求',
       sessRunning: '进行中',
@@ -395,8 +393,6 @@ window.__ModuleLoader__.load({
       sessNoCwd: 'No repo',
       sessGroupCount: '{n} requests',
       sessGroupSession: 'Session {id}',
-      sessGroupNoSession: 'Not session-initiated (panel/auto)',
-      sessGroupRepos: '{n} repos',
       sessSessionJobs: 'Compiles from this session · {n}',
       sessSessionJobsHint: 'Each compile started in this session; the per-request log follows below',
       sessRunning: 'in flight',
@@ -921,14 +917,6 @@ window.__ModuleLoader__.load({
       // 不承担流程语义，所以用点线而不是实线，字号也更小。
       // 会话行：对齐 DSH 侧边栏的会话行规格（一行一个会话、状态点 + 标题 + 元信息，
       // 不展开成请求列表）。尺寸按 DSH 的 32px 行高，点开才进入会话内部。
-      '[data-dscw-p-sessionlist] { display: flex; flex-direction: column; gap: 1px; padding: 2px 0; }',
-      '[data-dscw-p-sessionrow] { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 0 8px; cursor: pointer; font: inherit; font-size: 12.5px; line-height: 32px; color: var(--dsw-alias-label-primary); transition: background-color .12s ease; }',
-      '[data-dscw-p-sessionrow]:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 80%, transparent); }',
-      '[data-dscw-p-sessionrow]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
-      '[data-dscw-p-sessionrow] [data-dot] { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); }',
-      '[data-dscw-p-sessionrow] [data-dot][data-status="running"] { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)) 22%, transparent); }',
-      '[data-dscw-p-sessionrow] [data-title] { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-      '[data-dscw-p-sessionrow] [data-meta] { flex: 0 0 auto; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       // 会话内的任务摘要：一次编译一行，比请求行稍重，作为「明细之前的一层概括」。
       '[data-dscw-p-sessionjobs] { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px; }',
       '[data-dscw-p-sessionjob] { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary); }',
@@ -2670,55 +2658,6 @@ window.__ModuleLoader__.load({
           const grouped = (() => {
             if (!list?.length) return null
             const cwdOf = (s) => String(s.cwd ?? job?.cwd ?? focus?.cwd ?? '')
-            if (!job) {
-              // 全局视图对齐 DSH 的会话列表：一行一个会话，不铺开请求明细。
-              // 点一行进入该会话（focus），里面才看得到编译任务与请求。
-              // 与 DSH 的 treeitem 语义一致：会话是可打开的行，不是可展开的容器。
-              const groups = new Map()
-              for (const s of list) {
-                // 有会话的按会话归；没有会话的（面板按钮/自动调度发起）按仓库归——
-                // 它们本来就没有 agent 上下文，全塞进一个「非会话发起」行会让 23 个
-                // 任务挤成一行，比铺开还难用。
-                const sid = String(s.sessionId ?? '')
-                const k = sid || `repo:${cwdOf(s)}`
-                if (!groups.has(k)) groups.set(k, { sid: sid || null, cwd: sid ? '' : cwdOf(s), items: [] })
-                groups.get(k).items.push(s)
-              }
-              // 按最后活动时间倒序：最近的会话在最上面（与 DSH 侧边栏一致）
-              const ordered = [...groups.values()].map((g) => {
-                const lastAt = g.items.reduce((a, x) => (String(x.startedAt ?? '') > String(a ?? '') ? x.startedAt : a), null)
-                return { ...g, lastAt }
-              }).sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? '')))
-              const rowsOut = ordered.map(({ sid, cwd, items, lastAt }) => {
-                const live = items.some((x) => x.status === 'running')
-                const repos = new Set(items.map(cwdOf).filter(Boolean))
-                const stage = items[items.length - 1]?.stage ?? null
-                const label = sid
-                  ? t('sessGroupSession').replace('{id}', shortSession(sid))
-                  : (repoName(cwd) || t('sessNoCwd'))
-                return el('button', {
-                  key: sid || `repo:${cwd}`,
-                  'data-dscw-p-sessionrow': '',
-                  'data-live': live ? 'true' : null,
-                  title: sid || `${t('sessGroupNoSession')} · ${cwd || ''}`,
-                  onClick: () => {
-                    // 进入会话：用该会话的第一个 job 作为 focus（任务视图按 job 组织，
-                    // 但列表会把这个会话下的全部任务都筛出来）。
-                    const jid = items[0]?.jobId ?? null
-                    if (jid) { setFocus({ jobId: jid, cwd: items[0]?.cwd ?? '', sessionId: sid || null }); setLimit(80) }
-                  },
-                },
-                  el('span', { 'data-dot': '', 'data-status': live ? 'running' : 'done' }),
-                  el('span', { 'data-title': '' }, label),
-                  el('span', { 'data-meta': '' }, [
-                    stage ? STAGE_LABEL_OF(stage) : null,
-                    t('sessGroupCount').replace('{n}', items.length),
-                    sid && repos.size ? t('sessGroupRepos').replace('{n}', repos.size) : null,
-                    lastAt ? new Date(lastAt).toLocaleTimeString() : null,
-                  ].filter(Boolean).join(' · ')))
-              })
-              return el('div', { 'data-dscw-p-sessionlist': '', role: 'tree', 'aria-label': t('tabSessions') }, rowsOut)
-            }
             return stageGroups(list, 'one')
           })()
           return el('div', { 'data-dscw-p-sesswrap': '' },
@@ -3037,7 +2976,7 @@ window.__ModuleLoader__.load({
           try {
             // 会话页要自己分配高度（列表 + 详情各占一块），外层不能再滚：
             // 双层滚动条会把详情区挤成内容高度，下面留一大片空白。
-            return el('div', { 'data-dscw-p-page': '', 'data-dscw-p-fixed': (sessJob || tab === 'sessions') ? '' : null },
+            return el('div', { 'data-dscw-p-page': '', 'data-dscw-p-fixed': sessJob ? '' : null },
               sessJob
                 ? el(SessionView, { job: sessJob, onClose: () => setSessJobState(null) })
                 : el(React.Fragment, null,
@@ -3048,7 +2987,7 @@ window.__ModuleLoader__.load({
                   : null,
               ),
               el('div', { 'data-dscw-p-tabs': '' },
-                [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['sessions', t('tabSessions')], ['settings', t('tabSettings')]].map(([id, label]) =>
+                [['overview', t('tabOverview')], ['tasks', t('tabTasks')], ['settings', t('tabSettings')]].map(([id, label]) =>
                   el('button', {
                     key: id, 'data-dscw-p-tab': '',
                     'data-on': tab === id ? 'true' : null,
@@ -3056,8 +2995,6 @@ window.__ModuleLoader__.load({
                   }, label)),
               ),
               tab === 'overview' ? el(ReposTab) : null,
-              // 全局会话（1.2.0）：跨任务列出并发池全部 LLM 请求；job=null 走聚合接口。
-              tab === 'sessions' ? el(SessionView, { job: null, onClose: () => setTab('overview') }) : null,
               tab === 'settings' ? el('div', { 'data-dscw-p-settings': '' }, el(CodewikiCard)) : null,
               tab === 'tasks'
                 ? (err ? el('div', { 'data-dscw-p-empty': '' }, err)

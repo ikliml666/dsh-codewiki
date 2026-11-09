@@ -3179,24 +3179,7 @@ export function installWebServer(ctx, service, extra = {}) {
           }))
           // 数请求条数走 countSessionRecords：每个活跃任务只数文件名，不再读一遍它的全部 meta
           const active = activeSessionJobs(all, { requestCount: countSessionRecords })
-          // DSH 会话摘要：面板按 sessionId 把请求归到「哪个会话发起的编译」。
-          // 与 DSH 自己的会话概念对齐，不另造一套 ID——job.sessionId 就是宿主给的 agent id。
-          // 没有 sessionId 的任务（面板按钮/自动调度发起）单独归一组，不伪造 ID。
-          const sessionGroups = new Map()
-          for (const j of all) {
-            const sid = j.sessionId ?? null
-            if (!sessionGroups.has(sid)) {
-              sessionGroups.set(sid, { sessionId: sid, jobs: [], requests: 0, lastAt: null })
-            }
-            const g = sessionGroups.get(sid)
-            g.jobs.push({ id: j.id, cwd: j.cwd ?? '', stage: j.stage ?? null, updatedAt: j.updatedAt ?? null })
-            g.requests += countSessionRecords(j.id)
-            if (!g.lastAt || String(j.updatedAt ?? '') > String(g.lastAt)) g.lastAt = j.updatedAt ?? null
-          }
-          writeJson(res, 200, {
-            sessions, total: countAllSessionRecords(), limit, active,
-            sessionGroups: [...sessionGroups.values()].sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? ''))),
-          })
+          writeJson(res, 200, { sessions, total: countAllSessionRecords(), limit, active })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }
