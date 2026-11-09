@@ -21,8 +21,6 @@ window.__ModuleLoader__.load({
     const PANEL_ORDER = 52 // 排在 dsh-hindsight-on-demand（50）之后
     const POLL_MS = 2000
     const REPOS_PATH = '/api/codewiki/repos'
-    const SESSIONS_PATH = '/api/codewiki/sessions'
-    const SESSIONS_ITEM_PATH = '/api/codewiki/sessions/item'
     const MODELS_PATH = '/api/codewiki/models'
     const EFFORTS_PATH = '/api/codewiki/model-efforts'
     // 目录未声明 efforts 的模型（如 trae/mimo-v2.6-flash）在设置页展示的通用思考档位；
@@ -91,75 +89,19 @@ window.__ModuleLoader__.load({
       queueWaitLabel: '排队',
       runTimeLabel: '执行',
       queueAheadLabel: '在等',
-      sessBtn: '会话',
-      sessTitle: '编译会话（LLM 请求记录 · 保留 24h）',
-      sessEmpty: '暂无会话记录（编译请求发起后出现）',
-      sessNoCwd: '未关联仓库',
-      sessGroupCount: '{n} 条请求',
       // 会话分组：与 DSH 的会话概念对齐，一个会话发起的编译放一起。
-      sessGroupSession: '会话 {id}',
-      sessSessionJobs: '本会话发起的编译 · {n} 次',
-      sessSessionJobsHint: '同一会话里的每次编译；下面才是逐条模型请求',
-      sessRunning: '进行中',
-      sessActiveTitle: '进行中的任务',
-      sessActiveNoRequest: '尚未发出请求（正在做准备/收尾）',
-      sessActiveRequests: '已发 {n} 个请求',
-      sessActiveWritten: '已写 {n} 篇',
-      sessPrompt: '输入 prompt',
-      sessOutput: '模型输出',
-      sessBack: '← 返回列表',
       tabSessions: '会话',
-      sessGlobalTitle: '编译会话 · 全部任务（保留 24h）',
-      sessGlobalHint: '跨任务列出并发池的每一次 LLM 请求：正在跑的实时刷新，点开看 prompt 与模型输出。',
-      sessJob: '任务',
-      sessLive: '生成中',
-      sessOutputPending: '（暂无内容）',
-      sessTotal: '共 {n} 条',
-      sessMore: '再加载 80 条（还有 {n} 条）',
-      sessFocusOnly: '只看任务',
-      sessFocusClear: '看全部任务',
       // 阶段分组（1.3.0）：请求按「仓库 → 编译阶段 → 请求」三层排，组头要能一眼看出这一步在做什么、
       // 跑完了几条、有没有失败。历史记录没有阶段字段，单独归一组并说明原因，不假装它属于某一步。
-      sessStageUnknown: '未标注阶段',
-      sessStageCount: '{n} 条',
-      sessStageDone: '完成 {n}',
-      sessStageFailed: '失败 {n}',
-      sessStageRunning: '有请求在跑',
       // 循环分组：同一轮 agentic 工作里会有几十上百次工具往返，面板把它们平铺时
       // 看起来像「几十次独立失败」。按「输入上下文回落」切成循环，让「1 个循环 100 轮」
       // 与「100 次请求」在视觉上分得开。
-      sessLoopLabel: '循环 {n}',
-      sessLoopTurns: '{n} 轮往返',
-      sessLoopHint: '同一轮 agentic 工作内的工具往返；每轮都要重发历史，所以条数多不等于失败',
-      sessLoopSingle: '{n} 轮',
       // 详情页签：默认落在「输出」上——prompt 是给模型的指令，人点开多半是想看模型答了什么。
-      sessTabOutput: '输出',
-      sessTabPrompt: '输入',
-      sessTabReasoning: '思考',
-      sessTabTools: '工具',
-      sessReasoningOnly: '这条请求没有正文输出：内容都在「思考」页签里（模型把整轮推理写在 reasoning 里）。',
-      sessToolUnnamed: '未命名工具',
-      sessRoleSystem: '系统指令',
-      sessRoleUser: '用户任务',
-      sessRoleAssistant: '模型回复',
-      sessRoleTool: '工具结果',
-      sessStatOut: '输出 {n} 字',
-      sessStatThink: '思考 {n} 字',
-      sessStatTools: '工具 {n} 次',
       // token 数两套说法：实测来自上游 usage（账单口径），估算按 prompt 字符折算。
       // 分开显示是为了让人知道哪个数能拿去对账。
-      sessStatIn: '入 {n} tok',
-      sessStatInEst: '入 {n} tok（估算）',
-      sessStatOutTok: '出 {n} tok',
-      sessTokEstimatedHint: '上游未返回用量，这是按 prompt 字符数折算的估算值，不是账单口径',
       // 行内提示：没输出时直接说清是哪种情况，别让人点开才发现是空的。
       // 进行时与完成时必须是两套说法：`✓ done` 的行挂「思考中」读起来像还在跑或卡住了，
       // 而 agentic 写作本来就是把整轮推理写在 reasoning 里、正文由工具调用落盘。
-      sessHintThinking: '思考中',
-      sessHintTools: '仅工具调用',
-      sessHintThinkingDone: '内容在思考里',
-      sessHintToolsDone: '本轮在调工具',
-      sessHintEmpty: '无内容',
       secCompile: '编译模型',
       secCompileHint: '写文章与校对共用这一个模型，全部在插件内完成。',
       requestLimit: '单模块请求上限',
@@ -387,63 +329,7 @@ window.__ModuleLoader__.load({
       queueWaitLabel: 'queued',
       runTimeLabel: 'running',
       queueAheadLabel: 'waiting for',
-      sessBtn: 'Sessions',
-      sessTitle: 'Compile sessions (LLM request log · kept 24h)',
-      sessEmpty: 'No session records yet (they appear once compile requests start).',
-      sessNoCwd: 'No repo',
-      sessGroupCount: '{n} requests',
-      sessGroupSession: 'Session {id}',
-      sessSessionJobs: 'Compiles from this session · {n}',
-      sessSessionJobsHint: 'Each compile started in this session; the per-request log follows below',
-      sessRunning: 'in flight',
-      sessActiveTitle: 'Jobs in progress',
-      sessActiveNoRequest: 'No request yet (preparing or wrapping up)',
-      sessActiveRequests: '{n} requests sent',
-      sessActiveWritten: '{n} articles written',
-      sessPrompt: 'Input prompt',
-      sessOutput: 'Model output',
-      sessBack: '← Back to list',
       tabSessions: 'Sessions',
-      sessGlobalTitle: 'Compile sessions · all jobs (kept 24h)',
-      sessGlobalHint: 'Every LLM request of the concurrency pool across all jobs: running ones refresh live; open one for its prompt and model output.',
-      sessJob: 'job',
-      sessLive: 'streaming',
-      sessOutputPending: '(nothing yet)',
-      sessTotal: '{n} total',
-      sessMore: 'Load 80 more ({n} left)',
-      sessFocusOnly: 'Job only',
-      sessFocusClear: 'All jobs',
-      sessStageUnknown: 'unlabelled stage',
-      sessStageCount: '{n}',
-      sessStageDone: '{n} done',
-      sessStageFailed: '{n} failed',
-      sessStageRunning: 'requests running',
-      sessLoopLabel: 'Loop {n}',
-      sessLoopTurns: '{n} turns',
-      sessLoopHint: 'Tool round-trips inside one agentic run; each turn resends the history, so many turns is not failure',
-      sessLoopSingle: '{n} turns',
-      sessTabOutput: 'Output',
-      sessTabPrompt: 'Input',
-      sessTabReasoning: 'Reasoning',
-      sessTabTools: 'Tools',
-      sessReasoningOnly: 'No body output: everything is on the Reasoning tab (the model did the whole turn in reasoning).',
-      sessToolUnnamed: 'unnamed tool',
-      sessRoleSystem: 'System',
-      sessRoleUser: 'Task',
-      sessRoleAssistant: 'Reply',
-      sessRoleTool: 'Tool result',
-      sessStatOut: '{n} chars out',
-      sessStatThink: '{n} chars thinking',
-      sessStatTools: '{n} tool calls',
-      sessStatIn: '{n} tok in',
-      sessStatInEst: '{n} tok in (estimated)',
-      sessStatOutTok: '{n} tok out',
-      sessTokEstimatedHint: 'The upstream returned no usage; this is derived from prompt length, not billing figures.',
-      sessHintThinking: 'thinking',
-      sessHintTools: 'tools only',
-      sessHintThinkingDone: 'reasoning only',
-      sessHintToolsDone: 'tools this turn',
-      sessHintEmpty: 'no content',
       secCompile: 'Compile model',
       secCompileHint: 'Articles and proofreading share this model; all inside the plugin.',
       requestLimit: 'Per-module request cap',
@@ -872,10 +758,6 @@ window.__ModuleLoader__.load({
       // 仓库层用留白与字重，阶段层用一条缩进竖线与计数，请求层只剩状态点与正文。
       // 之前每行都描边、每层都加框，几十条请求摊开像一叠同重的卡片，扫不出「哪条在跑」。
       '[data-dscw-p-page][data-dscw-p-fixed] { overflow: hidden; }',
-      '[data-dscw-p-sesswrap] { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; flex: 1 1 auto; }',
-      '[data-dscw-p-sessbar] { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }',
-      '[data-dscw-p-sessbar] > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-      '[data-dscw-p-sessscroll] { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px; }',
 
       // 进行中任务：这两个 data 属性此前没有任何规则，渲染出来是几行裸文本。
       '[data-dscw-p-active] { display: flex; flex-direction: column; gap: 5px; flex: none; }',
@@ -918,14 +800,8 @@ window.__ModuleLoader__.load({
       // 会话行：对齐 DSH 侧边栏的会话行规格（一行一个会话、状态点 + 标题 + 元信息，
       // 不展开成请求列表）。尺寸按 DSH 的 32px 行高，点开才进入会话内部。
       // 会话内的任务摘要：一次编译一行，比请求行稍重，作为「明细之前的一层概括」。
-      '[data-dscw-p-sessionjobs] { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px; }',
-      '[data-dscw-p-sessionjob] { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary); }',
-      '[data-dscw-p-sessionjob] [data-job] { flex: none; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }',
-      '[data-dscw-p-sessionjob] [data-repo] { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-      '[data-dscw-p-sessionjob] [data-meta] { flex: 0 0 auto; margin-left: auto; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
 
       // 请求层：一行一次请求。状态只用一个点表达，行本身不加边框——阶段竖线已经是边界。
-      '[data-dscw-p-sesslist] { display: flex; flex-direction: column; }',
       '[data-dscw-p-sessrow] { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; border: 0; border-radius: 5px; background: transparent; padding: 5px 6px; cursor: pointer; font: inherit; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-secondary); transition: background-color .14s ease; }',
       '[data-dscw-p-sessrow]:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 70%, transparent); }',
       '[data-dscw-p-sessrow]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
@@ -940,25 +816,10 @@ window.__ModuleLoader__.load({
 
       // 详情：一条信息栏 + 页签 + 一个滚动的正文区。三块都不设固定高度，
       // 正文区吃满剩余空间自己滚——不再有「半屏内容 + 半屏空白 + 滚外层」。
-      '[data-dscw-p-sessdetail] { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; }',
-      '[data-dscw-p-sessdetailbar] { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }',
-      '[data-dscw-p-sessdetailbar] > [data-dscw-p-meta] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
       '[data-dscw-p-live] { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }',
       '[data-dscw-p-live]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: dscw-pulse 1.2s ease-in-out infinite; }',
-      '[data-dscw-p-sessstats] { display: flex; flex-wrap: wrap; gap: 4px 10px; flex: none; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
-      '[data-dscw-p-sesspane] { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 45%, transparent); overflow: hidden; }',
-      '[data-dscw-p-sesspane] > * { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 12px 12px; }',
-      '[data-dscw-p-sesspane] > [data-dscw-p-sessempty] { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }',
       // 正文排版：宿主 MarkdownText 自带结构，这里只调「面板里能读」的密度——
       // 12px 正文、1.65 行高、标题与正文同一字阶、代码块横向滚而不换行。
-      '[data-dscw-p-sesspane] [data-markdown-variant] { font-size: 12px; line-height: 1.65; color: var(--dsw-alias-label-secondary); }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] > :first-child { margin-top: 0; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] > :last-child { margin-bottom: 0; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] h1, [data-dscw-p-sesspane] [data-markdown-variant] h2, [data-dscw-p-sesspane] [data-markdown-variant] h3, [data-dscw-p-sesspane] [data-markdown-variant] h4 { font-size: 12.5px; line-height: 1.5; font-weight: 600; color: var(--dsw-alias-label-primary); margin: 12px 0 5px; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] ul, [data-dscw-p-sesspane] [data-markdown-variant] ol { padding-left: 18px; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] code { font-family: var(--dsw-alias-font-mono, ui-monospace, monospace); font-size: 11px; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] pre { overflow-x: auto; }',
-      '[data-dscw-p-sesspane] [data-markdown-variant] blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-tertiary); }',
       // 提示词分块：每个 [role] 一段，段落头是一条窄标签，正文照常渲染 Markdown。
       '[data-dscw-p-promptblocks] { display: flex; flex-direction: column; gap: 14px; }',
       '[data-dscw-p-promptblocks] > section { display: flex; flex-direction: column; gap: 5px; min-width: 0; }',
@@ -2339,366 +2200,12 @@ window.__ModuleLoader__.load({
           code: { copyLabel: '复制', copiedLabel: '已复制' },
           footnotes: '脚注',
         }
-
-        function SessionView({ job, onClose }) {
-          const t = tBound
-          const global = !job
-          const [list, setList] = React.useState(null)
-          const [total, setTotal] = React.useState(null)
-          const [limit, setLimit] = React.useState(80)
-          const [activeJobs, setActiveJobs] = React.useState([])
-          const [err, setErr] = React.useState(null)
-          const [sel, setSel] = React.useState(null) // 选中的请求 { jobId, n }
-          const [item, setItem] = React.useState(null)
-          const [focus, setFocus] = React.useState(null) // 只看某个任务 { jobId, cwd }
-          const [collapsed, setCollapsed] = React.useState({}) // 分组折叠态：key → true
-          const [detailTab, setDetailTab] = React.useState('output') // 详情默认看输出：prompt 是给模型的，不是给人读的
-          const targetId = focus?.jobId ?? job?.id ?? null
-          const targetSession = focus?.sessionId ?? null
-          // 指纹：5s 轮询的 payload 常常一字未变，此前每次都 setList 触发整棵列表重建，
-          // 滚动位置与焦点都被打断。内容没变就不进 state。
-          const sigRef = React.useRef('')
-          React.useEffect(() => {
-            let alive = true
-            let inFlight = false
-            const pull = async () => {
-              if (inFlight) return
-              inFlight = true
-              try {
-                const qs = targetSession
-                  ? `sessionId=${encodeURIComponent(targetSession)}&limit=${limit}`
-                  : targetId
-                    ? `jobId=${encodeURIComponent(targetId)}&limit=${limit}`
-                    : `limit=${Math.min(500, limit)}`
-                const d = await apiGet(`${SESSIONS_PATH}?${qs}`)
-                const nextList = Array.isArray(d.sessions) ? d.sessions : []
-                const nextActive = Array.isArray(d.active) ? d.active : []
-                const sig = `${d.total ?? ''}|${nextActive.map((a) => `${a.jobId}:${a.stage}:${a.nativePercent}:${a.requests}`).join(',')}|${nextList.map((s) => `${s.jobId ?? ''}#${s.n}:${s.status}:${s.stage}:${s.outputChars}:${s.reasoningChars ?? ''}`).join(',')}`
-                if (!alive) return
-                setErr(null)
-                if (sig === sigRef.current) return
-                sigRef.current = sig
-                setList(nextList)
-                setActiveJobs(nextActive)
-                setTotal(Number.isFinite(d.total) ? d.total : null)
-              } catch (e) {
-                if (alive) setErr(String(e?.message ?? e))
-              } finally {
-                inFlight = false
-              }
-            }
-            sigRef.current = ''
-            pull()
-            const timer = setInterval(pull, 5000)
-            return () => { alive = false; clearInterval(timer) }
-          }, [targetId, limit])
-          // 详情：还没有 finishedAt 就是仍在生成，2s 后再拉一次——正在跑的请求能看着输出
-          // 逐段长出来，而不是点开只有半截、只能等它结束再看。
-          React.useEffect(() => {
-            if (!sel) { setItem(null); return }
-            let alive = true
-            let timer = null
-            const load = async () => {
-              try {
-                const d = await apiGet(`${SESSIONS_ITEM_PATH}?jobId=${encodeURIComponent(sel.jobId)}&n=${sel.n}`)
-                if (!alive) return
-                setItem(d)
-                if (!d.finishedAt) timer = setTimeout(load, 2000)
-              } catch (e) {
-                if (alive) setItem({ error: String(e?.message ?? e) })
-              }
-            }
-            load()
-            return () => { alive = false; if (timer) clearTimeout(timer) }
-          }, [sel?.jobId, sel?.n])
-          const close = () => { setSel(null); onClose() }
-          const jobTag = (id) => String(id ?? '').replace(/^job-/, '')
-          // 会话 ID 显示成短形式：session-9e2582a8-958c-... → 9e2582a8。
-          // 完整 ID 在 title 里，列表上只需要够分辨。
-          const shortSession = (id) => {
-            const s = String(id ?? '').replace(/^session-/, '')
-            return s.length > 8 ? s.slice(0, 8) : (s || '?')
-          }
-          // token 数按量级缩写：单次请求可从几百到几十万，统一「k」会把 420 写成 0k。
-          const tokLabel = (n) => {
-            const v = Number(n) || 0
-            return v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
-          }
-          const toggleGroup = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
-          const markdown = (text, streaming) => el(MarkdownText, {
-            text: String(text ?? ''),
-            labels: MD_LABELS,
-            variant: 'compact',
-            ...(streaming ? { streaming: true } : {}),
-          })
-
-          // ---- 详情 ----
-          const detail = (() => {
-            if (!sel) return null
-            const rec = item
-            // 拉取失败的对象只有 error；记录本身出错时带着 n/jobId，两者要分开认。
-            const broken = !!rec?.error && rec.n == null
-            const live = !!rec && !broken && !rec.finishedAt
-            const tools = Array.isArray(rec?.tools) ? rec.tools : []
-            const tabs = [
-              { id: 'output', label: t('sessTabOutput') },
-              { id: 'prompt', label: t('sessTabPrompt') },
-              ...(rec?.reasoning ? [{ id: 'reasoning', label: t('sessTabReasoning') }] : []),
-              ...(tools.length ? [{ id: 'tools', label: `${t('sessTabTools')} ${tools.length}` }] : []),
-            ]
-            const tab = tabs.some((x) => x.id === detailTab) ? detailTab : 'output'
-            const body = (() => {
-              if (broken) return el('div', { 'data-dscw-p-error': '' }, rec.error)
-              if (rec == null) return el(Skeleton)
-              if (tab === 'prompt') {
-                const parts = splitPrompt(rec.prompt)
-                if (!parts.length) return el('div', { 'data-dscw-p-sessempty': '' }, t('sessOutputPending'))
-                return el('div', { 'data-dscw-p-promptblocks': '' }, parts.map((p, i) => el('section', {
-                  key: i, 'data-role': p.role ?? 'raw',
-                },
-                  el('div', { 'data-dscw-p-rolebar': '' }, p.role
-                    ? t(`sessRole${p.role.charAt(0).toUpperCase()}${p.role.slice(1)}`)
-                    : `#${i + 1}`),
-                  markdown(p.body, false))))
-              }
-              if (tab === 'reasoning') return markdown(rec.reasoning, live)
-              if (tab === 'tools') {
-                return el('div', { 'data-dscw-p-toollist': '' }, tools.map((x, i) => el('details', {
-                  key: x.id ?? i, 'data-dscw-p-tool': '', open: i < 3,
-                },
-                  el('summary', null,
-                    el('span', { 'data-toolname': '' }, x.name || t('sessToolUnnamed')),
-                    x.id ? el('span', { 'data-toolid': '', title: x.id }, String(x.id).slice(0, 10)) : null),
-                  el('pre', null, String(x.args ?? '')))))
-              }
-              return rec.output ? markdown(rec.output, live) : el('div', { 'data-dscw-p-sessempty': '' }, t('sessReasoningOnly'))
-            })()
-            return el('div', { 'data-dscw-p-sessdetail': '' },
-              el('div', { 'data-dscw-p-sessdetailbar': '' },
-                el(Button, { variant: 'ghost', size: 'sm', onClick: () => setSel(null) }, t('sessBack')),
-                el('span', { 'data-dscw-p-meta': '', title: rec?.name ?? '' }, [
-                  `#${sel.n}`,
-                  rec?.stage ? STAGE_LABEL_OF(rec.stage) : null,
-                  rec?.model ?? (global ? jobTag(sel.jobId) : null),
-                  rec?.startedAt ? new Date(rec.startedAt).toLocaleTimeString() : null,
-                ].filter(Boolean).join(' · ')),
-                live ? el('span', { 'data-dscw-p-live': '' }, t('sessLive')) : null),
-              el('div', { 'data-dscw-p-sessstats': '' },
-                el('span', null, t('sessStatOut').replace('{n}', String(rec?.outputChars ?? 0))),
-                rec?.reasoningChars ? el('span', null, t('sessStatThink').replace('{n}', String(rec.reasoningChars))) : null,
-                rec?.toolCalls ? el('span', null, t('sessStatTools').replace('{n}', String(rec.toolCalls))) : null,
-                // 输入量区分实测与估算：上游回的 usage 才是账单上的数，估算是按 prompt 字符
-                // 折出来的（中文 1 字 1 token、其余 3.5 字符 1 token），两者能差出不少。
-                // 不标注来源的话，用户没法判断这个数能不能拿来对账。
-                // 旧记录没有 inputTokensMeasured 字段，那些值全是估算——所以只有明确 === true
-                // 才算实测，缺字段按估算显示。
-                rec?.inputTokens
-                  ? el('span', { title: rec.inputTokensMeasured === true ? undefined : t('sessTokEstimatedHint') },
-                    t(rec.inputTokensMeasured === true ? 'sessStatIn' : 'sessStatInEst').replace('{n}', tokLabel(rec.inputTokens)))
-                  : null,
-                rec?.outputTokens ? el('span', null, t('sessStatOutTok').replace('{n}', tokLabel(rec.outputTokens))) : null),
-              el(SegmentedTabs, {
-                value: tab,
-                items: tabs.map((x) => ({ value: x.id, label: x.label })),
-                onChange: setDetailTab,
-              }),
-              el('div', { 'data-dscw-p-sesspane': '', 'data-open': 'true' }, body),
-            )
-          })()
-
-          // ---- 列表 ----
-          // 「打开没有内容」在行上就要说清原因：输出空、思考多，是模型把内容都写在思考里；
-          // 输出与思考都空但调了工具，是这一轮在操作工具；三者都空但请求还在跑，是增量还没到。
-          // 别让人点开才发现是空的，也别把「即将长出来」误报成「没有内容」。
-          //
-          // 进行时与完成时分开说：`✓ done` 的行挂「思考中」是现在进行时，读起来像还在跑或
-          // 卡住了；而 agentic 写作的正文本来就由工具调用直接落盘，不经过对话正文——
-          // 这类行是完成，不是空转，行名也不该比同组其他行更灰。
-          const isEmptyish = (s) => !Number(s.outputChars) && !Number(s.reasoningChars) && !Number(s.toolCalls)
-          const emptyHint = (s) => {
-            if (Number(s.outputChars)) return null
-            const live = s.status === 'running'
-            if (Number(s.reasoningChars)) return t(live ? 'sessHintThinking' : 'sessHintThinkingDone')
-            if (Number(s.toolCalls)) return t(live ? 'sessHintTools' : 'sessHintToolsDone')
-            if (live) return t('sessLive')
-            return t('sessHintEmpty')
-          }
-          // 字符数不足 1000 的行按实际字数显示：`Math.round(73/1000)` 会写成「0k ch」，
-          // 看着像这条什么都没产出，其实有 73 字。
-          const charLabel = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k ch` : `${n} ch`)
-          const row = (s) => el('button', {
-            key: `${s.jobId ?? job?.id}#${s.n}`,
-            'data-dscw-p-sessrow': '',
-            'data-status': s.status,
-            'data-empty': isEmptyish(s) && s.status !== 'running' ? 'true' : null,
-            onClick: () => { setSel({ jobId: s.jobId ?? job?.id, n: s.n }); setDetailTab('output') },
-          },
-            el('span', { 'data-mark': '' }, s.status === 'running' ? '▸' : s.status === 'done' ? '✓' : '✗'),
-            el('span', { 'data-name': '', title: s.name }, s.name),
-            el('span', { 'data-hint': '' }, emptyHint(s)),
-            el('span', { 'data-sub': '' }, [
-              s.status === 'running' ? t('sessRunning') : null,
-              s.outputChars ? charLabel(s.outputChars) : null,
-              s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : null,
-            ].filter(Boolean).join(' · ')),
-          )
-          const rows = (items) => el('div', { 'data-dscw-p-sesslist': '' }, items.map(row))
-          // 阶段分组按真实流程排，不按时间：同一仓库里「先解析、再写作、后校对」是固定次序，
-          // 按时间排会让同一个阶段在列表里出现多次、来回跳。
-          const stageGroups = (items, prefix) => {
-            const byStage = new Map()
-            for (const s of items) {
-              const k = String(s.stage ?? '')
-              if (!byStage.has(k)) byStage.set(k, [])
-              byStage.get(k).push(s)
-            }
-            const order = [...byStage.keys()].sort((a, b) => {
-              const ia = STAGE_ORDER.indexOf(a)
-              const ib = STAGE_ORDER.indexOf(b)
-              return (ia < 0 ? STAGE_ORDER.length : ia) - (ib < 0 ? STAGE_ORDER.length : ib)
-            })
-            if (order.length <= 1) return rows(items)
-            return el('div', { 'data-dscw-p-stagegroups': '' }, order.map((stage) => {
-              const g = byStage.get(stage)
-              const gk = `${prefix}/${stage || '__none'}`
-              const open = !collapsed[gk]
-              const running = g.some((x) => x.status === 'running')
-              const ok = g.filter((x) => x.status === 'done').length
-              const bad = g.filter((x) => x.status === 'error').length
-              return el('div', { key: stage || '__none', 'data-dscw-p-stagegroup': '', 'data-open': open ? 'true' : 'false' },
-                el('button', {
-                  'data-dscw-p-stagehead': '', 'data-live': running ? 'true' : null,
-                  onClick: () => toggleGroup(gk),
-                },
-                  el('span', { 'data-stage': '' }, STAGE_LABEL_OF(stage || null)),
-                  el('span', { 'data-count': '' }, t('sessStageCount').replace('{n}', g.length)),
-                  el('span', { 'data-body': '' }, [
-                    ok ? t('sessStageDone').replace('{n}', ok) : null,
-                    bad ? t('sessStageFailed').replace('{n}', bad) : null,
-                    running ? t('sessStageRunning') : null,
-                  ].filter(Boolean).join(' · '))),
-                open ? rows(g) : null)
-            }))
-          }
-          // 把同一阶段的记录按 agent 循环分组。返回列表条目时用 rows() 保持原行为。
-          // 进行中任务：点一行就只看这个任务的请求。
-          // 会话内的任务摘要：进入一个会话后先看到「这个会话发起了哪几次编译、
-          // 各写了多少篇」，而不是一上来就是几百条请求。请求列表收在下面，
-          // 需要细看某一次模型调用时才往下翻——对齐 DSH「会话是主体，明细是内部」。
-          const sessionJobsBlock = focus?.sessionId && Array.isArray(list)
-            ? (() => {
-              // 从请求记录里反推该会话涉及的任务（端点也会直接给 jobs，这里用记录兜底）
-              const byJob = new Map()
-              for (const s of list) {
-                const k = s.jobId ?? ''
-                if (!k) continue
-                if (!byJob.has(k)) byJob.set(k, { jobId: k, cwd: s.cwd ?? '', n: 0, lastAt: null, stage: s.stage ?? null })
-                const g = byJob.get(k)
-                g.n += 1
-                if (!g.lastAt || String(s.startedAt ?? '') > String(g.lastAt)) g.lastAt = s.startedAt
-              }
-              if (!byJob.size) return null
-              const items = [...byJob.values()].sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? '')))
-              return el('div', { 'data-dscw-p-sessionjobs': '' },
-                el('div', { 'data-dscw-p-seclabel': '' }, t('sessSessionJobs').replace('{n}', items.length)),
-                items.map((g) => el('div', { key: g.jobId, 'data-dscw-p-sessionjob': '' },
-                  el('span', { 'data-job': '', title: g.jobId }, jobTag(g.jobId)),
-                  el('span', { 'data-repo': '', title: g.cwd }, repoName(g.cwd) || t('sessNoCwd')),
-                  el('span', { 'data-meta': '' }, [
-                    g.stage ? STAGE_LABEL_OF(g.stage) : null,
-                    t('sessGroupCount').replace('{n}', g.n),
-                    g.lastAt ? new Date(g.lastAt).toLocaleTimeString() : null,
-                  ].filter(Boolean).join(' · ')))))
-            })()
-            : null
-          const activeBlock = activeJobs.length
-            ? el('div', { 'data-dscw-p-active': '' },
-              el('div', { 'data-dscw-p-seclabel': '' }, `${t('sessActiveTitle')} (${activeJobs.length})`),
-              activeJobs.map((a) => el('button', {
-                key: `active-${a.jobId}`,
-                'data-dscw-p-activerow': '',
-                'data-idle': a.requests > 0 ? null : 'true',
-                title: a.cwd || a.jobId,
-                onClick: global ? () => { setFocus({ jobId: a.jobId, cwd: a.cwd }); setLimit(80) } : undefined,
-              },
-                el('span', { 'data-dot': '' }),
-                el('span', { 'data-name': '' }, repoName(a.cwd) || jobTag(a.jobId)),
-                a.cwd ? el('span', { 'data-job': '' }, jobTag(a.jobId)) : null,
-                el('span', { 'data-sub': '' }, [
-                  stageLabel(a.stage) ?? a.stage,
-                  nativeStageName(a.nativeStage),
-                  a.nativeStage && Number.isFinite(a.nativePercent) ? `${a.nativePercent}%` : null,
-                  a.writtenCount ? t('sessActiveWritten').replace('{n}', a.writtenCount) : null,
-                  a.requests > 0 ? t('sessActiveRequests').replace('{n}', a.requests) : t('sessActiveNoRequest'),
-                ].filter(Boolean).join(' · ')),
-              )),
-            )
-            : null
-          const focusBar = focus
-            ? el('div', { 'data-dscw-p-sessdetailbar': '' },
-              el('span', { 'data-dscw-p-meta': '', title: focus.sessionId || focus.cwd || focus.jobId },
-                focus.sessionId
-                  ? t('sessGroupSession').replace('{id}', shortSession(focus.sessionId))
-                  : `${t('sessFocusOnly')} ${repoName(focus.cwd) || jobTag(focus.jobId)}`),
-              el(Button, {
-                variant: 'ghost', size: 'sm',
-                onClick: () => { setFocus(null); setLimit(80) },
-              }, t('sessFocusClear')))
-            : null
-          // 分页上限与服务端一致：全局聚合封顶 500 条，单任务封顶 2000 条。
-          const cap = global && !focus ? 500 : 2000
-          const reachable = total == null ? 0 : Math.min(total, cap)
-          const moreRow = total != null && (list?.length ?? 0) < reachable
-            ? el(Button, {
-              variant: 'ghost', size: 'sm',
-              onClick: () => setLimit((n) => Math.min(cap, n + 80)),
-            }, t('sessMore').replace('{n}', reachable - (list?.length ?? 0)))
-            : null
-          // 分组：全局按仓库分节，节内再按编译阶段分；单任务只有一个仓库，直接按阶段分。
-          const grouped = (() => {
-            if (!list?.length) return null
-            const cwdOf = (s) => String(s.cwd ?? job?.cwd ?? focus?.cwd ?? '')
-            return stageGroups(list, 'one')
-          })()
-          return el('div', { 'data-dscw-p-sesswrap': '' },
-            el('div', { 'data-dscw-p-sessbar': '' },
-              el('span', null, global
-                ? (focus ? `${t('sessGlobalTitle')} · ${repoName(focus.cwd) || jobTag(focus.jobId)}` : t('sessGlobalTitle'))
-                : t('sessTitle')),
-              total != null ? el('span', { 'data-hint': '' }, t('sessTotal').replace('{n}', total)) : null,
-              el(Button, { variant: 'ghost', size: 'sm', onClick: close }, '✕')),
-            global && !focus ? el('div', { 'data-dscw-p-meta': '' }, t('sessGlobalHint')) : null,
-            sel
-              ? detail
-              : err
-                ? el('div', { 'data-dscw-p-empty': '' }, err)
-                : list === null
-                  ? el(Skeleton)
-                  : el('div', { 'data-dscw-p-sessscroll': '' },
-                    focusBar,
-                    sessionJobsBlock,
-                    activeBlock,
-                    !list.length
-                      ? (activeJobs.length ? null : el('div', { 'data-dscw-p-empty': '' },
-                        el('strong', null, t('emptySessionsTitle')),
-                        el('span', null, t('sessEmpty'))))
-                      : grouped,
-                    moreRow,
-                  ),
-          )
-        }
-
-
         function CodewikiPanel() {
           const t = tBound
           const [jobs, setJobs] = React.useState(null) // null = 尚未拿到首轮
           const [err, setErr] = React.useState(null)
           const [busyId, setBusyId] = React.useState(null)
           const [tab, setTab] = React.useState('overview')
-          const [sessJob, setSessJobState] = React.useState(null) // 打开会话视图的任务
-          // 单任务会话视图（任务行「会话」按钮）会占满整页；全局「会话」Tab（1.2.0）则留在
-          // Tab 页内渲染，页面顶部的 Tab 条保持可见，随时能切走。
-          const setSessJob = (j) => { setSessJobState(j); if (j) setTab('tasks') }
           const [copiedPath, setCopiedPath] = React.useState(null)
           // 面板侧采样（2s 轮询差分）：tps 滚动窗口画 spark；批量完成速率 EWMA 算吞吐与 ETA
           const sparkRef = React.useRef(new Map()) // jobId -> number[]
@@ -2878,10 +2385,6 @@ window.__ModuleLoader__.load({
                 }, stageLabel(job.stage)),
                 el('div', { 'data-dscw-p-actions': '' },
                   throughputBadge(job, sparkOf, rateOf),
-                  el(Button, {
-                    variant: 'ghost', size: 'sm',
-                    onClick: () => setSessJob({ id: job.id, cwd: job.cwd }),
-                  }, t('sessBtn')),
                   active
                     ? el(Button, {
                       variant: 'ghost', size: 'sm',
@@ -2974,12 +2477,8 @@ window.__ModuleLoader__.load({
           }
 
           try {
-            // 会话页要自己分配高度（列表 + 详情各占一块），外层不能再滚：
-            // 双层滚动条会把详情区挤成内容高度，下面留一大片空白。
-            return el('div', { 'data-dscw-p-page': '', 'data-dscw-p-fixed': sessJob ? '' : null },
-              sessJob
-                ? el(SessionView, { job: sessJob, onClose: () => setSessJobState(null) })
-                : el(React.Fragment, null,
+            return el('div', { 'data-dscw-p-page': '' },
+              el(React.Fragment, null,
               el('div', { 'data-dscw-p-head': '' },
                 el('h3', null, t('panelTitle')),
                 (jobs ?? []).filter(isActive).length
