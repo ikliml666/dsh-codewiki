@@ -76,13 +76,22 @@ def _produced(response) -> bool:
 
 
 class ChannelBreaker:
-    """进程级连续空产出计数。有产出即清零，连续到阈值即熔断。"""
+    """进程级空产出压力计数。空产出 +1，有产出 -1（下限 0），到阈值即熔断。
+
+    为什么不是「有产出即清零」：并行写作时（moduleConcurrency>1）一个叶子坏掉、
+    其他叶子还在正常写，健康流量会不断把故障叶子的空产出计数冲回 0，熔断永远不
+    触发——实测 A 连空 6 次、B 正常 6 次交替时 max_streak 只有 2。衰减语义下，
+    空产出与正常产出 1:1 交替时计数原地踏步，故障占比过半就持续上涨直到熔断；
+    而通道真的恢复（持续有产出）时计数照样归零，不会把已经好转的上游误判成故障。
+    """
 
     def __init__(self, limit: int):
         self.limit = limit
         self.streak = 0
         self.max_streak = 0
         self.tripped = False
+        self.empty_total = 0
+        self.call_total = 0
 
     def trip(self, reason: str):
         """置熔断位并抛 :class:`ChannelBreakerTripped`。桥侧先熔断时也走这里。"""
@@ -93,17 +102,19 @@ class ChannelBreaker:
         """记一次调用结果。熔断那一刻抛 :class:`ChannelBreakerTripped`。"""
         if self.tripped:
             raise ChannelBreakerTripped(
-                f"模型通道已熔断（连续 {self.max_streak} 次空产出），本轮不再向上游发请求"
+                f"模型通道已熔断（空产出压力峰值 {self.max_streak}），本轮不再向上游发请求"
             )
+        self.call_total += 1
         if produced:
-            self.streak = 0
+            self.streak = max(0, self.streak - 1)
             return
+        self.empty_total += 1
         self.streak += 1
         if self.streak > self.max_streak:
             self.max_streak = self.streak
         if self.limit > 0 and self.streak >= self.limit:
             self.trip(
-                f"模型通道连续 {self.streak} 次空产出（上游 200 却无正文、无工具调用），"
+                f"模型通道空产出压力达 {self.streak}（累计 {self.empty_total}/{self.call_total} 次调用无正文、无工具调用），"
                 f"已中止本轮：后续请求不再转发上游，已写文章照常落盘"
             )
 
