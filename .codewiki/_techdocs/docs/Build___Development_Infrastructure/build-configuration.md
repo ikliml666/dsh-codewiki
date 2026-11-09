@@ -6,7 +6,7 @@ description: 本模块是 dsh-codewiki 的构建面与配置面：它不含编�
 # 构建与配置（build-configuration）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `dsh-codewiki` 的**构建面与配置面**：它不含编译算法，只决定「这个包长什么样、怎么被宿主装载、装载后拿到哪些默认配置、以及运行原生引擎所需的 Python 环境怎么造出来」。三个工件构成完整闭环：
 
@@ -100,7 +100,7 @@ LICENSE, README.md, CHANGELOG.md, CodeWiki.md
 
 ### 2.5 版本号
 
-`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.3`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
+`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.4`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
 
 ---
 
@@ -154,7 +154,7 @@ flowchart TD
 
 ### 3.3 配置键目录（注释里声明的子集）
 
-`cordis.patch.yml` 只列常用项，完整字段以 `index.js` 的 `Config` 为准（共 28 项，全部 `.volatile()`，改完即生效、无需重启）。
+`cordis.patch.yml` 只列常用项，完整字段以 `index.js` 的 `Config` 为准（共 29 项，全部 `.volatile()`，改完即生效、无需重启）。
 
 | 分组 | 键 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -163,6 +163,7 @@ flowchart TD
 | 运行 | `maxConcurrency` | `2` | LLM 请求并发（1–8，硬顶 8） |
 | 运行 | `moduleConcurrency` | `0` | 模块生成并行度；`0` = 跟随 `maxConcurrency`，`1` = 上游严格串行 |
 | 运行 | `requestLimit` | `100` | 单模块写作的 LLM 请求上限（硬顶 1000） |
+| 运行 | `emptyStreakLimit` | `3` | 连续空产出熔断：上游连续这么多次返回 200 却无正文、无工具调用就停发（0 = 关闭，硬顶 20） |
 | 运行 | `serialProjects` | `true` | 单项目串行；关闭后按 `parallelProjects`（默认 2）并行 |
 | 运行 | `excludePaths` | `''` | 排除清单，换行/分号/逗号分隔的绝对路径 |
 | 运行 | `workspaceOnly` | `true` | 任务页只显示已添加 dsh 工作区里的任务 |
@@ -186,7 +187,7 @@ flowchart TD
 
 ### 3.4 设置页与补丁的等价性
 
-设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（28 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。`techdocs` 曾经进过 `Config` 却没进 `SAVE_KEYS`、也没在表单里渲染（CHANGELOG 0.18.2 记录的缺口），现在它已接到「运行」分组的 `workspaceOnly` 之后，两侧对齐。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client（浏览器半侧客户端）](../ui-client.md)。
+设置页保存走 `configForms.mutate`，与手改 `cordis.patch.yml` 等价、同样热生效。可保存字段由 `client.js` 的 `SAVE_KEYS` 白名单决定（29 个键，与 `Config` 字段一一对应）；新增配置项必须同时进 `Config` 与 `SAVE_KEYS`，否则要么在面板上改不了，要么改了静默丢值。`techdocs` 曾经进过 `Config` 却没进 `SAVE_KEYS`、也没在表单里渲染（CHANGELOG 0.18.2 记录的缺口），现在它已接到「运行」分组的 `workspaceOnly` 之后，两侧对齐；`emptyStreakLimit` 则是新增字段同时补齐了 `Config`、`SAVE_KEYS`、表单渲染与词典的一例。自动保存策略：字段变更后 500ms 串行提交一次，校验不过的字段不提交。设置卡片本身见 [ui-client（浏览器半侧客户端）](../ui-client.md)。
 
 ---
 
@@ -332,7 +333,7 @@ sequenceDiagram
 子进程环境由 `nativeEnginePlan()` 固定：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`CODEWIKI_NO_KEYRING=1`，模型通道只用桥生成的占位 key（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），真实凭证从不进入子进程环境或日志。
 
 ??? abstract "Documented components (3)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/cordis.patch.yml) — `cordis.patch.yml`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/package.json) — `package.json`
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/cordis.patch.yml) — `cordis.patch.yml`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/package.json) — `package.json`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
 

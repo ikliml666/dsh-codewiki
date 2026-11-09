@@ -80,7 +80,7 @@ flowchart LR
 | 约束 | 含义 |
 | --- | --- |
 | 配置单一事实来源 | 默认值只存在于 `index.js` 的 `Config` schema；`cordis.patch.yml` 的 `config: {}` 表示不重复声明，profile 同 id 条目是**整对象替换**而非深合并 |
-| 字段双侧对齐 | 28 个 `Config` 字段必须与 `client.js` 的 `SAVE_KEYS` 一一对应；新增项只进一侧，会表现为「面板上改不了」或「改了静默丢值」 |
+| 字段双侧对齐 | 29 个 `Config` 字段必须与 `client.js` 的 `SAVE_KEYS` 一一对应；新增项只进一侧，会表现为「面板上改不了」或「改了静默丢值」 |
 | 发布白名单是正向枚举 | 新增运行期资源必须同时改 `package.json` 的 `files`，否则源码里存在、发布后消失 |
 | 环境问题显式失败 | 锁不一致或依赖不闭合 → 直接 `failed`，不跑引擎；环境问题一律以 `engine-deps` / `engine-missing` 报错，**不自动 pip install**、不降级到其它实现 |
 | 首次运行不提前建目录 | `absent` 状态不在 `env` 阶段写锁，避免落地器把「有目录但没有 `_meta.yaml`」判成人工破坏的半截库；锁与产物同事务落盘 |
@@ -92,7 +92,7 @@ flowchart LR
 
 | 页面 | 内容概要 |
 | --- | --- |
-| [build-configuration](Build___Development_Infrastructure/build-configuration.md) | `package.json` 的入口/`dsh` 声明/`files` 白名单/`engines` 策略；`cordis.patch.yml` 的两种安装形态与覆盖语义；28 项配置键目录；`setup-env.sh` 的四步流程与 `doctor` 锁契约；新机器上线的端到端时序 |
+| [build-configuration](Build___Development_Infrastructure/build-configuration.md) | `package.json` 的入口/`dsh` 声明/`files` 白名单/`engines` 策略；`cordis.patch.yml` 的两种安装形态与覆盖语义；29 项配置键目录；`setup-env.sh` 的四步流程与 `doctor` 锁契约；新机器上线的端到端时序 |
 | [fsoft-engine-tools](Build___Development_Infrastructure/fsoft-engine-tools.md) | `decodeGitPath` / `decodeGitPaths` / `toPosix` 的双保险设计与保守解码规则；探针的五条判据（R1–R5）、退出码与输出结构；中文空格 fixture 的目录意图与依赖关系；已知限制 |
 
 ---

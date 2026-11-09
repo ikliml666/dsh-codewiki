@@ -6,7 +6,7 @@ description: job-and-state 是 JobOrchestrationStateManagement 的状态底座�
 # 作业状态与持久化层（job-and-state）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `job-and-state` 是 `Job_Orchestration___State_Management` 的**状态底座**：它不推进编译流程、不驱动引擎，只回答三个问题——**任务现场怎么安全地落盘并被多个宿主实例共享**、**引擎到底发生了什么（黑匣子日志）**、**这一轮编译算不算完成（更新记录与终态裁决）**。
 
@@ -539,8 +539,8 @@ stateDiagram-v2
 | [Execution_Runtime___Vendored_Engine 概览](../Execution_Runtime___Vendored_Engine.md) | 引擎进程的实际生命周期与阶段上报由 Python 运行时负责，本模块只记录与裁决 |
 
 ??? abstract "Documented components (4)"
-    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cjob-logs.js) — `lib\job-logs.js`
-    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cjob-store.js) — `lib\job-store.js`
-    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cupdate-record.js) — `lib\update-record.js`
-    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`removeLog`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cjob-logs.js) — `lib\job-logs.js`
+    - [`normKey`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cjob-store.js) — `lib\job-store.js`
+    - [`isTerminalStage`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cupdate-record.js) — `lib\update-record.js`
+    - [`loadUpdateRecord`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cupdate-record.js) — `lib\update-record.js`
 

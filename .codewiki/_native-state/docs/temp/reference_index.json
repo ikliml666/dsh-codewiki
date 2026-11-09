@@ -387,11 +387,12 @@
       "finish",
       "finishReasonToOpenAI",
       "foldChunks",
+      "markProduced",
       "nativeEnginePlan",
+      "noteOutcome",
       "parse",
       "run",
       "setStage",
-      "settle",
       "start",
       "startLlmBridge",
       "startNativeRun",
@@ -979,6 +980,7 @@
       "beginSessionRecord",
       "byUpdated",
       "cancel",
+      "charLabel",
       "compile",
       "confirmCompile",
       "done",
@@ -986,6 +988,7 @@
       "engineLogBlock",
       "flush",
       "guard",
+      "isEmptyish",
       "jobSummary",
       "line",
       "llmChat",
@@ -1002,6 +1005,7 @@
       "stageSegments",
       "toOption",
       "toggleExclude",
+      "tokLabel",
       "withinRange"
     ]
   }

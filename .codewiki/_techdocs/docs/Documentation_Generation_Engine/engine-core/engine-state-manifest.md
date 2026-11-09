@@ -6,7 +6,7 @@ description: engine-state-manifest 是原生引擎通道的「记忆与身份证
 # engine-state-manifest：引擎清单与跨轮受管状态
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-state-manifest` 是原生引擎通道的**「记忆与身份证」层**。它回答三个否则无人能答的问题：
 
@@ -536,11 +536,11 @@ flowchart LR
 - 任务与状态存储（插件侧作业状态，与本模块的受管状态是两回事）：[../../Job_Orchestration___State_Management/job-and-state.md](../../Job_Orchestration___State_Management/job-and-state.md)
 
 ??? abstract "Documented components (7)"
-    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
-    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
-    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
-    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
-    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
+    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
+    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
 

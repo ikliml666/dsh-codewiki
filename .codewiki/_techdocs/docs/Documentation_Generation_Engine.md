@@ -6,7 +6,7 @@ description: DocumentationGenerationEngine 是 CodeWiki 的文档生成引擎：
 # Documentation_Generation_Engine 模块概览
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `Documentation_Generation_Engine` 是 CodeWiki 的**文档生成引擎**：它接收一次「为某个仓库生成或更新 wiki」的请求，把请求从环境探测推进到可机读的终态结论（`done` / `partial` / `failed` / `cancelled`），并且只把通过质量门的产物真正写进 `.codewiki/` 与 `CodeWiki.md`。
 
@@ -127,7 +127,7 @@ sequenceDiagram
 | [engine-orchestration 模块概览](Documentation_Generation_Engine/engine-core/engine-orchestration.md) | 执行与裁决层总览，含 [engine-runner：原生引擎执行与裁决编排](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner.md)、[engine-runner 进程与协议层](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner/engine-runner_process-protocol.md)、[engine-runner 原生编译流水线](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner/engine-runner_native-pipeline.md)、[apply-plan 落地器](Documentation_Generation_Engine/engine-core/engine-orchestration/apply-plan.md) |
 | [engine-contract-quality：引擎契约与质量裁决层](Documentation_Generation_Engine/engine-core/engine-contract-quality.md) | 结果契约、采用门三类问题（defect / degradation / stale）、死链语义校对、基线可推进性 |
 | [engine-state-manifest：引擎清单与跨轮受管状态](Documentation_Generation_Engine/engine-core/engine-state-manifest.md) | 引擎指纹与锁状态机、受管状态水合与采集、未消费账合并、工作区快照 |
-| [引擎外部集成层（模型桥与 TechDocs 回读）](Documentation_Generation_Engine/engine-core/engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性、TechDocs 回读 |
+| [引擎外部集成层（模型桥与 TechDocs 回读）](Documentation_Generation_Engine/engine-core/engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性与熔断、TechDocs 回读 |
 | [引擎运行时工具层（engine-runtime-utils）](Documentation_Generation_Engine/engine-core/engine-runtime-utils.md) | `collectOutput` / `validateOutput` 问题类别、页别名与死链判定、跨平台进程树终止 |
 | [文章流水线（article-pipeline）](Documentation_Generation_Engine/article-pipeline.md) | 文章结构契约与 `NATIVE_ARTICLE_OPTS` 统一口径、存量页修复与判删边界、四路 git 变更采集与降级 |
 
@@ -139,55 +139,55 @@ sequenceDiagram
 - 面板进度消费：[ui-client（浏览器半侧客户端）](ui-client.md)
 
 ??? abstract "Documented components (65)"
-    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
-    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
-    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
-    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
-    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
-    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
-    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
-    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
-    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
-    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
-    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
-    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
-    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`isWritable`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`makeWriteSet`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-repair.js) — `lib\article-repair.js`
-    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cchange-set.js) — `lib\change-set.js`
-    - [`parseFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`parseYamlLite`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`unquote`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`extractSections`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`fencesBalanced`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`collectWikiLinks`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`stripCode`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`blank`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`hasDuplicateFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`isRepoRelativeFile`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`inspectArticle`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`push`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Carticle-contract.js) — `lib\article-contract.js`
-    - [`textBlock`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`contentToBlocks`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`toolsToSchemas`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
-    - [`messageToDsh`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`applyNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`defaultRunCw`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findDeprecatedConceptPages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findOrphanPages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findStaleModulePages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`findSupersededLegacyPages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Capply-plan.js) — `lib\engine\apply-plan.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`setStage`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`startLlmBridge`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cllm-bridge.js) — `lib\engine\llm-bridge.js`
+    - [`doctor`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`writeLock`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmanifest.js) — `lib\engine\manifest.js`
+    - [`findMissingModuleDocs`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cmapping.js) — `lib\engine\mapping.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`stateDocFiles`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-state.js) — `lib\engine\native-state.js`
+    - [`isPlaceholderKey`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`add`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Coutput.js) — `lib\engine\output.js`
+    - [`isAlive`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cprocess-tree.js) — `lib\engine\process-tree.js`
+    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
+    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`captureSite`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ctechdocs.js) — `lib\engine\techdocs.js`
+    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
+    - [`createWorkspaceSnapshot`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`shortSha`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`snapshotExists`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cworkspace-snapshot.js) — `lib\engine\workspace-snapshot.js`
+    - [`hasBlockingIssue`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`isWritable`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`issueSummary`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`makeWriteSet`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`assemble`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-repair.js) — `lib\article-repair.js`
+    - [`collect`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cchange-set.js) — `lib\change-set.js`
+    - [`parseFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`parseYamlLite`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`unquote`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`extractSections`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`fencesBalanced`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`collectWikiLinks`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`stripCode`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`blank`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`hasDuplicateFrontmatter`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`isRepoRelativeFile`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`inspectArticle`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`push`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Carticle-contract.js) — `lib\article-contract.js`
+    - [`textBlock`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`contentToBlocks`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`toolsToSchemas`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
+    - [`messageToDsh`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Copenai-bridge.js) — `lib\engine\openai-bridge.js`
     - … and 15 more
 

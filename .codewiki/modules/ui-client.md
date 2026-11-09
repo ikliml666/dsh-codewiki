@@ -145,6 +145,9 @@ sequenceDiagram
 | `mount` | 设置卡片槽位注册器 | `slots`、`configForms` |
 | `line` | 引擎日志单行格式化（`engineLogBlock` 内） | `job.nativeLogs` |
 | `row` | 会话列表单行（`SessionView` 内） | `/sessions` |
+| `tokLabel` | token 数按量级缩写（`M` / `k` / 原值），`SessionView` 内 | 会话记录 |
+| `charLabel` | 字符数缩写：不足 1000 按实际字数，否则 `k ch`，`SessionView` 内 | 会话记录 |
+| `isEmptyish` | 判定「输出 / 思考 / 工具」三者全空，`SessionView` 内 | 会话记录 |
 | `toOption` | 思考档位 → `<option>`（目录对象与裸字符串统一取 id） | `/model-efforts` |
 | `byUpdated` | 任务排序比较器（`updatedAt`/`createdAt` 倒序） | `/jobs` |
 
@@ -184,9 +187,9 @@ graph LR
 - **快照订阅**：`pull()` 读快照并按 `snap.revision` 覆盖草稿——只有宿主值真的换了修订号才覆盖，避免保存回读时把用户正在输入的内容冲掉。
 - **可自动保存字段**由 `SAVE_KEYS` 白名单控制（新增字段必须同时进 `SAVE_KEYS` 与渲染，否则改了不会落盘）：
 
-  `enabled`、`binaryPath`、`maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`、`articleLanguage`、`updateReminder`、`autoCommit`、`workspaceOnly`、`techdocs`、`batchProvider`、`batchModel`、`batchReasoningEffort`、`effortByStage`、`excludePaths`、`autoUpdate`、`autoUpdateMin`、`requestLimit`、`nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs`、`updateRung`、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree`
+  `enabled`、`binaryPath`、`maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`、`articleLanguage`、`updateReminder`、`autoCommit`、`workspaceOnly`、`techdocs`、`batchProvider`、`batchModel`、`batchReasoningEffort`、`effortByStage`、`excludePaths`、`autoUpdate`、`autoUpdateMin`、`requestLimit`、`emptyStreakLimit`、`nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs`、`updateRung`、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree`
 
-- **校验**：`maxConcurrency` 必须是 1–8 的整数；`requestLimit` 必须是 1–1000 的整数。校验不过的草稿不提交，错误常显在底部状态行并提供「立即重试」。
+- **校验**：`maxConcurrency` 必须是 1–8 的整数；`requestLimit` 必须是 1–1000 的整数；`emptyStreakLimit` 必须是 0–20 的整数（`0` = 关闭），但该键缺省（老配置里从未写过这个键）时**不参与校验**——不能让一个没设置过的字段拦住所有保存。校验不过的草稿不提交，错误常显在底部状态行并提供「立即重试」。
 - **串行提交**：`savingRef` 保证同一时刻只有一次 `mutate` 在飞；`pendingRef` 保留最新草稿，保存期间再改动会在 finally 里重新排期。
 - **卸载兜底**：卸载时 `flush()` 一次，面板切走 / 折叠不会丢掉刚改的值。
 
@@ -216,10 +219,12 @@ stateDiagram-v2
 | 并发与语言（`secScale`） | `maxConcurrency`、`moduleConcurrency`、`serialProjects`、`parallelProjects`（串行时禁用）、`articleLanguage`、`binaryPath` |
 | 原生引擎（`secNative`） | `nativeEngine`、`nativeEnginePython`、`nativeEngineEntry`、`nativeEngineTimeoutMs` |
 | 增量策略（`secIncremental`） | `updateRung`（空/3/3b/2/1/0）、`updateTauNb`、`updateTauGrow`、`updateTauFull`、`updateTauTree` |
-| 编译模型（`secCompile`） | `batchProvider` / `batchModel` / `batchReasoningEffort`（`modelTrio` 联动）、`requestLimit`、`effortByStage`（graph / articles / proofread / validate 四档） |
+| 编译模型（`secCompile`） | `batchProvider` / `batchModel` / `batchReasoningEffort`（`modelTrio` 联动）、`requestLimit`、`emptyStreakLimit`（空产出熔断，`0` = 关闭，默认 3）、`effortByStage`（graph / articles / proofread / validate 四档） |
 | 调度与排除（`secSchedule`） | `autoUpdate`、`autoUpdateMin`、`excludePaths`（textarea） |
 
 **模型级联**：`/models` 可用时提供商与模型是下拉（目录外的值保留为 `__custom` 选项，避免静默丢配置）；不可用时整组退化为手填 `Input`，`catalogUnavailable` 提示错误但不阻断保存。`/model-efforts` 返回的档位是 `{ id, name, description }` 对象；若模型目录未声明档位，则回退到 `GENERIC_EFFORTS`（`off`、`low`、`medium`、`high`、`xhigh`、`max`）——选了模型不支持的档位由宿主侧 `llmChat` 剥档重试，不会失败。
+
+**`emptyStreakLimit`（空产出熔断）**：模型通道连续这么多次「上游返回 200 却既无正文也无工具调用」就停发请求，避免把额度烧在注定失败的调用上；已写好的文章照常落盘。`0` = 关闭，默认 3，合法区间 0–20。
 
 **`techdocs` 开关**：与同组其它开关的判定方向相反——其余开关只在显式关掉时才关（`!== false`），它只在显式 `true` 时才开（默认关闭）。开启后每轮额外导出一份 Backstage TechDocs 站点到 `.codewiki/_techdocs/`（约 37 个文件，不进 `cw` 索引），属于附加产物而非正式文章。
 
@@ -343,11 +348,13 @@ graph TD
 - **分组顺序**按真实流程（`STAGE_ORDER`：`queued → env → graph → cluster → prepare → articles → proofread → validate → index → baseline → commit → done`），不按时间——同一仓库里"先解析、再写作、后校对"是固定次序，按时间排会让同一阶段反复跳。
 - **轮询**：列表 5s；用 payload 指纹（`total | active 摘要 | 每条 session 的状态与字数`）比对，内容没变就不进 state，避免打断滚动位置与焦点。
 - **详情**：默认落在「输出」页签（prompt 是给模型的指令，人点开多半想看模型答了什么）；`prompt` 按 `[system]` / `[user]` / `[assistant]` / `[tool]` 头切块渲染；`reasoning` 与 `tools` 页签按需出现；未 `finishedAt` 时每 2s 续拉，能看到输出逐段长出来。
-- **空内容提示**在行上就说明原因（`sessHintThinking` / `sessHintTools` / `sessHintEmpty` / `sessLive`），不让人点开才发现是空的。
+- **空内容提示**在行上就说明原因，且**进行时与完成时是两套说法**：思考非空 → `sessHintThinking`（思考中）/ `sessHintThinkingDone`（内容在思考里）；只调了工具 → `sessHintTools`（仅工具调用）/ `sessHintToolsDone`（本轮在调工具）；三者全空且仍在跑 → `sessLive`；否则 `sessHintEmpty`。完成态的行不能挂「思考中」这类现在进行时——`✓ done` 的行那样写读起来像还在跑或卡住了，而 agentic 写作的正文本来就由工具调用直接落盘，这类行是完成而非空转。`data-empty` 也改由 `isEmptyish`（输出 / 思考 / 工具三者全空）判定，并且只在非 `running` 时才置位，避免把这类完成行当成空行显示成更灰的字。
+- **字数与 token 缩写**：字符数不足 1000 的行按实际字数显示（`charLabel`：`73 ch` 而不是 `Math.round(73/1000)` 得到的 `0k ch`）；token 数按量级缩写（`tokLabel`：≥1e6 用 `M`、≥1000 用 `k`、更小按原值），否则 420 会被写成 `0k`。
+- **用量标注来源**：输入量区分实测与估算——只有记录里 `inputTokensMeasured === true`（上游回了 `usage`）才显示 `sessStatIn`，缺该字段的旧记录一律按估算显示 `sessStatInEst`，并带 `sessTokEstimatedHint` 提示「这是按 prompt 字符折算的估算值，不是账单口径」；输出量统一 `sessStatOutTok`。估算按中文 1 字 1 token、其余 3.5 字符 1 token 折算，与实测能差出不少，不标注来源用户就没法判断这个数能不能拿去对账。
 - **分页**：单任务上限 2000 条、全局上限 500 条，每次 +80。
 - **MarkdownText** 需要 `labels`（代码块头直接读 `labels.code.copyLabel`），`MD_LABELS` 只提供真正会被读到的几项。
 
-会话记录的产生侧（`index.js::beginSessionRecord`，按流式 delta 累积输出 / 思考 / 工具调用，保留 24h）属于宿主模块，详见 [Job_Orchestration___State_Management.md](job-orchestration-state-management.md)。
+会话记录的产生侧（`index.js::beginSessionRecord`，按流式 delta 累积输出 / 思考 / 工具调用，保留 24h）属于宿主模块，详见 [Job_Orchestration___State_Management.md](job-orchestration-state-management.md)。该记录同时决定「入 tok」这一栏的口径：`inputTokens` 初值是按 prompt 字符折算的估算，上游回 `usage` 时被覆盖成实测值（含缓存读写）并置 `inputTokensMeasured = true`；面板据此区分实测与估算，缺该字段的旧记录按估算显示。
 
 ---
 
@@ -425,7 +432,7 @@ sequenceDiagram
 ## 13. 维护注意事项
 
 1. **新增设置字段**：同时修改四处——`SAVE_KEYS`、表单渲染、`zh()` / `en()` 词典、宿主 `Config` schema；漏掉词典会让 `t()` 回退显示键名，漏掉 `SAVE_KEYS` 则改动不会落盘。
-2. **词典键名核对**：当前代码引用了 `requestLimit`、`requestLimitHint`、`invalidRequestLimit` 与 `autoUpdateLabelHint`，而 `zh` / `en` 中定义的是 `autoUpdateHint` 等相邻键名。改动相关区域时建议一并核对，避免界面出现裸键名。
+2. **词典键名核对**：词典值必须是字符串，函数值会让 `t()` 回退返回键名。曾经出现过代码引用了 `requestLimit`、`requestLimitHint`、`invalidRequestLimit` 与 `autoUpdateLabelHint`、而 `zh` / `en` 里只定义了 `autoUpdateHint` 这类相邻键名的漂移；现已补齐（`requestLimit*`、`invalidRequestLimit`、`emptyStreakLimit*`、`invalidEmptyStreakLimit`、`sessStatIn` / `sessStatInEst` / `sessStatOutTok` / `sessTokEstimatedHint`、`sessHintThinkingDone` / `sessHintToolsDone` 均在两份词典中定义，自动更新的提示统一用 `autoUpdateHint`）。改动相关区域时仍建议一并核对，避免界面出现裸键名。
 3. **阶段名演进**：新增引擎阶段时必须同时更新 `NATIVE_STAGE_KEYS`、`NATIVE_TO_STEP`、`STAGE_ORDER`，否则新阶段会落到"未标注阶段"分组或不计入总进度。
 4. **权重守恒**：`STAGE_WEIGHTS` 除 `queued` 外总和应为 1（0.24 + 0.46 + 0.21 + 0.05 + 0.04）。漏一步或比例错，百分比会在相邻两步之间凭空跳点。
 5. **轮询纪律**：任何新轮询都要有 `inFlight` 互斥、`alive` 守卫与指纹比对，否则面板在慢网络下会重叠请求并打断滚动。

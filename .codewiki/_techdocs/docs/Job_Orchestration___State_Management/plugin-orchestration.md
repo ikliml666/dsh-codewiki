@@ -6,7 +6,7 @@ description: plugin-orchestration 是 dsh-codewiki 插件的入口与编排层�
 # 插件编排层（plugin-orchestration）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `plugin-orchestration` 是 `dsh-codewiki` 插件的**入口与编排层**，实现全部位于 `index.js`。它把「一个仓库的整轮 wiki 编译」从一次工具调用变成一条**可观测、可恢复、可取消的后台任务**：注册四个面向模型/用户的能力（`cw`、`codewiki_generate`、`codewiki_update`、`codewiki_progress`）、一个 10 秒节拍的任务状态机、一套会话内容记录、一组仅回环可访问的 HTTP 端点，以及编译产物的自动提交与系统提示注入。
 
@@ -415,6 +415,7 @@ flowchart LR
 - `maxConcurrency`：非有限或 < 1 退回默认 2，硬顶 8。
 - `moduleConcurrency`：0/未填 = 跟随默认档并发；它是**独立设置项**，不能与 `maxConcurrency`（LLM 请求并发）混用同一个值。
 - `requestLimit`：非正值退回默认 100，硬顶 1000。
+- `emptyStreakLimit`：`0` = 关闭空产出熔断；负值/非数字一律退回默认 3（真机实测正常任务最大连续空产出 1 次、故障任务 27 次，中间没有过渡带）。它随每轮原生编译一起下发（`startNativeRun` 的 `emptyStreakLimit`），与 `requestLimit` 并列构成单轮写作的请求预算与空产出熔断。
 - `parallelLimit`：`serialProjects` 为真时恒为 1；否则 1–4，默认 2。
 - `updateRung`：只接受 `0/1/2/3/3b`，非法值在**提交时**由 `updateOptionsOf` 抛错（job 直接进 `failed`），不在下游逐层判空。
 - `updateTau*`：空串/NaN/越界一律返回 `undefined`，交给引擎用上游默认值——上游改默认时插件不会跟着漂移。
@@ -429,10 +430,10 @@ flowchart LR
 
 | 函数 | 作用 |
 | --- | --- |
-| `beginSessionRecord(job, task)` | 写 `nnn.meta.json`（running）+ `nnn.full.json`（prompt），返回 `{onDelta, onDone, onError}` |
+| `beginSessionRecord(job, task)` | 写 `nnn.meta.json`（running）+ `nnn.full.json`（prompt），返回 `{onDelta, onDone, onError}`；`inputTokens` 初值是按 prompt 字符折算的估算，`onDone` 收到上游 `usage` 时覆盖为实测值（含缓存读写）并置 `inputTokensMeasured = true`，供面板区分「实测 / 估算」 |
 | `sessionDeltaOf(chunk)` | 按 `type` 分流正文 / `reasoning-delta` / `tool-call-delta` |
 | `listSessionRecords` / `listAllSessionRecords` | 只读轻量 meta，按 `n` 倒序 |
-| `readSessionRecordDetail` | meta + full 合并返回（阶段与统计只在 meta 里） |
+| `readSessionRecordDetail` | meta + full 合并返回（阶段与统计只在 meta 里），并透出 `inputTokensMeasured` 让消费方区分实测与估算 |
 | `countSessionRecords` / `countAllSessionRecords` | 只数文件名（2.4ms vs 读全部 meta 的 70ms） |
 | `pruneSessionRecords` | 删除超 24h 记录，顺带清空目录 |
 
@@ -521,12 +522,12 @@ flowchart TD
 | 安装、bundle patch、环境脚本 | [构建与配置（build-configuration）](../Build___Development_Infrastructure/build-configuration.md) |
 
 ??? abstract "Documented components (8)"
-    - [`addUsage`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
-    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/index.js) — `index.js`
+    - [`addUsage`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`apply`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`cancel`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`jobSummary`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`list`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`onAbort`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`progressView`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
+    - [`reposFileFor`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/index.js) — `index.js`
 

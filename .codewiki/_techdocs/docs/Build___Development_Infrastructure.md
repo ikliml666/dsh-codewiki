@@ -6,7 +6,7 @@ description: 本模块是 dsh-codewiki 的构建面、配置面与验收工具�
 # 构建与开发基础设施（Build___Development_Infrastructure）概述
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `dsh-codewiki` 的**构建面、配置面与验收工具面**。它不参与一次编译的裁决链，也不写 `.codewiki/` 产物，而是回答三个前置问题：
 
@@ -88,7 +88,7 @@ flowchart LR
 | 约束 | 含义 |
 | --- | --- |
 | 配置单一事实来源 | 默认值只存在于 `index.js` 的 `Config` schema；`cordis.patch.yml` 的 `config: {}` 表示不重复声明，profile 同 id 条目是**整对象替换**而非深合并 |
-| 字段双侧对齐 | 28 个 `Config` 字段必须与 `client.js` 的 `SAVE_KEYS` 一一对应；新增项只进一侧，会表现为「面板上改不了」或「改了静默丢值」 |
+| 字段双侧对齐 | 29 个 `Config` 字段必须与 `client.js` 的 `SAVE_KEYS` 一一对应；新增项只进一侧，会表现为「面板上改不了」或「改了静默丢值」 |
 | 发布白名单是正向枚举 | 新增运行期资源必须同时改 `package.json` 的 `files`，否则源码里存在、发布后消失 |
 | 环境问题显式失败 | 锁不一致或依赖不闭合 → 直接 `failed`，不跑引擎；环境问题一律以 `engine-deps` / `engine-missing` 报错，**不自动 pip install**、不降级到其它实现 |
 | 首次运行不提前建目录 | `absent` 状态不在 `env` 阶段写锁，避免落地器把「有目录但没有 `_meta.yaml`」判成人工破坏的半截库；锁与产物同事务落盘 |
@@ -100,7 +100,7 @@ flowchart LR
 
 | 页面 | 内容概要 |
 | --- | --- |
-| [构建与配置（build-configuration）](Build___Development_Infrastructure/build-configuration.md) | `package.json` 的入口/`dsh` 声明/`files` 白名单/`engines` 策略；`cordis.patch.yml` 的两种安装形态与覆盖语义；28 项配置键目录；`setup-env.sh` 的四步流程与 `doctor` 锁契约；新机器上线的端到端时序 |
+| [构建与配置（build-configuration）](Build___Development_Infrastructure/build-configuration.md) | `package.json` 的入口/`dsh` 声明/`files` 白名单/`engines` 策略；`cordis.patch.yml` 的两种安装形态与覆盖语义；29 项配置键目录；`setup-env.sh` 的四步流程与 `doctor` 锁契约；新机器上线的端到端时序 |
 | [FSoft 引擎工具链（fsoft-engine-tools）](Build___Development_Infrastructure/fsoft-engine-tools.md) | `decodeGitPath` / `decodeGitPaths` / `toPosix` 的双保险设计与保守解码规则；探针的五条判据（R1–R5）、退出码与输出结构；中文空格 fixture 的目录意图与依赖关系；已知限制 |
 
 ---
@@ -120,14 +120,14 @@ flowchart LR
 | 任务队列、排队与自动调度 | [作业编排与状态管理（Job Orchestration & State Management）](Job_Orchestration___State_Management.md) |
 
 ??? abstract "Documented components (10)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/cordis.patch.yml) — `cordis.patch.yml`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/package.json) — `package.json`
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
-    - [`decodeGitPath`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cgit-paths.js) — `lib\git-paths.js`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Cscripts%5Crun.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\scripts\run.py`
-    - [`Engine`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Ccore%5Cengine.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\core\engine.py`
-    - [`Handler`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Chandler.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\handler.py`
-    - [`TaskQueue`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
-    - [`TaskQueue.push`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/tools%5Cfsoft-engine%5Cprobe-no-llm-graph.py) — `tools\fsoft-engine\probe-no-llm-graph.py`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/cordis.patch.yml) — `cordis.patch.yml`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/package.json) — `package.json`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`decodeGitPath`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cgit-paths.js) — `lib\git-paths.js`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Cscripts%5Crun.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\scripts\run.py`
+    - [`Engine`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Ccore%5Cengine.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\core\engine.py`
+    - [`Handler`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Chandler.py) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\handler.py`
+    - [`TaskQueue`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
+    - [`TaskQueue.push`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cfixtures%5C%E4%B8%AD%E6%96%87%20%E7%A9%BA%E6%A0%BC%20fixture%5Csrc%5Cweb%5Ctask.ts) — `tools\fsoft-engine\fixtures\中文 空格 fixture\src\web\task.ts`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools%5Cfsoft-engine%5Cprobe-no-llm-graph.py) — `tools\fsoft-engine\probe-no-llm-graph.py`
 

@@ -119,7 +119,7 @@ sequenceDiagram
 | [engine-orchestration](Documentation_Generation_Engine/engine-core/engine-orchestration.md) | 执行与裁决层总览，含 [engine-runner](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner.md)、[engine-runner_process-protocol](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner/engine-runner_process-protocol.md)、[engine-runner_native-pipeline](Documentation_Generation_Engine/engine-core/engine-orchestration/engine-runner/engine-runner_native-pipeline.md)、[apply-plan](Documentation_Generation_Engine/engine-core/engine-orchestration/apply-plan.md) |
 | [engine-contract-quality](Documentation_Generation_Engine/engine-core/engine-contract-quality.md) | 结果契约、采用门三类问题（defect / degradation / stale）、死链语义校对、基线可推进性 |
 | [engine-state-manifest](Documentation_Generation_Engine/engine-core/engine-state-manifest.md) | 引擎指纹与锁状态机、受管状态水合与采集、未消费账合并、工作区快照 |
-| [engine-integrations](Documentation_Generation_Engine/engine-core/engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性、TechDocs 回读 |
+| [engine-integrations](Documentation_Generation_Engine/engine-core/engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性与熔断、TechDocs 回读 |
 | [engine-runtime-utils](Documentation_Generation_Engine/engine-core/engine-runtime-utils.md) | `collectOutput` / `validateOutput` 问题类别、页别名与死链判定、跨平台进程树终止 |
 | [article-pipeline](Documentation_Generation_Engine/article-pipeline.md) | 文章结构契约与 `NATIVE_ARTICLE_OPTS` 统一口径、存量页修复与判删边界、四路 git 变更采集与降级 |
 

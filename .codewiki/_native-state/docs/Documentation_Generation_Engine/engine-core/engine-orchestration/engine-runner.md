@@ -219,12 +219,13 @@ flowchart TD
 
 FSoft 只从 `<old_commit>..<new_commit>` 取 diff，读的却是工作区文件。若工作区有未提交改动，就会出现「文章反映了工作区、账却指向 HEAD」，下一轮把 HEAD 当 `old_commit` 就把这些改动当成已消化——这是「变化悄悄丢」的入口。因此在引擎启动前用独立 `GIT_INDEX_FILE` 造一个含全部未提交改动的临时 commit（**不挂任何 ref**，gc 后自然消失），让本轮 `commitId` 指向它。造不出快照**不算失败**：退回 HEAD 记账并记 note（快照是对齐精度的改进，不是编译成立的前提）。
 
-### 3.7 可观测性：三类「不许静默」的事实
+### 3.7 可观测性：四类「不许静默」的事实
 
 源码里反复强调「沉默即缺陷」，实现上体现为：
 
 - **进度帧不吞异常**：`engineProgress` 校验 stage 必须属于 `ENGINE_STAGES`，传契约外的阶段名是编程错误必须当场响（0.17.32 把校对帧写成 `proofread` 时被 try/catch 吞掉，面板「校对」格永不点亮而测试全绿）；
 - **模型空产出计数**：`bridge.stats().emptyResponses` 记录「上游 200 但既无正文也无工具调用」的次数，这类调用会被引擎记成「这一页无需改动」，是假 done 的来源之一，因此必须进 notes；
+- **空产出熔断也是可见事实**：连续空产出达到阈值（`emptyStreakLimit`，默认 3，0 = 关闭）后桥停止向上游转发，本轮后续请求变少、部分叶子写不成；`bridge.stats().tripped` 为真时把 `emptyStreakMax` 与 `rejectedAfterBreak` 一并写进 notes，否则面板只看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了；
 - **状态自报与实际采集交叉核对**：引擎自报 `artifacts.stateFiles` 有、而 `captureDocsDir` 没采集到的项会被点名，避免悄悄当成「已持久化」。
 
 进度帧经 `onProgress` 透出后同时驱动两件事：上层面板的阶段条（见 [ui-client](../../../ui-client.md)）与模型桥的阶段选档（`bridge.setStage`，按阶段选 `reasoningEffort`）。
@@ -243,6 +244,7 @@ FSoft 只从 `<old_commit>..<new_commit>` 取 diff，读的却是工作区文件
 | `moduleConcurrency` | 原生引擎同层模块并行度（1–8，0=跟随 `maxConcurrency`） | 1（严格串行） |
 | `articleLanguage` | 文章语言，一路带到引擎 `payload.language`（不传即静默按英文写） | 中文 |
 | `techdocs` | 导出 Backstage TechDocs 到 `.codewiki/_techdocs/` | 关 |
+| `emptyStreakLimit` | 连续空产出熔断阈值：达到即停止向上游发请求（0 = 关闭），并作为 note 报到终态 | 3 |
 | `autoCommit` | 落地器自动提交 wiki 产物 | 开 |
 
 180 分钟的来历：真机唯一一次跑完的编译分阶段实测 `articles 66.0min + crosscut 10.0min + review 68.9min + queued 29.2min ≈ 174 分钟`，早期 45 分钟预算会在阶段 3 刚开头（percent 54）被砍掉，一篇都写不出来——那不是编译失败，是预算低于物理耗时。

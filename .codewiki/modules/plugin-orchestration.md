@@ -416,6 +416,7 @@ flowchart LR
 - `maxConcurrency`：非有限或 < 1 退回默认 2，硬顶 8。
 - `moduleConcurrency`：0/未填 = 跟随默认档并发；它是**独立设置项**，不能与 `maxConcurrency`（LLM 请求并发）混用同一个值。
 - `requestLimit`：非正值退回默认 100，硬顶 1000。
+- `emptyStreakLimit`：`0` = 关闭空产出熔断；负值/非数字一律退回默认 3（真机实测正常任务最大连续空产出 1 次、故障任务 27 次，中间没有过渡带）。它随每轮原生编译一起下发（`startNativeRun` 的 `emptyStreakLimit`），与 `requestLimit` 并列构成单轮写作的请求预算与空产出熔断。
 - `parallelLimit`：`serialProjects` 为真时恒为 1；否则 1–4，默认 2。
 - `updateRung`：只接受 `0/1/2/3/3b`，非法值在**提交时**由 `updateOptionsOf` 抛错（job 直接进 `failed`），不在下游逐层判空。
 - `updateTau*`：空串/NaN/越界一律返回 `undefined`，交给引擎用上游默认值——上游改默认时插件不会跟着漂移。
@@ -430,10 +431,10 @@ flowchart LR
 
 | 函数 | 作用 |
 | --- | --- |
-| `beginSessionRecord(job, task)` | 写 `nnn.meta.json`（running）+ `nnn.full.json`（prompt），返回 `{onDelta, onDone, onError}` |
+| `beginSessionRecord(job, task)` | 写 `nnn.meta.json`（running）+ `nnn.full.json`（prompt），返回 `{onDelta, onDone, onError}`；`inputTokens` 初值是按 prompt 字符折算的估算，`onDone` 收到上游 `usage` 时覆盖为实测值（含缓存读写）并置 `inputTokensMeasured = true`，供面板区分「实测 / 估算」 |
 | `sessionDeltaOf(chunk)` | 按 `type` 分流正文 / `reasoning-delta` / `tool-call-delta` |
 | `listSessionRecords` / `listAllSessionRecords` | 只读轻量 meta，按 `n` 倒序 |
-| `readSessionRecordDetail` | meta + full 合并返回（阶段与统计只在 meta 里） |
+| `readSessionRecordDetail` | meta + full 合并返回（阶段与统计只在 meta 里），并透出 `inputTokensMeasured` 让消费方区分实测与估算 |
 | `countSessionRecords` / `countAllSessionRecords` | 只数文件名（2.4ms vs 读全部 meta 的 70ms） |
 | `pruneSessionRecords` | 删除超 24h 记录，顺带清空目录 |
 

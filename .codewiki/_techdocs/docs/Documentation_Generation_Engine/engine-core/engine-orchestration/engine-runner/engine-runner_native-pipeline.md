@@ -6,7 +6,7 @@ description: 本页描述 lib/engine/native-run.js 的 runNativeJob：插件生�
 # engine-runner 原生编译流水线
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本页描述 `lib/engine/native-run.js` 的 `runNativeJob`：插件生产通道中**一次完整编译的编排与裁决**。它把分散在各层的组件（环境清单、Python 引擎、质量门、落地器、跨轮受管状态、模型桥）串成一条不可回退的直线，并给出一个**严格终态**——任何一环没走完，终态都不会被后续步骤洗白成 `done`。
 
@@ -304,7 +304,8 @@ FSoft 只从 `<old_commit>..<new_commit>` 取 diff。它读的是工作区文件
 
 - 桥失败 → `failed` + `engine-model`，`stage: 'cluster'`；
 - `onLog` 只记方法与状态码，绝不记请求头 / body / 占位 key；
-- `onRequestStart` 把原生通道的模型请求接进面板「会话」视图（不接这个钩子面板就永远是空列表）。
+- `onRequestStart` 把原生通道的模型请求接进面板「会话」视图（不接这个钩子面板就永远是空列表）；
+- `emptyStreakLimit` 只在配置值能转成有限数字时才下发（`0` = 关闭熔断），缺省不下发、交给桥自己的默认值 `3`。桥据此在上游连续空产出到阈值后进入熔断态，后续请求不再发往上游（回 503），已发出的调用照常计费。
 
 桥的凭证边界与协议面见 [引擎外部集成层（模型桥与 TechDocs 回读）](../../engine-integrations.md)。
 
@@ -372,7 +373,7 @@ onProgress: (p) => {
 | 无 `docsDir` | `failed` + `engine-output`，`stage: 'validate'` |
 | 抛异常 | `failed` + `engine-crashed`，`stage: 'articles'` |
 
-`finally` 块里取 `bridge.stats()` 再 `close()`：`emptyResponses` 是「上游 200 却什么也没产出」的次数，这类调用在引擎账本里会被记成「这一页无需改动」，是假 `done` 的来源之一。取不到统计或关不掉就大声失败——吞掉只会让这类假 `done` 的成因永远不可见。
+`finally` 块里取 `bridge.stats()` 再 `close()`：`emptyResponses` 是「上游 200 却什么也没产出」的次数，这类调用在引擎账本里会被记成「这一页无需改动」，是假 `done` 的来源之一；同一份统计里的 `tripped` / `emptyStreakMax` / `rejectedAfterBreak` 则说明桥是否已因连续空产出熔断（见 8.2）。取不到统计或关不掉就大声失败——吞掉只会让这类假 `done` 的成因永远不可见。
 
 ---
 
@@ -525,15 +526,20 @@ applyRes = await applyImpl({
 
 `_techdocs/` 只在**本轮真的读到站点**时才裁：站点页由模块树生成，模块合并/删除后旧页会永远留着；反过来，导出失败时裁它就变成「一次失败的附加产物把上一轮整个站点删光」。
 
-### 8.2 空产出可见性
+### 8.2 空产出与熔断可见性
 
 ```js
 if (emptyResponses > 0) {
   notes.push(`模型通道空产出 ${emptyResponses}/${bridgeRequests} 次 ...`)
 }
+if (bridgeStats?.tripped === true) {
+  notes.push(`模型通道已熔断（连续 ${Number(bridgeStats.emptyStreakMax ?? 0)} 次空产出后停发，挡下 ${Number(bridgeStats.rejectedAfterBreak ?? 0)} 个后续请求）：本轮后续请求未再发往上游，已写文章照常落盘；请检查编译模型或上游额度后重跑`)
+}
 ```
 
 上游 200、只有 usage+finish、既没正文也没工具调用——引擎会把这类调用记成「这一页无需改动」，于是整轮看起来 `done` 却一篇文章没写。这条是插件侧**独立可观测**的证据，不参与裁决、只进 notes。
+
+熔断同理只进 notes，但它是**必须报出来**的被动事实：连续空产出达到阈值（桥的 `emptyStreakLimit`，默认 3）后桥停止转发上游，本轮后面的请求数量因此变少、部分叶子因此没写成；只写在桥日志里的话，面板上只会看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了。note 里带上 `emptyStreakMax`（最大连续空产出游程）与 `rejectedAfterBreak`（被挡下的请求数），已写文章照常落盘。
 
 ### 8.3 终态合成：最弱的一环说了算
 
@@ -702,6 +708,7 @@ sequenceDiagram
 | `articleLanguage` | `中文` | 透传 `payload.language` |
 | `moduleConcurrency` | `0` → 跟随 `maxConcurrency` | 同层模块并行度 |
 | `requestLimit` | 100（硬顶 1000） | 单模块写作请求上限 |
+| `emptyStreakLimit` | `3`（0 = 关闭，上限 20） | 连续空产出熔断阈值；只在能转成有限数字时才下发给桥 |
 | `techdocs` | `false` | 是否导出站点 |
 | `updateRung` / `updateTau*` | 空 → 上游默认 | 增量档位与阈值 |
 | `autoCommit` | `true` | 影响落地器注入的 `commit` 实现 |
@@ -734,6 +741,7 @@ sequenceDiagram
 | 每轮 `partial`、缺页清单相同 | 缺口修复不收敛 | 看 `state.json` 的 `missingRepair.attempts` |
 | `partial` + `[native-state]` blocker | 受管状态不完整，下一轮无法增量 | `gate.stateMissing` |
 | `done` 却一篇文章没写 | 模型通道空产出 | `notes` 里的「模型通道空产出 N/M 次」 |
+| 后半轮请求量骤减、若干叶子没写成 | 模型通道连续空产出触发熔断 | `notes` 里的「模型通道已熔断（连续 N 次空产出后停发，挡下 K 个后续请求）」；桥日志的 `empty-breaker` 事件 |
 | 面板「校对」格不亮 | 进度帧 stage 不在 `ENGINE_STAGES` | 现在会当场抛错（`engine-crashed`），看 `onProgress` 实现 |
 | 库里 404 链接多但每轮 `done` | 门判过、但跨页链接未重写 | 看 `gate.articles[].defects` 与 `proofread` notes |
 | `writtenCount` 为 0 但引擎说写了 N 篇 | 落地器整批回滚 | 看 `apply.rolledBack` / `apply.outcome` |
@@ -751,6 +759,7 @@ sequenceDiagram
 4. **快照**：脏工作区造出快照时 `commitId` 指向快照、`gate.baseline.consumedInput` 非空；快照失败退回 HEAD 且仍能完成编译。
 5. **`settle` 契约**：任何分支的返回值都能通过 `validateEngineResult`；`done` 带 blockers 会抛错（用注入 gate 构造矛盾）。
 6. **进度**：给 `runNativeJob` 传 `onProgress`，断言帧阶段全部属于 `ENGINE_STAGES`（这正是 0.17.32 事故的缺口）。
+7. **熔断可见性**：注入 `bridge` 使 `stats()` 返回 `tripped: true`、`emptyStreakMax` / `rejectedAfterBreak` 非零，断言 `notes` 里出现熔断条目（熔断不参与裁决，只要求可见）；同时断言 `emptyStreakLimit` 只在配置为有限数字时才下发给桥。
 
 ---
 
@@ -769,5 +778,5 @@ sequenceDiagram
 - 任务存储与终态落账：[作业状态与持久化层（job-and-state）](../../../../Job_Orchestration___State_Management/job-and-state.md)。
 
 ??? abstract "Documented components (1)"
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

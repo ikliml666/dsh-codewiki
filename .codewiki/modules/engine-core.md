@@ -132,7 +132,7 @@ sequenceDiagram
 | [engine-orchestration](engine-orchestration.md) | 执行与裁决层总览，含 [engine-runner](engine-runner.md)、[engine-runner_process-protocol](engine-runner-process-protocol.md)、[engine-runner_native-pipeline](engine-runner-native-pipeline.md)、[apply-plan](apply-plan.md) |
 | [engine-contract-quality](engine-contract-quality.md) | 结果契约、采用门三类问题（defect / degradation / stale）、死链语义校对、基线可推进性 |
 | [engine-state-manifest](engine-state-manifest.md) | 引擎指纹与锁状态机、受管状态水合与采集、未消费账合并、工作区快照 |
-| [engine-integrations](engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性、TechDocs 回读 |
+| [engine-integrations](engine-integrations.md) | 模型桥安全模型、OpenAI 双向转换语义、空产出可观测性与熔断、TechDocs 回读 |
 | [engine-runtime-utils](engine-runtime-utils.md) | `collectOutput` / `validateOutput` 问题类别、页别名与死链判定、跨平台进程树终止 |
 
 ## 相关模块

@@ -2,33 +2,19 @@
   "stateVersion": 1,
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
-    "baseCommit": "eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96",
-    "headCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85"
+    "baseCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85",
+    "headCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26"
   },
   "pendingChanges": {
     "state": "ok",
-    "baseCommit": "eea7ea80bdb6b5c9a429ba0978f0b9ccc8885a96",
-    "headCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85",
+    "baseCommit": "6fff6d2bc38638f036b50169c33143a3a06efd85",
+    "headCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26",
     "committed": [
       "CHANGELOG.md",
+      "client.js",
       "index.js",
-      "lib/article-contract.js",
-      "lib/engine/apply-plan.js",
-      "lib/engine/client.js",
-      "lib/engine/contract.js",
-      "lib/engine/manifest.js",
+      "lib/engine/llm-bridge.js",
       "lib/engine/native-run.js",
-      "lib/engine/native-state.js",
-      "lib/engine/openai-bridge.js",
-      "lib/engine/output.js",
-      "lib/engine/python/full_parallel_runtime.py",
-      "lib/engine/python/stage_map.py",
-      "lib/engine/quality-gate.js",
-      "lib/engine/techdocs.js",
-      "lib/engine/workspace-snapshot.js",
-      "lib/git-paths.js",
-      "lib/job-logs.js",
-      "lib/update-record.js",
       "package.json"
     ],
     "staged": [],
@@ -42,11 +28,12 @@
   "engineVersion": "2.0.0",
   "scope": "auto",
   "effectiveScope": "stale",
-  "updateOutcome": "no_change",
+  "updateOutcome": "incremental",
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw7rdkof-6-native（31 个文件）"
+    "持久化基线 eea7ea8 与本次 cw 基线 6fff6d2 不同（以 cw 基线为准，未消费变化仍会并入）",
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw8ld1ew-3-native（31 个文件）"
   ],
-  "updatedAt": "2026-11-08T11:40:24.297Z"
+  "updatedAt": "2026-11-09T02:11:44.906Z"
 }

@@ -171,6 +171,9 @@ flowchart LR
 `AbortController.abort()`，把中止传到 `llm.stream({signal})`——既省 token，也让引擎的取消语义
 真正生效。
 
+已熔断的桥对任何 `POST /v1/chat/completions` 直接回 503 `empty_response_breaker`，且**在读 body 与
+建立会话记录之前**返回（见第六节的熔断小节）；`/healthz` 与 `/v1/models` 不受熔断影响。
+
 ### 一次流式请求的完整时序
 
 ```mermaid
@@ -182,6 +185,7 @@ sequenceDiagram
     participant S as 会话记录
     E->>B: POST /v1/chat/completions (stream true, Bearer 占位 key)
     B->>B: 校验占位 key 形状与取值
+    B->>B: 已熔断则回 503（不读 body、不建会话记录）
     B->>O: toLlmRequest(provider, model, reasoningEffort, body)
     O-->>B: GenerateOptions
     B->>S: onRequestStart({name, model, provider, stage, batchPrompt})
@@ -196,7 +200,7 @@ sequenceDiagram
     end
     B->>O: chunksToCompletion({chunks})
     O-->>B: 折叠后的正文与 usage
-    B->>S: onDone(content, completionTokens)
+    B->>S: onDone(content, completionTokens, usageSeen)
     B-->>E: data: [DONE]
     B->>B: finish(200) 写访问日志并统计空产出
 ```
@@ -218,9 +222,13 @@ sequenceDiagram
 
 所有会话回调都用 `callSession()` 包一层沙箱：面板记账失败**绝不**影响正在跑的模型请求。
 
+`onDone(content, completionTokens, usageSeen)` 的第三个参数是桥从 `usage` chunk 里取走的四元组
+`{input, output, cacheRead, cacheWrite}`：`TokenUsage.inputTokens` 是**不含缓存**的净输入，只记它
+会让面板显示的「真实计费量」低于账单上的 `prompt_tokens`，所以缓存读写一并带出去。
+
 ---
 
-## 六、统计与「空产出」可观测性
+## 六、统计、「空产出」可观测性与熔断
 
 `stats()` 返回一份快照：
 
@@ -231,6 +239,10 @@ sequenceDiagram
 | `authRejected` | 占位 key 校验失败次数 |
 | `failures` | 上游异常/解析失败次数 |
 | `emptyResponses` | 上游 200 但**一个产出型 chunk 都没有**的调用次数 |
+| `emptyStreak` | 当前连续空产出游程（有产出的调用即归零） |
+| `emptyStreakMax` | 本轮出现过的最大连续空产出游程 |
+| `rejectedAfterBreak` | 熔断后被挡下的请求数（不计入 `emptyResponses`，它们压根没打上游） |
+| `tripped` | 是否已进入熔断态 |
 | `lastError` | 最近一次失败的文本 |
 
 `emptyResponses` 是这套集成里最有价值的一个数：引擎会把「只有 reasoning/usage/finish、
@@ -241,6 +253,25 @@ sequenceDiagram
 
 访问日志只记 `method` / `path` / `status` / `ms` / chunk 类型计数 / usage，**不记**
 `Authorization`，也**不记**正文（可能含源码与文章内容）。
+
+### 空产出熔断（`emptyStreakLimit`）
+
+连续空产出到阈值后，桥**停止向上游转发**，而不是继续把钱烧在注定空回的请求上：
+
+- 阈值来自 `emptyStreakLimit`（默认 `3`，`0` = 关闭熔断）；`startLlmBridge` 用
+  `Math.max(0, Math.floor(Number(emptyStreakLimit) || 0))` 归一，非数字即视为 0（关闭）。
+- 计数由 `noteOutcome(produced)` 承担：有产出则把 `emptyStreak` 归零；无产出则
+  `emptyResponses++`、`emptyStreak++` 并刷新 `emptyStreakMax`，达到阈值时置 `tripped` 并写一条
+  `kind: 'empty-breaker'` 日志。
+- 熔断检查放在**读 body 与建立会话记录之前**：被挡下的请求既不进上游计费，也不会在面板上多出一条
+  「这条请求干了什么」的记录。响应是 503 `bridge_error` / `empty_response_breaker`，让引擎侧的
+  pydantic 把它当成可重试的上游错误。
+- 阈值取 3 的依据是真机分布：正常任务的最大游程是 1（偶发一次后立刻恢复），故障任务
+  （`job-mw80h05t-2`）是 27 次连续空返回，两者之间没有过渡带。
+- `markProduced` 只在「上游正常结束」的出口调用；中途失败由 `failures` 记账，且**不清零**
+  `emptyStreak`——一次网络失败不代表模型恢复了。
+- 熔断在本轮是粘滞的：此后每个 chat 请求都直接 503，直到桥被关掉、换一个新的。`native-run`
+  在关桥后按 `tripped` / `emptyStreakMax` / `rejectedAfterBreak` 写 note，不参与裁决。
 
 ---
 
@@ -288,7 +319,7 @@ flowchart LR
 
 | 位置 | 行为 |
 | --- | --- |
-| `native-run.js` 段 2 | `startLlmBridge({llm, provider, model, reasoningEffort, effortByStage, timeoutMs, onLog, onRequestStart})`；抛错 → `settle({outcome:'failed', stage:'cluster', error.code:'engine-model'})` |
+| `native-run.js` 段 2 | `startLlmBridge({llm, provider, model, reasoningEffort, effortByStage, timeoutMs, emptyStreakLimit, onLog, onRequestStart})`；抛错 → `settle({outcome:'failed', stage:'cluster', error.code:'engine-model'})` |
 | `native-run.js` 段 3.8 | `captureSite({siteDir: techdocsDir, destDir: TECHDOCS_DIR})`；`idleRound` 时跳过（内容逐字相同，重写只会制造纯改动提交） |
 | `native-run.js` 引擎 `onProgress` | `bridge?.setStage?.(p.stage)` 同步阶段 |
 | `native-run.js` `finally` | 先 `stats()` 再 `close()`——先关桥会让还在读流的引擎拿到 502 |
@@ -311,6 +342,7 @@ flowchart LR
 | `batchProvider` / `batchModel` | 桥的路由目标；留空时无法提交任务 |
 | `batchReasoningEffort` | 兜底思考档位 |
 | `effortByStage` | 按 `ENGINE_STAGES` 阶段名分档，缺省用兜底 |
+| `emptyStreakLimit` | 空产出熔断阈值（默认 3，0 = 关闭）；由 `native-run` 下发给 `startLlmBridge` |
 | `techdocs` | 是否导出站点（默认 `false`） |
 | `nativeEnginePython` / `nativeEngineEntry` | 解释器与入口路径（见 [构建与配置](build-configuration.md)） |
 
@@ -328,6 +360,7 @@ DSH `>=0.2.0-rc.0`，打包时 `bin/cw`、`lib`、`tools/fsoft-engine/*` 一并�
 | 400 请求体非法 JSON / 缺 `messages` | `toLlmRequest` 校验失败 | `failures++`，返回 OpenAI 风格错误体 |
 | 413 请求体过大 | 超过 32 MiB | 拒绝并销毁连接 |
 | 502 `upstream_error` | 上游 `llm.stream` 抛错（非流式） | 若流已开始，改发 error 事件 + `[DONE]` |
+| 503 `empty_response_breaker` | 已熔断（连续空产出达 `emptyStreakLimit`） | `rejectedAfterBreak++`；请求不读 body、不建会话记录、不发上游 |
 | `emptyResponses > 0` | 上游 200 但无产出型 chunk | 只写 note（「引擎会记成无需改动，请检查编译模型」），不参与裁决 |
 | 站点目录不存在 | `captureSite` 找不到 `siteDir` | 返回空写集 + `skipped`，编译不受影响 |
 | 站点读回抛异常 | `captureSite` 内部错误 | note「不影响本轮终态」；不把 `_techdocs` 加进 `pruneRoots` |

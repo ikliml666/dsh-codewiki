@@ -6,7 +6,7 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 # engine-python-runtime：FSoft 原生引擎的 Python 侧运行时
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`6fff6d2b`](https://github.com/ikliml666/dsh-codewiki/commit/6fff6d2bc38638f036b50169c33143a3a06efd85) on 2026-11-08 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-python-runtime` 是本插件在 **Python 进程内**运行的那一半引擎运行时。它不实现任何文档算法——
 依赖图、模块聚类、文章写作、增量 diff 全部由 vendored 的上游 FSoft（CodeWiki）引擎完成。
@@ -862,25 +862,25 @@ sequenceDiagram
 | 整轮报 `done` 但文章明显没写 | agent 异常被上游吞成 `no-op` | `_failed_calls_of` |
 
 ??? abstract "Documented components (21)"
-    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
-    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
-    - [`configure_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`current_concurrency`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_merge_tree`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`write_tree_exclusive`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_node_at`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_run_module`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_walk`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_run_parallel`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_install_shared_tree_io`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`install_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`is_incremental`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`articles_percent`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`map_stage`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`percent_of`](https://github.com/ikliml666/dsh-codewiki/blob/6fff6d2bc38638f036b50169c33143a3a06efd85/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
+    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+    - [`configure_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`current_concurrency`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_merge_tree`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`write_tree_exclusive`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_node_at`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_module`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_walk`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_parallel`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_install_shared_tree_io`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`install_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`is_incremental`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`articles_percent`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`map_stage`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`percent_of`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
 
