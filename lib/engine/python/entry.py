@@ -1064,7 +1064,17 @@ def action_generate(request_id, payload, is_update=False):
         #     max_output_retries 用完、再轮到下一个叶子各烧一遍
         #     （真机 job-mw80h05t-2：#107–#158 同一叶子 52 次请求、输入恒 74,817 tok）。
         from channel_breaker import install as install_channel_breaker
-        install_channel_breaker(payload["emptyStreakLimit"])
+        # emptyStreakLimit 用下标：熔断阈值两侧必须同源同值，缺了就是协议对不上，
+        # 让它当场 KeyError 比悄悄用另一个值诚实。
+        #
+        # historyCompactionKeep 用 get：它是**新增**的下发字段，而宿主热重载时会出现
+        # 「旧 Node 下发 + 新 Python 接收」的窗口（改了两侧却只重启一侧）。那个窗口里
+        # 下标取值会让每轮编译都以 KeyError 失败，代价远大于「用默认值 3 跑一轮」。
+        # 缺省值 3 与 Config 的默认值一致，不是在这里另立一套语义。
+        install_channel_breaker(
+            payload["emptyStreakLimit"],
+            payload.get("historyCompactionKeep", 3),
+        )
 
         # 全量轮：安装模块级并行（父模块等子模块，共享树合并，失败仍上抛）
         from full_parallel_runtime import install_full_runtime

@@ -155,6 +155,8 @@ window.__ModuleLoader__.load({
       requestLimitHint: '单个模块写作的 LLM 请求上限（1–1000）。写不完时引擎会续发补写提醒，每次提醒各吃一份预算；大模块撞上限会让整轮从完成掉成部分完成。',
       emptyStreakLimit: '空产出熔断',
       emptyStreakLimitHint: '连续这么多次「上游返回 200 却没有任何正文/工具调用」就停发，不再把额度烧在注定失败的调用上；已写文章照常落盘。0 = 关闭。',
+      historyCompactionKeep: '历史压缩',
+      historyCompactionKeepHint: '保留最近几次「整篇文件读」的完整内容，更早的替换成带行数的占位符（模型需要时用 view_range 回查）。实测单次增量编译 65.7% 的输入 token 是重复重发的已读文件内容，默认 3 约省 37%。行段读与开头两轮任务定义永不裁剪。-1 = 关闭。',
       batchProvider: '模型提供商',
       batchProviderHint: '模型设置里已注册的提供商；凭证由宿主按它解析。',
       batchProviderMissing: '目录不可用，请手填 provider id',
@@ -224,6 +226,7 @@ window.__ModuleLoader__.load({
       invalidConcurrency: '并发上限须为 1–8 的整数。',
       invalidRequestLimit: '单模块请求上限须为 1–1000 的整数。',
       invalidEmptyStreakLimit: '空产出熔断阈值须为 0–20 的整数（0 = 关闭）。',
+      invalidHistoryCompactionKeep: '历史压缩须为 -1 或 0–20 的整数（-1 = 关闭）。',
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stageQueued: '排队中',
@@ -429,6 +432,8 @@ window.__ModuleLoader__.load({
       requestLimitHint: 'LLM request budget for one module (1–1000). Unfinished modules get continuation reminders, each with its own budget; hitting the cap turns a whole run from complete into partial.',
       emptyStreakLimit: 'Empty-output breaker',
       emptyStreakLimitHint: 'Stop sending once the upstream returns 200 with no text and no tool call this many times in a row, so budget is not burned on calls that cannot succeed; articles already written still land. 0 = off.',
+      historyCompactionKeep: 'History compaction',
+      historyCompactionKeepHint: 'Keep the last N whole-file reads intact and replace older ones with a placeholder naming the omitted line count (the model can re-read a range with view_range). Measured: 65.7% of input tokens in one incremental compile were re-sent file contents. Default 3 saves about 37%. Ranged reads and the first two task-definition turns are never compacted. -1 = off.',
       batchProvider: 'Model provider',
       batchProviderHint: 'A provider from model settings; the host resolves credentials.',
       batchProviderMissing: 'Catalog unavailable — type the provider id',
@@ -498,6 +503,7 @@ window.__ModuleLoader__.load({
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
       invalidRequestLimit: 'Per-module request cap must be an integer between 1 and 1000.',
       invalidEmptyStreakLimit: 'Empty-output breaker must be an integer between 0 and 20 (0 = off).',
+      invalidHistoryCompactionKeep: 'History compaction must be -1 or an integer between 0 and 20 (-1 = off).',
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stageQueued: 'Queued',
@@ -1014,7 +1020,7 @@ window.__ModuleLoader__.load({
           'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit',
           'workspaceOnly', 'techdocs', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
           'excludePaths',
-          'autoUpdate', 'autoUpdateMin', 'requestLimit', 'emptyStreakLimit',
+          'autoUpdate', 'autoUpdateMin', 'requestLimit', 'emptyStreakLimit', 'historyCompactionKeep',
           'nativeEngine', 'nativeEnginePython', 'nativeEngineEntry', 'nativeEngineTimeoutMs',
           'updateRung', 'updateTauNb', 'updateTauGrow', 'updateTauFull', 'updateTauTree',
         ]
@@ -1248,6 +1254,12 @@ window.__ModuleLoader__.load({
             if (streakRaw !== undefined && streakRaw !== null && streakRaw !== '') {
               const streak = Number(streakRaw)
               if (!Number.isInteger(streak) || streak < 0 || streak > 20) return t('invalidEmptyStreakLimit')
+            }
+            // 历史压缩：-1（关闭）与 0–20 都合法；缺省不拦。
+            const compactRaw = d?.historyCompactionKeep
+            if (compactRaw !== undefined && compactRaw !== null && compactRaw !== '') {
+              const n = Number(compactRaw)
+              if (!Number.isInteger(n) || n < -1 || n > 20) return t('invalidHistoryCompactionKeep')
             }
             return null
           }
@@ -1526,6 +1538,17 @@ window.__ModuleLoader__.load({
                       onChange: (e) => setPath('emptyStreakLimit', e.target.value === '' ? 3 : Number(e.target.value)),
                     }),
                     el('div', { 'data-dscw-hint': '' }, t('emptyStreakLimitHint')),
+                  ),
+                  // 历史压缩：把早期整篇文件读换成占位符，避免每轮重发已读过的全文。
+                  // -1 = 关闭；0–20 是保留次数。
+                  el('label', null, t('historyCompactionKeep')),
+                  el('div', { 'data-dscw-field': '' },
+                    el(Input, {
+                      type: 'number', min: -1, max: 20, step: 1,
+                      value: String(draft.historyCompactionKeep ?? 3),
+                      onChange: (e) => setPath('historyCompactionKeep', e.target.value === '' ? 3 : Number(e.target.value)),
+                    }),
+                    el('div', { 'data-dscw-hint': '' }, t('historyCompactionKeepHint')),
                   ),
                   // 按环节设档位：每个环节一个下拉，选项来自模型目录（与上面的思考程度同一份）。
                   // 留空 = 用上面的 batchReasoningEffort 兜底；整组都留空时配置里就是空对象。

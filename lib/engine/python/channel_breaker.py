@@ -92,6 +92,11 @@ class ChannelBreaker:
         self.tripped = False
         self.empty_total = 0
         self.call_total = 0
+        # 历史压缩的累计计数，进 notes 供面板显示「省了多少」。
+        self.compacted_blocks = 0
+
+    def note_compaction(self, blocks: int) -> None:
+        self.compacted_blocks += blocks
 
     def trip(self, reason: str):
         """置熔断位并抛 :class:`ChannelBreakerTripped`。桥侧先熔断时也走这里。"""
@@ -119,12 +124,15 @@ class ChannelBreaker:
             )
 
 
-def install(empty_streak_limit) -> ChannelBreaker:
-    """装上熔断，返回本轮 breaker。
+def install(empty_streak_limit, compaction_keep=3) -> ChannelBreaker:
+    """装上熔断与历史压缩，返回本轮 breaker。
 
     ``empty_streak_limit`` 由 Node 侧下发（与桥同一个配置项、同源同值），0 = 关闭熔断。
     没有缺省值可退：native-run 恒下发它（none 时也是 3），传不进来就是协议对不上，
     这里让 ``int(None)`` 当场抛，而不是悄悄用一个和桥不同的阈值。
+
+    ``compaction_keep`` 是保留最近几次整篇文件读（见 history_compaction 模块）；
+    负数 = 关闭压缩。
 
     在任何 PydanticAIBackend 实例化**之前**调用：模型对象在
     ``PydanticAIBackend.__init__`` 里就由 ``create_fallback_models`` 建好
@@ -136,6 +144,8 @@ def install(empty_streak_limit) -> ChannelBreaker:
     from codewiki.src.be import llm_services
     from codewiki.src.be.api_usage import UsageModel
     from codewiki.src.be.llm_services import create_main_model
+
+    from history_compaction import compact_messages
 
     limit = int(empty_streak_limit)
 
@@ -161,6 +171,14 @@ def install(empty_streak_limit) -> ChannelBreaker:
             # 熔断后在入口就停：这一次请求一个 token 都不发给上游。
             if breaker.tripped:
                 breaker.note(False)
+            # 历史压缩：把早期整篇文件读替换成占位符，再交给上游。
+            # 放在这里而不是改引擎源码——这是模型调用出口，所有叶子、所有通道都经过它。
+            # 压缩只作用于本次请求的消息列表，不改 agent 持有的 message_history
+            # （下一次 run 仍带完整历史，否则「压缩」会变成「永久丢失」）。
+            if compaction_keep >= 0:
+                messages, dropped = compact_messages(messages, compaction_keep)
+                if dropped:
+                    breaker.note_compaction(dropped)
             try:
                 response = await self.wrapped.request(messages, model_settings, model_request_parameters)
             except ModelHTTPError as exc:
