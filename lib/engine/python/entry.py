@@ -1237,8 +1237,17 @@ def _usage_of_ledger(adapter):
     `except Exception` 分支里写进 `job.statistics`（doc_generator.py:182、:200-207），
     而熔断是 BaseException，两条路都不经过。账本本身在 `_run_backend_generation`
     一开始就挂到 adapter 上了（:219），此时已记下本轮全部请求，读它是准确的。
+
+    账本为 None 是真实可达的：`_usage_ledger` 在 `__init__` 里是 None（:75），
+    只在 :219 才被赋真值。若熔断发生在后端初始化阶段（install / 建模型链，
+    早于 :219），账本还没挂上。这时返回全 0 是对的——后端都没跑起来，
+    本轮确实一个模型请求都没发出去。绝不能在这里再抛 AttributeError：
+    那是在 `except ChannelBreakerTripped` 块里的二次异常，会撕掉协议流。
     """
-    totals = adapter._usage_ledger.summary()["totals"]
+    ledger = adapter._usage_ledger
+    if ledger is None:
+        return {"inputTokens": 0, "outputTokens": 0, "cachedTokens": 0, "requests": 0}
+    totals = ledger.summary()["totals"]
     return {
         "inputTokens": int(totals.get("input_tokens", 0) or 0),
         "outputTokens": int(totals.get("output_tokens", 0) or 0),
