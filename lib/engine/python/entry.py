@@ -1112,6 +1112,7 @@ def action_generate(request_id, payload, is_update=False):
         return _salvage(
             request_id, docs_dir, repo_path, started, reached["stage"],
             "engine-model", str(exc), usage=_usage_of_ledger(adapter),
+            adapter=adapter, kind="model-channel-tripped",
         )
     except SystemExit as exc:
         # FSoft 在「无变更」等路径会 sys.exit(0)（generate.py:640 附近）。
@@ -1424,7 +1425,7 @@ def _classify_exception(exc, request_id, docs_dir, repo_path, started, stage="ar
     )
 
 
-def _salvage(request_id, docs_dir, repo_path, started, stage, code, message, usage=None):
+def _salvage(request_id, docs_dir, repo_path, started, stage, code, message, usage=None, adapter=None, kind="article-failed"):
     """崩溃/模型失败时，若已经写出文章，就降 partial 交付，而不是整轮判 failed。
 
     **为什么必须这么做**：原生引擎的一条任务动辄跑几十上百分钟（真机全量实测约
@@ -1435,18 +1436,26 @@ def _salvage(request_id, docs_dir, repo_path, started, stage, code, message, usa
 
     **为什么不是无条件 partial**：一篇都没写出来时仍然是 failed——用空产物冒充
     「部分完成」会让基线与面板失真（见 _done_result 与 canAdvanceBaseline 的注记）。
+
+    ``adapter`` 有值时用它读本轮增量结局。熔断出口传了 adapter 就必须读：
+    ``updateOutcome`` 是「基线能不能推进」的唯一证据，熔断轮如果恒报 None，
+    上层会把一轮真实走完增量、只是末尾模型通道挂掉的轮次当成「引擎没说」，
+    基线处置随之失真。``kind`` 让 blocker 说清是哪一类中断——熔断与崩溃的
+    处置动作不同（前者要检查模型通道/额度，后者要查引擎），措辞混同会让人
+    修错地方。
     """
     written = _count_docs(docs_dir)
     if written <= 0:
         return failure(code, message, stage, request_id, usage=usage)
     result = _done_result(
         request_id, docs_dir, repo_path, started,
-        written=written, stage=stage, update_outcome=_update_outcome_of_safe(),
+        written=written, stage=stage,
+        update_outcome=_update_outcome_of(adapter) if adapter is not None else _update_outcome_of_safe(),
     )
     result["outcome"] = "partial"
     result["error"] = {"code": code, "message": str(message)[:4000], "stage": stage}
     result["blockers"] = [
-        {"kind": "article-failed", "detail": f"编译在 {stage} 阶段中断（已写 {written} 篇）：{str(message)[:300]}"}
+        {"kind": kind, "detail": f"编译在 {stage} 阶段中断（已写 {written} 篇）：{str(message)[:300]}"}
     ]
     result["failedCount"] = 1
     if usage is not None:
