@@ -76,6 +76,7 @@ export const Config = z.object({
   moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
   requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 100（上游默认值）；调小能压住单模块成本，调大能减少大模块被预算中断的补写次数'),
   emptyStreakLimit: z.number().default(3).volatile().description('连续空产出熔断阈值（0–20，0 = 关闭）：上游连续这么多次返回 200 却无正文、无工具调用时，本轮不再向上游发请求，已写文章照常落盘。默认 3——真机实测正常任务的最大连续空产出是 1 次，故障任务是 27 次，中间没有过渡带，所以 3 既不会误伤正常任务又能在故障早期停手，避免把额度烧在注定失败的调用上'),
+  historyCompactionKeep: z.number().default(3).volatile().description('历史压缩：保留最近几次「整篇文件读」的完整内容（0–20，-1 = 关闭），更早的替换成带行数的占位符。实测单次增量编译 110 次请求共 1,039 万输入 token，其中 65.7% 是工具返回的整篇文件内容——16 篇文档在第 2–7 次请求读入后，每轮都被完整重发一遍。默认 3 来自 SWE-agent 的 LastNObservations 策略（它默认 5）与本仓库实测（16 篇里 10 篇读入后再未访问），预期省 37%。行段读（带 view_range）与开头两轮任务定义永不裁剪'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -178,6 +179,14 @@ export function liveConfig(config) {
     emptyStreakLimit: (() => {
       const raw = Number(val(c.emptyStreakLimit))
       return Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : 3
+    })(),
+    // 历史压缩：保留最近几次整篇文件读。-1 = 关闭，负值原样透传（引擎侧按 <0 关闭）。
+    // 上限 20 只是防配置手滑写成 999——那等于不压缩，但仍会每轮做一次无用的扫描。
+    historyCompactionKeep: (() => {
+      const raw = Number(val(c.historyCompactionKeep))
+      if (!Number.isFinite(raw)) return 3
+      if (raw < 0) return -1
+      return Math.min(Math.round(raw), 20)
     })(),
     serialProjects: val(c.serialProjects) !== false,
     parallelLimit: (() => {
@@ -1657,6 +1666,8 @@ function createJobService(config) {
         requestLimit: c.requestLimit,
         // 连续空产出熔断：0 = 关闭。默认 3，见 Config 里的实测依据。
         emptyStreakLimit: c.emptyStreakLimit,
+        // 历史压缩：保留最近几次整篇文件读。-1 = 关闭。默认 3，见 Config 里的实测依据。
+        historyCompactionKeep: c.historyCompactionKeep,
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),

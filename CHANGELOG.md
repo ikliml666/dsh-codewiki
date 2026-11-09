@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.19.0 — 2026-11-09
+
+### 历史压缩：把已读文件的全文从后续每轮请求里摘掉（实测省 37%）
+
+单次增量编译（job-mw8s9um1-4，串行 moduleConcurrency=1）实测：110 次模型请求共
+**1,039 万输入 token**，其中 **65.7% 是工具返回的整篇文件内容**。模型在第 2–7 次请求里
+把 16 篇文档整篇读进历史，之后每一条请求都把全部 16 篇完整重发一遍，一直背到第 110 次。
+
+**这不是并发导致，也不是故障**，是上游设计与框架默认行为的叠加：
+
+- 上游 prompt 的 `WRITE_SET` 只给 14 个页面路径、不给内容 → 模型必须自己读（合理，它要精准改）
+- pydantic-ai 的 agentic 循环默认保留完整历史 → 读过的一直在
+- 两者相遇：16 篇整篇读，在历史里累计出现 1047 次，重复倍数 65.4×
+
+**裁什么**：只裁整篇读（`view` 不带 `view_range` 的返回）。行段读（带 `view_range`）是模型的
+精准定位手段——真机 46 次行段读 vs 24 次整篇读，前者才是它实际依赖的。实测 16 篇被整篇
+读入的文档里，**10 篇读入后再未被任何 `view_range` 访问**，纯占历史。
+
+**判据用行数不用字符数**：真机整篇读 100–409 行，行段读 ≤71 行，阈值取 80 行干净分开。
+最初用 4000 字符做阈值，200 行的中文页面只有 2900 字符被漏判——语言不同字符密度差 4 倍，
+字符数不是可靠判据。
+
+**方案来自三个成熟项目的实证**：
+
+- **SWE-agent** `LastNObservations`（论文默认 n=5）：保留最近 n 个 observation，其余替换成
+  `Old environment output: (n lines omitted)`。与本项目场景最贴近（同为「读文件→改→再读」循环）。
+- **Claude Code** 第一级压缩：清旧工具结果、只留最近 5 个，占位符带行数。它的第二级用
+  `cache_edits` 保住 prompt cache，依赖 Anthropic 私有 API，本项目不走。
+- **OpenHands** `keep_first`：保护开头 system 与任务定义永不压缩。
+
+**缓存顾虑在本项目不成立**：SWE-agent 源码明确警告裁剪会破坏 prompt cache（历史每轮变 →
+缓存全失效）。本项目实测不适用——上游加的 `cache_control` 标记在桥的 `contentToBlocks`
+（`lib/engine/openai-bridge.js:35-48`）里只取 `type === 'text'`，标记被丢弃；110 次请求零缓存
+命中（`cachedTokens` 全空）。裁剪没有缓存代价。
+
+**实现**：新增 `lib/engine/python/history_compaction.py`（纯函数、可单测），在
+`channel_breaker.py` 的 `GuardedModel.request` 出口接线——这是模型调用出口，所有叶子、
+所有通道都经过它，不改引擎源码（`.probe-fsoft/` 是 gitignore 的探针环境）。压缩只作用于
+本次请求的消息列表，不改 agent 持有的 `message_history`（否则「压缩」会变成「永久丢失」）。
+
+配置项 `historyCompactionKeep`：默认 3，-1 = 关闭，0–20 合法。保护开头两个 ModelRequest
+（system 提示词 + `WRITE_SET`/`CHANGE_REPORT` 任务定义）。
+
+实测收益（真实记录 + cl100k tokenizer 离线模拟）：
+
+```
+基线（全保留）        10,395,521 token
+保留最近 3 次整篇读     6,447,581 token   省 38.0%
+保留最近 2 次           5,461,849 token   省 47.5%
+保留最近 1 次           4,463,924 token   省 57.1%
+```
+
+验证：
+
+```
+.dbg-compaction-unit.py   18 passed   判据/保护前缀/保留策略/占位符格式/不污染原始历史/边界
+.dbg-compaction-e2e.py     6 passed   走真实 GuardedModel 链路：上游收到的内容确实变少
+反向验证：拆掉 GuardedModel 里的压缩接线 → 3 条 FAIL（内容 17634→17634、0 占位符）
+         还原后 6 passed
+真机判据校验：16 篇整篇读（100–409 行）全部识别，71 行行段读正确排除
+全量回归：Python 19+16+15+7+9+5+18+6、Node 4+4+2 全绿
+```
+
+**未验证**：真实编译下裁剪后的文章质量。离线模拟证明 token 省下来了，但「模型拿到占位符
+后会不会回读、写出的文章会不会退化」需要同输入跑两遍对比（裁 vs 不裁）。这是下一步。
+
 ## 0.18.5 — 2026-11-09
 
 ### 审核补丁：衰减计数、专属熔断类别、账本缺失防护（commit 2fcc617f / 5296ea7e / 57a63d7d）
