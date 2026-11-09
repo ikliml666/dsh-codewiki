@@ -96,6 +96,10 @@ window.__ModuleLoader__.load({
       sessEmpty: '暂无会话记录（编译请求发起后出现）',
       sessNoCwd: '未关联仓库',
       sessGroupCount: '{n} 条请求',
+      // 会话分组：与 DSH 的会话概念对齐，一个会话发起的编译放一起。
+      sessGroupSession: '会话 {id}',
+      sessGroupNoSession: '非会话发起（面板/自动调度）',
+      sessGroupRepos: '{n} 个仓库',
       sessRunning: '进行中',
       sessActiveTitle: '进行中的任务',
       sessActiveNoRequest: '尚未发出请求（正在做准备/收尾）',
@@ -388,6 +392,9 @@ window.__ModuleLoader__.load({
       sessEmpty: 'No session records yet (they appear once compile requests start).',
       sessNoCwd: 'No repo',
       sessGroupCount: '{n} requests',
+      sessGroupSession: 'Session {id}',
+      sessGroupNoSession: 'Not session-initiated (panel/auto)',
+      sessGroupRepos: '{n} repos',
       sessRunning: 'in flight',
       sessActiveTitle: 'Jobs in progress',
       sessActiveNoRequest: 'No request yet (preparing or wrapping up)',
@@ -911,16 +918,8 @@ window.__ModuleLoader__.load({
 
       // 循环层：阶段内的 agentic 往返分组。比阶段层再淡一档——它解释「为什么这么多条」，
       // 不承担流程语义，所以用点线而不是实线，字号也更小。
-      '[data-dscw-p-loopgroup] { display: flex; flex-direction: column; min-width: 0; border-left: 1px dotted var(--dsw-alias-border-l3); padding-left: 6px; margin-left: 2px; }',
-      '[data-dscw-p-loophead] { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; border: 0; border-radius: 4px; background: transparent; padding: 3px 5px; cursor: pointer; font: inherit; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }',
-      '[data-dscw-p-loophead]:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 55%, transparent); }',
-      '[data-dscw-p-loophead]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
-      '[data-dscw-p-loophead]::before { content: "\\25b8"; flex: none; font-size: 7px; transition: transform .16s ease; }',
-      '[data-dscw-p-loopgroup][data-open="true"] > [data-dscw-p-loophead]::before { transform: rotate(90deg); }',
-      '[data-dscw-p-loophead] [data-loop] { flex: none; font-weight: 500; color: var(--dsw-alias-label-secondary); }',
-      '[data-dscw-p-loophead] [data-count] { flex: none; font-variant-numeric: tabular-nums; }',
-      '[data-dscw-p-loophead] [data-body] { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }',
-      '[data-dscw-p-loophead][data-live="true"] [data-loop] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); }',
+      // 会话内的仓库层：比会话层再淡一档（点线），它只是把「同一会话里的多个仓库」分开。
+      '[data-dscw-p-repogroup] { display: flex; flex-direction: column; min-width: 0; border-left: 1px dotted var(--dsw-alias-border-l3); padding-left: 6px; margin-left: 2px; }',
 
       // 请求层：一行一次请求。状态只用一个点表达，行本身不加边框——阶段竖线已经是边界。
       '[data-dscw-p-sesslist] { display: flex; flex-direction: column; }',
@@ -2408,6 +2407,12 @@ window.__ModuleLoader__.load({
           }, [sel?.jobId, sel?.n])
           const close = () => { setSel(null); onClose() }
           const jobTag = (id) => String(id ?? '').replace(/^job-/, '')
+          // 会话 ID 显示成短形式：session-9e2582a8-958c-... → 9e2582a8。
+          // 完整 ID 在 title 里，列表上只需要够分辨。
+          const shortSession = (id) => {
+            const s = String(id ?? '').replace(/^session-/, '')
+            return s.length > 8 ? s.slice(0, 8) : (s || '?')
+          }
           // token 数按量级缩写：单次请求可从几百到几十万，统一「k」会把 420 写成 0k。
           const tokLabel = (n) => {
             const v = Number(n) || 0
@@ -2566,55 +2571,10 @@ window.__ModuleLoader__.load({
                     bad ? t('sessStageFailed').replace('{n}', bad) : null,
                     running ? t('sessStageRunning') : null,
                   ].filter(Boolean).join(' · '))),
-                // 阶段内再按「agent 循环」切分：同一轮 agentic 工作会有几十上百次工具
-                // 往返（每次都要重发历史），平铺会让「一个循环 100 轮」看起来像
-                // 「100 次独立请求」。判据是输入上下文回落：新一轮开始会重建 prompt，
-                // 输入 token 明显小于上一轮（历史还没长起来）。只有同一阶段内条数多时
-                // 才值得切，避免给本来就短的列表套两层。
-                open ? loopGroups(g, gk) : null)
+                open ? rows(g) : null)
             }))
           }
           // 把同一阶段的记录按 agent 循环分组。返回列表条目时用 rows() 保持原行为。
-          // 用函数声明而不是 const 箭头：stageGroups 在它之前定义并调用它，
-          // const 会落在暂时性死区里。
-          function loopGroups(items, prefix) {
-            const loops = []
-            let cur = []
-            let prev = null
-            for (const s of items) {
-              const tok = Number(s.inputTokens) || 0
-              // 新一轮开始：输入上下文明显回落（< 上一轮一半，且上一轮确实有量）
-              if (prev !== null && tok < prev * 0.5 && prev > 0) {
-                loops.push(cur)
-                cur = []
-              }
-              cur.push(s)
-              prev = tok
-            }
-            if (cur.length) loops.push(cur)
-            if (loops.length <= 1) return rows(items)
-            return el('div', { 'data-dscw-p-loopgroups': '' }, loops.map((lg, i) => {
-              const lk = `${prefix}/loop${i}`
-              const open = !collapsed[lk]
-              const running = lg.some((x) => x.status === 'running')
-              const ok = lg.filter((x) => x.status === 'done').length
-              const bad = lg.filter((x) => x.status === 'error').length
-              return el('div', { key: lk, 'data-dscw-p-loopgroup': '', 'data-open': open ? 'true' : 'false' },
-                el('button', {
-                  'data-dscw-p-loophead': '', 'data-live': running ? 'true' : null,
-                  title: t('sessLoopHint'),
-                  onClick: () => toggleGroup(lk),
-                },
-                  el('span', { 'data-loop': '' }, t('sessLoopLabel').replace('{n}', i + 1)),
-                  el('span', { 'data-count': '' }, t('sessLoopTurns').replace('{n}', lg.length)),
-                  el('span', { 'data-body': '' }, [
-                    ok ? t('sessStageDone').replace('{n}', ok) : null,
-                    bad ? t('sessStageFailed').replace('{n}', bad) : null,
-                    running ? t('sessStageRunning') : null,
-                  ].filter(Boolean).join(' · '))),
-                open ? rows(lg) : null)
-            }))
-          }
           // 进行中任务：点一行就只看这个任务的请求。
           const activeBlock = activeJobs.length
             ? el('div', { 'data-dscw-p-active': '' },
@@ -2662,9 +2622,13 @@ window.__ModuleLoader__.load({
             if (!list?.length) return null
             const cwdOf = (s) => String(s.cwd ?? job?.cwd ?? focus?.cwd ?? '')
             if (!global || focus) return stageGroups(list, 'one')
+            // 全局视图按 DSH 会话分组：一个会话发起的编译任务放在一起，与 DSH 自己的
+            // 会话概念对齐（job.sessionId 就是宿主给的 agent id，不另造一套）。
+            // 面板按钮/自动调度发起的任务没有 agent 上下文 → sessionId 为 null，
+            // 单独归一组并说明来源，不伪造 ID。
             const groups = new Map()
             for (const s of list) {
-              const k = cwdOf(s)
+              const k = String(s.sessionId ?? '')
               if (!groups.has(k)) groups.set(k, [])
               groups.get(k).push(s)
             }
@@ -2673,18 +2637,46 @@ window.__ModuleLoader__.load({
               const tb = String(b[1][0]?.startedAt ?? '')
               return tb.localeCompare(ta)
             })
-            return el('div', { 'data-dscw-p-sessgroups': '' }, ordered.map(([cwd, items], gi) => {
-              const rk = `repo/${cwd || '__none'}`
-              // 默认全展开：进会话页就是想一眼看完所有工作区，折叠是用户的额外动作而不是前提。
+            return el('div', { 'data-dscw-p-sessgroups': '' }, ordered.map(([sid, items]) => {
+              const rk = `sess/${sid || '__none'}`
               const open = collapsed[rk] !== true
               const live = items.some((x) => x.status === 'running')
-              return el('div', { key: cwd || '__none', 'data-dscw-p-sessgroup': '', 'data-open': open ? 'true' : 'false' },
+              // 会话里可能有多个仓库的编译，组头显示会话 + 仓库数
+              const repos = new Set(items.map(cwdOf).filter(Boolean))
+              return el('div', { key: sid || '__none', 'data-dscw-p-sessgroup': '', 'data-open': open ? 'true' : 'false' },
                 el('button', { 'data-dscw-p-repohead': '', 'data-live': live ? 'true' : null, onClick: () => toggleGroup(rk) },
-                  el('span', { 'data-repo': '', title: cwd }, cwd ? repoName(cwd) : t('sessNoCwd')),
-                  el('span', { 'data-count': '' }, t('sessGroupCount').replace('{n}', items.length))),
-                open ? stageGroups(items, cwd || '__none') : null)
+                  el('span', { 'data-repo': '', title: sid || '' },
+                    sid ? t('sessGroupSession').replace('{id}', shortSession(sid)) : t('sessGroupNoSession')),
+                  el('span', { 'data-count': '' }, [
+                    t('sessGroupCount').replace('{n}', items.length),
+                    repos.size > 1 ? t('sessGroupRepos').replace('{n}', repos.size) : null,
+                  ].filter(Boolean).join(' · '))),
+                open ? byRepo(items, sid || '__none') : null)
             }))
           })()
+          // 会话内再按仓库分一层（一个会话可能连续编译多个仓库）
+          function byRepo(items, prefix) {
+            const cwdOf = (s) => String(s.cwd ?? job?.cwd ?? focus?.cwd ?? '')
+            const groups = new Map()
+            for (const s of items) {
+              const k = cwdOf(s)
+              if (!groups.has(k)) groups.set(k, [])
+              groups.get(k).push(s)
+            }
+            if (groups.size <= 1) return stageGroups(items, prefix)
+            const ordered = [...groups.entries()].sort((a, b) =>
+              String(b[1][0]?.startedAt ?? '').localeCompare(String(a[1][0]?.startedAt ?? '')))
+            return el('div', { 'data-dscw-p-repogroups': '' }, ordered.map(([cwd, g]) => {
+              const rk = `${prefix}/repo/${cwd || '__none'}`
+              const open = collapsed[rk] !== true
+              const live = g.some((x) => x.status === 'running')
+              return el('div', { key: cwd || '__none', 'data-dscw-p-repogroup': '', 'data-open': open ? 'true' : 'false' },
+                el('button', { 'data-dscw-p-repohead': '', 'data-live': live ? 'true' : null, onClick: () => toggleGroup(rk) },
+                  el('span', { 'data-repo': '', title: cwd }, cwd ? repoName(cwd) : t('sessNoCwd')),
+                  el('span', { 'data-count': '' }, t('sessGroupCount').replace('{n}', g.length))),
+                open ? stageGroups(g, rk) : null)
+            }))
+          }
           return el('div', { 'data-dscw-p-sesswrap': '' },
             el('div', { 'data-dscw-p-sessbar': '' },
               el('span', null, global

@@ -1098,14 +1098,20 @@ export function beginSessionRecord(job, task) {
   const startedAt = new Date().toISOString()
   // 思考档打开时正文可能为空：光看 outputChars 会把「想了 1000 段」的请求显示成空。
   // 三个计数分开记，面板才能如实说明「这条请求的内容在思考里」。
+  //
+  // sessionId 是发起这次编译的 DSH 会话（job.sessionId，来自宿主 exec.agent.id）。
+  // 面板按它把请求归到「哪个会话发起的编译」，与 DSH 自己的会话概念对齐——
+  // 不另造一套 ID。面板/自动调度发起的任务没有 agent 上下文，那是 null（如实记 null，
+  // 不编一个假 ID）。
   const meta = {
-    n, jobId: job.id, name: task.name, model: task.model || null, provider: task.provider || null,
+    n, jobId: job.id, sessionId: job.sessionId ?? null,
+    name: task.name, model: task.model || null, provider: task.provider || null,
     stage: task.stage || null,
     startedAt, finishedAt: null, status: 'running',
     inputTokens: estimateTokens(task.batchPrompt),
     outputChars: 0, reasoningChars: 0, toolCalls: 0, outputTokens: 0,
   }
-  const full = { n, jobId: job.id, name: task.name, stage: meta.stage, startedAt, prompt: task.batchPrompt ?? '', output: '', reasoning: '', tools: [] }
+  const full = { n, jobId: job.id, sessionId: job.sessionId ?? null, name: task.name, stage: meta.stage, startedAt, prompt: task.batchPrompt ?? '', output: '', reasoning: '', tools: [] }
   writeSessionMeta(job.id, meta)
   writeSessionFull(job.id, n, full)
   let out = ''
@@ -3136,7 +3142,24 @@ export function installWebServer(ctx, service, extra = {}) {
           }))
           // 数请求条数走 countSessionRecords：每个活跃任务只数文件名，不再读一遍它的全部 meta
           const active = activeSessionJobs(all, { requestCount: countSessionRecords })
-          writeJson(res, 200, { sessions, total: countAllSessionRecords(), limit, active })
+          // DSH 会话摘要：面板按 sessionId 把请求归到「哪个会话发起的编译」。
+          // 与 DSH 自己的会话概念对齐，不另造一套 ID——job.sessionId 就是宿主给的 agent id。
+          // 没有 sessionId 的任务（面板按钮/自动调度发起）单独归一组，不伪造 ID。
+          const sessionGroups = new Map()
+          for (const j of all) {
+            const sid = j.sessionId ?? null
+            if (!sessionGroups.has(sid)) {
+              sessionGroups.set(sid, { sessionId: sid, jobs: [], requests: 0, lastAt: null })
+            }
+            const g = sessionGroups.get(sid)
+            g.jobs.push({ id: j.id, cwd: j.cwd ?? '', stage: j.stage ?? null, updatedAt: j.updatedAt ?? null })
+            g.requests += countSessionRecords(j.id)
+            if (!g.lastAt || String(j.updatedAt ?? '') > String(g.lastAt)) g.lastAt = j.updatedAt ?? null
+          }
+          writeJson(res, 200, {
+            sessions, total: countAllSessionRecords(), limit, active,
+            sessionGroups: [...sessionGroups.values()].sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? ''))),
+          })
         } catch (err) {
           writeJson(res, 500, { error: String(err?.message ?? err) })
         }
