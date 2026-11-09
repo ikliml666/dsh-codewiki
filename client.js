@@ -121,6 +121,13 @@ window.__ModuleLoader__.load({
       sessStageDone: '完成 {n}',
       sessStageFailed: '失败 {n}',
       sessStageRunning: '有请求在跑',
+      // 循环分组：同一轮 agentic 工作里会有几十上百次工具往返，面板把它们平铺时
+      // 看起来像「几十次独立失败」。按「输入上下文回落」切成循环，让「1 个循环 100 轮」
+      // 与「100 次请求」在视觉上分得开。
+      sessLoopLabel: '循环 {n}',
+      sessLoopTurns: '{n} 轮往返',
+      sessLoopHint: '同一轮 agentic 工作内的工具往返；每轮都要重发历史，所以条数多不等于失败',
+      sessLoopSingle: '{n} 轮',
       // 详情页签：默认落在「输出」上——prompt 是给模型的指令，人点开多半是想看模型答了什么。
       sessTabOutput: '输出',
       sessTabPrompt: '输入',
@@ -404,6 +411,10 @@ window.__ModuleLoader__.load({
       sessStageDone: '{n} done',
       sessStageFailed: '{n} failed',
       sessStageRunning: 'requests running',
+      sessLoopLabel: 'Loop {n}',
+      sessLoopTurns: '{n} turns',
+      sessLoopHint: 'Tool round-trips inside one agentic run; each turn resends the history, so many turns is not failure',
+      sessLoopSingle: '{n} turns',
       sessTabOutput: 'Output',
       sessTabPrompt: 'Input',
       sessTabReasoning: 'Reasoning',
@@ -897,6 +908,19 @@ window.__ModuleLoader__.load({
       '[data-dscw-p-stagehead] [data-count] { flex: none; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-stagehead] [data-body] { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }',
       '[data-dscw-p-stagehead][data-live="true"] [data-stage] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); }',
+
+      // 循环层：阶段内的 agentic 往返分组。比阶段层再淡一档——它解释「为什么这么多条」，
+      // 不承担流程语义，所以用点线而不是实线，字号也更小。
+      '[data-dscw-p-loopgroup] { display: flex; flex-direction: column; min-width: 0; border-left: 1px dotted var(--dsw-alias-border-l3); padding-left: 6px; margin-left: 2px; }',
+      '[data-dscw-p-loophead] { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; border: 0; border-radius: 4px; background: transparent; padding: 3px 5px; cursor: pointer; font: inherit; font-size: 10.5px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }',
+      '[data-dscw-p-loophead]:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 55%, transparent); }',
+      '[data-dscw-p-loophead]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }',
+      '[data-dscw-p-loophead]::before { content: "\\25b8"; flex: none; font-size: 7px; transition: transform .16s ease; }',
+      '[data-dscw-p-loopgroup][data-open="true"] > [data-dscw-p-loophead]::before { transform: rotate(90deg); }',
+      '[data-dscw-p-loophead] [data-loop] { flex: none; font-weight: 500; color: var(--dsw-alias-label-secondary); }',
+      '[data-dscw-p-loophead] [data-count] { flex: none; font-variant-numeric: tabular-nums; }',
+      '[data-dscw-p-loophead] [data-body] { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }',
+      '[data-dscw-p-loophead][data-live="true"] [data-loop] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); }',
 
       // 请求层：一行一次请求。状态只用一个点表达，行本身不加边框——阶段竖线已经是边界。
       '[data-dscw-p-sesslist] { display: flex; flex-direction: column; }',
@@ -2542,7 +2566,53 @@ window.__ModuleLoader__.load({
                     bad ? t('sessStageFailed').replace('{n}', bad) : null,
                     running ? t('sessStageRunning') : null,
                   ].filter(Boolean).join(' · '))),
-                open ? rows(g) : null)
+                // 阶段内再按「agent 循环」切分：同一轮 agentic 工作会有几十上百次工具
+                // 往返（每次都要重发历史），平铺会让「一个循环 100 轮」看起来像
+                // 「100 次独立请求」。判据是输入上下文回落：新一轮开始会重建 prompt，
+                // 输入 token 明显小于上一轮（历史还没长起来）。只有同一阶段内条数多时
+                // 才值得切，避免给本来就短的列表套两层。
+                open ? loopGroups(g, gk) : null)
+            }))
+          }
+          // 把同一阶段的记录按 agent 循环分组。返回列表条目时用 rows() 保持原行为。
+          // 用函数声明而不是 const 箭头：stageGroups 在它之前定义并调用它，
+          // const 会落在暂时性死区里。
+          function loopGroups(items, prefix) {
+            const loops = []
+            let cur = []
+            let prev = null
+            for (const s of items) {
+              const tok = Number(s.inputTokens) || 0
+              // 新一轮开始：输入上下文明显回落（< 上一轮一半，且上一轮确实有量）
+              if (prev !== null && tok < prev * 0.5 && prev > 0) {
+                loops.push(cur)
+                cur = []
+              }
+              cur.push(s)
+              prev = tok
+            }
+            if (cur.length) loops.push(cur)
+            if (loops.length <= 1) return rows(items)
+            return el('div', { 'data-dscw-p-loopgroups': '' }, loops.map((lg, i) => {
+              const lk = `${prefix}/loop${i}`
+              const open = !collapsed[lk]
+              const running = lg.some((x) => x.status === 'running')
+              const ok = lg.filter((x) => x.status === 'done').length
+              const bad = lg.filter((x) => x.status === 'error').length
+              return el('div', { key: lk, 'data-dscw-p-loopgroup': '', 'data-open': open ? 'true' : 'false' },
+                el('button', {
+                  'data-dscw-p-loophead': '', 'data-live': running ? 'true' : null,
+                  title: t('sessLoopHint'),
+                  onClick: () => toggleGroup(lk),
+                },
+                  el('span', { 'data-loop': '' }, t('sessLoopLabel').replace('{n}', i + 1)),
+                  el('span', { 'data-count': '' }, t('sessLoopTurns').replace('{n}', lg.length)),
+                  el('span', { 'data-body': '' }, [
+                    ok ? t('sessStageDone').replace('{n}', ok) : null,
+                    bad ? t('sessStageFailed').replace('{n}', bad) : null,
+                    running ? t('sessStageRunning') : null,
+                  ].filter(Boolean).join(' · '))),
+                open ? rows(lg) : null)
             }))
           }
           // 进行中任务：点一行就只看这个任务的请求。
