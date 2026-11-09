@@ -135,12 +135,26 @@ window.__ModuleLoader__.load({
       sessStatOut: '输出 {n} 字',
       sessStatThink: '思考 {n} 字',
       sessStatTools: '工具 {n} 次',
+      // token 数两套说法：实测来自上游 usage（账单口径），估算按 prompt 字符折算。
+      // 分开显示是为了让人知道哪个数能拿去对账。
+      sessStatIn: '入 {n} tok',
+      sessStatInEst: '入 {n} tok（估算）',
+      sessStatOutTok: '出 {n} tok',
+      sessTokEstimatedHint: '上游未返回用量，这是按 prompt 字符数折算的估算值，不是账单口径',
       // 行内提示：没输出时直接说清是哪种情况，别让人点开才发现是空的。
+      // 进行时与完成时必须是两套说法：`✓ done` 的行挂「思考中」读起来像还在跑或卡住了，
+      // 而 agentic 写作本来就是把整轮推理写在 reasoning 里、正文由工具调用落盘。
       sessHintThinking: '思考中',
       sessHintTools: '仅工具调用',
+      sessHintThinkingDone: '内容在思考里',
+      sessHintToolsDone: '本轮在调工具',
       sessHintEmpty: '无内容',
       secCompile: '编译模型',
       secCompileHint: '写文章与校对共用这一个模型，全部在插件内完成。',
+      requestLimit: '单模块请求上限',
+      requestLimitHint: '单个模块写作的 LLM 请求上限（1–1000）。写不完时引擎会续发补写提醒，每次提醒各吃一份预算；大模块撞上限会让整轮从完成掉成部分完成。',
+      emptyStreakLimit: '空产出熔断',
+      emptyStreakLimitHint: '连续这么多次「上游返回 200 却没有任何正文/工具调用」就停发，不再把额度烧在注定失败的调用上；已写文章照常落盘。0 = 关闭。',
       batchProvider: '模型提供商',
       batchProviderHint: '模型设置里已注册的提供商；凭证由宿主按它解析。',
       batchProviderMissing: '目录不可用，请手填 provider id',
@@ -208,6 +222,8 @@ window.__ModuleLoader__.load({
       loadingLabel: '加载中…',
       conflict: '保存冲突：设置已被他处修改，请重试。',
       invalidConcurrency: '并发上限须为 1–8 的整数。',
+      invalidRequestLimit: '单模块请求上限须为 1–1000 的整数。',
+      invalidEmptyStreakLimit: '空产出熔断阈值须为 0–20 的整数（0 = 关闭）。',
       panelTitle: '编译任务',
       panelEmpty: '暂无编译任务——在会话里运行 codewiki_generate 开始编译。',
       stageQueued: '排队中',
@@ -398,11 +414,21 @@ window.__ModuleLoader__.load({
       sessStatOut: '{n} chars out',
       sessStatThink: '{n} chars thinking',
       sessStatTools: '{n} tool calls',
+      sessStatIn: '{n} tok in',
+      sessStatInEst: '{n} tok in (estimated)',
+      sessStatOutTok: '{n} tok out',
+      sessTokEstimatedHint: 'The upstream returned no usage; this is derived from prompt length, not billing figures.',
       sessHintThinking: 'thinking',
       sessHintTools: 'tools only',
+      sessHintThinkingDone: 'reasoning only',
+      sessHintToolsDone: 'tools this turn',
       sessHintEmpty: 'no content',
       secCompile: 'Compile model',
       secCompileHint: 'Articles and proofreading share this model; all inside the plugin.',
+      requestLimit: 'Per-module request cap',
+      requestLimitHint: 'LLM request budget for one module (1–1000). Unfinished modules get continuation reminders, each with its own budget; hitting the cap turns a whole run from complete into partial.',
+      emptyStreakLimit: 'Empty-output breaker',
+      emptyStreakLimitHint: 'Stop sending once the upstream returns 200 with no text and no tool call this many times in a row, so budget is not burned on calls that cannot succeed; articles already written still land. 0 = off.',
       batchProvider: 'Model provider',
       batchProviderHint: 'A provider from model settings; the host resolves credentials.',
       batchProviderMissing: 'Catalog unavailable — type the provider id',
@@ -470,6 +496,8 @@ window.__ModuleLoader__.load({
       loadingLabel: 'Loading…',
       conflict: 'Save conflict: settings changed elsewhere, please retry.',
       invalidConcurrency: 'Concurrency cap must be an integer between 1 and 8.',
+      invalidRequestLimit: 'Per-module request cap must be an integer between 1 and 1000.',
+      invalidEmptyStreakLimit: 'Empty-output breaker must be an integer between 0 and 20 (0 = off).',
       panelTitle: 'Compilation jobs',
       panelEmpty: 'No compilation jobs yet — run codewiki_generate in a session to start one.',
       stageQueued: 'Queued',
@@ -986,7 +1014,7 @@ window.__ModuleLoader__.load({
           'serialProjects', 'parallelProjects', 'articleLanguage', 'updateReminder', 'autoCommit',
           'workspaceOnly', 'techdocs', 'batchProvider', 'batchModel', 'batchReasoningEffort', 'effortByStage',
           'excludePaths',
-          'autoUpdate', 'autoUpdateMin', 'requestLimit',
+          'autoUpdate', 'autoUpdateMin', 'requestLimit', 'emptyStreakLimit',
           'nativeEngine', 'nativeEnginePython', 'nativeEngineEntry', 'nativeEngineTimeoutMs',
           'updateRung', 'updateTauNb', 'updateTauGrow', 'updateTauFull', 'updateTauTree',
         ]
@@ -1214,6 +1242,13 @@ window.__ModuleLoader__.load({
             // 单模块请求上限：拦住非整数与越界，避免 0 或负数被当成「不限制」
             const reqLimit = Number(d?.requestLimit)
             if (!Number.isInteger(reqLimit) || reqLimit < 1 || reqLimit > 1000) return t('invalidRequestLimit')
+            // 空产出熔断：0 合法（关闭）；字段缺省（老配置还没写过这个键）时按默认 3，
+            // 不能让一个从未设置过的字段拦住所有保存。
+            const streakRaw = d?.emptyStreakLimit
+            if (streakRaw !== undefined && streakRaw !== null && streakRaw !== '') {
+              const streak = Number(streakRaw)
+              if (!Number.isInteger(streak) || streak < 0 || streak > 20) return t('invalidEmptyStreakLimit')
+            }
             return null
           }
 
@@ -1481,6 +1516,17 @@ window.__ModuleLoader__.load({
                     }),
                     el('div', { 'data-dscw-hint': '' }, t('requestLimitHint')),
                   ),
+                  // 连续空产出熔断：模型通道连续这么多次「200 但什么都没产出」就停发，
+                  // 避免把额度烧在注定失败的调用上。0 = 关闭。
+                  el('label', null, t('emptyStreakLimit')),
+                  el('div', { 'data-dscw-field': '' },
+                    el(Input, {
+                      type: 'number', min: 0, max: 20, step: 1,
+                      value: String(draft.emptyStreakLimit ?? 3),
+                      onChange: (e) => setPath('emptyStreakLimit', e.target.value === '' ? 3 : Number(e.target.value)),
+                    }),
+                    el('div', { 'data-dscw-hint': '' }, t('emptyStreakLimitHint')),
+                  ),
                   // 按环节设档位：每个环节一个下拉，选项来自模型目录（与上面的思考程度同一份）。
                   // 留空 = 用上面的 batchReasoningEffort 兜底；整组都留空时配置里就是空对象。
                   el('label', null, t('effortByStage')),
@@ -1545,7 +1591,7 @@ window.__ModuleLoader__.load({
                       label: t('autoUpdateLabel'),
                     })
                   ),
-                  el('div', { 'data-dscw-hint': '' }, t('autoUpdateLabelHint')),
+                  el('div', { 'data-dscw-hint': '' }, t('autoUpdateHint')),
                   el('label', null, t('autoUpdateMinLabel')),
                   el('div', { 'data-dscw-field': '' },
                     el(Input, {
@@ -2315,6 +2361,11 @@ window.__ModuleLoader__.load({
           }, [sel?.jobId, sel?.n])
           const close = () => { setSel(null); onClose() }
           const jobTag = (id) => String(id ?? '').replace(/^job-/, '')
+          // token 数按量级缩写：单次请求可从几百到几十万，统一「k」会把 420 写成 0k。
+          const tokLabel = (n) => {
+            const v = Number(n) || 0
+            return v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
+          }
           const toggleGroup = (key) => setCollapsed((s) => ({ ...s, [key]: !s[key] }))
           const markdown = (text, streaming) => el(MarkdownText, {
             text: String(text ?? ''),
@@ -2378,8 +2429,16 @@ window.__ModuleLoader__.load({
                 el('span', null, t('sessStatOut').replace('{n}', String(rec?.outputChars ?? 0))),
                 rec?.reasoningChars ? el('span', null, t('sessStatThink').replace('{n}', String(rec.reasoningChars))) : null,
                 rec?.toolCalls ? el('span', null, t('sessStatTools').replace('{n}', String(rec.toolCalls))) : null,
-                rec?.inputTokens ? el('span', null, `in ${Math.round(rec.inputTokens / 1000)}k tok`) : null,
-                rec?.outputTokens ? el('span', null, `out ${Math.round(rec.outputTokens / 1000)}k tok`) : null),
+                // 输入量区分实测与估算：上游回的 usage 才是账单上的数，估算是按 prompt 字符
+                // 折出来的（中文 1 字 1 token、其余 3.5 字符 1 token），两者能差出不少。
+                // 不标注来源的话，用户没法判断这个数能不能拿来对账。
+                // 旧记录没有 inputTokensMeasured 字段，那些值全是估算——所以只有明确 === true
+                // 才算实测，缺字段按估算显示。
+                rec?.inputTokens
+                  ? el('span', { title: rec.inputTokensMeasured === true ? undefined : t('sessTokEstimatedHint') },
+                    t(rec.inputTokensMeasured === true ? 'sessStatIn' : 'sessStatInEst').replace('{n}', tokLabel(rec.inputTokens)))
+                  : null,
+                rec?.outputTokens ? el('span', null, t('sessStatOutTok').replace('{n}', tokLabel(rec.outputTokens))) : null),
               el(SegmentedTabs, {
                 value: tab,
                 items: tabs.map((x) => ({ value: x.id, label: x.label })),
@@ -2393,18 +2452,27 @@ window.__ModuleLoader__.load({
           // 「打开没有内容」在行上就要说清原因：输出空、思考多，是模型把内容都写在思考里；
           // 输出与思考都空但调了工具，是这一轮在操作工具；三者都空但请求还在跑，是增量还没到。
           // 别让人点开才发现是空的，也别把「即将长出来」误报成「没有内容」。
+          //
+          // 进行时与完成时分开说：`✓ done` 的行挂「思考中」是现在进行时，读起来像还在跑或
+          // 卡住了；而 agentic 写作的正文本来就由工具调用直接落盘，不经过对话正文——
+          // 这类行是完成，不是空转，行名也不该比同组其他行更灰。
+          const isEmptyish = (s) => !Number(s.outputChars) && !Number(s.reasoningChars) && !Number(s.toolCalls)
           const emptyHint = (s) => {
             if (Number(s.outputChars)) return null
-            if (Number(s.reasoningChars)) return t('sessHintThinking')
-            if (Number(s.toolCalls)) return t('sessHintTools')
-            if (s.status === 'running') return t('sessLive')
+            const live = s.status === 'running'
+            if (Number(s.reasoningChars)) return t(live ? 'sessHintThinking' : 'sessHintThinkingDone')
+            if (Number(s.toolCalls)) return t(live ? 'sessHintTools' : 'sessHintToolsDone')
+            if (live) return t('sessLive')
             return t('sessHintEmpty')
           }
+          // 字符数不足 1000 的行按实际字数显示：`Math.round(73/1000)` 会写成「0k ch」，
+          // 看着像这条什么都没产出，其实有 73 字。
+          const charLabel = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k ch` : `${n} ch`)
           const row = (s) => el('button', {
             key: `${s.jobId ?? job?.id}#${s.n}`,
             'data-dscw-p-sessrow': '',
             'data-status': s.status,
-            'data-empty': Number(s.outputChars) || s.status === 'running' ? null : 'true',
+            'data-empty': isEmptyish(s) && s.status !== 'running' ? 'true' : null,
             onClick: () => { setSel({ jobId: s.jobId ?? job?.id, n: s.n }); setDetailTab('output') },
           },
             el('span', { 'data-mark': '' }, s.status === 'running' ? '▸' : s.status === 'done' ? '✓' : '✗'),
@@ -2412,7 +2480,7 @@ window.__ModuleLoader__.load({
             el('span', { 'data-hint': '' }, emptyHint(s)),
             el('span', { 'data-sub': '' }, [
               s.status === 'running' ? t('sessRunning') : null,
-              s.outputChars ? `${Math.round(s.outputChars / 1000)}k ch` : null,
+              s.outputChars ? charLabel(s.outputChars) : null,
               s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : null,
             ].filter(Boolean).join(' · ')),
           )

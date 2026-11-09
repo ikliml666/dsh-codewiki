@@ -1,6 +1,6 @@
 {
   "name": "@ikliml666/dsh-codewiki",
-  "version": "0.18.3",
+  "version": "0.18.4",
   "description": "Repository-level code-wiki compiler for DeepSeek Harness: turns a whole repo into cross-linked Markdown articles under .codewiki/ with a sidebar panel for progress, engine logs and per-stage model settings. Incremental by design, with an article contract gate before anything reaches disk. Default channel drives the upstream FSoft-AI4Code/CodeWiki Python engine (needs a local Python 3.10+ venv with closed deps); a minimal built-in Node channel remains for hosts that cannot run it.",
   "private": false,
   "type": "module",

@@ -75,6 +75,7 @@ export const Config = z.object({
   maxConcurrency: z.number().default(DEFAULT_CONCURRENCY).volatile().description('默认档并发上限（1–8），硬顶 8；默认 2'),
   moduleConcurrency: z.number().default(0).volatile().description('原生引擎的模块生成并行度（1–8），硬顶 8：留空或 0 = 跟随默认档并发（真机实测 2× 时吞吐 2.9×）；填 1 = 上游原本的严格串行（一篇约 12 分钟）。同一拓扑层的模块并发写文档，父模块仍等全部子模块；调大能明显缩短编译墙钟，代价是同批 LLM 请求更密集'),
   requestLimit: z.number().default(DEFAULT_REQUEST_LIMIT).volatile().description('单个模块写作的 LLM 请求上限（1–1000，硬顶 1000）：上游写作 agent 用它做单次 run 的预算，写不完会续发补写提醒，每次提醒各自一份预算。默认 100（上游默认值）；调小能压住单模块成本，调大能减少大模块被预算中断的补写次数'),
+  emptyStreakLimit: z.number().default(3).volatile().description('连续空产出熔断阈值（0–20，0 = 关闭）：上游连续这么多次返回 200 却无正文、无工具调用时，本轮不再向上游发请求，已写文章照常落盘。默认 3——真机实测正常任务的最大连续空产出是 1 次，故障任务是 27 次，中间没有过渡带，所以 3 既不会误伤正常任务又能在故障早期停手，避免把额度烧在注定失败的调用上'),
   serialProjects: z.boolean().default(true).volatile().description('单项目串行：同一时刻只推进一个仓库的编译任务，其余排队（queued），当前任务收尾后自动轮到下一个。关闭后按 parallelProjects 并行推进多个仓库'),
   parallelProjects: z.number().default(2).volatile().description('并行推进的仓库编译任务上限（1–4）：关闭单项目串行后生效。默认 2——多仓库同时编译不再互相排队；额度紧张或限流时调回 1 或开启串行'),
   articleLanguage: z.string().default('中文').volatile().description('wiki 文章书写语言'),
@@ -171,6 +172,12 @@ export function liveConfig(config) {
     requestLimit: (() => {
       const raw = Number(val(c.requestLimit))
       return Number.isFinite(raw) && raw >= 1 ? Math.min(Math.round(raw), 1000) : DEFAULT_REQUEST_LIMIT
+    })(),
+    // 连续空产出熔断阈值：0 = 关闭，负值/非数字一律退回默认 3。
+    // 真机实测正常任务最大连续空产出 1 次、故障任务 27 次，中间没有过渡带。
+    emptyStreakLimit: (() => {
+      const raw = Number(val(c.emptyStreakLimit))
+      return Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : 3
     })(),
     serialProjects: val(c.serialProjects) !== false,
     parallelLimit: (() => {
@@ -930,6 +937,7 @@ export function readSessionRecordDetail(jobId, n) {
     reasoningChars: meta?.reasoningChars ?? String(full.reasoning ?? '').length,
     toolCalls: meta?.toolCalls ?? (Array.isArray(full.tools) ? full.tools.length : 0),
     inputTokens: meta?.inputTokens ?? null,
+    inputTokensMeasured: meta?.inputTokensMeasured === true,
     outputTokens: meta?.outputTokens ?? full.outputTokens ?? 0,
     model: meta?.model ?? null,
     provider: meta?.provider ?? null,
@@ -1121,7 +1129,7 @@ export function beginSessionRecord(job, task) {
         writeSessionFull(job.id, n, { ...full, output: out, reasoning: think, tools: [...tools.values()] })
       }
     },
-    onDone(content, outputTokens) {
+    onDone(content, outputTokens, usage) {
       meta.status = 'done'
       meta.finishedAt = new Date().toISOString()
       // 完成时的全文是权威值；流式没抽到正文（只吐了思考）时保留思考，不把它当空。
@@ -1130,6 +1138,17 @@ export function beginSessionRecord(job, task) {
       meta.reasoningChars = think.length
       meta.toolCalls = tools.size
       meta.outputTokens = outputTokens ?? 0
+      // 真实用量以上游 usage 为准：inputTokens 此前是 estimateTokens(prompt) 的字符估算，
+      // 面板上那个「in 74k tok」不是账单上的数。上游回 usage 时覆盖成实测值，并标记来源，
+      // 让「这是估算」与「这是实测」在面板上可分辨。上游不回 usage 时（实测约 2%）保留估算。
+      //
+      // 计费量含缓存：TokenUsage 的 inputTokens 是不含缓存的净输入，OpenAI 的 prompt_tokens
+      // 是输入+缓存读写之和（openai-bridge.js:172-185 同一口径）。
+      const measuredIn = Number(usage?.input)
+      if (Number.isFinite(measuredIn) && measuredIn > 0) {
+        meta.inputTokens = measuredIn + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0)
+        meta.inputTokensMeasured = true
+      }
       writeSessionMeta(job.id, meta)
       writeSessionFull(job.id, n, {
         ...full, output: out, reasoning: think, tools: [...tools.values()],
@@ -1636,6 +1655,8 @@ function createJobService(config) {
         // 单模块写作请求上限：上游写作 agent 的硬预算，不传就等于用引擎默认 100，
         // 大模块会撞满抛错把整轮判成 partial。
         requestLimit: c.requestLimit,
+        // 连续空产出熔断：0 = 关闭。默认 3，见 Config 里的实测依据。
+        emptyStreakLimit: c.emptyStreakLimit,
         // 原始树留档根（仓库外）：引擎产物在被映射/改写/裁剪之前先拷一份，
         // 失败只记 note 不影响终态——它是事实来源，不是交付物。
         rawTreeRoot: nativeRawTreeDir(),

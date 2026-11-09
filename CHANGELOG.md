@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.18.4 — 2026-11-09
+
+### 会话面板：已完成的行不再说「思考中」，用量改显实测 token，模型通道加空产出熔断
+
+用户截图会话视图，看到大片 `✓ 原生请求 · deepseek-v4.1-flash`、`0k ch`、`思考中`、`仅工具调用`，
+问「大多数请求都是失败的，没有结果输出，这会影响到使用额度以及效率吧」。
+
+**先纠正一个误判：那些不是失败。** 全部 3143 条会话记录里 `status` 无一为 `error`，全是 `done`；
+截图那轮任务（`job-mw81xjun-0`，42 篇）终态 `outcome: done`、失败 0。抽查三条「0 char」记录：
+`output` 为空，`reasoning` 有 491 字推理，`tools` 里有 `str_replace_editor` 的完整参数——模型在
+读页、在改页，正文由工具调用直接落盘，不经过对话正文。这是 agentic 写作的正常形态。
+
+**但用户的直觉有一半是对的：额度确实在漏**，只是漏点与成败无关：
+
+```
+总请求 3143    输入 175,627,642 tok    输出 2,079,061 tok     （约 84 : 1）
+正文为空的 2755 条（87.7%）里，2512 条有思考、2724 条有工具调用
+真·空返回（无正文无思考无工具）30 条
+```
+
+三处独立缺陷，分别改掉：
+
+**一、已完成的行挂现在进行时的「思考中」。** `emptyHint` 不看 `status`，`✓ done` 且正文为空
+一律落到 `sessHintThinking`/`sessHintTools`，读起来像还在跑或卡住了。0.17.61 只修了 `running`
+分支，`done` 分支没改。现在按状态分流：进行中说「思考中」，完成说「内容在思考里」；
+工具同理（「仅工具调用」/「本轮在调工具」）。
+
+同一个缺陷还有第二处：`data-empty` 判据是「无正文」，于是这些已完成、有思考的行被降了饱和度，
+比同组其他行更灰，看着像出了问题。改成只有三空（无正文、无思考、无工具）才标记。
+
+顺带修掉 `Math.round(73 / 1000)` 显示成 `0k ch`：不足千字按实际字节数显示。
+
+**二、面板上的 `in 74k tok` 不是账单上的数。** `session meta` 的 `inputTokens` 是
+`estimateTokens(prompt)` 的字符折算（中文 1 字 1 token、其余 3.5 字符 1 token），与上游用量
+可以差出不少。桥本来就收到了 `usage` chunk，只是没往下传：
+
+- `llm-bridge.js` 的 `usageSeen` 扩到四个字段（input / output / cacheRead / cacheWrite），
+  两条 `onDone` 出口多传一个 `usage` 实参
+- `beginSessionRecord` 的 `onDone(content, outputTokens, usage)` 用实测值覆盖估算，并写
+  `inputTokensMeasured: true`。**计费量含缓存**：`TokenUsage.inputTokens` 是不含缓存的净输入，
+  账单口径要加 `cacheRead + cacheWrite`（与 `openai-bridge.js:172-185` 同一换算）
+- 面板把两者分开显示（`入 74k tok` / `入 74k tok（估算）`），估算值带 title 说明它是折算值。
+  上游不回 `usage` 时（实测约 2%）保留估算、不标记实测，历史记录缺该字段一律按估算显示
+
+**三、真正失败的那一轮：模型通道 27 次连续空返回，引擎却把每次失败记成「无需改动」。**
+`job-mw80h05t-2`（dsh-git-worktree）在 00:26:36–00:30:55 拿到 27 次「HTTP 200 但只有
+usage+finish 两个 chunk」，每次 3–31 秒；引擎按「输出重试 3 次」跑满后抛
+`UnexpectedModelBehavior: Exceeded maximum output retries (3)`，8 个叶子写作失败，任务 partial，
+空烧 629,386 input token（占该任务 5.4%）。
+
+熔断加在桥的请求入口：连续这么多次「上游 200 却无正文、无工具调用」后，后续请求不再转发上游，
+直接回 503，`stats` 记 `tripped`/`emptyStreakMax`/`rejectedAfterBreak`。**不终止引擎进程**——
+已写的文章照常走质量门落地，终态如实标 partial，只是不再把额度烧在注定失败的调用上。
+`native-run` 把熔断写进 notes，面板能看到「为什么这一轮后面的请求变少了」。
+
+阈值默认 3，依据是真机游程分布：正常任务的最大连续空产出是 1 次（偶发一次后立刻恢复），
+故障任务是 27 次，**两者之间没有过渡带**。配置项 `emptyStreakLimit`（0 = 关闭）同时进了设置页。
+
+**四、顺手修掉两个一直存在的文案缺陷。** `t('requestLimitHint')` 与
+`t('autoUpdateLabelHint')` 引用的键在字典里不存在（后者字典里叫 `autoUpdateHint`），
+面板上直接显示键名本身。已补 `requestLimit`/`requestLimitHint`/`emptyStreakLimit*`/
+`invalidRequestLimit`/`invalidEmptyStreakLimit` 并改掉拼错的那一处。
+
+验证（测试文件不随仓库分发，故用 `.dbg-*.mjs` 临时脚本，已被 .gitignore 覆盖）：
+
+```
+.dbg-session-metrics.mjs  4 passed   桥交出 usage 四字段；实测覆盖估算且计费含缓存；无 usage 时保留估算
+.dbg-empty-breaker.mjs    3 passed   达阈值停发上游且不再计费；中途恢复清零不误熔断；阈值 0 = 关闭
+.dbg-extract-hint.mjs    11 passed   从 client.js 源码抽出 emptyHint/isEmptyish/charLabel 真实执行
+.dbg-config-wire.mjs      2 passed   Config 暴露该键；0 原样保留、非法值退回 3
+.dbg-wire-e2e.mjs         3 passed   runNativeJob 真的把 emptyStreakLimit 传进 startLlmBridge
+.dbg-i18n-keys.mjs        键齐全     270 对键全匹配（含 t('xxx') 静态引用全集）
+.dbg-i18n-dyn.mjs         键齐全     动态拼接键（${k}Hint、kind${X}、sessRole${X}、state${X}）全覆盖
+```
+
+反向验证（证明测试真的红得起来）：
+
+```
+把 emptyHint/isEmptyish/charLabel 改回旧逻辑 → 4 条 FAIL，还原后 11 passed
+临时拆掉桥里的 stats.tripped 判断       → 熔断用例 FAIL，还原后 3 passed
+```
+
+**未验证**：真实上游连续空返回下的熔断行为。真机故障窗口是一次性事件，本轮只用手工构造的
+「200 + usage-only」响应覆盖了这条路径，没有等第二次真实故障。熔断触发后的引擎侧反应
+（503 会被 `_classify_exception` 翻成什么 blocker 文案）同样未在真实引擎上跑过。
+
 ## 0.18.3 — 2026-11-08
 
 ### 清理死代码：14 个符号 + 10 个空转的 default 导出
