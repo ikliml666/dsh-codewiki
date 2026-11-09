@@ -46,6 +46,11 @@ import time
 import traceback
 from pathlib import Path
 
+# 熔断异常类型：`action_generate` 的 except 子句必须能解析到它，而 except 子句不参与
+# 延迟导入，只能顶层引入。channel_breaker 顶层只 import sys，不会把 pydantic-ai 拉进来
+# （那会让 doctor 在 pydantic 装坏时自己崩掉），见该模块 docstring。
+from channel_breaker import ChannelBreakerTripped
+
 # ── 协议流守卫：必须在 import codewiki 之前装好 ──────────────────────────────
 
 _REAL_STDOUT = sys.stdout
@@ -382,9 +387,13 @@ def emit_result(request_id, result):
     emit({"type": "result", "requestId": request_id, "result": result})
 
 
-def failure(code, message, stage=None, request_id=""):
-    """构造一个 failed 终态。message 只放给人看的说明，绝不拼凭证内容。"""
-    return {
+def failure(code, message, stage=None, request_id="", usage=None):
+    """构造一个 failed 终态。message 只放给人看的说明，绝不拼凭证内容。
+
+    ``usage`` 由调用方在拿得到账本时显式传入。默认 0 只对「还没花过钱就失败」成立；
+    熔断这类中途终止必须带上真实用量，否则面板与成本核算看到的是「这一轮没花钱」。
+    """
+    result = {
         "contractVersion": CONTRACT_VERSION,
         "outcome": "failed",
         "stage": stage,
@@ -401,6 +410,9 @@ def failure(code, message, stage=None, request_id=""):
         "startedAt": None,
         "finishedAt": None,
     }
+    if usage is not None:
+        result["usage"] = usage
+    return result
 
 
 # ── doctor：环境可信性 ───────────────────────────────────────────────────────
@@ -1041,6 +1053,19 @@ def action_generate(request_id, payload, is_update=False):
     try:
         from codewiki.cli.adapters.doc_generator import CLIDocumentationGenerator
 
+        # 模型通道熔断（0.18.5）。必须在建 adapter 之前装：backend 的
+        # `create_fallback_models` 在 PydanticAIBackend.__init__ 里就被调用
+        # （pydantic_ai_backend.py:67），晚于此处的 patch 对已建好的模型对象无效。
+        #
+        # 它做两件事，对应两笔真实浪费：
+        #   · 去掉同源 fallback —— 本插件 fallback_model 恒等于 main_model
+        #     （见 _model_config），命中 fallback_on 只是让同一个上游再烧一遍；
+        #   · 在模型调用出口数连续空产出，到阈值整轮中止，而不是等 pydantic 把
+        #     max_output_retries 用完、再轮到下一个叶子各烧一遍
+        #     （真机 job-mw80h05t-2：#107–#158 同一叶子 52 次请求、输入恒 74,817 tok）。
+        from channel_breaker import install as install_channel_breaker
+        install_channel_breaker(payload["emptyStreakLimit"])
+
         # 全量轮：安装模块级并行（父模块等子模块，共享树合并，失败仍上抛）
         from full_parallel_runtime import install_full_runtime
         install_full_runtime(config.get("module_concurrency", 1))
@@ -1073,6 +1098,21 @@ def action_generate(request_id, payload, is_update=False):
             docs_dir=docs_dir,
         )
         job = adapter.generate()
+    except ChannelBreakerTripped as exc:
+        # 熔断必须是**整轮**终态，不能像普通异常那样交给 `except Exception` 分类：
+        # 它由 channel_breaker 在模型调用出口抛出，专门用来穿过引擎里那些
+        # `except Exception` 把失败吞成 no-op 的位置（orchestrator.py:425-427、
+        # leaf_agent.py:140-145、full_parallel_runtime 的 _run_module）。
+        # 因此它是 BaseException 子类，**不会被下面的 except Exception 捕获**，
+        # 必须在这里显式收口，否则异常会穿过 action_generate 撕掉协议流。
+        #
+        # 已写的文章照常交付（_salvage 的 partial 语义），用量从 adapter 的账本补：
+        # generate() 的 `_finish_usage` 在 `except Exception` 分支里，BaseException
+        # 走不到，不补的话本轮真实花费会在终态里显示为 0。
+        return _salvage(
+            request_id, docs_dir, repo_path, started, reached["stage"],
+            "engine-model", str(exc), usage=_usage_of_ledger(adapter),
+        )
     except SystemExit as exc:
         # FSoft 在「无变更」等路径会 sys.exit(0)（generate.py:640 附近）。
         # 这不是失败：增量更新时「没有要改的」正是正常终态。
@@ -1187,6 +1227,23 @@ def _usage_of(job):
         }
     except Exception:
         return {"inputTokens": 0, "outputTokens": 0, "cachedTokens": 0, "requests": 0}
+
+
+def _usage_of_ledger(adapter):
+    """熔断出口的用量：job 的那条路走不通，只能直接读 adapter 的账本。
+
+    为什么要单独一个函数：`adapter.generate()` 的用量只在**正常返回**或
+    `except Exception` 分支里写进 `job.statistics`（doc_generator.py:182、:200-207），
+    而熔断是 BaseException，两条路都不经过。账本本身在 `_run_backend_generation`
+    一开始就挂到 adapter 上了（:219），此时已记下本轮全部请求，读它是准确的。
+    """
+    totals = adapter._usage_ledger.summary()["totals"]
+    return {
+        "inputTokens": int(totals.get("input_tokens", 0) or 0),
+        "outputTokens": int(totals.get("output_tokens", 0) or 0),
+        "cachedTokens": int(totals.get("cache_read_tokens", 0) or 0),
+        "requests": int(totals.get("requests", 0) or 0),
+    }
 
 
 def _update_outcome_of(adapter):
@@ -1367,7 +1424,7 @@ def _classify_exception(exc, request_id, docs_dir, repo_path, started, stage="ar
     )
 
 
-def _salvage(request_id, docs_dir, repo_path, started, stage, code, message):
+def _salvage(request_id, docs_dir, repo_path, started, stage, code, message, usage=None):
     """崩溃/模型失败时，若已经写出文章，就降 partial 交付，而不是整轮判 failed。
 
     **为什么必须这么做**：原生引擎的一条任务动辄跑几十上百分钟（真机全量实测约
@@ -1381,7 +1438,7 @@ def _salvage(request_id, docs_dir, repo_path, started, stage, code, message):
     """
     written = _count_docs(docs_dir)
     if written <= 0:
-        return failure(code, message, stage, request_id)
+        return failure(code, message, stage, request_id, usage=usage)
     result = _done_result(
         request_id, docs_dir, repo_path, started,
         written=written, stage=stage, update_outcome=_update_outcome_of_safe(),
@@ -1392,6 +1449,8 @@ def _salvage(request_id, docs_dir, repo_path, started, stage, code, message):
         {"kind": "article-failed", "detail": f"编译在 {stage} 阶段中断（已写 {written} 篇）：{str(message)[:300]}"}
     ]
     result["failedCount"] = 1
+    if usage is not None:
+        result["usage"] = usage
     return result
 
 

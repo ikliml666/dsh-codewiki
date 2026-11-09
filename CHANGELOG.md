@@ -1,5 +1,125 @@
 # Changelog
 
+## 0.18.5 — 2026-11-09
+
+### 根治重复失败／一直重写：熔断升级为「整轮停」，拆掉同源 fallback
+
+0.18.4 在桥侧加了「连续 3 次空产出回 503」的熔断，但它挡住的只是桥这一个入口：引擎把 503
+当作可重试的上游错误，在每个叶子上继续烧；`FallbackModel` 又把 `UnexpectedModelBehavior`
+当成回退信号，切到**同一个模型同一条桥同一个上游**再烧一遍。这一轮把熔断从「桥拒绝」改成
+「整轮终止」，并拆掉那个假容错。
+
+真机证词（`%TEMP%/dsh-codewiki-sessions/job-mw80h05t-2/`，185 条会话共 11,566,117 输入 tok）：
+
+```
+#107–#158   同一叶子连续 52 次请求，inputTokens 恒 = 74,817
+#159–#185   27 次三空响应，input 尺寸在 13k/10k/32k/18k/14k/11k 间切换
+            → 不同叶子各自重试 3–4 次
+```
+
+**一、熔断的抛点从「桥入口」前移到「模型调用出口」，且跨叶子共享预算。**
+新增 `lib/engine/python/channel_breaker.py`（运行时补丁，不改 venv 里的第三方源码），在
+`Model.request` 出口数连续空产出：连续 N 次即抛 `ChannelBreakerTripped`。
+
+- 选 `Model.request` 而不是 agent 循环：pydantic 的 `max_output_retries` 是 **per-run** 的
+  （`_agent_graph.py:452-473`），同一上游故障会让每个叶子各烧满一份；进程内所有
+  `PydanticAIBackend` 共用同一个 breaker 才谈得上「共享预算」。
+- 停在**第 N 次**而不是等 pydantic 重试到上限（N+1 次）再失败，止血更早。
+- 熔断后每个后续调用在入口即抛，一个 token 都不发上游。
+
+**二、`ChannelBreakerTripped` 必须是 `BaseException`，并且必须显式收口。**
+引擎里到处是 `except Exception`（`updater/orchestrator.py:425-427`、
+`leaf_agent.py:140-145`、`full_parallel_runtime.py` 的 `_run_module`、
+`fsoft_runtime.py:220-222`），普通异常会被吞成「这页无需改动」，整轮照样报 done。只有非
+Exception 才能穿过它们——代价是 `action_generate` 的 `except Exception` 也接不住它，
+所以必须在 `job = adapter.generate()` 紧邻外侧加 `except ChannelBreakerTripped`，在
+`except SystemExit` 之前，显式翻成契约终态：
+
+- 已写文章 >0 → `partial`（沿用 `_salvage` 语义，不丢已写产物）
+- 一篇没写 → `failed`，`error.code = engine-model`
+- 用量从 `adapter._usage_ledger` 补：`generate()` 的 `_finish_usage` 在
+  `except Exception` 分支里（`doc_generator.py:200-207`），BaseException 走不到它，
+  不补的话这轮真实花费会在终态里显示为 0
+
+**三、桥的熔断响应从 503 改 400。** 依据（`.probe-fsoft/venv` 里实测）：
+
+| 状态码 | openai SDK 重试（`_base_client.py:843-863`） | pydantic 归类 | `fallback_on` 命中 |
+| --- | --- | --- | --- |
+| 503 | 是（`>=500`） | `ModelUnavailableError` | 是 → 同源再烧一遍 |
+| 400 | 否（不在 408/409/429/>=500 集合） | `category=None` → 裸 `ModelHTTPError` | 是（仍是 `ModelAPIError` 子类） |
+
+400 单独还不够（仍是 `ModelAPIError`），所以配合第四条的「不包 FallbackModel」，两者一起
+才让熔断真正止住。引擎侧读到 `provider_error_code == 'empty_response_breaker'` 时把桥的
+拒绝升级成进程级熔断（`channel_breaker.GuardedModel.request`），避免「桥已拒、引擎还逐叶子撞」。
+
+**四、同源 fallback 直接不包。** patch `codewiki.src.be.llm_services.create_fallback_models`：
+`fallback_model == main_model`（`entry.py` 的 `_model_config` 恒如此）时返回
+`GuardedModel(UsageModel(main))`，不再包 `FallbackModel`。非同源时直接抛 `RuntimeError`
+而不是回退到旧行为——本插件只有一条上游，非同源 fallback 的熔断语义未定义，写成崩溃比写成
+一条永不执行的分支诚实。
+
+patch 必须遍历 `sys.modules` 替换所有 `create_fallback_models` 绑定：上游两处调用点都是
+`from ... import`（`pydantic_ai_backend.py:30`、`generate_sub_module_documentations.py:10`），
+导入时已复制引用，只改定义处不起作用。
+
+**五、阈值经 `native-run` 同时下发给桥与引擎。** 此前 `emptyStreakLimit` 只传给桥，
+引擎侧收不到就等于没有跨叶子预算。现在 `runNativeJob` 的 `emptyStreakLimit` 参数同时进
+`startLlmBridge({...})` 与引擎 `payload`（`entry.py` 读 `payload["emptyStreakLimit"]`）。
+
+未做：**doc_guard 的熔断跳过**（原计划的第四项）。熔断抛点在 `Model.request`，
+`run_until_doc_written` 的下一次 `agent.run` 根本执行不到——那条分支不可达，写出来是死代码。
+
+验证（`.dbg-*`/`.tmp-*` 临时脚本，已被 .gitignore 覆盖，不随仓库分发）：
+
+```
+.dbg-empty-breaker.mjs          3 passed  熔断后回 400（不再是 503）；中途恢复清零；阈值 0 = 关闭
+.dbg-wire-e2e.mjs               4 passed  emptyStreakLimit 同时进桥参数与引擎 payload；0 原样；缺省 3
+.dbg-config-wire.mjs            2 passed  Config 暴露该键；归一化保留合法值、非法值退回 3
+.tmp-check-breaker.py          19 passed  包装层行为：同源 fallback 不再存在；空产出 3 次即熔断
+                                          （上游只被调 3 次而非 4/6 次）；limit=5 时叶子 1 烧 4 次、
+                                          叶子 2 补到第 5 次才熔断（旧行为是 8 次且全失败）；偶发 1 次
+                                          空产出后恢复不误停；BaseException 穿过 except Exception
+.tmp-check-bridge-engine.py     9 passed  真桥 + 真 pydantic-ai 走 HTTP：引擎侧先熔断时桥只被打 3 次、
+                                          之后 rejectedAfterBreak=0；桥侧先熔断（桥 2/引擎 5）时引擎把
+                                          400 升级为整轮熔断、桥只转发 2 次、挡下 1 次
+.tmp-check-entry.py            15 passed  _salvage 带 usage 进 partial/failed；_usage_of_ledger 读数正确；
+                                          ChannelBreakerTripped 不被 except Exception 捕获
+.tmp-check-patch-order.py       7 passed  复刻 entry.py 的导入顺序：install 时 pydantic_ai_backend
+                                          与 generate_sub_module_documentations 都还没进 sys.modules，
+                                          之后导入读到的就是新 factory；真 PydanticAIBackend 建出的
+                                          _fallback_models 是 GuardedModel、内层仍是 UsageModel
+.tmp-check-e2e-trip.py         15 passed  action_generate 真的收得住熔断：无产物 → failed + 账本用量
+                                          224,451 tok + 错误码 engine-model（不是 engine-crashed）；
+                                          已写 3 篇 → partial + 同一份用量；真实子进程跑 generate
+                                          动作时正常退出、只发出一条 result 帧（协议流没被撕）
+.tmp-check-async-prop.py        5 passed  引擎的两条并发结构都能让 BaseException 穿出去：
+                                          gather 立刻传播且不等 2 秒的兄弟任务；复刻
+                                          full_parallel_runtime._run_module 的
+                                          `async with semaphore` + `except Exception` 后仍到达顶层；
+                                          asyncio.to_thread（增量隔离路径）里的熔断同样传回事件循环
+```
+
+反向验证（拆掉补丁必须红）：
+
+```
+① channel_breaker 里把「连续到阈值即熔断」改成 if False：
+   .tmp-check-breaker.py 13 passed / 6 failed——熔断不再触发、上游被调 4 次而不是 3 次、
+   breaker 不置位、叶子 2 不熔断、BaseException 不再出现。还原后 19 passed。
+② factory 里把同源 fallback 包回去（FallbackModel(main, fb)）：
+   .tmp-check-patch-order.py 报 PydanticAIBackend._fallback_models = FallbackModel，FAIL。还原后 7 passed。
+③ 删掉 GuardedModel 包装（等价 0.18.4）：.tmp-check-bridge-engine.py 下三个叶子各抛一次
+   ModelHTTPError、桥被挡下 3 次、没有任何一次 ChannelBreakerTripped
+   →「整轮停的信号不存在」与「逐叶子燃烧」两条断言 FAIL。
+```
+
+**未验证**：真实上游连续空返回下的整轮终止。真机故障窗口是一次性事件，本轮全部用构造的
+「200 + usage-only」响应与真桥（`startLlmBridge` + 桩 `llm.stream`）覆盖，没有等第二次真实
+故障。三个未在真机上跑过的点：①`ChannelBreakerTripped` 在**真实引擎**（含
+`fsoft_runtime` 的隔离副本、`full_parallel_runtime` 的并行分支）里是否真的穿过所有
+`except Exception`；②`_usage_of_ledger` 读到的账本数字与最终成交账单是否一致（账本由
+`api_usage.py` 的 `UsageModel` 逐请求记，本身未改）；③断线时 `asyncio.run` 的取消传播是否会
+先于我们的收口把任务带走。
+
 ## 0.18.4 — 2026-11-09
 
 ### 会话面板：已完成的行不再说「思考中」，用量改显实测 token，模型通道加空产出熔断
