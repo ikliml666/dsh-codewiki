@@ -92,7 +92,7 @@ LICENSE, README.md, CHANGELOG.md, CodeWiki.md
 
 ### 2.5 版本号
 
-`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.4`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
+`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.5`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
 
 ---
 

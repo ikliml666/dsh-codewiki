@@ -6,7 +6,7 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 # engine-python-runtime：FSoft 原生引擎的 Python 侧运行时
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-python-runtime` 是本插件在 **Python 进程内**运行的那一半引擎运行时。它不实现任何文档算法——
 依赖图、模块聚类、文章写作、增量 diff 全部由 vendored 的上游 FSoft（CodeWiki）引擎完成。
@@ -16,9 +16,10 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 - 把 FSoft 的五段进度翻译成引擎契约的阶段名（九段枚举中的前四段）与 0–90% 百分比，以 JSON 行推回 Node；
 - 把成功 / 部分成功 / 失败 / 取消翻译成与 `lib/engine/contract.js` 同语义的 `EngineResult`；
 - 在**不改上游源码**的前提下，为全量与增量两条路径注入受控并行（源码锚点校验，锚点不匹配即拒绝安装）；
+- 在**不改上游源码**的前提下，在模型调用出口数连续空产出，到阈值熔断**整轮**（进程级计数，跨叶子共享同一份额度）；
 - 守住两条红线：**不读本机凭证库**、**不让上游打印污染协议流**。
 
-对应源码目录：`lib/engine/python/`，共 5 个文件、约 2 000 行。
+对应源码目录：`lib/engine/python/`，共 6 个文件、约 2 000 行。
 
 ---
 
@@ -44,6 +45,7 @@ description: engine-python-runtime 是本插件在 Python 进程内运行的那�
 │    full_parallel_runtime.py ── 全量：同层模块受控并行                             │
 │    fsoft_runtime.py         ── 增量：叶子隔离并行 + 断点续跑                      │
 │    tree_coverage.py         ── 未归属文件补挂到已有叶子                           │
+│    channel_breaker.py       ── 模型调用出口的空产出熔断（整轮中止）               │
 └───────────────────────────────────┬──────────────────────────────────────────────┘
                                     │ import / 运行时打补丁
 ┌───────────────────────────────────┴──────────────────────────────────────────────┐
@@ -84,12 +86,14 @@ flowchart TD
         FP["full_parallel_runtime.py<br/>全量并行"]
         FR["fsoft_runtime.py<br/>增量并行 + 断点"]
         TC["tree_coverage.py<br/>叶子归属补齐"]
+        CB["channel_breaker.py<br/>空产出熔断"]
     end
 
     subgraph Up["vendor codewiki"]
         DG["DocumentationGenerator"]
         IU["IncrementalUpdater"]
         PT["ProgressTracker"]
+        MD["Model.request<br/>模型调用出口"]
     end
 
     NR --> CL
@@ -101,24 +105,27 @@ flowchart TD
     EN --> SM
     EN --> FP
     EN --> FR
+    EN --> CB
     FR --> TC
     FP -- "替换 _generate_modules_in_order" --> DG
     FR -- "替换 IncrementalUpdater._run 的 Step 5" --> IU
     EN -- "替换 start/update/complete_stage" --> PT
+    CB -- "替换 create_fallback_models，包住模型调用出口" --> MD
 ```
 
-四个设计取向决定了整个模块的形状：
+五个设计取向决定了整个模块的形状：
 
 1. **入口极薄**。算法一律留在上游，本层只做协议、观测与契约翻译，避免长出"第二个编译器"。
 2. **旁路观察，不打补丁**。进度与模块名都靠替换/挂 handler 获得，不 fork 上游类，上游升版时靠源码锚点校验显式失败而非静默降级。
 3. **边界自洽**。编码、stdout 守卫、子进程 text 模式补丁全部在导入 `codewiki` **之前**装好，因为上游会缓存 stdout 包装器。
 4. **失败必须显式**。已写文章尽量降 `partial` 交付，但绝不把空产物伪装成"部分完成"。
+5. **空产出要整轮止血**。上游返回 200 却既无正文也无工具调用时，计数落在进程内唯一的一处（模型调用出口），到阈值直接中止整轮，而不是让同一故障在每个叶子上各烧满一份重试预算。
 
 ---
 
 ## 3. 文件级详解
 
-本模块的 5 个文件职责清晰、彼此边界明确，但每个文件都围绕同一条协议链路，规模也不足以各自成页，故在此逐文件详述。
+本模块的 6 个文件职责清晰、彼此边界明确，但每个文件都围绕同一条协议链路，规模也不足以各自成页，故在此逐文件详述。
 每个小节对应一个源文件，可直接作为该文件的阅读指南。
 
 核心组件索引：
@@ -131,6 +138,7 @@ flowchart TD
 | `run_leaf_agents` | `lib/engine/python/fsoft_runtime.py` | 增量 Step 5 入口：排序活跃叶子 → 补挂归属 → 隔离并行执行 |
 | `_install_shared_tree_io` | `lib/engine/python/full_parallel_runtime.py` | 在 `FileManager` 类上串行化 `module_tree.json` 读改写 + 并行分支增量合并 |
 | `file_owner` | `lib/engine/python/tree_coverage.py` | 查询某文件被哪个叶子认领 |
+| `ChannelBreaker` | `lib/engine/python/channel_breaker.py` | 进程级连续空产出计数：有产出即清零，连续到阈值即熔断整轮 |
 
 文件间依赖（箭头 = import / 调用）：
 
@@ -141,17 +149,19 @@ flowchart LR
     FP["full_parallel_runtime.py"]
     FR["fsoft_runtime.py"]
     TC["tree_coverage.py"]
+    CB["channel_breaker.py<br/>（无内部依赖）"]
 
     EN --> SM
     EN --> FP
     EN --> FR
+    EN --> CB
     FR --> FP
     FR --> TC
 ```
 
-`entry.py` 是唯一的入口，其余四个都是被它（或彼此）调用的库：
+`entry.py` 是唯一的入口，其余五个都是被它（或彼此）调用的库：
 `fsoft_runtime` 复用 `full_parallel_runtime.write_tree_exclusive` 与 `tree_coverage.adopt_unowned_files`；
-`stage_map` 保持零内部依赖，因此可被单独导入做纯函数测试。
+`stage_map` 与 `channel_breaker` 保持零内部依赖，因此可被单独导入做纯函数测试。
 
 ### 3.1 `entry.py` —— 协议入口
 
@@ -307,6 +317,7 @@ WIKI_PRODUCT_PATTERNS = (".codewiki", "CodeWiki.md")
 
 `fallback_model` 必须显式给：adapter 用 `self.config.get("fallback_model")` 透传，缺省 `None` 会让上游 `create_fallback_models`
 在 `model_name.lower()` 上抛 `AttributeError`，且崩在 graph 阶段开头，表现为 `engine-crashed` 而不是可理解的模型错误。
+本插件恒把 `fallback_model` 设成 `main_model`——熔断补丁因此会**去掉同源 fallback**（见 3.6），否则命中 `fallback_on` 只是让同一个上游再烧一遍。
 
 #### 3.1.8 进度桥接 `bridge_progress`
 
@@ -430,6 +441,17 @@ if is_update:
     install_incremental_runtime()
 ```
 
+模型通道熔断必须在**建 adapter 之前**装（见 3.6）：`PydanticAIBackend.__init__` 里就会调用 `create_fallback_models` 建好模型对象，
+晚于此刻的 patch 对已建好的对象无效：
+
+```python
+from channel_breaker import install as install_channel_breaker
+install_channel_breaker(payload["emptyStreakLimit"])   # 与桥同源同值，0 = 关闭
+```
+
+`emptyStreakLimit` 没有缺省值可退：`native-run.js` 恒下发它（缺省也是 3），传不进来就是协议对不上，`int(None)` 当场抛，
+而不是悄悄用一个和桥不同的阈值。
+
 TechDocs 导出目录（`payload.techdocsDir`）刻意放在**仓库外**的临时位置：上游这一步直接写盘，让它往仓库里写就绕过了落地器的写集封闭与回滚
 （partial/failed 轮会留下半份成品站点）。
 
@@ -446,8 +468,10 @@ flowchart TD
     E -- "APIError / ConfigurationError" --> H["_salvage(engine-model)"]
     E -- "RepositoryError" --> I["failure engine-missing"]
     E -- "KeyboardInterrupt" --> J["cancelled"]
+    E -- "ChannelBreakerTripped（BaseException，整轮中止）" --> H2["_salvage(engine-model)<br/>usage 取自 adapter 账本"]
     E -- 其它 --> K["_salvage(engine-crashed)"]
     H --> L{"已写篇数 > 0?"}
+    H2 --> L
     K --> L
     L -- 是 --> M["partial 交付 + article-failed blocker"]
     L -- 否 --> N["failed"]
@@ -459,6 +483,8 @@ flowchart TD
 
 分类依据是**异常类型**而非消息文本（文本随版本变，类型相对稳定）。上游 1b4af43 起 `_generate_modules_in_order` 在有模块失败时抛
 `RuntimeError("Documentation failed for modules: ...")`——语义上它仍是"计划内文章没写成"，不是"进程崩了"，所以翻成 `partial` + 点名缺哪些模块。
+
+熔断信号 `ChannelBreakerTripped` 单独收口，**不能**交给 `except Exception` 分类：它由 `channel_breaker` 在模型调用出口抛出，专门用来穿过引擎里那些把失败吞成 no-op 的 `except Exception` 位置（`orchestrator.py:425-427`、`leaf_agent.py:140-145`、`full_parallel_runtime` 的 `_run_module`），因此它是 `BaseException` 子类。若不在 `action_generate` 里显式捕获，它会穿过整个函数、撕掉协议流。收口后按 `_salvage` 的 partial 语义交付已写文章，错误码仍为 `engine-model`；用量由 `_usage_of_ledger(adapter)` 从 adapter 的账本补——`generate()` 的 `_finish_usage` 在 `except Exception` 分支里，`BaseException` 走不到，不补的话本轮真实花费会在终态里显示为 0。
 
 三个计数函数把引擎自己的记账读成契约事实：
 
@@ -473,7 +499,8 @@ flowchart TD
 插件只读 `outcome` 就会把"模型连续三轮没吐任何内容"读成"整轮无需改动"（真机 `job-mw0cn6cv-4` 的 24 条 no-op 里有 2 条正是这样来的）。
 
 `_usage_of` 必须被**每条出口**调用：partial 分支曾直接 return，于是写了一半的任务用量恒为 0——面板与成本核算看到的都是"没花钱"，
-而实际上这一轮可能已经跑了上百次请求。
+而实际上这一轮可能已经跑了上百次请求。`failure(...)` 与 `_salvage(...)` 因此都接受可选的 `usage`：缺省仍全 0（只对"还没花过钱就失败"成立），
+熔断这类**中途终止**必须由调用方带上真实用量。熔断出口拿不到 `job`，用 `_usage_of_ledger(adapter)` 直接读 adapter 的账本。
 
 `_state_files(docs_dir)` 只报磁盘上**真实存在**的跨轮状态文件（顶层 `*.json`、`temp/dependency_graphs/*`、`temp/reference_index.json`、
 `temp/artifact_index.json`），不让上层按白名单猜：白名单写错会把"引擎其实没产出依赖图"误记成"已持久化"，下一轮增量拿空图跑，
@@ -713,6 +740,67 @@ flowchart TD
 `adopt_unowned_files` 的候选过滤链是 `component_files` → `module_file_owners` → `compute_valid_leaf_types` / `filter_leaf_nodes` →
 `route_by_rules` → `_nearest_leaf` 兜底。全部复用上游函数，本模块不重新定义"哪个文件属于哪个模块"的规则——只在规则**给不出答案**时提供确定性兜底。
 
+### 3.6 `channel_breaker.py` —— 模型通道空产出熔断
+
+上游模型返回 200、却只给 usage + finish（无正文、无工具调用）时，pydantic-ai 会把它当成"这一轮模型没说话"并按 `max_output_retries`（默认 3）
+原地重试，每次重试都带全量 `message_history`。两个放大器让它变成额度黑洞：`max_output_retries` 是 **per-run** 的（跨叶子不共享，同一故障让每个叶子
+各烧满一份），而引擎里到处是 `except Exception`（`orchestrator.py:425-427`、`leaf_agent.py:140-145`、`full_parallel_runtime` 的 `_run_module`、
+`fsoft_runtime.py:220-222` 的 `isolated`），一个叶子失败只记一条 error 就继续下一个。真机 `job-mw80h05t-2` 的 #107–#158 是同一叶子连续 52 次请求、
+`inputTokens` 恒为 74,817。
+
+做法是在**所有 agent 调用的公共出口**——`Model.request`——数空产出：连续 N 次即置熔断位并当场抛 `ChannelBreakerTripped`。
+
+```mermaid
+flowchart TD
+    A["Model.request<br/>GuardedModel 包装"] --> B{"已熔断?"}
+    B -- 是 --> B1["note(False)<br/>入口即抛，零成本"]
+    B -- 否 --> C["wrapped.request(...)<br/>内层是 UsageModel"]
+    C --> D{"ModelHTTPError 且<br/>provider_error_code 是 empty_response_breaker?"}
+    D -- 是 --> D1["trip(桥侧判定)<br/>升级为本进程熔断"]
+    D -- 否 --> E["note(_produced(response))"]
+    E --> F{"有产出?"}
+    F -- 是 --> G["streak 归零"]
+    F -- 否 --> H["streak 加一<br/>刷新 max_streak"]
+    H --> I{"streak 达到 limit<br/>且 limit 大于 0?"}
+    I -- 是 --> J["trip 抛 ChannelBreakerTripped<br/>整轮中止"]
+    I -- 否 --> K["返回 response"]
+```
+
+`ChannelBreaker` 的三个字段很薄：`limit`（阈值，0 = 关闭）、`streak` / `max_streak`（当前与历史最长连续空产出）、`tripped`。
+`note(produced)` 记一次调用结果并在熔断那一刻抛；`trip(reason)` 置位并抛，桥侧先熔断时也走这里。
+
+三处关键设计：
+
+- **计数点选在模型调用出口，而不是桥或 agent 循环**。只有这里跨叶子共享（进程内所有 `PydanticAIBackend` 共用同一个 breaker）；停在**第 N 次**
+  而不是等 pydantic 重试到上限（N+1 次）再失败，止血更早；熔断后每个后续调用在入口即抛，一分钱不花。
+- **`ChannelBreakerTripped` 必须是 `BaseException` 子类**。上面那些 `except Exception` 会把普通异常吞成"这页无需改动"，整轮照样报 `done`。
+  只有非 `Exception` 才能穿过它们到达 `entry.py` 的 `action_generate`，由那里翻成契约终态（见 3.1.12）。
+- **包在 `UsageModel` 外层而不是替换它**：逐请求记账必须照旧生效，本轮已花的 token 仍然进得了账本——熔断出口的 `usage` 正是从这里读的。
+  只覆盖非流式路径：引擎全部走 `agent.run()`，没有任何 `event_stream_handler` / `.iter()`。
+
+`install(empty_streak_limit)` 做的第二件事是**去掉同源 fallback**：它替换 `codewiki.src.be.llm_services.create_fallback_models`，
+返回 `GuardedModel(UsageModel(create_main_model(config), config.main_model))`，不再包 `FallbackModel`。上游的实现是
+`FallbackModel(main, fallback, fallback_on=(ModelAPIError, UnexpectedModelBehavior))`，而本插件恒把 `fallback_model` 设成 `main_model`——
+主模型空响应重试到上限抛 `UnexpectedModelBehavior`，命中 `fallback_on`，于是切到**同一个模型、同一条桥、同一个上游**再烧一遍：零容错意义，纯双倍成本。
+非同源 fallback 直接抛 `RuntimeError` 而不是随手支持：真有第二个模型时它也必须被熔断层包住（否则熔断信息在 fallback 内部丢失），那是另一份设计。
+
+替换必须遍历 `sys.modules` 而不是只改 `llm_services`：`from X import f` 在导入时就复制了引用（`pydantic_ai_backend.py:30` 与
+`agent_tools/generate_sub_module_documentations.py:10` 都这么导），只改定义处的话这两个调用点仍会走未熔断的旧函数。
+一个绑定都找不到时抛 `RuntimeError`，拒绝静默继续。
+
+`_produced(response)` 的判据是 `part_kind ∈ {text, tool-call, builtin-tool-call}`（用字符串而非 `isinstance`：part 类在 pydantic-ai 各版本间会改名/搬家，
+`part_kind` 是跨版本稳定的协议字段），空字符串的 `TextPart` 不算产出。**只吃 reasoning 的响应算空**：它既不能让引擎写文章，也已经计过费。
+
+与桥的协作是双向的：桥先到阈值时回 400 `empty_response_breaker`（选 400 而非 503，因为 openai SDK 的 `_should_retry` 只对 408/409/429/>=500 重试），
+引擎侧把这条失败 `trip()` 成本进程的熔断，否则会把它当普通 `APIError` 逐叶子继续撞。两侧**必须收同一个 `emptyStreakLimit`**，
+否则会出现"引擎还认为通道健康、桥已经全部拒绝"的窗口。桥侧细节见
+[引擎外部集成层（模型桥与 TechDocs 回读）](../Documentation_Generation_Engine/engine-core/engine-integrations.md)。
+
+pydantic 的 import 全部收在 `install()` 里而不是模块顶层：本模块被 `entry.py` 顶层导入（`except` 子句需要一个稳定的异常类型），
+而 `entry.py` 的 `doctor` 动作正是用来诊断"依赖缺失/损坏"的环境——顶层拉 pydantic-ai 会让"pydantic 装坏了"变成入口自己 `ImportError` 崩溃，
+Node 侧只能拿到 `engine-crashed`，正好废掉 `doctor` 存在的意义。
+
+
 ---
 
 ## 4. 一次 `generate` 请求的完整时序
@@ -733,6 +821,7 @@ sequenceDiagram
     CL->>EN: spawn + stdin 一行 JSON + env CODEWIKI_*
     EN->>EN: emit_hello()
     EN->>FS: import codewiki（stdout 已被守卫）
+    EN->>FS: install_channel_breaker(emptyStreakLimit)
     EN->>FS: install_full_runtime(concurrency)
     EN->>FS: CLIDocumentationGenerator(...).generate()
     FS->>EN: start_stage(1)
@@ -741,11 +830,15 @@ sequenceDiagram
     Note over EN: 心跳线程每 10s 补一帧
     FS->>EN: complete_stage() / update_stage()
     EN->>CL: progress{stage:articles, writtenCount:N}
+    Note over FS: 连续空产出达 emptyStreakLimit 则抛 ChannelBreakerTripped（整轮中止）
     FS-->>EN: job（statistics.usage_totals）
     EN->>CL: result{outcome:done|partial, writtenCount, usage, artifacts}
     CL->>NR: EngineResult + protocolViolations + stderrTail
     NR->>BR: bridge.stats() 然后 close()
 ```
+
+连续空产出达 `emptyStreakLimit` 时，熔断从模型调用出口抛 `ChannelBreakerTripped`，由 `action_generate` 收口成 `partial`（已写文章照常交付、
+`usage` 从 adapter 账本补）或 `failed`（一篇未写）——终态仍走同一条 `result` 行，协议流不会被打断。见 3.6。
 
 Node 侧的 `client.js` 对这条流有六条协议不变量（stdout 只含 JSON-lines、`requestId` 必须匹配、无 `result` 即失败、退出码只表达进程层、
 取消后到达的 result 丢弃、重复 result 先到者胜），并在超时/静默/取消三条分支上都按 `writtenCount` 决定 `partial` 还是 `failed`。
@@ -811,6 +904,7 @@ sequenceDiagram
 | `moduleConcurrency` | 0（跟随 `maxConcurrency`） | `payload.moduleConcurrency` → `config["module_concurrency"]` 与 `install_full_runtime` |
 | `articleLanguage` | 中文 | `payload.language` → `agent_instructions.language` |
 | `techdocs` | 关 | `payload.techdocsDir`（仓库外临时目录） |
+| `emptyStreakLimit` | 3 | `payload.emptyStreakLimit` → `channel_breaker.install`（引擎侧独立计数、整轮中止）；同一个值也下发给 `llm-bridge.js` |
 | `batchProvider` / `batchModel` / `batchReasoningEffort` | — | 不经 Python 侧，由 `llm-bridge.js` 消费 |
 
 注意 `articleLanguage` 默认是中文，而原生通道在修复前整条链路都没把它带下来（`nativeEnginePlan` 不接、`startNativeRun` 不传、
@@ -841,6 +935,10 @@ sequenceDiagram
 | 16 | 观测代码（探针/handler/心跳）的任何异常都不能弄崩编译 | 排障手段变成故障源 | 各处 `except Exception` |
 | 17 | `_count_docs` / `_doc_fingerprints` 必须递归并排除 `temp/`、点目录 | 少计篇数导致假成功，记账文件被当文章 | 两函数 |
 | 18 | 排除清单每次返回新列表 | 与调用方的模式列表互相污染 | `source_exclude_patterns` |
+| 19 | 熔断信号必须是 `BaseException` 子类并在 `action_generate` 显式收口 | 被引擎的 `except Exception` 吞成 no-op，整轮照样报 `done` | `ChannelBreakerTripped` |
+| 20 | 引擎侧与桥侧必须收同一个 `emptyStreakLimit` | 出现"引擎认为通道健康、桥已全部拒绝"的窗口，每次请求都以 `APIError` 记账 | `channel_breaker.install` + `startLlmBridge` |
+| 21 | 熔断这类中途终止必须带上真实用量 | 面板与成本核算看到"这一轮没花钱" | `_usage_of_ledger` → `_salvage(usage=...)` |
+| 22 | 熔断补丁必须在建 adapter 之前装，且遍历 `sys.modules` 替换所有绑定 | 已建好的模型对象不受补丁影响，熔断静默失效 | `install_channel_breaker` |
 
 ---
 
@@ -860,27 +958,31 @@ sequenceDiagram
 | `module_tree 冲突：X 在两个并行分支里组件归属不一致` | 同叶子被分给不同组件 | `_merge_tree` |
 | `增量断点签名已变化，且没有可恢复的受管基线` | 上游/选项/树/图变了但没给 `resumeBaselineDocsDir` | `_load_completed` |
 | 整轮报 `done` 但文章明显没写 | agent 异常被上游吞成 `no-op` | `_failed_calls_of` |
+| 整轮 `partial`/`failed`，错误信息提到"模型通道连续 N 次空产出" | 上游 200 却无正文、无工具调用，达 `emptyStreakLimit` 熔断 | `ChannelBreaker.note`、`emptyStreakLimit` 设置项、桥的 `emptyResponses` / `emptyStreakMax` |
+| 熔断轮次的 `usage` 显示为 0 | 熔断出口没走 `_usage_of_ledger`（`BaseException` 不进 `except Exception`） | `action_generate` 的 `except ChannelBreakerTripped` |
+| 报 `RuntimeError(... 非同源 fallback ...)` | `fallback_model` 与 `main_model` 不同，熔断语义未定义 | `channel_breaker.install` 的 `factory` |
 
-??? abstract "Documented components (21)"
-    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
-    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
-    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
-    - [`configure_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`current_concurrency`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_merge_tree`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`write_tree_exclusive`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_node_at`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_run_module`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_walk`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_run_parallel`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`_install_shared_tree_io`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`install_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
-    - [`is_incremental`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`articles_percent`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`map_stage`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
-    - [`percent_of`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+??? abstract "Documented components (22)"
+    - [`_ProtocolOnly`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`_popen_init_utf8`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`main`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Centry.py) — `lib\engine\python\entry.py`
+    - [`run_leaf_agents`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfsoft_runtime.py) — `lib\engine\python\fsoft_runtime.py`
+    - [`_SharedTreeIO`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`articles_ceiling`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`file_owner`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Ctree_coverage.py) — `lib\engine\python\tree_coverage.py`
+    - [`configure_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`current_concurrency`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_merge_tree`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`write_tree_exclusive`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_node_at`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_module`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_walk`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_run_parallel`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`_install_shared_tree_io`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`install_full_runtime`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cfull_parallel_runtime.py) — `lib\engine\python\full_parallel_runtime.py`
+    - [`is_incremental`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`articles_percent`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`map_stage`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`percent_of`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cstage_map.py) — `lib\engine\python\stage_map.py`
+    - [`ChannelBreaker`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cpython%5Cchannel_breaker.py) — `lib\engine\python\channel_breaker.py`
 

@@ -6,7 +6,7 @@ description: engine-runner 是 DocumentationGenerationEngine/engine-core/engine-
 # engine-runner：原生引擎执行与裁决编排
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 `engine-runner` 是 `Documentation_Generation_Engine/engine-core/engine-orchestration` 下的执行层，负责把「一次 CodeWiki 编译」从一句请求变成**可机读的终态结论**。它只包含两个文件，却承担两类完全不同性质的职责：
 
@@ -233,7 +233,7 @@ FSoft 只从 `<old_commit>..<new_commit>` 取 diff，读的却是工作区文件
 
 - **进度帧不吞异常**：`engineProgress` 校验 stage 必须属于 `ENGINE_STAGES`，传契约外的阶段名是编程错误必须当场响（0.17.32 把校对帧写成 `proofread` 时被 try/catch 吞掉，面板「校对」格永不点亮而测试全绿）；
 - **模型空产出计数**：`bridge.stats().emptyResponses` 记录「上游 200 但既无正文也无工具调用」的次数，这类调用会被引擎记成「这一页无需改动」，是假 done 的来源之一，因此必须进 notes；
-- **空产出熔断也是可见事实**：连续空产出达到阈值（`emptyStreakLimit`，默认 3，0 = 关闭）后桥停止向上游转发，本轮后续请求变少、部分叶子写不成；`bridge.stats().tripped` 为真时把 `emptyStreakMax` 与 `rejectedAfterBreak` 一并写进 notes，否则面板只看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了；
+- **空产出熔断也是可见事实**：连续空产出达到阈值（`emptyStreakLimit`，默认 3，0 = 关闭）后桥停止向上游转发，本轮后续请求变少、部分叶子写不成；同一个阈值也随 `payload` 下发给引擎，由引擎在模型调用出口独立计数并整轮中止（两侧必须同值，否则会出现「引擎还认为通道健康、桥已全部拒绝」的窗口）；`bridge.stats().tripped` 为真时把 `emptyStreakMax` 与 `rejectedAfterBreak` 一并写进 notes，否则面板只看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了；
 - **状态自报与实际采集交叉核对**：引擎自报 `artifacts.stateFiles` 有、而 `captureDocsDir` 没采集到的项会被点名，避免悄悄当成「已持久化」。
 
 进度帧经 `onProgress` 透出后同时驱动两件事：上层面板的阶段条（见 [ui-client（浏览器半侧客户端）](../../../ui-client.md)）与模型桥的阶段选档（`bridge.setStage`，按阶段选 `reasoningEffort`）。
@@ -252,7 +252,7 @@ FSoft 只从 `<old_commit>..<new_commit>` 取 diff，读的却是工作区文件
 | `moduleConcurrency` | 原生引擎同层模块并行度（1–8，0=跟随 `maxConcurrency`） | 1（严格串行） |
 | `articleLanguage` | 文章语言，一路带到引擎 `payload.language`（不传即静默按英文写） | 中文 |
 | `techdocs` | 导出 Backstage TechDocs 到 `.codewiki/_techdocs/` | 关 |
-| `emptyStreakLimit` | 连续空产出熔断阈值：达到即停止向上游发请求（0 = 关闭），并作为 note 报到终态 | 3 |
+| `emptyStreakLimit` | 连续空产出熔断阈值：达到即停止向上游发请求（0 = 关闭），同一个值也下发给引擎侧独立计数；并作为 note 报到终态 | 3 |
 | `autoCommit` | 落地器自动提交 wiki 产物 | 开 |
 
 180 分钟的来历：真机唯一一次跑完的编译分阶段实测 `articles 66.0min + crosscut 10.0min + review 68.9min + queued 29.2min ≈ 174 分钟`，早期 45 分钟预算会在阶段 3 刚开头（percent 54）被砍掉，一篇都写不出来——那不是编译失败，是预算低于物理耗时。
@@ -328,6 +328,6 @@ flowchart LR
 单测还依赖 `client.js` 的两处纯函数式设计：`createProtocolReader` 不碰进程（可逐字节喂，模拟管道任意切分），以及 `DSH_CODEWIKI_ENGINE_SILENCE_MS` 允许把静默阈值压到 30 秒以上便于快速验证。
 
 ??? abstract "Documented components (2)"
-    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`runEngine`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cclient.js) — `lib\engine\client.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

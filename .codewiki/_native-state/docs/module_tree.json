@@ -376,7 +376,8 @@
             "lib\\engine\\python\\stage_map.py::is_incremental",
             "lib\\engine\\python\\stage_map.py::articles_percent",
             "lib\\engine\\python\\stage_map.py::map_stage",
-            "lib\\engine\\python\\stage_map.py::percent_of"
+            "lib\\engine\\python\\stage_map.py::percent_of",
+            "lib\\engine\\python\\channel_breaker.py::ChannelBreaker"
         ],
         "children": {
             "engine-python-runtime": {
@@ -402,7 +403,8 @@
                     "lib\\engine\\python\\stage_map.py::is_incremental",
                     "lib\\engine\\python\\stage_map.py::articles_percent",
                     "lib\\engine\\python\\stage_map.py::map_stage",
-                    "lib\\engine\\python\\stage_map.py::percent_of"
+                    "lib\\engine\\python\\stage_map.py::percent_of",
+                    "lib\\engine\\python\\channel_breaker.py::ChannelBreaker"
                 ],
                 "children": {}
             },

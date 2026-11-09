@@ -12,6 +12,7 @@ source_files:
   - vendor/codewiki/src/main.rs
   - vendor/codewiki/src/meta.rs
   - vendor/codewiki/src/setup.rs
+  - lib/engine/python/channel_breaker.py
 tags: []
 generated_by: fsoft-native
 fsoft_page: Execution_Runtime___Vendored_Engine.md

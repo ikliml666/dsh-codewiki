@@ -3,12 +3,12 @@
   "repoRoot": "E:\\ik\\Documents\\trae_projects\\1\\dsh plugin\\dsh-codewiki",
   "consumedRange": {
     "baseCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26",
-    "headCommit": "696ba54c910acf29651468040934246908d09089"
+    "headCommit": "6589001428bc8eb6662303a05b6be49bacbd4061"
   },
   "pendingChanges": {
     "state": "ok",
     "baseCommit": "bc7e15a2499b5c4f334d4c0611eace4ad97c1c26",
-    "headCommit": "696ba54c910acf29651468040934246908d09089",
+    "headCommit": "6589001428bc8eb6662303a05b6be49bacbd4061",
     "committed": [
       "CHANGELOG.md",
       "lib/engine/llm-bridge.js",
@@ -32,8 +32,7 @@
   "fallbackReason": "",
   "missingRepair": null,
   "notes": [
-    "持久化基线 6fff6d2 与本次 cw 基线 bc7e15a 不同（以 cw 基线为准，未消费变化仍会并入）",
-    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw8oe4kc-4-native（31 个文件）"
+    "引擎原始树已留档：C:/Users/ik/AppData/Local/Temp/dsh-codewiki-native-raw/job-mw8qqyk5-1-native（31 个文件）"
   ],
-  "updatedAt": "2026-11-09T03:02:28.127Z"
+  "updatedAt": "2026-11-09T04:41:58.075Z"
 }

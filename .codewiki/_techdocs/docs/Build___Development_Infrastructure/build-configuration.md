@@ -6,7 +6,7 @@ description: 本模块是 dsh-codewiki 的构建面与配置面：它不含编�
 # 构建与配置（build-configuration）
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 `dsh-codewiki` 的**构建面与配置面**：它不含编译算法，只决定「这个包长什么样、怎么被宿主装载、装载后拿到哪些默认配置、以及运行原生引擎所需的 Python 环境怎么造出来」。三个工件构成完整闭环：
 
@@ -100,7 +100,7 @@ LICENSE, README.md, CHANGELOG.md, CodeWiki.md
 
 ### 2.5 版本号
 
-`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.4`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
+`package.json` 的 `version` 与 `CHANGELOG.md` 的最新条目必须同步（当前为 `0.18.5`）。`cordis.patch.yml` 的注释里不重复声明默认值，默认值只存在于 `index.js` 的 `Config` schema —— 单一事实来源。
 
 ---
 
@@ -333,7 +333,7 @@ sequenceDiagram
 子进程环境由 `nativeEnginePlan()` 固定：`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`CODEWIKI_NO_KEYRING=1`，模型通道只用桥生成的占位 key（`CODEWIKI_BASE_URL` / `CODEWIKI_API_KEY` / `CODEWIKI_MAIN_MODEL` / `CODEWIKI_CLUSTER_MODEL`），真实凭证从不进入子进程环境或日志。
 
 ??? abstract "Documented components (3)"
-    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/cordis.patch.yml) — `cordis.patch.yml`
-    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/package.json) — `package.json`
-    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
+    - [`cordis.patch.yml`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/cordis.patch.yml) — `cordis.patch.yml`
+    - [`package.json`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/package.json) — `package.json`
+    - [`setup-env.sh`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/tools/fsoft-engine/setup-env.sh) — `tools/fsoft-engine/setup-env.sh`
 

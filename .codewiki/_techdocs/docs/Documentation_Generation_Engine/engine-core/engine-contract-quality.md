@@ -6,7 +6,7 @@ description: 本模块是 DocumentationGenerationEngine 中负责「判据」的
 # engine-contract-quality：引擎契约与质量裁决层
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本模块是 Documentation_Generation_Engine 中负责「**判据**」的那一层：它定义 Node 与 Python 引擎之间的跨进程结果契约，并把引擎交回来的产物裁决成可机读的终态（`done` / `partial` / `failed` / `cancelled`）、阻塞原因与「基线能不能推进」。它本身**不跑引擎、不写文件、不改文章正文**，只做纯数据校验与判定，因此可以被逐条测试钉死。
 
@@ -487,11 +487,11 @@ flowchart TD
 - 构建与打包：[构建与配置（build-configuration）](../../Build___Development_Infrastructure/build-configuration.md)、[FSoft 引擎工具链（fsoft-engine-tools）](../../Build___Development_Infrastructure/fsoft-engine-tools.md)
 
 ??? abstract "Documented components (7)"
-    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
-    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
-    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
-    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
+    - [`describeEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`normalizeBlocker`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`validateEngineResult`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Ccontract.js) — `lib\engine\contract.js`
+    - [`proofreadPages`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cproofread.js) — `lib\engine\proofread.js`
+    - [`gateNativeOutput`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`toQualityIssues`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cquality-gate.js) — `lib\engine\quality-gate.js`
+    - [`isExternalTarget`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cwiki-links.js) — `lib\engine\wiki-links.js`
 

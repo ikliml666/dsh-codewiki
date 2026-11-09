@@ -6,7 +6,7 @@ description: 本页描述 lib/engine/native-run.js 的 runNativeJob：插件生�
 # engine-runner 原生编译流水线
 
 !!! info "Generated documentation"
-    This page was written by CodeWiki from the source code at commit [`bc7e15a2`](https://github.com/ikliml666/dsh-codewiki/commit/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
+    This page was written by CodeWiki from the source code at commit [`65890014`](https://github.com/ikliml666/dsh-codewiki/commit/6589001428bc8eb6662303a05b6be49bacbd4061) on 2026-11-09 with `deepseek-v4.1-flash`. Check the code before relying on details.
 
 本页描述 `lib/engine/native-run.js` 的 `runNativeJob`：插件生产通道中**一次完整编译的编排与裁决**。它把分散在各层的组件（环境清单、Python 引擎、质量门、落地器、跨轮受管状态、模型桥）串成一条不可回退的直线，并给出一个**严格终态**——任何一环没走完，终态都不会被后续步骤洗白成 `done`。
 
@@ -117,6 +117,7 @@ flowchart TB
 | `language` | `''` | 文章书写语言，透传引擎 `agent_instructions.language` |
 | `moduleConcurrency` | `1` | 同层模块并行度，1 = 上游原始串行 |
 | `requestLimit` | `0` | 单模块 LLM 请求上限，0 = 用引擎默认 |
+| `emptyStreakLimit` | `3` | 连续空产出熔断阈值（0 = 关闭）；同一个值同时下发给模型桥与引擎侧 |
 | `resume` | `false` | 断点续跑：水合时不覆盖已有产物 |
 | `rawTreeRoot` | `null` | 原始树留档根（仓库外），留空不留档 |
 | `techdocsDir` | `null` | TechDocs 站点目录（仓库外），留空不导出 |
@@ -305,7 +306,8 @@ FSoft 只从 `<old_commit>..<new_commit>` 取 diff。它读的是工作区文件
 - 桥失败 → `failed` + `engine-model`，`stage: 'cluster'`；
 - `onLog` 只记方法与状态码，绝不记请求头 / body / 占位 key；
 - `onRequestStart` 把原生通道的模型请求接进面板「会话」视图（不接这个钩子面板就永远是空列表）；
-- `emptyStreakLimit` 只在配置值能转成有限数字时才下发（`0` = 关闭熔断），缺省不下发、交给桥自己的默认值 `3`。桥据此在上游连续空产出到阈值后进入熔断态，后续请求不再发往上游（回 503），已发出的调用照常计费。
+- `emptyStreakLimit` 无条件下发给桥（`0` = 关闭熔断，缺省 `3`）。桥据此在上游连续空产出到阈值后进入熔断态，后续请求不再发往上游（回 400 `empty_response_breaker`；选 400 而非 502/503 是因为 openai SDK 只对 408/409/429/`>=500` 自动重试，`>=500` 还会被归进 `ModelUnavailableError` 的 fallback 分类），已发出的调用照常计费。
+- 桥与引擎**两侧必须收同一个 `emptyStreakLimit`**：桥在转发口拒绝，引擎在模型调用出口独立计数并整轮中止。两边阈值不同会出现「引擎还认为通道健康、桥已经全部拒绝」的窗口，那一段的每次请求都以 `APIError` 记账，看起来像上游故障；引擎侧这一份也不能省——pydantic 的 `max_output_retries` 是 per-run 的，没有跨叶子预算时同一次上游故障会让每个叶子各烧满 3 次重试（真机 `job-mw80h05t-2` 的 27 次三空响应）。
 
 桥的凭证边界与协议面见 [引擎外部集成层（模型桥与 TechDocs 回读）](../../engine-integrations.md)。
 
@@ -326,6 +328,7 @@ const action = resolution === RESOLUTION.UPDATE ? 'update' : 'generate'
 | `language` | 非空时 | 文章语言，不传则引擎按英文写 |
 | `moduleConcurrency` | 总是 | `max(1, Number(moduleConcurrency) \|\| 1)` |
 | `requestLimit` | `> 0` 时 | 单模块请求上限（0 不是合法预算） |
+| `emptyStreakLimit` | 总是 | 连续空产出熔断阈值，与桥取同一个值；引擎在模型调用出口独立计数并整轮中止 |
 | `updateOptions` | 仅 `update` | `{ ...DEFAULT_UPDATE_OPTIONS, ...deps.updateOptions, extra }` |
 | `commitId` | 非空时 | 本轮记账，即下一轮 updater 的 `old_commit` |
 | `techdocsDir` | 非空时 | TechDocs 站点输出（仓库外） |
@@ -539,7 +542,7 @@ if (bridgeStats?.tripped === true) {
 
 上游 200、只有 usage+finish、既没正文也没工具调用——引擎会把这类调用记成「这一页无需改动」，于是整轮看起来 `done` 却一篇文章没写。这条是插件侧**独立可观测**的证据，不参与裁决、只进 notes。
 
-熔断同理只进 notes，但它是**必须报出来**的被动事实：连续空产出达到阈值（桥的 `emptyStreakLimit`，默认 3）后桥停止转发上游，本轮后面的请求数量因此变少、部分叶子因此没写成；只写在桥日志里的话，面板上只会看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了。note 里带上 `emptyStreakMax`（最大连续空产出游程）与 `rejectedAfterBreak`（被挡下的请求数），已写文章照常落盘。
+熔断同理只进 notes，但它是**必须报出来**的被动事实：连续空产出达到阈值（`emptyStreakLimit`，桥与引擎两侧取同一个值，默认 3）后桥停止转发上游、引擎侧也整轮中止，本轮后面的请求数量因此变少、部分叶子因此没写成；只写在桥日志里的话，面板上只会看到「写了 N 篇、失败 M 项」而无从知道是模型通道先挂了。note 里带上 `emptyStreakMax`（最大连续空产出游程）与 `rejectedAfterBreak`（被挡下的请求数），已写文章照常落盘。
 
 ### 8.3 终态合成：最弱的一环说了算
 
@@ -708,7 +711,7 @@ sequenceDiagram
 | `articleLanguage` | `中文` | 透传 `payload.language` |
 | `moduleConcurrency` | `0` → 跟随 `maxConcurrency` | 同层模块并行度 |
 | `requestLimit` | 100（硬顶 1000） | 单模块写作请求上限 |
-| `emptyStreakLimit` | `3`（0 = 关闭，上限 20） | 连续空产出熔断阈值；只在能转成有限数字时才下发给桥 |
+| `emptyStreakLimit` | `3`（0 = 关闭，上限 20） | 连续空产出熔断阈值；同一个值既下发给桥也下发给引擎 |
 | `techdocs` | `false` | 是否导出站点 |
 | `updateRung` / `updateTau*` | 空 → 上游默认 | 增量档位与阈值 |
 | `autoCommit` | `true` | 影响落地器注入的 `commit` 实现 |
@@ -742,6 +745,7 @@ sequenceDiagram
 | `partial` + `[native-state]` blocker | 受管状态不完整，下一轮无法增量 | `gate.stateMissing` |
 | `done` 却一篇文章没写 | 模型通道空产出 | `notes` 里的「模型通道空产出 N/M 次」 |
 | 后半轮请求量骤减、若干叶子没写成 | 模型通道连续空产出触发熔断 | `notes` 里的「模型通道已熔断（连续 N 次空产出后停发，挡下 K 个后续请求）」；桥日志的 `empty-breaker` 事件 |
+| 引擎大量报 `APIError`、看起来像上游故障 | 桥已熔断拒绝转发，而引擎侧阈值与之不同仍在继续请求 | 核对下发给桥与 `payload` 的 `emptyStreakLimit` 是否同值（`runNativeJob` 现在只用一个参数同时下发两侧） |
 | 面板「校对」格不亮 | 进度帧 stage 不在 `ENGINE_STAGES` | 现在会当场抛错（`engine-crashed`），看 `onProgress` 实现 |
 | 库里 404 链接多但每轮 `done` | 门判过、但跨页链接未重写 | 看 `gate.articles[].defects` 与 `proofread` notes |
 | `writtenCount` 为 0 但引擎说写了 N 篇 | 落地器整批回滚 | 看 `apply.rolledBack` / `apply.outcome` |
@@ -759,7 +763,7 @@ sequenceDiagram
 4. **快照**：脏工作区造出快照时 `commitId` 指向快照、`gate.baseline.consumedInput` 非空；快照失败退回 HEAD 且仍能完成编译。
 5. **`settle` 契约**：任何分支的返回值都能通过 `validateEngineResult`；`done` 带 blockers 会抛错（用注入 gate 构造矛盾）。
 6. **进度**：给 `runNativeJob` 传 `onProgress`，断言帧阶段全部属于 `ENGINE_STAGES`（这正是 0.17.32 事故的缺口）。
-7. **熔断可见性**：注入 `bridge` 使 `stats()` 返回 `tripped: true`、`emptyStreakMax` / `rejectedAfterBreak` 非零，断言 `notes` 里出现熔断条目（熔断不参与裁决，只要求可见）；同时断言 `emptyStreakLimit` 只在配置为有限数字时才下发给桥。
+7. **熔断可见性**：注入 `bridge` 使 `stats()` 返回 `tripped: true`、`emptyStreakMax` / `rejectedAfterBreak` 非零，断言 `notes` 里出现熔断条目（熔断不参与裁决，只要求可见）；同时断言 `emptyStreakLimit` 以同一个值同时到达桥与引擎 `payload`（两侧阈值必须一致）。
 
 ---
 
@@ -778,5 +782,5 @@ sequenceDiagram
 - 任务存储与终态落账：[作业状态与持久化层（job-and-state）](../../../../Job_Orchestration___State_Management/job-and-state.md)。
 
 ??? abstract "Documented components (1)"
-    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/bc7e15a2499b5c4f334d4c0611eace4ad97c1c26/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
+    - [`noop`](https://github.com/ikliml666/dsh-codewiki/blob/6589001428bc8eb6662303a05b6be49bacbd4061/lib%5Cengine%5Cnative-run.js) — `lib\engine\native-run.js`
 

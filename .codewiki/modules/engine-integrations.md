@@ -171,7 +171,7 @@ flowchart LR
 `AbortController.abort()`，把中止传到 `llm.stream({signal})`——既省 token，也让引擎的取消语义
 真正生效。
 
-已熔断的桥对任何 `POST /v1/chat/completions` 直接回 503 `empty_response_breaker`，且**在读 body 与
+已熔断的桥对任何 `POST /v1/chat/completions` 直接回 400 `empty_response_breaker`，且**在读 body 与
 建立会话记录之前**返回（见第六节的熔断小节）；`/healthz` 与 `/v1/models` 不受熔断影响。
 
 ### 一次流式请求的完整时序
@@ -185,7 +185,7 @@ sequenceDiagram
     participant S as 会话记录
     E->>B: POST /v1/chat/completions (stream true, Bearer 占位 key)
     B->>B: 校验占位 key 形状与取值
-    B->>B: 已熔断则回 503（不读 body、不建会话记录）
+    B->>B: 已熔断则回 400（不读 body、不建会话记录）
     B->>O: toLlmRequest(provider, model, reasoningEffort, body)
     O-->>B: GenerateOptions
     B->>S: onRequestStart({name, model, provider, stage, batchPrompt})
@@ -241,7 +241,7 @@ sequenceDiagram
 | `emptyResponses` | 上游 200 但**一个产出型 chunk 都没有**的调用次数 |
 | `emptyStreak` | 当前连续空产出游程（有产出的调用即归零） |
 | `emptyStreakMax` | 本轮出现过的最大连续空产出游程 |
-| `rejectedAfterBreak` | 熔断后被挡下的请求数（不计入 `emptyResponses`，它们压根没打上游） |
+| `rejectedAfterBreak` | 熔断后被挡下的请求数（不计入 `emptyResponses`，它们压根没打上游；响应是 400 `empty_response_breaker`） |
 | `tripped` | 是否已进入熔断态 |
 | `lastError` | 最近一次失败的文本 |
 
@@ -264,13 +264,17 @@ sequenceDiagram
   `emptyResponses++`、`emptyStreak++` 并刷新 `emptyStreakMax`，达到阈值时置 `tripped` 并写一条
   `kind: 'empty-breaker'` 日志。
 - 熔断检查放在**读 body 与建立会话记录之前**：被挡下的请求既不进上游计费，也不会在面板上多出一条
-  「这条请求干了什么」的记录。响应是 503 `bridge_error` / `empty_response_breaker`，让引擎侧的
-  pydantic 把它当成可重试的上游错误。
+  「这条请求干了什么」的记录。响应是 400 `bridge_error` / `empty_response_breaker`。
+- **状态码选 400 而不是 502/503**：引擎侧的 openai SDK 只对 408/409/429/`>=500` 自动重试
+  （`_base_client.py:843-863`），而 `>=500` 还会被 pydantic-ai 归成 `ModelUnavailableError`、
+  命中 `FallbackModel` 的 `fallback_on`，等于让同一条坏上游再烧一遍。400 是唯一「既不触发 SDK
+  重试、也不进 fallback 分类」的 4xx；引擎侧据此在 `channel_breaker` 里把整轮判停（读
+  `error.code` 的 `empty_response_breaker`），而不是当普通 `APIError` 逐叶子继续撞。
 - 阈值取 3 的依据是真机分布：正常任务的最大游程是 1（偶发一次后立刻恢复），故障任务
   （`job-mw80h05t-2`）是 27 次连续空返回，两者之间没有过渡带。
 - `markProduced` 只在「上游正常结束」的出口调用；中途失败由 `failures` 记账，且**不清零**
   `emptyStreak`——一次网络失败不代表模型恢复了。
-- 熔断在本轮是粘滞的：此后每个 chat 请求都直接 503，直到桥被关掉、换一个新的。`native-run`
+- 熔断在本轮是粘滞的：此后每个 chat 请求都直接 400，直到桥被关掉、换一个新的。`native-run`
   在关桥后按 `tripped` / `emptyStreakMax` / `rejectedAfterBreak` 写 note，不参与裁决。
 
 ---
@@ -360,7 +364,7 @@ DSH `>=0.2.0-rc.0`，打包时 `bin/cw`、`lib`、`tools/fsoft-engine/*` 一并�
 | 400 请求体非法 JSON / 缺 `messages` | `toLlmRequest` 校验失败 | `failures++`，返回 OpenAI 风格错误体 |
 | 413 请求体过大 | 超过 32 MiB | 拒绝并销毁连接 |
 | 502 `upstream_error` | 上游 `llm.stream` 抛错（非流式） | 若流已开始，改发 error 事件 + `[DONE]` |
-| 503 `empty_response_breaker` | 已熔断（连续空产出达 `emptyStreakLimit`） | `rejectedAfterBreak++`；请求不读 body、不建会话记录、不发上游 |
+| 400 `empty_response_breaker` | 已熔断（连续空产出达 `emptyStreakLimit`） | `rejectedAfterBreak++`；请求不读 body、不建会话记录、不发上游；选 400 是为了既不触发 SDK 自动重试、也不被归进 `ModelUnavailableError` 的 fallback 分类 |
 | `emptyResponses > 0` | 上游 200 但无产出型 chunk | 只写 note（「引擎会记成无需改动，请检查编译模型」），不参与裁决 |
 | 站点目录不存在 | `captureSite` 找不到 `siteDir` | 返回空写集 + `skipped`，编译不受影响 |
 | 站点读回抛异常 | `captureSite` 内部错误 | note「不影响本轮终态」；不把 `_techdocs` 加进 `pruneRoots` |
