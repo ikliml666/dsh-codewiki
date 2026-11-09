@@ -3164,9 +3164,18 @@ export function installWebServer(ctx, service, extra = {}) {
           const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 200))
           const all = service.list()
           const byId = new Map()
-          for (const j of all) byId.set(j.id, j.cwd ?? '')
+          const sessionOfJob = new Map()
+          for (const j of all) {
+            byId.set(j.id, j.cwd ?? '')
+            sessionOfJob.set(j.id, j.sessionId ?? null)
+          }
+          // sessionId 以 job 上的为准：会话记录里的那份是 0.19.0 才开始写的，更早的记录
+          // 没有该字段（历史事实，不回填磁盘）。但 job.sessionId 一直存在，用它兜底，
+          // 面板按会话归类才不会把旧记录全归到 null 组、退化成一行。
           const sessions = listAllSessionRecords({ limit }).map((s) => ({
-            ...s, cwd: byId.get(s.jobId) ?? '',
+            ...s,
+            cwd: byId.get(s.jobId) ?? '',
+            sessionId: s.sessionId ?? sessionOfJob.get(s.jobId) ?? null,
           }))
           // 数请求条数走 countSessionRecords：每个活跃任务只数文件名，不再读一遍它的全部 meta
           const active = activeSessionJobs(all, { requestCount: countSessionRecords })

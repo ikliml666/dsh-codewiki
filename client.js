@@ -2676,24 +2676,31 @@ window.__ModuleLoader__.load({
               // 与 DSH 的 treeitem 语义一致：会话是可打开的行，不是可展开的容器。
               const groups = new Map()
               for (const s of list) {
-                const k = String(s.sessionId ?? '')
-                if (!groups.has(k)) groups.set(k, [])
-                groups.get(k).push(s)
+                // 有会话的按会话归；没有会话的（面板按钮/自动调度发起）按仓库归——
+                // 它们本来就没有 agent 上下文，全塞进一个「非会话发起」行会让 23 个
+                // 任务挤成一行，比铺开还难用。
+                const sid = String(s.sessionId ?? '')
+                const k = sid || `repo:${cwdOf(s)}`
+                if (!groups.has(k)) groups.set(k, { sid: sid || null, cwd: sid ? '' : cwdOf(s), items: [] })
+                groups.get(k).items.push(s)
               }
               // 按最后活动时间倒序：最近的会话在最上面（与 DSH 侧边栏一致）
-              const ordered = [...groups.entries()].map(([sid, items]) => {
-                const lastAt = items.reduce((a, x) => (String(x.startedAt ?? '') > String(a ?? '') ? x.startedAt : a), null)
-                return { sid, items, lastAt }
+              const ordered = [...groups.values()].map((g) => {
+                const lastAt = g.items.reduce((a, x) => (String(x.startedAt ?? '') > String(a ?? '') ? x.startedAt : a), null)
+                return { ...g, lastAt }
               }).sort((a, b) => String(b.lastAt ?? '').localeCompare(String(a.lastAt ?? '')))
-              const rowsOut = ordered.map(({ sid, items, lastAt }) => {
+              const rowsOut = ordered.map(({ sid, cwd, items, lastAt }) => {
                 const live = items.some((x) => x.status === 'running')
                 const repos = new Set(items.map(cwdOf).filter(Boolean))
                 const stage = items[items.length - 1]?.stage ?? null
+                const label = sid
+                  ? t('sessGroupSession').replace('{id}', shortSession(sid))
+                  : (repoName(cwd) || t('sessNoCwd'))
                 return el('button', {
-                  key: sid || '__none',
+                  key: sid || `repo:${cwd}`,
                   'data-dscw-p-sessionrow': '',
                   'data-live': live ? 'true' : null,
-                  title: sid || t('sessGroupNoSession'),
+                  title: sid || `${t('sessGroupNoSession')} · ${cwd || ''}`,
                   onClick: () => {
                     // 进入会话：用该会话的第一个 job 作为 focus（任务视图按 job 组织，
                     // 但列表会把这个会话下的全部任务都筛出来）。
@@ -2702,12 +2709,11 @@ window.__ModuleLoader__.load({
                   },
                 },
                   el('span', { 'data-dot': '', 'data-status': live ? 'running' : 'done' }),
-                  el('span', { 'data-title': '' },
-                    sid ? t('sessGroupSession').replace('{id}', shortSession(sid)) : t('sessGroupNoSession')),
+                  el('span', { 'data-title': '' }, label),
                   el('span', { 'data-meta': '' }, [
                     stage ? STAGE_LABEL_OF(stage) : null,
                     t('sessGroupCount').replace('{n}', items.length),
-                    repos.size ? t('sessGroupRepos').replace('{n}', repos.size) : null,
+                    sid && repos.size ? t('sessGroupRepos').replace('{n}', repos.size) : null,
                     lastAt ? new Date(lastAt).toLocaleTimeString() : null,
                   ].filter(Boolean).join(' · ')))
               })
