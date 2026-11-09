@@ -24,6 +24,9 @@ __pycache__/
 .probe-fsoft/
 err.txt
 
-# 开发期临时脚本（补丁/诊断），不入库
+# 开发期临时脚本（补丁/诊断/实验），不入库
 .tmp-*.py
 .dbg-*.mjs
+.dbg-*.py
+.exp-*.mjs
+.exp-*.py
